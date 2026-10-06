@@ -1,0 +1,236 @@
+import { durationSeconds, imageToVideoVariant } from '@shared/models'
+import {
+  NEEDS_CONSENT,
+  type ConsentRequest,
+  type Generation,
+  type GenerationParams,
+  type GenerationStatus,
+  type Segment,
+  type SegmentPatch,
+  type Sequence
+} from '@shared/types'
+
+/** The main process keeps at least this much of a take when clamping trims. */
+export const MIN_CLIP_SECONDS = 0.2
+
+export function isPending(g: Generation): boolean {
+  return g.status === 'queued' || g.status === 'processing'
+}
+
+export function selectedTake(segment: Segment): Generation | undefined {
+  const id = segment.selectedGenerationId
+  return id ? segment.takes.find((t) => t.id === id) : undefined
+}
+
+/** The selected take, if it is finished and its file is on disk (i.e. it can be previewed and exported). */
+export function readyTake(segment: Segment): Generation | undefined {
+  const take = selectedTake(segment)
+  return take?.status === 'completed' && take.filePath && !take.fileMissing ? take : undefined
+}
+
+/** Newest take that is still queued or generating. */
+export function pendingTake(segment: Segment): Generation | undefined {
+  return segment.takes.find(isPending)
+}
+
+/** Real length when ffprobe has measured it, else the requested duration. */
+export function takeDuration(take: Generation): number {
+  return take.videoDuration ?? durationSeconds(take.params.duration)
+}
+
+/** Seconds the segment contributes to the cut, or undefined while it has no ready take. */
+export function clipLength(segment: Segment): number | undefined {
+  const take = readyTake(segment)
+  if (!take) return undefined
+  return Math.max(0, takeDuration(take) - segment.trimStart - segment.trimEnd)
+}
+
+export function totalLength(sequence: Sequence): number {
+  return sequence.segments.reduce((sum, s) => sum + (clipLength(s) ?? 0), 0)
+}
+
+/** Estimated progress 0–1 of a pending take, from Venice's average execution time. */
+export function takeProgress(g: Generation): number | undefined {
+  if (!g.executionDuration || !g.averageExecutionTime) return undefined
+  return Math.min(0.97, g.executionDuration / g.averageExecutionTime)
+}
+
+/** The params a new take of the segment will actually be generated with (continuations use the I2V sibling). */
+export function effectiveParams(segment: Segment, index: number): GenerationParams {
+  if (!segment.continueFromPrevious || index === 0) return segment.params
+  return { ...segment.params, model: imageToVideoVariant(segment.params.model) }
+}
+
+/**
+ * The segment is part of the cut only once its selected take is completed and its file still exists. Must
+ * match what "generate all" in main regenerates, since the run's count and price are shown from this.
+ */
+export function needsTake(segment: Segment): boolean {
+  return !readyTake(segment)
+}
+
+/**
+ * True when the segment continues from the previous one but its selected take was made from another frame
+ * than the one the previous clip now ends on (a different take was chosen or its end trim changed).
+ * Relies on the main process naming extracted frames `<takeId>-<last|ms>.png`.
+ */
+export function continuationMismatch(segment: Segment, previous: Segment | undefined): boolean {
+  if (!segment.continueFromPrevious || !previous) return false
+  const take = selectedTake(segment)
+  const prevTake = readyTake(previous)
+  if (!take || take.status !== 'completed' || !prevTake) return false
+  const start = take.params.startImage
+  // Not made from an extracted frame at all, e.g. continuation was switched on after generating. Frames live in
+  // .studio/bildrutor/ (frames/ in libraries from before the base folder could be chosen).
+  if (!start || !/[/\\](frames|bildrutor)[/\\]/.test(start)) return true
+  const name = fileName(start)
+  if (!name.startsWith(prevTake.id)) return true
+  const at = /-(last|\d+)\.png$/.exec(name)?.[1]
+  if (!at) return false
+  if (at === 'last') return previous.trimEnd > 0
+  if (previous.trimEnd <= 0) return true
+  if (prevTake.videoDuration === undefined) return false
+  return Math.abs(Number(at) / 1000 - (prevTake.videoDuration - previous.trimEnd)) > 0.05
+}
+
+/** Applies a patch to the local copy the same way the main process will, for instant feedback. */
+export function patchSegmentLocally(sequence: Sequence, segmentId: string, patch: SegmentPatch): Sequence {
+  return {
+    ...sequence,
+    segments: sequence.segments.map((s) => {
+      if (s.id !== segmentId) return s
+      const next: Segment = { ...s }
+      if (patch.params) next.params = patch.params
+      if (patch.continueFromPrevious !== undefined) {
+        next.continueFromPrevious = patch.continueFromPrevious
+        if (patch.continueFromPrevious) next.params = { ...next.params, model: imageToVideoVariant(next.params.model) }
+      }
+      if (patch.trimStart !== undefined) next.trimStart = patch.trimStart
+      if (patch.trimEnd !== undefined) next.trimEnd = patch.trimEnd
+      if (patch.selectedGenerationId !== undefined) next.selectedGenerationId = patch.selectedGenerationId ?? undefined
+      return next
+    })
+  }
+}
+
+/** Local copy of a move: same renumbering rules as the main process. */
+export function moveSegmentLocally(sequence: Sequence, segmentId: string, toIndex: number): Sequence {
+  const segments = sequence.segments.slice()
+  const from = segments.findIndex((s) => s.id === segmentId)
+  if (from === -1) return sequence
+  const [moved] = segments.splice(from, 1)
+  segments.splice(Math.max(0, Math.min(toIndex, segments.length)), 0, moved)
+  return {
+    ...sequence,
+    segments: segments.map((s, i) => ({
+      ...s,
+      position: i,
+      continueFromPrevious: i === 0 ? false : s.continueFromPrevious
+    }))
+  }
+}
+
+const STATUS_RANK: Record<GenerationStatus, number> = { queued: 0, processing: 1, completed: 2, failed: 2 }
+
+/**
+ * Picks the fresher of a take as fetched with the sequence and the latest live update for it.
+ * Fetches can be answered after a newer progress event arrived, so neither source always wins.
+ */
+export function freshestTake(fetched: Generation, live: Generation): Generation {
+  const a = STATUS_RANK[fetched.status]
+  const b = STATUS_RANK[live.status]
+  if (b > a) return live
+  if (b < a) return fetched
+  if (fetched.status === 'processing' && (live.executionDuration ?? 0) > (fetched.executionDuration ?? 0)) return live
+  if (fetched.status === 'completed') {
+    // Thumbnail and duration are stored after the video itself; keep whichever copy already has them.
+    const filePath = fetched.filePath ?? live.filePath
+    const thumbPath = fetched.thumbPath ?? live.thumbPath
+    const videoDuration = fetched.videoDuration ?? live.videoDuration
+    if (filePath === fetched.filePath && thumbPath === fetched.thumbPath && videoDuration === fetched.videoDuration) {
+      return fetched
+    }
+    return { ...fetched, filePath, thumbPath, videoDuration }
+  }
+  return fetched
+}
+
+/** Merges a live generation update into every segment that shows it (or owns it, for brand-new takes). */
+export function applyGenerationUpdate(sequence: Sequence, g: Generation): Sequence {
+  let changed = false
+  const segments = sequence.segments.map((s) => {
+    const i = s.takes.findIndex((t) => t.id === g.id)
+    if (i !== -1) {
+      const fresh = freshestTake(s.takes[i], g)
+      if (fresh === s.takes[i]) return s
+      changed = true
+      const takes = s.takes.slice()
+      takes[i] = fresh
+      return { ...s, takes }
+    }
+    if (g.segmentId === s.id) {
+      changed = true
+      return { ...s, takes: [g, ...s.takes] }
+    }
+    return s
+  })
+  return changed ? { ...sequence, segments } : sequence
+}
+
+/**
+ * JSON with sorted keys, for comparing params regardless of key order. Empty values are left out, since
+ * main normalises `''` and `[]` to absent fields and that alone isn't a change.
+ */
+export function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return v
+    return Object.fromEntries(
+      Object.entries(v as Record<string, unknown>)
+        .filter(([, x]) => x !== undefined && x !== '' && !(Array.isArray(x) && x.length === 0))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    )
+  })
+}
+
+/** Finds a consent request in an error message, also when it is wrapped (e.g. "Klipp 2: NEEDS_CONSENT:{…}"). */
+export function parseConsent(message: string | undefined): ConsentRequest | undefined {
+  if (!message) return undefined
+  const i = message.indexOf(NEEDS_CONSENT)
+  if (i === -1) return undefined
+  try {
+    return JSON.parse(message.slice(i + NEEDS_CONSENT.length)) as ConsentRequest
+  } catch {
+    return undefined
+  }
+}
+
+export function round2(v: number): number {
+  return Math.round(v * 100) / 100
+}
+
+const decimal = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 1 })
+
+/** "7,4 s" or "1 min 23 s". */
+export function formatLength(seconds: number): string {
+  if (seconds < 59.95) return `${decimal.format(seconds)} s`
+  const total = Math.round(seconds)
+  return `${Math.floor(total / 60)} min ${total % 60} s`
+}
+
+/** "1:07" for player clocks. */
+export function formatClock(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
+export function formatTakeTime(ms: number): string {
+  const d = new Date(ms)
+  const today = new Date().toDateString() === d.toDateString()
+  return today
+    ? d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+export function fileName(path: string): string {
+  return path.split(/[/\\]/).pop() ?? path
+}

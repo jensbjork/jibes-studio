@@ -1,0 +1,173 @@
+import { useEffect, useRef } from 'react'
+import type { SavedPrompt } from '@shared/types'
+import { ConfirmDeleteButton, CopyButton, FavoriteButton, secondaryButton } from './controls'
+import { formatUses, formatWhen, titleFromBody } from './prompt-utils'
+import TagInput from './TagInput'
+import { canSave, type Draft, type DraftFields, type SaveStatus } from './usePromptDraft'
+
+interface Props {
+  draft: Draft
+  /** The stored version, for usage stats; missing until a new prompt is first saved. */
+  stored?: SavedPrompt
+  status?: SaveStatus
+  tagSuggestions: string[]
+  onChange: (patch: DraftFields) => void
+  /** Saves right away instead of waiting for the debounce. */
+  onBlur: () => void
+  onToggleFavorite: () => void
+  onUse: () => void
+  onDuplicate: () => void
+  onDelete: () => void
+}
+
+const field = 'w-full rounded-md border border-line bg-raised px-3 py-2 outline-none focus:border-muted'
+
+function SaveIndicator({ draft, status }: { draft: Draft; status?: SaveStatus }) {
+  if (status?.state === 'error') {
+    return (
+      <span className="truncate text-accent select-text" title={status.error}>
+        Kunde inte spara: {status.error}
+      </span>
+    )
+  }
+  if (status?.state === 'invalid' || (!draft.id && !canSave(draft))) {
+    return <span className="text-muted">{draft.id ? 'En tom prompt sparas inte' : 'Ny prompt – sparas när du börjat skriva'}</span>
+  }
+  if (status?.state === 'pending' || status?.state === 'saving') return <span className="text-muted">Sparar…</span>
+  if (status?.state === 'saved') return <span className="text-muted">Sparad</span>
+  return null
+}
+
+export default function PromptEditor({
+  draft,
+  stored,
+  status,
+  tagSuggestions,
+  onChange,
+  onBlur,
+  onToggleFavorite,
+  onUse,
+  onDuplicate,
+  onDelete
+}: Props) {
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const savable = canSave(draft)
+  const isNew = !draft.id
+
+  // A fresh prompt starts with the cursor in the body; the title can be left to fill itself in.
+  useEffect(() => {
+    if (isNew) bodyRef.current?.focus()
+  }, [])
+
+  return (
+    <section className="flex min-w-0 flex-1 flex-col">
+      <div className="drag flex h-12 shrink-0 items-center gap-3 pl-8 pr-4">
+        <div className="min-w-0 flex-1 truncate text-[12px]">
+          <SaveIndicator draft={draft} status={status} />
+        </div>
+        <div className="no-drag flex shrink-0 items-center gap-1">
+          <CopyButton text={draft.body.trim()} disabled={!savable} />
+          <button
+            type="button"
+            onClick={onDuplicate}
+            disabled={isNew || !savable}
+            title="Skapa en kopia att variera"
+            className={secondaryButton}
+          >
+            Duplicera
+          </button>
+          {isNew ? (
+            <button type="button" onClick={onDelete} className={secondaryButton}>
+              Släng
+            </button>
+          ) : (
+            <ConfirmDeleteButton onConfirm={onDelete} />
+          )}
+          <button
+            type="button"
+            onClick={onUse}
+            disabled={!savable}
+            title="Öppna i Generera (⌘ + Enter)"
+            className="ml-1 rounded-md bg-accent px-3.5 py-1.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
+          >
+            Använd
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-3xl space-y-5 px-8 pb-10 pt-2">
+          <div className="flex items-center gap-3">
+            <input
+              value={draft.title}
+              onChange={(e) => onChange({ title: e.target.value })}
+              onBlur={onBlur}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  bodyRef.current?.focus()
+                }
+              }}
+              placeholder={titleFromBody(draft.body) || 'Titel'}
+              aria-label="Titel"
+              className="min-w-0 flex-1 bg-transparent text-xl font-semibold outline-none placeholder:text-muted/60"
+            />
+            <FavoriteButton active={draft.favorite} onToggle={onToggleFavorite} className="text-xl" />
+          </div>
+
+          <TagInput
+            value={draft.tags}
+            onChange={(tags) => onChange({ tags })}
+            suggestions={tagSuggestions}
+            onBlur={onBlur}
+          />
+
+          <label className="block">
+            <span className="mb-1.5 flex justify-between text-muted">
+              <span>Prompt</span>
+              <span className="text-[11px]">{draft.body.length} tecken</span>
+            </span>
+            <textarea
+              ref={bodyRef}
+              value={draft.body}
+              onChange={(e) => onChange({ body: e.target.value })}
+              onBlur={onBlur}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && savable) {
+                  e.preventDefault()
+                  onUse()
+                }
+              }}
+              rows={14}
+              placeholder="Beskriv scenen, rörelsen och kameran…"
+              className={`${field} min-h-48 resize-y text-[14px] leading-relaxed`}
+            />
+            <span className="mt-1 block text-[11px] text-muted">
+              I referensläget pekar du ut bilderna med @Image1, @Image2 … i den ordning de ligger i formuläret.
+            </span>
+          </label>
+
+          <label className="block">
+            <span className="mb-1.5 block text-muted">Negativ prompt (valfri)</span>
+            <textarea
+              value={draft.negativePrompt}
+              onChange={(e) => onChange({ negativePrompt: e.target.value })}
+              onBlur={onBlur}
+              rows={3}
+              placeholder="Det du inte vill se…"
+              className={`${field} resize-y leading-relaxed`}
+            />
+          </label>
+
+          {stored && (
+            <p className="border-t border-line pt-4 text-[11px] text-muted">
+              Skapad {formatWhen(stored.createdAt)} · Ändrad {formatWhen(stored.updatedAt)} ·{' '}
+              {formatUses(stored.useCount)}
+              {stored.lastUsedAt ? `, senast ${formatWhen(stored.lastUsedAt)}` : ''}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
