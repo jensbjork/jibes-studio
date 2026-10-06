@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output (electron-vite → out/, electron-builder → dist/)
+out/
+dist/
+*.tsbuildinfo
+
+# Test and coverage output
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files (may hold API keys); commit an .env.example instead
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editors and IDEs (shared recommendations in .vscode/extensions.json are allowed)
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+
+# Local AI-assistant settings
+.claude/settings.local.json
+CLAUDE.local.md

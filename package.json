@@ -1,0 +1,58 @@
+{
+  "name": "studio",
+  "productName": "Studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "macOS desktop studio for generating videos with the Venice.ai API: reference-aware prompts, a library of characters, environments and outfits, sequences of clips exported with ffmpeg, and an MCP server for your own AI agents.",
+  "keywords": [
+    "electron",
+    "react",
+    "macos",
+    "video-generation",
+    "ai-video",
+    "venice-ai",
+    "mcp",
+    "model-context-protocol",
+    "ffmpeg",
+    "sqlite"
+  ],
+  "license": "MIT",
+  "author": "Jens Björk",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "STUDIO_DEV_PROFILE=1 electron-vite dev -w",
+    "dev:real": "electron-vite dev -w",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "check": "npm run typecheck && npm run build",
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "app": "electron-vite build && NODE_OPTIONS=--experimental-require-module electron-builder --mac",
+    "app:install": "npm run app && rm -rf /Applications/Studio.app && cp -R dist/mac-arm64/Studio.app /Applications/ && echo \"Studio.app installed in /Applications\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "~1.32.1",
+    "better-sqlite3": "^13.0.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

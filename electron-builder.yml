@@ -1,0 +1,36 @@
+appId: se.jensbjork.studio
+productName: Studio
+copyright: Copyright © 2026 Jens Björk
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+  # better-sqlite3 ships prebuilt Node-API binaries for every platform plus its C sources; only darwin-arm64 is needed.
+  - '!node_modules/better-sqlite3/{deps,src,build}/**'
+  - '!node_modules/better-sqlite3/prebuilds/{win32,linux,linuxmusl,darwin-x64}*'
+electronLanguages:
+  - sv
+  - en
+# Native modules can't be loaded from inside the asar archive.
+asarUnpack:
+  - '**/*.node'
+mac:
+  target:
+    - target: dir
+      arch: arm64
+  icon: build/icon.icns
+  category: public.app-category.video
+  darkModeSupport: true
+  # No Developer ID: ad-hoc signing is enough for an app built and run locally
+  # (Apple Silicon refuses to run unsigned code). Hardened runtime would require notarization.
+  identity: '-'
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    NSDocumentsFolderUsageDescription: Studio sparar ditt bibliotek med videor, karaktärer och sekvenser i den mapp du väljer.
+    NSDesktopFolderUsageDescription: Studio behöver komma åt bilder och mappar du väljer på skrivbordet.
+    NSDownloadsFolderUsageDescription: Studio behöver komma åt bilder du väljer i Hämtade filer.
+    NSRemovableVolumesUsageDescription: Studio kan ha sitt bibliotek på en extern disk.
+    NSNetworkVolumesUsageDescription: Studio kan ha sitt bibliotek på en nätverksdisk.

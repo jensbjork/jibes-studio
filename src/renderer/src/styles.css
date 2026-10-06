@@ -1,0 +1,54 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+  --color-bg: #0b0b0d;
+  --color-panel: #131316;
+  --color-raised: #1b1b1f;
+  --color-line: #26262c;
+  --color-muted: #8b8b96;
+  --color-text: #ececf1;
+  --color-accent: #e5484d;
+  --color-accent-hover: #f2555a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable] {
+  user-select: text;
+}
+
+/* Window drag region for the hidden-inset title bar. */
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2c2c33;
+  border-radius: 10px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}

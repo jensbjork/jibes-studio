@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26262c"/>
+      <stop offset="1" stop-color="#0b0b0d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2555a"/>
+      <stop offset="1" stop-color="#c9353a"/>
+    </linearGradient>
+    <linearGradient id="clip" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3a42"/>
+      <stop offset="1" stop-color="#26262c"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS icon grid: 824×824 body centred on the 1024 canvas -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+  <!-- Clips in a sequence, back to front -->
+  <rect x="248" y="268" width="412" height="260" rx="40" fill="url(#clip)" opacity="0.55"/>
+  <rect x="306" y="350" width="412" height="260" rx="40" fill="url(#clip)" opacity="0.8"/>
+  <rect x="370" y="438" width="400" height="248" rx="34" fill="#16161a" stroke="url(#accent)" stroke-width="12"/>
+  <path d="M538 509 L538 615 L628 562 Z" fill="url(#accent)" stroke="url(#accent)" stroke-width="22" stroke-linejoin="round"/>
+  <!-- Timeline -->
+  <rect x="248" y="760" width="528" height="14" rx="7" fill="#ffffff" fill-opacity="0.12"/>
+  <rect x="248" y="760" width="300" height="14" rx="7" fill="url(#accent)"/>
+  <circle cx="548" cy="767" r="22" fill="#ffffff"/>
+</svg>
