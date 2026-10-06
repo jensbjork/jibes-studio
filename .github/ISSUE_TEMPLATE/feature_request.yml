@@ -1,0 +1,62 @@
+name: Feature request
+description: Suggest an idea or an improvement for Studio.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please search the existing issues first, and do not include API keys, tokens or other secrets.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what gets in the way today?
+      placeholder: When I build a sequence I want to …, but …
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How you imagine it working in the app, or through the agent connection (MCP).
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other ways to solve it, or how you work around it today.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Generate view
+        - Prompt editor and @ImageN references
+        - Library (characters, environments, outfits)
+        - Prompt library
+        - Sequences, takes and preview
+        - Export (ffmpeg)
+        - Agent connection (MCP)
+        - Settings, base folder or profiles
+        - Packaging or install
+        - Other
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mock-ups, screenshots, links to Venice.ai API docs, or anything else that helps.
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: I would like to work on this myself.

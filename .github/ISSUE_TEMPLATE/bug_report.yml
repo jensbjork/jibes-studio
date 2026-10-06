@@ -1,0 +1,112 @@
+name: Bug report
+description: Something in Studio does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search the existing issues first.
+
+        **Do not paste secrets.** Never include your Venice API key, Studio's agent-connection (MCP) bearer token, or any other key or token, and remove personal paths and file names from logs and screenshots.
+
+        **Security vulnerabilities** must not be reported here. Follow SECURITY.md in the repository root instead (also linked under the repository's *Security* tab).
+
+        The app's UI is in Swedish; quote buttons and messages exactly as they appear.
+
+  - type: input
+    id: version
+    attributes:
+      label: Studio version
+      description: In Finder, select Studio.app and choose File → Get Info. When running from source, give the commit (`git rev-parse --short HEAD`).
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: How do you run Studio?
+      options:
+        - Studio.app (built with npm run app)
+        - From source with npm run dev (Studio Dev profile)
+        - From source with npm run dev:real
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac
+      description: From the Apple menu → About This Mac.
+      placeholder: macOS 26.0, MacBook Air M3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Generate view
+        - Prompt editor and @ImageN references
+        - Library (characters, environments, outfits)
+        - Prompt library
+        - Sequences, takes and preview
+        - Export (ffmpeg)
+        - Agent connection (MCP)
+        - Settings, base folder or profiles
+        - Packaging or install
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps that shows the problem.
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include any error message exactly as shown. Screenshots help, with personal content hidden.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Terminal output from npm run dev, or messages from Console.app for Studio.app. Redact API keys, tokens and personal paths before pasting.
+      render: shell
+
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: ffmpeg version
+      description: For export and preview problems, the first line of `ffmpeg -version`.
+      placeholder: ffmpeg version 8.0
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: This report contains no API keys, tokens or other secrets.
+          required: true

@@ -1,0 +1,67 @@
+
+
+# ----------------------------------------------------------------------------
+# Conventional Commits: https://www.conventionalcommits.org/en/v1.0.0/
+# Full guide: CONTRIBUTING.md. Enable this template once per clone with:
+#   git config commit.template .gitmessage
+# Lines starting with "#" are removed from the message.
+# ----------------------------------------------------------------------------
+#
+# <type>(<scope>): <subject>
+#
+# <body>
+#
+# <footer>
+#
+# --- Header (required) -------------------------------------------------------
+# Aim for 72 characters or fewer (the hard limit is 100). Write the subject in
+# the imperative mood and lower case, with no full stop at the end:
+#   "add trim handles to takes", not "Added trim handles." or "Adds ...".
+#
+# Types:
+#   feat      a new feature for users
+#   fix       a bug fix
+#   docs      documentation only
+#   refactor  a code change that neither fixes a bug nor adds a feature
+#   perf      a performance improvement
+#   test      adding or fixing tests
+#   build     build system, packaging (electron-builder) or dependencies
+#   ci        GitHub Actions and other CI configuration
+#   chore     maintenance that does not touch src/ or the shipped app
+#   revert    reverts an earlier commit
+#
+# Scopes (optional, pick the closest one):
+#   generate   the Generate view and the job queue
+#   prompt     the prompt editor and @ImageN reference checks
+#   library    characters, environments, outfits and the prompt library
+#   assets     reference images and asset folders on disk
+#   sequences  sequences, clips, takes, trims and preview
+#   export     ffmpeg export of sequences
+#   agent      agent connection: approvals, activity, the agent guide
+#   mcp        the MCP server, its tools and transport
+#   db         SQLite schema and migrations
+#   ui         shared UI components, layout and styling
+#   settings   the Settings view, the base folder and profiles
+#   build      electron-vite, electron-builder and packaging
+#   deps       dependency updates
+#   docs       README, docs/ and other documentation
+#
+# --- Body (optional) ---------------------------------------------------------
+# Explain what changed and why, not how. Wrap lines at 72 characters.
+# Separate the body from the header with one blank line.
+#
+# --- Footer (optional) -------------------------------------------------------
+# Reference issues and flag breaking changes, one per line:
+#   Closes #123
+#   Refs #45
+#   BREAKING CHANGE: <what breaks, and how to migrate>
+# A breaking change can also be marked with "!" after the type or scope:
+#   feat(mcp)!: rename the list_assets tool to list_library
+#
+# Never put API keys, tokens, real names or personal paths in a commit.
+#
+# Examples:
+#   feat(sequences): continue a clip from the trimmed last frame
+#   fix(export): keep audio in sync when a take is trimmed
+#   docs(mcp): describe the approval flow for paid generations
+#   build(deps): bump electron from 44.5.1 to 44.6.0

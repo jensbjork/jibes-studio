@@ -1,0 +1,12 @@
+# Every issue must use one of the forms in this folder.
+blank_issues_enabled: false
+
+# Vulnerabilities go through SECURITY.md, never a public issue. GitHub already shows
+# the security policy in the issue chooser once SECURITY.md is on the default branch.
+# An explicit link needs an absolute URL; enable this once the repository has its
+# final GitHub address (replace OWNER/REPO):
+#
+# contact_links:
+#   - name: Report a security vulnerability
+#     url: https://github.com/OWNER/REPO/security/policy
+#     about: Please report vulnerabilities privately as described in SECURITY.md, not as a public issue.
