@@ -1,0 +1,19 @@
+# Normalise line endings: text files are stored and checked out with LF.
+* text=auto eol=lf
+
+# Binary assets: never diff or convert line endings.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.mp4 binary
+*.mov binary
+*.webm binary
+*.db binary
+*.sqlite binary
+
+# Generated lockfile: collapse it in GitHub diffs and keep it out of language stats.
+package-lock.json linguist-generated=true
