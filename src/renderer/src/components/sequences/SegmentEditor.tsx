@@ -11,13 +11,14 @@ import ConfirmButton from './ConfirmButton'
 import { CloseIcon, PlayIcon } from './icons'
 import KeyframeBox from './KeyframeBox'
 import NotesField from './NotesField'
-import { clipKey, continues, parseConsent, readyTake, stableJson } from './sequenceUtils'
+import { clipKey, continues, parseConsent, readyTake, stableJson, takePromptsFor } from './sequenceUtils'
 import { useDraft, useRegisterFlush, type DraftStatus, type FlushRegistry } from './useDraft'
 import type { SequenceStore } from './useSequence'
 
 /** Lets the take list push an old take's prompt back into the editor. */
 export interface EditorHandle {
-  applyPrompt: (prompt: string, negativePrompt?: string) => void
+  /** The take's prompts, their @ImageN / @AudioN tokens renumbered to the clip's references (takePromptsFor). */
+  applyPrompt: (take: GenerationParams) => void
 }
 
 interface Props {
@@ -83,7 +84,8 @@ export default function SegmentEditor({
 
   useEffect(() => {
     const handle: EditorHandle = {
-      applyPrompt: (prompt, negativePrompt) => setParams((p) => ({ ...p, prompt, negativePrompt }))
+      // Against the references in the editor as they are now, so a reorder since the take doesn't move its words.
+      applyPrompt: (take) => setParams((p) => ({ ...p, ...takePromptsFor(take, p) }))
     }
     handleRef.current = handle
     return () => {

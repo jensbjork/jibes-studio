@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { remapPromptReferences } from '@shared/prompt-remap'
+import type { GenerationParams, ReferenceAudio } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { stableJson } from './sequenceUtils'
 
@@ -26,12 +28,51 @@ function mergeFields<T extends object>(local: T, base: T, server: T): T {
   const out: Record<string, unknown> = { ...(server as Record<string, unknown>) }
   const l = local as Record<string, unknown>
   const b = base as Record<string, unknown>
+  const mine = new Set<string>()
   for (const key of new Set([...Object.keys(l), ...Object.keys(b)])) {
     if (stableJson(l[key]) === stableJson(b[key])) continue
+    mine.add(key)
     if (l[key] === undefined) delete out[key]
     else out[key] = l[key]
   }
+  followReferences(out, mine.has('prompt') ? l : server, mine.has('negativePrompt') ? l : server)
   return out as T
+}
+
+/** A params-like value's reference lists (empty when it has none). */
+function referenceLists(p: object): { images: string[]; audios: ReferenceAudio[] } {
+  const { referenceImages, referenceAudios } = p as Partial<GenerationParams>
+  return {
+    images: Array.isArray(referenceImages) ? referenceImages : [],
+    audios: Array.isArray(referenceAudios) ? referenceAudios : []
+  }
+}
+
+/**
+ * Keeps a merged clip's prompts on their pictures and clips. The reference lists and the prompts are merged as
+ * separate fields, but a prompt's @ImageN / @AudioN tokens only mean something with the lists it was written
+ * against: when an agent's reorder_references (or update_segment's references) lands while the user types, the
+ * merge takes the agent's lists and the user's text. Each prompt is therefore renumbered from the lists of the
+ * side it came from (`promptFrom`, `negativeFrom`) to the merged lists (remapPromptReferences), so "@Image1 hugs
+ * @Image3" typed against [A, B, C] reads "@Image2 hugs @Image1" against the agent's [C, A, B] – never naming
+ * whatever now holds the old number. Values without a prompt (not clip params) are left alone.
+ */
+function followReferences(out: Record<string, unknown>, promptFrom: object, negativeFrom: object): void {
+  if (typeof out.prompt !== 'string') return
+  const after = referenceLists(out)
+  for (const [key, from] of [
+    ['prompt', promptFrom],
+    ['negativePrompt', negativeFrom]
+  ] as const) {
+    const text = out[key]
+    if (typeof text !== 'string' || !text) continue
+    const before = referenceLists(from)
+    out[key] = remapPromptReferences(
+      text,
+      { before: before.images, after: after.images },
+      { before: before.audios, after: after.audios }
+    )
+  }
 }
 
 /**
@@ -42,7 +83,8 @@ function mergeFields<T extends object>(local: T, base: T, server: T): T {
  * such a snapshot is an echo or a stale read, and adopting it would undo newer typing.
  * Values the server produced itself (clamped trims, a converted model) are adopted once idle.
  * A change made elsewhere (an agent) while an edit waits is merged field by field when the edit is saved,
- * rather than overwritten by the whole draft.
+ * rather than overwritten by the whole draft; the prompts' @ImageN / @AudioN tokens follow the merged reference
+ * lists (followReferences).
  * A pending change is saved on unmount, so switching segments never loses edits.
  */
 export function useDraft<T extends object>(server: T, save: (value: T) => Promise<unknown>, delay = 600): Draft<T> {

@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { paramsForSubmit } from '@shared/models'
+import type { ComposedPrompt } from '@shared/prompt-compose'
 import { canonicalizeParams } from '@shared/prompt-refs'
 import type {
   ApprovalImageReference,
@@ -16,7 +17,7 @@ import type {
   StillParams
 } from '@shared/types'
 import * as db from '../../db'
-import { prepareSubmission } from '../../jobs'
+import { composeSubmission, prepareSubmission } from '../../jobs'
 import { missingClipProblem, type MissingClip, type SubmitGuard } from '../../sequences'
 import * as store from '../../sequence-store'
 import { getImageSafeMode } from '../../settings'
@@ -45,6 +46,9 @@ import { assertNotRunning, continues, endsOnNext, isUsableTake, loadClip, loadSe
 const CHANGED =
   'har ändrats sedan agenten bad om lov, så förfrågan gäller inte längre. Be agenten fråga igen om det fortfarande ska genereras.'
 
+/** A description appended to the prompt (or the prompt language, or which are switched off) changed meanwhile. */
+const SENT_PROMPT_CHANGED = `Prompten som skickas – med beskrivningarna av referenserna – ${CHANGED}`
+
 /**
  * Models without audio. For them a clip stored with "audio: false" (as agents saved clips before) and one with
  * no audio setting (as the form saves it) are the same generation; the key must not tell them apart, or merely
@@ -54,7 +58,10 @@ type SilentModels = ReadonlySet<string>
 
 const MODELS_TIMEOUT_MS = 5000
 
-/** SilentModels from the model list (cached in main); empty when it can't be had in time. */
+/**
+ * SilentModels from the model list (cached in main); empty when it can't be had in time. Loading the list also
+ * makes main remember the models' prompt limits, which the descriptions appended to a prompt are fitted into.
+ */
 async function silentModels(): Promise<SilentModels> {
   let timer: NodeJS.Timeout | undefined
   const timeout = new Promise<undefined>((resolve) => {
@@ -68,12 +75,41 @@ async function silentModels(): Promise<SilentModels> {
   }
 }
 
+/** Matches no prompt a request was made with: without a library nothing can be composed (or compared). */
+const NO_LIBRARY_PROMPT: ComposedPrompt = {
+  prompt: '\u0000no-library',
+  legend: '',
+  entries: [],
+  truncated: false,
+  dropped: false
+}
+
+/**
+ * The prompt a generation sends: the user's prompt with the References legend composed from the descriptions of
+ * its references as they are in the database right now (as main composes it at submit). An approval holds on to
+ * the text, so a description edited while the request waits – which would change what Venice gets – makes it
+ * lapse.
+ */
+function sentPromptOf(params: GenerationParams): ComposedPrompt {
+  try {
+    return composeSubmission(paramsForSubmit(params))
+  } catch {
+    return NO_LIBRARY_PROMPT
+  }
+}
+
+/** What the dialog shows besides params.prompt: the composed prompt and its legend, when something is appended. */
+function composedFields(sent: ComposedPrompt): Pick<ApprovalPlan, 'composedPrompt' | 'descriptionLegend'> {
+  return sent.legend ? { composedPrompt: sent.prompt, descriptionLegend: sent.legend } : {}
+}
+
 /** Compares what a generation would send, independent of key order and of fields that don't matter. */
 function paramsKey(p: GenerationParams, silent?: SilentModels): string {
   const s = paramsForSubmit(p)
   return JSON.stringify([
     s.model,
-    s.prompt,
+    // The prompt as sent: the user's text plus the descriptions of its references (minus those switched off).
+    sentPromptOf(s).prompt,
     s.negativePrompt ?? '',
     s.duration,
     s.resolution ?? '',
@@ -278,7 +314,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request generation (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating the current Generate form (as get_workspace shows it). Nothing is generated or paid for until they approve in Studio. The form is checked first (prompt, start image or references, @ImageN / @AudioN tokens); problems come back as an error and no request is made. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. The form is captured now: later changes to it don't change this request. Add a short note for the user (Swedish) saying what this generation is for.",
+        "💰 Asks the user to approve generating the current Generate form (as get_workspace shows it). Nothing is generated or paid for until they approve in Studio. The form is checked first (prompt, start image or references, @ImageN / @AudioN tokens); problems come back as an error and no request is made. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. The form is captured now: later changes to it don't change this request. The prompt is sent with the descriptions of its referenced assets appended (composed_prompt in get_workspace); the user approves exactly that text, and the request lapses if a description (or the prompt language) changes before they answer. Add a short note for the user (Swedish) saying what this generation is for.",
       input: { note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.') },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       summary: () => 'vill generera'
@@ -299,22 +335,34 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         throw new Error(`Formuläret kan inte genereras: ${errorText(err)}`)
       })
       const images = imageIdentity(params)
-      const price = await quote(params)
+      // The model list too: main remembers the models' prompt limits from it, which the composed prompt is fitted into.
+      const [price] = await Promise.all([quote(params), silentModels()])
+      // What Venice will get: the prompt with the descriptions of its references as they are now. The user approves
+      // exactly this text, so a description edited before they answer makes the request lapse.
+      const sent = sentPromptOf(params)
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'generation',
         client: ctx.clientName(),
         note,
         params,
+        ...composedFields(sent),
         priceUsd: price,
         fingerprint: `generation:${paramsKey(params)}`,
+        paramsNow: () => db.followRewrites(params, mark),
         // Pictures renamed along with their asset while the request waited are followed to their new place,
         // but they must still be the very files the request was made with.
         verify: () => {
-          if (imageIdentity(db.followRewrites(params, mark)) !== images) {
+          const now = db.followRewrites(params, mark)
+          if (imageIdentity(now) !== images) {
             throw new Error(`Bilderna eller ljudklippen i förfrågan ${CHANGED}`)
           }
+          if (sentPromptOf(now).prompt !== sent.prompt) throw new Error(SENT_PROMPT_CHANGED)
         },
-        execute: async () => [(await callService<Generation>('video:generate', db.followRewrites(params, mark))).id]
+        // The approved text goes along, so what Venice gets is exactly what verify compared – not the prompt
+        // composed again after the quote's round trip, from descriptions that may have been edited meanwhile.
+        execute: async () => [
+          (await callService<Generation>('video:generate', db.followRewrites(params, mark), sent.prompt)).id
+        ]
       })
       return {
         data: pendingAnswer(request, reused),
@@ -331,7 +379,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request clip generation (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating a new take of one sequence clip. Nothing is generated or paid for until they approve in Studio. The clip is checked first; a clip that continues from the previous one needs that clip's finished selected take, and one with end_from_next the next clip's (use request_generate_all to generate clips in order). The dialog shows the user the clip's start and end frames. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. If the clip – or the selected take or trim of a neighbour it takes a frame from – is changed before the user approves, the request lapses. A newer request for the same clip replaces a pending older one.",
+        "💰 Asks the user to approve generating a new take of one sequence clip. Nothing is generated or paid for until they approve in Studio. The clip is checked first; a clip that continues from the previous one needs that clip's finished selected take, and one with end_from_next the next clip's (use request_generate_all to generate clips in order). The dialog shows the user the clip's start and end frames. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. If the clip – or the selected take or trim of a neighbour it takes a frame from, or a description appended to its prompt (composed_prompt in get_sequence) – is changed before the user approves, the request lapses. A newer request for the same clip replaces a pending older one.",
       input: {
         segment_id: z.string(),
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
@@ -376,12 +424,18 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       // Pinned to the neighbours' takes and trims too: the dialog shows the frames they give now.
       const neighbours = clipNeighbours(sequence, index, true)
       const key = clipKey(segment.params, neighbours, silent)
+      // The prompt as it will be sent, with the descriptions of its references as they are now (what the user sees).
+      const sent = sentPromptOf(generated)
       /** Why the clip as stored now isn't the one the user is shown, or undefined. */
       const changed = (): string | undefined => {
         const now = storedClipKey(segment.id, silent, true)
         if (!now) return 'Klippet finns inte längre.'
         const params = db.followRewrites(segment.params, mark)
-        if (now === clipKey(params, neighbours, silent)) return undefined
+        if (now === clipKey(params, neighbours, silent)) {
+          // Both keys are built from today's descriptions; only the text kept from the request tells an edit apart.
+          const prompt = sentPromptOf(asGenerated(params, continuing, endFromNext)).prompt
+          return prompt === sent.prompt ? undefined : SENT_PROMPT_CHANGED
+        }
         // The clip itself is as it was: a neighbour's other take or trim gives another frame.
         const same = { previousId: neighbours.previousId, nextId: neighbours.nextId }
         if (storedClipKey(segment.id, silent) === clipKey(params, same, silent)) {
@@ -390,11 +444,14 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         return `Klippet ${CHANGED}`
       }
       const guard: SubmitGuard = (id) => (id === segment.id ? changed() : 'Fel klipp.')
+      const shown = paramsForSubmit(generated)
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'segment',
         client: ctx.clientName(),
         note,
-        params: paramsForSubmit(generated),
+        params: shown,
+        paramsNow: () => db.followRewrites(shown, mark),
+        ...composedFields(sent),
         sequenceId: sequence.id,
         sequenceName: sequence.name,
         segmentIds: [segment.id],
@@ -425,7 +482,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request generating all missing clips (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating every clip of a sequence that has no finished selected take, in an order that gives every clip the frames it needs (a continuation after the clip before it, a clip with end_from_next after the clip after it). Clips already rendering are waited for, not paid again. Every clip to generate is checked first; problems come back as an error naming the clip. price_usd is the sum over the clips. Returns immediately with {approval_id, status: \"pending\", price_usd, clip_numbers}; follow it with get_approval, then get_sequence. If the sequence's clips change before the user approves, the request lapses.",
+        "💰 Asks the user to approve generating every clip of a sequence that has no finished selected take, in an order that gives every clip the frames it needs (a continuation after the clip before it, a clip with end_from_next after the clip after it). Clips already rendering are waited for, not paid again. Every clip to generate is checked first; problems come back as an error naming the clip. price_usd is the sum over the clips. Returns immediately with {approval_id, status: \"pending\", price_usd, clip_numbers}; follow it with get_approval, then get_sequence. If the sequence's clips, or the descriptions appended to their prompts, change before the user approves, the request lapses.",
       input: {
         sequence_id: z.string(),
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
@@ -467,9 +524,16 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const price = prices.every((p) => p !== undefined) ? prices.reduce<number>((sum, p) => sum + (p ?? 0), 0) : undefined
       const keys = clips.map((c) => `${c.id}:${clipKey(c.params, c.neighbours, silent)}`)
       const clipNumbers = clips.map((c) => c.clip)
+      // Each clip's prompt as it will be sent, with the descriptions of its references as they are now.
+      const composed = new Map(clips.map((c) => [c.id, sentPromptOf(c.generated)]))
+      const sent = new Map([...composed].map(([id, c]) => [id, c.prompt]))
       const approved = new Map(clips.map((c) => [c.id, c]))
       const approvedKey = (c: (typeof clips)[number]): string =>
         clipKey(db.followRewrites(c.params, mark), c.neighbours, silent)
+      /** The clip's prompt as it would be sent now differs from the one the user approved (a description changed). */
+      const promptChanged = (c: (typeof clips)[number]): boolean =>
+        sentPromptOf(asGenerated(db.followRewrites(c.params, mark), !!c.neighbours.previousId, !!c.neighbours.nextId))
+          .prompt !== sent.get(c.id)
       // The run reads the sequence as it goes; this keeps it to the clips, and the settings, the user approved.
       const guard: SubmitGuard = (segmentId) => {
         const c = approved.get(segmentId)
@@ -478,6 +542,9 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         }
         if (storedClipKey(segmentId, silent) !== approvedKey(c)) {
           return 'Klippet ändrades efter att du godkände agentens förfrågan, så det genererades inte. Granska det och tryck ”Generera saknade” om det ska genereras.'
+        }
+        if (promptChanged(c)) {
+          return 'En beskrivning som läggs till i klippets prompt ändrades efter att du godkände agentens förfrågan, så klippet genererades inte. Granska det och tryck ”Generera saknade” om det ska genereras.'
         }
         return undefined
       }
@@ -489,6 +556,8 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         sequenceName: sequence.name,
         segmentIds: clips.map((c) => c.id),
         clipNumbers,
+        // The dialog compares them with the legends it composes now, so it says before the click what verify refuses.
+        clipLegends: Object.fromEntries([...composed].map(([id, c]) => [id, c.legend])),
         priceUsd: price,
         fingerprint: `all:${sequence.id}:${keys.join(';')}`,
         target: `all:${sequence.id}`,
@@ -497,6 +566,8 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           const then = clips.map((c) => `${c.id}:${approvedKey(c)}`)
           const now = ids.map((id) => `${id}:${storedClipKey(id, silent)}`)
           if (now.join(';') !== then.join(';')) throw new Error(`Sekvensen ${CHANGED}`)
+          const edited = clips.find(promptChanged)
+          if (edited) throw new Error(`Klipp ${edited.clip}: ${SENT_PROMPT_CHANGED}`)
         },
         execute: async () => {
           await callService('sequences:generateAll', sequence.id, guard)

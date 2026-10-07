@@ -22,6 +22,18 @@ export interface ApprovalPlan {
   client: string
   note?: string
   params?: GenerationParams
+  /**
+   * The prompt exactly as it is sent – params.prompt with the References legend composed from the assets'
+   * descriptions at request time – and that legend alone, when something is appended. The dialog shows them;
+   * verify refuses when the prompt would be composed differently by now.
+   */
+  composedPrompt?: string
+  descriptionLegend?: string
+  /**
+   * 'generate-all': each clip's legend at request time (ApprovalRequest.clipLegends), for the dialog to compare;
+   * verify compares the clips' composed prompts.
+   */
+  clipLegends?: Record<string, string>
   image?: ApprovalImageRequest
   sequenceId?: string
   sequenceName?: string
@@ -38,6 +50,13 @@ export interface ApprovalPlan {
    * belongs to what was ended and no request is made.
    */
   epoch?: number
+  /**
+   * `params` as they are now: the files moved since the request was made ("Städa upp", an asset renamed) followed
+   * to where they are (db.followRewrites), as verify reads them. A pending request is listed with these, so the
+   * dialog shows the pictures and composes the legend from the files as they are, and doesn't take a move for an
+   * edited description.
+   */
+  paramsNow?: () => GenerationParams
   /** Throws (in Swedish) when what would be generated is no longer what the user is shown. Run before submitting. */
   verify?: () => void | Promise<void>
   /** Submits it; resolves with the ids of the generations it started (or the still it made). */
@@ -99,6 +118,10 @@ export class ApprovalStore {
       note: plan.note?.trim() || undefined,
       kind: plan.kind,
       params: plan.params,
+      ...(plan.composedPrompt !== undefined
+        ? { composedPrompt: plan.composedPrompt, descriptionLegend: plan.descriptionLegend }
+        : {}),
+      ...(plan.clipLegends ? { clipLegends: plan.clipLegends } : {}),
       image: plan.image,
       sequenceId: plan.sequenceId,
       sequenceName: plan.sequenceName,
@@ -118,12 +141,25 @@ export class ApprovalStore {
 
   get(id: string): ApprovalRequest | undefined {
     const entry = this.entries.get(id)
-    return entry && { ...entry.request }
+    return entry && this.view(entry)
   }
 
   /** Pending requests and the most recently decided ones, oldest first. */
   list(): ApprovalRequest[] {
-    return [...this.entries.values()].map((e) => ({ ...e.request }))
+    return [...this.entries.values()].map((e) => this.view(e))
+  }
+
+  /** A copy of the request as it is shown: a pending one with its params following moved files (paramsNow). */
+  private view(entry: Entry): ApprovalRequest {
+    const request = { ...entry.request }
+    if (request.status === 'pending' && entry.plan.paramsNow) {
+      try {
+        request.params = entry.plan.paramsNow()
+      } catch {
+        // Shown as it was made; verify still reads the files as they are.
+      }
+    }
+    return request
   }
 
   /**

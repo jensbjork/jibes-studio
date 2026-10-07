@@ -375,7 +375,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Review a generation',
       description:
-        "Look closely at what a finished generation actually became, to learn how prompts translate into video: returns its prompt, settings, the reference token maps, price, the user's rating and every review so far, then `frames` frames evenly spaced from the first to the last (JPEG, 512 px wide, each captioned \"t = 2.4 s\"), followed by the reference images it was made from (include_references) so you can compare identity, outfit, pose and place – and with include_audio the clip's own sound (MP3) plus the reference voice windows (@AudioN), for clients that take audio. Afterwards record what you saw with add_review, and anything that generalises with save_learning. Free; changes nothing.",
+        "Look closely at what a finished generation actually became, to learn how prompts translate into video: returns its prompt (and sent_prompt, the prompt as Venice got it with the descriptions of its referenced assets appended, when that differs), settings, the reference token maps, price, the user's rating and every review so far, then `frames` frames evenly spaced from the first to the last (JPEG, 512 px wide, each captioned \"t = 2.4 s\"), followed by the reference images it was made from (include_references) so you can compare identity, outfit, pose and place – and with include_audio the clip's own sound (MP3) plus the reference voice windows (@AudioN), for clients that take audio. Afterwards record what you saw with add_review, and anything that generalises with save_learning. Free; changes nothing.",
       input: {
         generation_id: z.string(),
         frames: z.number().int().min(1).max(12).default(6).describe('How many frames, first to last. Default 6.'),
@@ -401,6 +401,8 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         created: localTime(g.createdAt),
         model: g.model,
         prompt: g.prompt,
+        // What Venice actually got, when the descriptions of its references were appended to the prompt.
+        ...(g.sentPrompt && g.sentPrompt !== g.prompt ? { sent_prompt: g.sentPrompt } : {}),
         ...(g.params.negativePrompt ? { negative_prompt: g.params.negativePrompt } : {}),
         params: paramsInfo(g.params, index),
         price_usd: priceValue(g.quote),

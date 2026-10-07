@@ -291,7 +291,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Update asset',
       description:
-        "Changes an asset's name, description and/or (characters only) default outfit. Fields you leave out stay as they are. Renaming also renames its folder in the user's library. default_outfit_id must be an outfit's id; null removes the default outfit.",
+        "Changes an asset's name, description and/or (characters only) default outfit. Fields you leave out stay as they are. Renaming also renames its folder in the user's library. default_outfit_id must be an outfit's id; null removes the default outfit. The name and description are appended to every prompt that sends the asset's photos or voice (the References legend), from the next generation on – so keep the description concrete and visual (what the photos can't say), and expect a pending approval that uses the asset to lapse when you change it.",
       input: {
         asset_id: z.string(),
         name: z.string().min(1).optional(),
@@ -538,7 +538,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Get generation',
       description:
-        "One generation: status, error, timing, price, its settings with the reference token maps (@ImageN and @AudioN), which sequence clip it is a take of, the user's rating and every review, and – when completed – its poster frame as an image. Ask for `frames` to also get evenly spread frames from the video, captioned with their time (the last one is the clip's final frame, where a continuation clip would start). Poll this after an approval to follow progress. To judge a finished clip properly (frames next to the reference images, its sound), use review_generation.",
+        "One generation: status, error, timing, price, its settings with the reference token maps (@ImageN and @AudioN), sent_prompt (the prompt exactly as Venice got it, with the descriptions of its referenced assets appended as a References legend – when that differs from the prompt), which sequence clip it is a take of, the user's rating and every review, and – when completed – its poster frame as an image. Ask for `frames` to also get evenly spread frames from the video, captioned with their time (the last one is the clip's final frame, where a continuation clip would start). Poll this after an approval to follow progress. To judge a finished clip properly (frames next to the reference images, its sound), use review_generation.",
       input: {
         generation_id: z.string(),
         include_thumbnail: z.boolean().default(true).describe('Return the poster frame when completed. Default true.'),
@@ -579,6 +579,8 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
           : {}),
         take_of: takeOf(g),
         params: paramsInfo(g.params, index),
+        // What Venice actually got, when the descriptions of its references were appended to the prompt.
+        ...(g.sentPrompt && g.sentPrompt !== g.params.prompt ? { sent_prompt: g.sentPrompt } : {}),
         rating: reviews.find((r) => r.author === 'user')?.rating ?? null,
         reviews: reviews.map(reviewInfo)
       }
