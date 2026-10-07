@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { readdir, rm, rmdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios } from '@shared/models'
+import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import { isExtractedFirstFrame, isExtractedFrame } from '@shared/seams'
 import type { Generation, GenerationParams, Segment, Sequence, SequenceSummary } from '@shared/types'
 import * as db from './db'
@@ -139,6 +140,8 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v 
 /**
  * Normalises params coming from the renderer, an agent or JSON, dropping anything malformed. Reference audio
  * clips keep their windows; whether the model can use them is decided when a take is sent (paramsForSubmit).
+ * The description switches (includeDescriptions, excludedDescriptionAssetIds) are kept: they decide what a take
+ * appends to its prompt, and "Använd igen" on a take brings them back.
  */
 export function sanitizeParams(input: Partial<GenerationParams> | undefined): GenerationParams {
   const p = input ?? {}
@@ -156,7 +159,8 @@ export function sanitizeParams(input: Partial<GenerationParams> | undefined): Ge
     startImage: str(p.startImage),
     endImage: str(p.endImage),
     referenceImages: refs?.length ? refs : undefined,
-    referenceAudios: sanitizeReferenceAudios(p.referenceAudios)
+    referenceAudios: sanitizeReferenceAudios(p.referenceAudios),
+    ...sanitizeDescriptionFlags(p)
   }
 }
 

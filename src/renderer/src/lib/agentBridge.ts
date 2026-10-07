@@ -12,7 +12,9 @@ import {
   supportsAudioInput,
   type Kind
 } from '@shared/models'
-import { canonicalizeTokens, findAudioTokens, findImageTokens } from '@shared/prompt-refs'
+import { canonicalizeTokens, findAudioTokens, findImageTokens, findMalformedTokens } from '@shared/prompt-refs'
+import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
+import { referenceMoves, reorderReferences } from '@shared/prompt-remap'
 import type {
   AgentCommand,
   AgentCommandReply,
@@ -36,16 +38,18 @@ import { promptIssuesOf } from './promptIssues'
 import { openInSequenceEditor } from './workspace'
 
 // The renderer half of the agent connection. Tools that read or fill the Generate form (get_workspace,
-// set_form, set_references, open_in_studio) reach main's MCP server as an 'agent:command'; this applies them
-// to the form store with the same rules the form itself uses (mode switching, model options, the reference
-// caps for images and audio) and answers with 'agent:reply'. Everything else the agent does goes straight to
-// main's services. Error messages are Swedish: they are shown to the agent, which talks to the user in Swedish.
+// set_form, set_references, reorder_references, open_in_studio) reach main's MCP server as an 'agent:command';
+// this applies them to the form store with the same rules the form itself uses (mode switching, model options,
+// the reference caps for images and audio, tokens following a reorder) and answers with 'agent:reply'.
+// Everything else the agent does goes straight to main's services. Error messages are Swedish: they are shown
+// to the agent, which talks to the user in Swedish.
 
 /** An image of the form tied to the library photo it is (asset, photo number), like a reference minus its token. */
 export type FormImage = Omit<AgentFormReference, 'token'>
 
 /**
- * The answer to get_form, set_form and set_references. `params` is what a generation would send now (inputs
+ * The answer to get_form, set_form, set_references and reorder_references. `params` is what a generation would
+ * send now (inputs
  * the mode doesn't use are left out); `references` are in order, @Image1 first, only in reference mode and
  * only the images the model takes; `audioReferences` likewise, @Audio1 first, only when the model takes audio.
  */
@@ -190,6 +194,8 @@ export function applySetForm(
   const promptValue = field(args, 'prompt')
   const negativeValue = field(args, 'negative_prompt')
   const startValue = field(args, 'start_image')
+  const includeValue = field(args, 'include_descriptions')
+  const excludedValue = field(args, 'excluded_description_asset_ids')
   const explicit = new Set(
     ['duration', 'resolution', 'aspect_ratio', 'audio'].filter((key) => given(field(args, key)))
   )
@@ -310,6 +316,24 @@ export function applySetForm(
     }
   }
 
+  // The description switches ("Ta med beskrivningar" and each asset's own), stored as the form's own box stores
+  // them: left out while they have their default, so the form compares equal to one never switched.
+  if (includeValue !== undefined) {
+    if (includeValue === null || includeValue === true) delete next.includeDescriptions
+    else if (includeValue === false) next.includeDescriptions = false
+    else errors.push('include_descriptions ska vara true eller false.')
+  }
+  if (excludedValue !== undefined) {
+    if (excludedValue === null) delete next.excludedDescriptionAssetIds
+    else if (!Array.isArray(excludedValue) || excludedValue.some((id) => typeof id !== 'string' || !id.trim())) {
+      errors.push('excluded_description_asset_ids ska vara en lista med tillgångs-id:n.')
+    } else {
+      const ids = sanitizeDescriptionFlags({ excludedDescriptionAssetIds: excludedValue.map((id) => id.trim()) })
+      if (ids.excludedDescriptionAssetIds) next.excludedDescriptionAssetIds = ids.excludedDescriptionAssetIds
+      else delete next.excludedDescriptionAssetIds
+    }
+  }
+
   const limit = model?.promptCharacterLimit
   if (limit && next.prompt.length > limit && (promptValue !== undefined || modelChanged)) {
     errors.push(`Prompten är ${next.prompt.length} tecken – ${modelLabel} tar högst ${limit}. Korta den.`)
@@ -410,6 +434,180 @@ export function applySetReferences(
   return { params: next, notes }
 }
 
+/** A token that moved with its picture or clip: "@Image3" → "@Image1". */
+export interface MovedReference {
+  from: string
+  to: string
+  path: string
+}
+
+/** What reorder_references did: the form, notes, and every token that got a new number. */
+export interface ReorderChange extends FormChange {
+  moved: { images: MovedReference[]; audios: MovedReference[] }
+}
+
+const pathKey = (path: string): string => path.normalize('NFC')
+
+/** "Image3", "image 3", "@Bild3", "@Ljud2": a reference written loosely, as the token it means ("@Image3"). */
+function looseToken(entry: string): string | undefined {
+  const bare = /^[@＠]?\s*(image|audio)\s*0*([1-9][0-9]*)$/i.exec(entry)
+  if (bare) return `@${bare[1].toLowerCase() === 'audio' ? 'Audio' : 'Image'}${bare[2]}`
+  const written = /^[@＠]/.test(entry) ? entry : `@${entry}`
+  const near = findMalformedTokens(written).find((m) => m.start === 0 && m.end === written.length)
+  return near?.suggestion && /^@(Image|Audio)\d+$/.test(near.suggestion) ? near.suggestion : undefined
+}
+
+/**
+ * reorder_references' `images` or `audios` as entries the shared reorder reads: tokens ("@Image3") and the form's
+ * own paths. The agent may also name a reference by its 1-based number, a library photo or clip id
+ * (image_id / audio_id), or an asset id – all of that asset's photos (or clips) in the form, in their current
+ * order – or pass the items set_references takes ({path}). Undefined when the list was left out.
+ */
+function orderEntries(
+  value: unknown,
+  kind: 'image' | 'audio',
+  paths: readonly string[],
+  assets: readonly Asset[]
+): string[] | undefined {
+  if (value === undefined || value === null) return undefined
+  const word = kind === 'image' ? 'Image' : 'Audio'
+  const list = kind === 'image' ? 'images' : 'audios'
+  if (!Array.isArray(value)) {
+    throw new BridgeError(`${list} ska vara en lista med referenser (@${word}1 …) i den nya ordningen.`)
+  }
+  const keys = paths.map(pathKey)
+  /** The form's own spelling of a path, so the shared reorder finds it whatever its Unicode normalization. */
+  const formPath = (path: string): string | undefined => {
+    const i = keys.indexOf(pathKey(path))
+    return i === -1 ? undefined : paths[i]
+  }
+  const where = kind === 'image' ? 'referensbilderna' : 'ljudreferenserna'
+  return value.flatMap((item): string[] => {
+    if (typeof item === 'number') {
+      if (!Number.isInteger(item) || item < 1) throw new BridgeError(`${item} är inget giltigt @${word}-nummer.`)
+      return [`@${word}${item}`]
+    }
+    const raw = typeof item === 'string' ? item : asArgs(item).path
+    if (typeof raw !== 'string' || !raw.trim()) {
+      throw new BridgeError(`${list} innehåller en tom eller oläslig post.`)
+    }
+    const entry = raw.trim()
+    if (entry.startsWith('/')) return [formPath(entry) ?? entry]
+    for (const asset of assets) {
+      if (kind === 'image') {
+        const photo = asset.images.findIndex((img) => img.id === entry)
+        if (photo !== -1) {
+          const path = formPath(asset.images[photo].path)
+          if (!path) throw new BridgeError(`Bild ${photo + 1} av ${asset.name} är inte en av ${where} i formuläret.`)
+          return [path]
+        }
+      } else {
+        const clips = Array.isArray(asset.audio) ? asset.audio : []
+        const clip = clips.findIndex((c) => c.id === entry)
+        if (clip !== -1) {
+          const path = formPath(clips[clip].path)
+          if (!path) throw new BridgeError(`Ljudklipp ${clip + 1} av ${asset.name} är inte en av ${where} i formuläret.`)
+          return [path]
+        }
+      }
+    }
+    const asset = assets.find((a) => a.id === entry)
+    if (asset) {
+      const own = (kind === 'image' ? asset.images : Array.isArray(asset.audio) ? asset.audio : []).map((x) =>
+        pathKey(x.path)
+      )
+      const found = paths.filter((p) => own.includes(pathKey(p)))
+      if (!found.length) {
+        throw new BridgeError(`${asset.name} har ${kind === 'image' ? 'inga bilder' : 'inget ljud'} bland ${where}.`)
+      }
+      return found
+    }
+    return [looseToken(entry) ?? entry]
+  })
+}
+
+/**
+ * Applies reorder_references to the form: the reference images (`images`) and/or audio clips (`audios`) in a new
+ * order – the ones named first, the rest after them in their current order – with every @ImageN and @AudioN token
+ * of the prompt and the negative prompt renumbered so it still names the same picture or clip, all in one change
+ * (the shared reorderReferences, which sequence clips use too). Nothing is added or removed, so unlike
+ * set_references the prompt stays right. All or nothing: an entry that names no reference refuses the command.
+ */
+export function applyReorderReferences(
+  current: GenerationParams,
+  rawArgs: unknown,
+  assets: readonly Asset[] = []
+): ReorderChange {
+  const args = asArgs(rawArgs)
+  const images = current.referenceImages ?? []
+  const audios = current.referenceAudios ?? []
+  const imageEntries = orderEntries(field(args, 'images') ?? field(args, 'paths'), 'image', images, assets)
+  const audioEntries = orderEntries(field(args, 'audios'), 'audio', audios.map((a) => a.path), assets)
+  if (!imageEntries && !audioEntries) {
+    throw new BridgeError('Ange images och/eller audios: referenserna i den ordning de ska ha.')
+  }
+  if (kindOfModelId(current.model) !== 'reference-to-video') {
+    throw new BridgeError(
+      `Formuläret är i läget ${modeName(kindOfModelId(current.model))} – referenser används bara i läget ` +
+        `${modeName('reference-to-video')}. Byt läge med set_form först.`
+    )
+  }
+
+  let next = current
+  try {
+    if (imageEntries?.length) next = reorderReferences(next, 'image', imageEntries)
+    if (audioEntries?.length) next = reorderReferences(next, 'audio', audioEntries)
+  } catch (e) {
+    throw new BridgeError(`Inget ändrades. ${e instanceof Error ? e.message : String(e)}`)
+  }
+
+  const moved = {
+    images: referenceMoves(current, next, 'image'),
+    audios: referenceMoves(current, next, 'audio')
+  }
+  const notes: string[] = []
+  if (!moved.images.length && !moved.audios.length) {
+    notes.push('Referenserna låg redan i den ordningen – inget ändrades.')
+    return { params: current, notes, moved }
+  }
+  const renumbered = (list: readonly MovedReference[]) => list.map((m) => `${m.from} → ${m.to}`).join(', ')
+  if (moved.images.length) notes.push(`Bilderna har nya nummer: ${renumbered(moved.images)}.`)
+  if (moved.audios.length) notes.push(`Ljuden har nya nummer: ${renumbered(moved.audios)}.`)
+  const promptFollowed = next.prompt !== current.prompt
+  const negativeFollowed = (next.negativePrompt ?? '') !== (current.negativePrompt ?? '')
+  if (promptFollowed || negativeFollowed) {
+    const which =
+      promptFollowed && negativeFollowed
+        ? 'Prompten och den negativa prompten'
+        : promptFollowed
+          ? 'Prompten'
+          : 'Den negativa prompten'
+    notes.push(`${which} följde med: varje @-hänvisning pekar på samma bild eller ljud som förut.`)
+  }
+  notes.push(...capNotes(images, next.referenceImages ?? [], maxReferenceImages(current.model), assets))
+  return { params: next, notes, moved }
+}
+
+/** Notes for the pictures a reorder moved past the model's limit (no longer sent) or back inside it. */
+function capNotes(before: readonly string[], after: readonly string[], max: number, assets: readonly Asset[]): string[] {
+  if (after.length <= max) return []
+  const photos = photoIndex(assets)
+  const name = (path: string): string => {
+    const photo = photos.get(path)
+    return photo?.assetName ? `${photo.assetName}, bild ${photo.photoNumber}` : (path.split('/').pop() ?? path)
+  }
+  const out: string[] = []
+  after.forEach((path, i) => {
+    const was = before.indexOf(path)
+    if (i >= max && was < max) {
+      out.push(`Bilden på plats ${i + 1} (${name(path)}) skickas inte längre – modellen tar max ${max} bilder.`)
+    } else if (i < max && was >= max) {
+      out.push(`Bilden som nu är @Image${i + 1} (${name(path)}) skickas nu – den låg förut utanför modellens gräns.`)
+    }
+  })
+  return out
+}
+
 // ── Answers ─────────────────────────────────────────────────────────────────
 
 function photoIndex(assets: readonly Asset[]): Map<string, FormImage> {
@@ -450,10 +648,17 @@ export function describeForm(
   const sent = paramsForSubmit(params)
   const photos = photoIndex(assets)
   const describe = (path: string): FormImage => photos.get(path) ?? { path }
+  // Reference images past the model's limit stay in the form (the user may drag one forward) but aren't sent,
+  // so they have no token; listed apart, with their place, so an agent can move one in with reorder_references.
+  const max = maxReferenceImages(params.model)
+  const unsent = kindOfModelId(params.model) === 'reference-to-video' ? (params.referenceImages ?? []).slice(max) : []
   return {
     ...where,
     params: sent,
     references: (sent.referenceImages ?? []).map((path, i) => ({ token: `@Image${i + 1}`, ...describe(path) })),
+    ...(unsent.length
+      ? { unsentReferences: unsent.map((path, i) => ({ position: max + i + 1, ...describe(path) })) }
+      : {}),
     audioReferences: audioReferences(sent.referenceAudios ?? [], assets),
     ...(sent.startImage ? { startImage: describe(sent.startImage) } : {}),
     ...(sent.endImage ? { endImage: describe(sent.endImage) } : {}),
@@ -579,28 +784,35 @@ async function run(cmd: AgentCommand, ctx: BridgeContext): Promise<unknown> {
   const library = await window.studio.libraryStatus()
   if (library.state !== 'ready' || generateParamsFrozen()) throw new BridgeError(SWITCHING_LIBRARY)
 
-  if (cmd.command === 'open') return open(cmd.args, ctx)
-  if (cmd.command !== 'get_form' && cmd.command !== 'set_form' && cmd.command !== 'set_references') {
-    throw new BridgeError(`Studio känner inte igen kommandot ”${String(cmd.command)}”.`)
+  // Compared as text: a command this window doesn't know yet (main newer than the window) is refused below.
+  const command: string = cmd.command
+  if (command === 'open') return open(cmd.args, ctx)
+  if (!['get_form', 'set_form', 'set_references', 'reorder_references'].includes(command)) {
+    throw new BridgeError(`Studio känner inte igen kommandot ”${command}”.`)
   }
 
   // Loading the models also registers their modes, which decide the mode of ids that don't name it. Reading
-  // the form only needs that for unusual ids, so it waits less.
-  const { models, error } = await modelList(cmd.command === 'get_form' ? 1500 : 4000)
+  // the form or reordering it only needs that for unusual ids, so they wait less.
+  const { models, error } = await modelList(command === 'set_form' || command === 'set_references' ? 4000 : 1500)
   const assets = await assetsFollowingForm()
-  if (cmd.command === 'get_form') return snapshot(ctx.view(), assets)
+  if (command === 'get_form') return snapshot(ctx.view(), assets)
 
   // Read after the awaits, so the change builds on the form as it is now (the user may have typed meanwhile).
-  const change =
-    cmd.command === 'set_form'
+  const change: FormChange & Partial<Pick<ReorderChange, 'moved'>> =
+    command === 'set_form'
       ? applySetForm(getGenerateParams(), cmd.args, models, error)
-      : applySetReferences(getGenerateParams(), cmd.args, models, assets)
+      : command === 'set_references'
+        ? applySetReferences(getGenerateParams(), cmd.args, models, assets)
+        : applyReorderReferences(getGenerateParams(), cmd.args, assets)
   // The awaits may have outlasted main's patience, or a library switch may have gone through meanwhile.
   if (expired(cmd)) throw new BridgeError(TOO_LATE)
   if (generateParamsFrozen()) throw new BridgeError(SWITCHING_LIBRARY)
+  // One update for the lists and both prompts, like a drag in the form: the editor never shows a half-done
+  // reorder, and ⌘Z in the prompt doesn't see the renumbering as typing.
   setGenerateParams(change.params)
   ctx.show('generate')
-  return snapshot('generate', assets, change.notes)
+  const result = snapshot('generate', assets, change.notes)
+  return change.moved ? { ...result, moved: change.moved } : result
 }
 
 /** Runs one command and says how it went; never throws. */

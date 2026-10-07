@@ -165,7 +165,12 @@ const migrations: string[] = [
     cost REAL,
     created_at INTEGER NOT NULL
   );
-  CREATE INDEX stills_by_sequence ON stills(sequence_id, created_at);`
+  CREATE INDEX stills_by_sequence ON stills(sequence_id, created_at);`,
+
+  // Phase 8: the descriptions of the referenced assets are appended to the prompt as a References legend when it
+  // is sent. sent_prompt is the prompt exactly as Venice got it; prompt (and params.prompt) stay the user's text,
+  // which "Använd igen" puts back. NULL for generations from before.
+  `ALTER TABLE generations ADD COLUMN sent_prompt TEXT;`
 ]
 
 
@@ -274,6 +279,8 @@ export interface GenerationRow {
   /** Stored form, like file_path. */
   thumb_path: string | null
   video_duration: number | null
+  /** The prompt as sent (the user's with the References legend); NULL for generations from before it was kept. */
+  sent_prompt: string | null
 }
 
 /** A generation with absolute paths (the conversion to and from the stored form happens here). */
@@ -287,6 +294,7 @@ export function generationFromRow(r: GenerationRow): StoredGeneration {
     createdAt: r.created_at,
     model: r.model,
     prompt: r.prompt,
+    ...(typeof r.sent_prompt === 'string' ? { sentPrompt: r.sent_prompt } : {}),
     params: fromStoredParams(JSON.parse(r.params) as GenerationParams),
     status: r.status,
     queueId: r.queue_id ?? undefined,
@@ -313,9 +321,10 @@ export function insertGeneration(g: StoredGeneration): void {
     .prepare(
       `INSERT INTO generations (id, created_at, model, prompt, params, status, queue_id, download_url, file_path,
          error, quote, average_execution_time, execution_duration, completed_at, segment_id, thumb_path,
-         video_duration)
+         video_duration, sent_prompt)
        VALUES (@id, @createdAt, @model, @prompt, @params, @status, @queueId, @downloadUrl, @filePath, @error,
-         @quote, @averageExecutionTime, @executionDuration, @completedAt, @segmentId, @thumbPath, @videoDuration)`
+         @quote, @averageExecutionTime, @executionDuration, @completedAt, @segmentId, @thumbPath, @videoDuration,
+         @sentPrompt)`
     )
     .run({
       id: g.id,
@@ -334,7 +343,8 @@ export function insertGeneration(g: StoredGeneration): void {
       completedAt: g.completedAt ?? null,
       segmentId: g.segmentId ?? null,
       thumbPath: storedPathOrNull(g.thumbPath),
-      videoDuration: g.videoDuration ?? null
+      videoDuration: g.videoDuration ?? null,
+      sentPrompt: typeof g.sentPrompt === 'string' ? g.sentPrompt : null
     })
 }
 

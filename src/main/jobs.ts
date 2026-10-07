@@ -3,13 +3,28 @@ import { EventEmitter } from 'node:events'
 import { access, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { paramsForSubmit } from '@shared/models'
+import {
+  composeOptionsFor,
+  composePrompt,
+  knowsPromptLimit,
+  promptLimitOf,
+  rememberPromptLimits
+} from '@shared/prompt-compose'
 import { blockingPromptError, canonicalizeParams } from '@shared/prompt-refs'
-import { NEEDS_CONSENT, type ConsentRequest, type Generation, type GenerationParams } from '@shared/types'
+import {
+  NEEDS_CONSENT,
+  type ComposedPrompt,
+  type ConsentRequest,
+  type Generation,
+  type GenerationParams,
+  type VideoModel
+} from '@shared/types'
+import { describedAssetsFor } from './assets'
 import * as db from './db'
 import { extractThumbnail, ffmpegStatus, probe } from './ffmpeg'
 import { dayStamp, generationsDayDir, promptExcerpt, sequenceTakesDir, thumbsDir, timeStamp, tmpDir } from './paths'
 import { importExternalReferences, placeFile } from './references'
-import { getAcceptedConsents } from './settings'
+import { getAcceptedConsents, getPromptLanguage } from './settings'
 import {
   buildRequestBody,
   download,
@@ -32,6 +47,10 @@ const MAX_RETRY_DELAY_MS = 60_000
 const MAX_UNREACHABLE_RETRIES = 70
 /** Other unexpected errors (e.g. the video couldn't be saved) get a few quick retries; each re-downloads it. */
 const MAX_RETRIES = 5
+/** How long a submit waits for the model list (for the model's prompt limit) before it composes without one. */
+const MODELS_TIMEOUT_MS = 5000
+/** A list that didn't know the model (or couldn't be had) is asked again at most this often. */
+const MODELS_RECHECK_MS = 10 * 60_000
 
 function consentRequest(body: unknown): ConsentRequest | undefined {
   const b = body as {
@@ -66,18 +85,48 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
+ * The prompt as a submission of these params sends it (composePrompt): the user's prompt with the References legend
+ * of the referenced assets' descriptions appended – the descriptions as the database has them right now, the
+ * params' own switches (includeDescriptions, excludedDescriptionAssetIds), the user's prompt language – and kept
+ * within the model's prompt limit: `characterLimit` when given, else the one remembered from the model list.
+ * Tokens are canonicalised first, as they are sent. Synchronous, so a check (an approval's) can compare it on the
+ * very database state a submit reads. Needs an open library.
+ */
+export function composeSubmission(
+  params: GenerationParams,
+  opts: { characterLimit?: number } = {}
+): ComposedPrompt {
+  const p = canonicalizeParams(params)
+  const limit = opts.characterLimit ?? promptLimitOf(p.model)
+  return composePrompt(p, describedAssetsFor(paramsForSubmit(p)), composeOptionsFor(p, getPromptLanguage(), limit))
+}
+
+/**
+ * Refuses (Swedish) a prompt that can't be sent as composed. The legend's tokens are valid by construction and
+ * its texts carry no "@", so this only says again what the user's prompt said; it runs anyway, on exactly the
+ * text Venice gets, so nothing that would spoil a paid generation can slip in with a description.
+ */
+function checkComposed(params: GenerationParams, composed: Pick<ComposedPrompt, 'prompt'>): void {
+  if (composed.prompt === params.prompt) return
+  const problem = blockingPromptError({ ...params, prompt: composed.prompt })
+  if (problem) throw new Error(problem)
+}
+
+/**
  * The params exactly as a paid submission sends them, or a Swedish refusal: the prompt's @ImageN and @AudioN
  * references are checked against what the caller has (so a token past the model's limit is reported as such),
- * tokens are canonicalised, inputs the model doesn't use are dropped (paramsForSubmit), and every reference
- * audio clip is measured and its window filled in, so that a clip shorter than 2 s or clips longer than 15 s
- * together — which Venice would refuse after the upload — are refused here. Nothing is copied or sent.
- * JobManager.submit runs it on every submission; callers that quote first (a sequence take) run it before the
- * quote too.
+ * tokens are canonicalised, inputs the model doesn't use are dropped (paramsForSubmit), the prompt as composed with
+ * the descriptions legend (composeSubmission) is checked too, and every reference audio clip is measured and its
+ * window filled in, so that a clip shorter than 2 s or clips longer than 15 s together — which Venice would refuse
+ * after the upload — are refused here. The returned params keep the user's prompt: the legend is composed again,
+ * from the descriptions as they are then, when the job is sent. Nothing is copied or sent. JobManager.submit runs
+ * it on every submission; callers that quote first (a sequence take) run it before the quote too.
  */
 export async function prepareSubmission(params: GenerationParams): Promise<GenerationParams> {
   const problem = blockingPromptError(params)
   if (problem) throw new Error(problem)
   const checked = paramsForSubmit(canonicalizeParams(params))
+  checkComposed(checked, composeSubmission(checked))
   if (!checked.referenceAudios?.length) return checked
   // "The clip no longer exists" says more than ffprobe failing to open it.
   ensureImagesExist(checked)
@@ -122,6 +171,14 @@ export interface SubmitOptions {
   quote?: number
   /** Makes the generation a take of this sequence segment. */
   segmentId?: string
+  /**
+   * The prompt to send, composed by the caller from these params (composeSubmission) when it read them: a sequence
+   * take composes it together with the reads its approval's check runs on, and an agent's approved form request
+   * passes the text the user approved, so each sends exactly what was checked however long the frames, the quote
+   * and the upload take. Checked like a prompt composed here; one that doesn't start with the params' prompt is
+   * ignored. Default: composed when the job is sent.
+   */
+  sentPrompt?: string
 }
 
 type MediaInfo = Pick<db.StoredGeneration, 'videoDuration' | 'thumbPath'>
@@ -140,8 +197,17 @@ export class JobManager extends EventEmitter<JobEvents> {
   private epoch = 0
   /** The backfill's current poster/duration step, which writes into the library that was open when it began. */
   private backfillStep: Promise<unknown> | undefined
+  /** When the model list was last asked for a model's prompt limit (see promptLimit). */
+  private limitsCheckedAt = 0
 
-  constructor(private readonly venice: VeniceClient) {
+  /**
+   * `models`: the video model list as main caches it, for the models' prompt limits; without it the list is
+   * fetched from Venice (GET /models, free) when a submit needs a limit it doesn't know yet.
+   */
+  constructor(
+    private readonly venice: VeniceClient,
+    private readonly models?: () => Promise<VideoModel[]>
+  ) {
     super()
   }
 
@@ -180,10 +246,36 @@ export class JobManager extends EventEmitter<JobEvents> {
     if (problem) throw new Error(problem)
     this.submitting++
     try {
-      return await this.queue(await prepareSubmission(params), opts)
+      // Before the files are read: the model list may take a moment, and paths are only followed from there on.
+      // A caller that composed the prompt itself (a sequence take) already had the limit.
+      const limit = opts.sentPrompt === undefined ? await this.promptLimit(params.model) : undefined
+      return await this.queue(await prepareSubmission(params), opts, limit)
     } finally {
       this.submitting--
     }
+  }
+
+  /**
+   * The model's prompt limit, for composing what is sent: from the remembered model list, which is fetched when
+   * it doesn't know the model (at most every MODELS_RECHECK_MS). When the list can't be had in time the prompt is
+   * composed without a limit, as before limits were known.
+   */
+  private async promptLimit(model: string): Promise<number | undefined> {
+    if (!knowsPromptLimit(model) && Date.now() - this.limitsCheckedAt > MODELS_RECHECK_MS) {
+      this.limitsCheckedAt = Date.now()
+      const load = this.models ?? (() => this.venice.listVideoModels())
+      let timer: NodeJS.Timeout | undefined
+      const timeout = new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), MODELS_TIMEOUT_MS)
+      })
+      try {
+        const models = await Promise.race([load().catch(() => undefined), timeout])
+        if (models) rememberPromptLimits(models)
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    return promptLimitOf(model)
   }
 
   /**
@@ -209,7 +301,7 @@ export class JobManager extends EventEmitter<JobEvents> {
     await this.backfillStep?.catch(() => {})
   }
 
-  private async queue(params: GenerationParams, opts: SubmitOptions): Promise<Generation> {
+  private async queue(params: GenerationParams, opts: SubmitOptions, limit: number | undefined): Promise<Generation> {
     // Without an open library the job could be paid for and then not recorded anywhere; this throws
     // "Välj en biblioteksmapp först." before anything is sent.
     db.getDb()
@@ -218,9 +310,19 @@ export class JobManager extends EventEmitter<JobEvents> {
     // The upload below can take seconds; an asset renamed meanwhile (or "Städa upp") moves its pictures,
     // and the row written afterwards must point at where they are now (db.followRewrites).
     const mark = db.rewriteMark()
+    // What Venice gets: the prompt with the descriptions of the referenced assets as the library has them now
+    // (asset files are inside the library, so the copying below never changes the paths they are found by). The
+    // row keeps the user's prompt in `prompt` and `params`, and this one as sentPrompt.
+    const given = opts.sentPrompt
+    const own = params.prompt.trimEnd()
+    const composed =
+      typeof given === 'string' && (given === params.prompt || (own !== '' && given.startsWith(own)))
+        ? { prompt: given }
+        : composeSubmission(params, { characterLimit: limit })
+    checkComposed(params, composed)
     // Outside images and audio are copied into Referensbilder first, so the stored params point at the copies.
     params = await importExternalReferences(params)
-    const body = await buildRequestBody(params)
+    const body = await buildRequestBody({ ...params, prompt: composed.prompt })
     if (params.model.includes('seedance') && getAcceptedConsents().seedance) {
       body.consents = {
         seedance: {
@@ -243,6 +345,7 @@ export class JobManager extends EventEmitter<JobEvents> {
       createdAt: Date.now(),
       model: params.model,
       prompt: params.prompt,
+      sentPrompt: composed.prompt,
       params: db.followRewrites(params, mark),
       status: 'queued',
       queueId: res.queue_id,

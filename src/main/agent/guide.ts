@@ -16,7 +16,9 @@ export function serverInstructions(lang: PromptLanguage): string {
     'storyboards whose clips can start and end on chosen images (keyframes).',
     'Call get_studio_guide once before you start: it explains @ImageN / @AudioN references, how to write prompts that',
     'work, storyboards and replacing a clip between its neighbours, and ends with the learnings earlier sessions',
-    'recorded – follow them. Everything is free to prepare (references, prompts, the Generate form, sequences,',
+    'recorded – follow them. Studio appends the descriptions of the referenced assets to every prompt it sends (a',
+    'References legend), so prompts describe the action, camera and mood rather than repeating them. Everything is',
+    'free to prepare (references, prompts, the Generate form, sequences,',
     'storyboards), but every generation costs the user real money: request_generation, request_segment_generation,',
     'request_generate_all and request_image_generation only ask for the user\'s approval in Studio, and nothing is',
     'generated until they say yes. When a generation is done, look at what it became',
@@ -34,6 +36,7 @@ export function promptWritingGuide(lang: PromptLanguage): string {
   const sound = sv ? 'ljud' : 'sound'
   const posedAs = sv ? 'i posen' : 'posed as in'
   const and = sv ? 'och' : 'and'
+  const references = sv ? 'Referenser:' : 'References:'
   return `## Writing video prompts (Seedance-class models)
 
 **Language:** write every video prompt in ${LANGUAGE_NAMES[lang]} (the user's setting "Promptspråk"), even though you talk to the user in Swedish.
@@ -41,7 +44,7 @@ export function promptWritingGuide(lang: PromptLanguage): string {
 **One clip is one continuous shot.** A clip is 4–15 seconds of a single camera take. Describe one shot – no cuts, no "then later", no montage, no list of unrelated actions. One main action (two or three closely linked ones at most) that fits the clip's duration.
 
 **Order the prompt like a shot description:**
-1. **Subject** – who or what is in the shot, each with its references right after the name, plus one or two distinctive visual traits.
+1. **Subject** – who or what is in the shot, each with its references right after the name (their looks come from the photos and the appended descriptions – see below).
 2. **Action** – what happens during the clip, in order, with concrete verbs of motion and pacing ("slowly turns her head", "breaks into a run halfway through").
 3. **Camera / shot** – shot size and angle (close-up, medium shot, wide shot, low angle, over-the-shoulder) and camera movement (static, slow dolly-in, tracking shot alongside, handheld, crane up, orbit).
 4. **Lighting and mood** – time of day, light quality and direction, colour palette, atmosphere (golden hour backlight, overcast soft light, neon reflections on wet asphalt).
@@ -54,6 +57,18 @@ export function promptWritingGuide(lang: PromptLanguage): string {
 - Tokens only exist in reference-to-video mode. Text-to-video and image-to-video prompts must not contain any @ tokens.
 - The photos carry identity (face, exact garment, the place, the body positions of a pose) and the audio carries the voice. Use the text for what they can't say: action, expression, camera, light. Keep any appearance you do mention consistent with the asset's description and photos – never contradict them (no "blonde" for a dark-haired character).
 
+**Descriptions of referenced assets are appended automatically as a References legend – don't repeat them in the prompt; write the action, camera and mood.** When Studio sends a prompt it adds one line per referenced asset that has a description, built from the user's library at that moment:
+\`\`\`
+<your prompt>
+
+${references}
+- Anna (@Image1, @Image2; ${voice} @Audio1): <Anna's description>
+- <the place> (@Image4): <its description>
+\`\`\`
+- The legend is never part of the prompt text you write or read back (\`prompt\`); \`composed_prompt\` (get_workspace, validate_prompt, get_sequence) shows the whole text that is sent and \`description_entries\` which descriptions go along (\`sent\`; \`included\` only says it is switched on – an empty prompt, or a legend that doesn't fit the model's limit, sends none: see \`descriptions_note\`). It follows the tokens, so it stays right when references are reordered.
+- It counts towards the model's prompt_character_limit: Studio shortens the descriptions (or, if even the names don't fit, leaves the legend out – descriptions_note says so) rather than refusing. Keep your own prompt lean so they fit.
+- A description that is missing, vague or wrong for this shot: improve it with update_asset (it then applies to every later prompt), or switch that asset's description off for this form or clip with excluded_description_asset_ids (set_form, add_segment, update_segment; include_descriptions: false switches all of them off) – e.g. when the scene deliberately shows a character differently from the description.
+
 **Voices (@AudioN).** With a model that takes reference audio (audio_input in list_models) a character's voice clip steers the timbre, tone and pacing of how they sound – a style guide, not an exact clone. Keep the clip's token inside the character's parenthesis and attribute spoken lines to the character by name: \`Anna (@Image1, ${voice} @Audio1) says: "…"\`. An environment's sound clip goes with the place: \`the harbour pier (@Image4, ${sound} @Audio2)\`. Keep audio on (set_form audio: true) – without generated sound a voice reference has nothing to shape.
 
 **Poses.** A pose asset is a photo or sketch of how people stand, sit or hold each other and where they are relative to each other and the camera. Its photo carries only the positions – the identities come from the characters' own photos. Name the characters that take the pose, then the pose with its token: \`Anna (@Image1) ${and} Erik (@Image3) ${posedAs} Kram (@Image5)\`, and say the pose in words too ("standing face to face, her arms around his neck"). Use one pose per clip and keep the camera angle close to the pose photo's.
@@ -62,7 +77,7 @@ export function promptWritingGuide(lang: PromptLanguage): string {
 
 **Be concrete and visual.** Describe what the camera sees, not intentions ("make it epic", "a beautiful moment"). Avoid contradictions (sunny and rainy, night and midday sun), more than three characters, small legible text, and complicated hand interactions.
 
-**Length:** usually 40–120 words. Respect the model's prompt_character_limit (list_models).
+**Length:** usually 40–120 words of your own; the References legend comes on top. Respect the model's prompt_character_limit (list_models) – composed_characters in get_workspace / validate_prompt is the length that is sent.
 
 **Audio:** when audio is on, the model also makes sound. You may describe ambience and sounds ("waves crashing, gulls in the distance") and short spoken lines in quotes with who says them: \`Erik says: "Kom, vi går."\` Keep dialogue short – a line or two per clip.
 
@@ -117,7 +132,7 @@ Studio keeps four kinds of **assets**, each with a name, a description written b
 - **outfit** (klädsel) – what a character wears.
 - **pose** (pose) – a photo or sketch of body positions: who stands where, posture, distance, camera angle.
 
-Use list_assets to see them and get_asset to look at the photos (you get the images) and listen to a voice (include_audio). Read the descriptions: they say what the user cares about (age, hair, style, the mood of a place). Each audio clip has a **reference window** (clip_start, clip_length): the 2–15 s part that is sent to Venice; update_asset_audio moves it. You can create assets and edit names, descriptions, default outfits and audio windows, but photos and audio files can only be added by the user in Studio.
+Use list_assets to see them and get_asset to look at the photos (you get the images) and listen to a voice (include_audio). Read the descriptions: they say what the user cares about (age, hair, style, the mood of a place) – and Studio appends them to every prompt that uses the asset's photos or voice (see "Descriptions in the prompt"), so a good description is concrete and visual and says what the photos alone can't. Each audio clip has a **reference window** (clip_start, clip_length): the 2–15 s part that is sent to Venice; update_asset_audio moves it. You can create assets and edit names, descriptions, default outfits and audio windows, but photos and audio files can only be added by the user in Studio.
 
 ## Modes (model kinds)
 - **reference-to-video** (default, \`seedance-2-5-reference-to-video-basic\`): the model gets up to N reference images (9 for Seedance, see max_reference_images in list_models) and – for models with audio_input – up to 3 reference audio clips; the prompt refers to them as @Image1 … @ImageN and @Audio1 … @AudioN. Best for putting the user's characters in their outfits, places and poses, with their voices.
@@ -131,6 +146,13 @@ Each model has its own durations, resolutions, aspect ratios and audio options (
 - The image budget is small: usually 1–3 photos per character (clear face, different angles), 1–2 per outfit (the whole garment), 1–2 per environment, 1 per pose. Choose the clearest photos with get_asset and pass their image_ids.
 - **Default outfits are not added automatically by set_references** (Studio's own picker does add them). If a character should wear its default outfit, add that outfit too; if the scene needs other clothes, add the other outfit instead – never both.
 - Studio refuses to generate when a token points at nothing, past the model's limit, is malformed ("@Image 3", "@img3", "@Voice1", "@Ljud1") or appears in a mode without references. validate_prompt shows those problems (Swedish messages) before anything is paid for; warnings mean a reference is never mentioned.
+- **Reordering:** reorder_references changes the order of the form's (or a clip's: target {segment_id}) reference images or audio clips, the way the user drags a thumbnail in Studio, and renumbers every token in the prompt and negative prompt so each still points at the same picture or clip – with references [A, B, C] and "@Image1 hugs @Image3", moving C first gives [C, A, B] and "@Image2 hugs @Image1". Name references by token, image_id / audio_id or asset_id; the ones you name come first, the rest keep their order. Use it whenever only the order should change (e.g. to bring a picture within the model's limit of max_reference_images, or to make a character @Image1): set_references with mode "replace" sets the list anew and does not renumber the tokens already in the prompt.
+
+## Descriptions in the prompt (the References legend)
+- Studio appends the descriptions of the assets whose photos or voices are sent to the prompt, as a References legend after it (see "Writing video prompts"). It is composed when the generation is sent, from the descriptions as they are then: a description the user (or you, with update_asset) improves applies to the next generation.
+- The user can switch it off for a form or clip ("Ta med beskrivningar": include_descriptions) or per asset (excluded_description_asset_ids). Respect what they switched off; change it only when asked or clearly needed, and tell them.
+- Don't paste descriptions into the prompt yourself – they would be sent twice. Check composed_prompt (get_workspace, validate_prompt, get_sequence) to see exactly what is sent.
+- The approval dialog shows the user the whole composed prompt with the legend; if a description changes before they approve, the request lapses and you need to ask again.
 
 ## Voices and sounds (@AudioN)
 - Only reference-to-video models with **audio_input: true** in list_models take reference audio (all Seedance reference-to-video models, including the default). Never with a model that lacks it.
@@ -148,7 +170,7 @@ Each model has its own durations, resolutions, aspect ratios and audio options (
 ${promptWritingGuide(lang)}
 ## The Generate form and the workspace
 - get_workspace shows what the user is looking at (view, open sequence and clip) and the Generate form: mode, model, settings, prompt, the reference token maps (images and audio), validation issues and the price.
-- set_form changes the form (mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, start image) and switches Studio to the Generate view; set_references sets its references. The user sees every change live in Studio, so tell them what you changed.
+- set_form changes the form (mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, start image, the description switches) and switches Studio to the Generate view; set_references sets its references and reorder_references changes their order (renumbering the prompt's tokens). The user sees every change live in Studio, so tell them what you changed.
 - open_in_studio brings the Generate view or a sequence clip to the front.
 - save_prompt stores a prompt in the user's prompt library (list_prompts reads it; it may hold prompts they like).
 
@@ -209,8 +231,8 @@ The point of reviewing is to write better prompts next time. Do it for every gen
 ## A typical workflow
 1. Read the learnings (below), then get_workspace and list_assets (get_asset for the photos and voices of the assets you might use).
 2. set_form({mode: "reference-to-video"}), then set_references with the chosen character(s), outfit(s), environment and pose – voices come along for characters.
-3. Write the prompt from the returned token maps; set_form({prompt, negative_prompt}).
-4. validate_prompt({use_form: true}) and fix every error.
+3. Write the prompt from the returned token maps – the action, camera and mood; the assets' descriptions are appended for you; set_form({prompt, negative_prompt}).
+4. validate_prompt({use_form: true}), fix every error and read composed_prompt: that is what will be sent.
 5. request_generation({note: "…why…"}), tell the user it is waiting for their OK, poll get_approval.
 6. When it is completed: review_generation → add_review → save_learning if you learned something general; iterate.
 

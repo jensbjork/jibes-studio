@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { KINDS, kindOfModelId, paramsForSubmit } from '@shared/models'
+import { composeOptionsFor, composePrompt, describedAssets, type ComposedPrompt } from '@shared/prompt-compose'
+import { canonicalizeParams } from '@shared/prompt-refs'
 import type {
   ApprovalImageRequest,
   ApprovalRequest,
   Asset,
   ConsentRequest,
   GenerationParams,
+  PromptLanguage,
   Segment,
   SegmentFramePreview,
   Sequence,
@@ -15,10 +18,11 @@ import {
   APPROVAL_TTL_MS,
   approvalQueue,
   deferApproval,
+  refreshApprovals,
   resolveApproval,
   useAgentState
 } from '../../lib/agent'
-import { ipcErrorMessage, useAssets, useModels } from '../../lib/hooks'
+import { ipcErrorMessage, useAssetsState, useModels } from '../../lib/hooks'
 import { formatUsd, mediaUrl } from '../../lib/media'
 import { blockingPromptIssue, promptIssuesOf } from '../../lib/promptIssues'
 import ConsentDialog from '../ConsentDialog'
@@ -108,11 +112,25 @@ const secondary = 'rounded-md border border-line px-4 py-2 transition hover:bg-r
 
 function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProps) {
   const { models } = useModels()
-  const assets = useAssets()
+  const { assets, loaded: assetsLoaded } = useAssetsState()
   const photos = useMemo(() => photoIndex(assets), [assets])
   const voices = useMemo(() => audioSourcesByPath(assets), [assets])
   const { sequence, error: sequenceError } = useSequence(a.sequenceId)
   const now = useNow(15_000)
+  const language = usePromptLanguageSetting()
+  // Composes a prompt the way main sends it, from the library as it is now; undefined until everything it
+  // depends on (the assets, the prompt language, the models' prompt limits) has been read.
+  const composer = useMemo(
+    () => (assetsLoaded && language && models.length ? makeComposer(assets, language, models) : undefined),
+    [assets, assetsLoaded, language, models]
+  )
+  // The library changed (files moved by "Städa upp" or a renamed asset come as new assets): main lists the request
+  // with its params following the moves, so its pictures and legend are read from the files as they are now – a
+  // move is not taken for an edited description.
+  const pendingNow = a.status === 'pending'
+  useEffect(() => {
+    if (pendingNow) void refreshApprovals()
+  }, [assets, pendingNow])
 
   const [phase, setPhase] = useState<Phase>('review')
   const [error, setError] = useState<string>()
@@ -127,7 +145,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const expired = pending && now > expiresAt
   // A still for a storyboard (Venice's image models) rather than a video.
   const image = a.kind === 'image' ? (a.image ?? null) : undefined
-  const clips = useMemo(() => clipsOf(a, sequence), [a, sequence])
+  const clips = useMemo(() => withDescriptions(clipsOf(a, sequence), a, composer), [a, sequence, composer])
   // The automatic start and end frames of the one clip a 'segment' request generates, as they are right now.
   const frameClip = a.kind === 'segment' && clips.length === 1 ? clips[0] : undefined
   const needsFrames = !!frameClip && !!(frameClip.continuesFrom || frameClip.endsAt)
@@ -144,7 +162,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
       a.priceUsd,
       image?.params,
       imageTarget,
-      clips.map((c) => [c.key, c.title, c.params, c.continuesFrom, c.endsAt]),
+      clips.map((c) => [c.key, c.title, c.params, c.continuesFrom, c.endsAt, c.legend, c.descriptionsChanged]),
       // A neighbour's other take (or trim) is another frame: the user must see it before it is paid for. While a
       // new answer is on its way the old frame may be stale, so the request arms again only once it has come.
       framesLoading,
@@ -154,10 +172,16 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   )
   // The first clip that can't be generated, named when the request covers several.
   const blockingClip = clips.find((c) => c.blocking)
+  // Main refuses a request whose composed prompt is no longer the one it was made with; say so before the click.
+  const changedClip = clips.find((c) => c.descriptionsChanged)
+  const descriptionsChanged =
+    changedClip &&
+    (clips.length > 1 && changedClip.title ? `${changedClip.title}: ${DESCRIPTIONS_CHANGED}` : DESCRIPTIONS_CHANGED)
   const blocking =
     (blockingClip && clips.length > 1 && blockingClip.title
       ? `${blockingClip.title}: ${blockingClip.blocking}`
       : blockingClip?.blocking) ??
+    descriptionsChanged ??
     // What stands in the way of the clip's start and end frames (a neighbour without a finished take …).
     frames?.problems[0] ??
     (image === null ? 'Förfrågan saknar uppgifter om bilden' : undefined) ??
@@ -410,7 +434,8 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         )}
         {blocking && (
           <p className="text-[12px] text-accent">
-            Kan inte genereras som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {a.client} rätta det, eller avböj.
+            Kan inte genereras som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {a.client}{' '}
+            {blocking === descriptionsChanged ? 'fråga igen' : 'rätta det'}, eller avböj.
           </p>
         )}
       </div>
@@ -444,6 +469,84 @@ interface Clip {
   endsAt?: number
   blocking?: string
   warnings: string[]
+  /**
+   * What Studio appends to the prompt when it is sent: the References legend of the referenced assets'
+   * descriptions (without the blank line before it). For a request that captured its prompt ('generation',
+   * 'segment'), the legend it was made with; otherwise the one the library gives now.
+   */
+  legend?: string
+  /** Characters of the prompt as it is sent (prompt plus legend). */
+  sentLength?: number
+  /** The model's prompt limit, which the legend was fitted into. */
+  limit?: number
+  /** The library now gives another legend than the request was made with (a description changed meanwhile). */
+  descriptionsChanged?: boolean
+}
+
+/** Why a request with a composed prompt can't be approved once a description has changed. */
+const DESCRIPTIONS_CHANGED =
+  'En beskrivning som läggs till i prompten har ändrats sedan agenten frågade, så det som skulle skickas är inte längre det du ser här'
+
+interface Composer {
+  /**
+   * The prompt as main sends it (src/shared/prompt-compose.ts): canonical tokens, the inputs the model takes, the
+   * params' own description switches, the prompt language and the model's prompt limit.
+   */
+  compose: (params: GenerationParams) => ComposedPrompt
+  /** The model's prompt limit (prompt_character_limit), when it has one. */
+  limitOf: (modelId: string) => number | undefined
+}
+
+function makeComposer(assets: readonly Asset[], language: PromptLanguage, models: readonly VideoModel[]): Composer {
+  const described = describedAssets(assets)
+  const limits = new Map(models.map((m) => [m.id, m.promptCharacterLimit]))
+  const limitOf = (modelId: string): number | undefined => limits.get(modelId) || undefined
+  return {
+    limitOf,
+    compose: (params) => {
+      const sent = paramsForSubmit(canonicalizeParams(params))
+      return composePrompt(sent, described, composeOptionsFor(sent, language, limitOf(sent.model)))
+    }
+  }
+}
+
+/** The legend as the dialog shows it: the text after the user's prompt, without the blank line in front. */
+const shownLegend = (legend: string | undefined): string | undefined => legend?.replace(/^\s+/, '') || undefined
+
+/**
+ * The clips with what is appended to their prompts. A request that captured its prompt shows the legend it was
+ * made with and is marked when the library would now compose another one (main would refuse it); the clips of
+ * "generate all" are read live, so they show today's legend, marked when it isn't the one the request was made
+ * with (main refuses that too).
+ */
+function withDescriptions(clips: Clip[], a: ApprovalRequest, composer: Composer | undefined): Clip[] {
+  const captured = (a.kind === 'generation' || a.kind === 'segment') && !!a.params
+  const legends = a.kind === 'generate-all' ? a.clipLegends : undefined
+  return clips.map((clip) => {
+    const live = composer?.compose(clip.params)
+    const limit = composer?.limitOf(clip.params.model)
+    if (captured) {
+      const legend = shownLegend(a.descriptionLegend)
+      return {
+        ...clip,
+        legend,
+        sentLength: (a.composedPrompt ?? clip.params.prompt).length,
+        ...(limit ? { limit } : {}),
+        // Legends compared rather than whole prompts: the request's prompt is canonical, the clip's may not be.
+        descriptionsChanged: !!live && shownLegend(live.legend) !== legend
+      }
+    }
+    if (!live) return clip
+    const legend = shownLegend(live.legend)
+    const then = legends?.[clip.key]
+    return {
+      ...clip,
+      legend,
+      sentLength: live.prompt.length,
+      ...(limit ? { limit } : {}),
+      ...(then !== undefined ? { descriptionsChanged: legend !== shownLegend(then) } : {})
+    }
+  })
 }
 
 function clipOf(
@@ -473,13 +576,10 @@ function endsAtClip(segment: Segment, index: number, count: number): number | un
 
 function segmentClip(segment: Segment, index: number, count: number): Clip {
   const continuing = segment.continueFromPrevious && index > 0
-  return clipOf(
-    segment.id,
-    effectiveParams(segment, index),
-    `Klipp ${index + 1}`,
-    continuing ? index : undefined,
-    endsAtClip(segment, index, count)
-  )
+  const endsAt = endsAtClip(segment, index, count)
+  // The last clip has no next one to end on, so main generates it as it is (its model, its references).
+  const own = endsAt === undefined && segment.endFromNext ? { ...segment, endFromNext: false } : segment
+  return clipOf(segment.id, effectiveParams(own, index), `Klipp ${index + 1}`, continuing ? index : undefined, endsAt)
 }
 
 /** The clips a request would generate, in order (none for an image request). */
@@ -563,6 +663,18 @@ function ClipSummary({
         <p className="text-accent">Prompten är tom.</p>
       )}
 
+      {clip.legend && (
+        <DescriptionLegend
+          legend={clip.legend}
+          targets={targets}
+          audioTargets={audioTargets}
+          sentLength={clip.sentLength}
+          limit={clip.limit}
+          changed={clip.descriptionsChanged}
+          compact={compact}
+        />
+      )}
+
       {p.negativePrompt && (
         <>
           <Label className="mt-3">Negativ prompt</Label>
@@ -640,6 +752,58 @@ function ClipSummary({
         </ul>
       )}
     </section>
+  )
+}
+
+/**
+ * What Studio appends to the prompt when it is sent – the descriptions of the referenced assets as a References
+ * legend – set apart from the agent's prompt above it (a dashed box of its own), with its tokens coloured like
+ * the prompt's and the length that is sent.
+ */
+function DescriptionLegend({
+  legend,
+  targets,
+  audioTargets,
+  sentLength,
+  limit,
+  changed,
+  compact
+}: {
+  legend: string
+  targets: TokenTarget[]
+  audioTargets: TokenTarget[]
+  sentLength?: number
+  limit?: number
+  /** The library gives another legend by now (a description was edited after the request). */
+  changed?: boolean
+  compact: boolean
+}) {
+  const count = (n: number): string => n.toLocaleString('sv-SE')
+  return (
+    <div className={`mt-2 rounded-md border border-dashed px-3 py-2 ${changed ? 'border-accent/60' : 'border-line'}`}>
+      <div className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-muted">
+        <span>Läggs till i prompten · beskrivningarna av referenserna</span>
+        {sentLength !== undefined && (
+          <span
+            className="ml-auto tabular-nums"
+            title="Så många tecken skickas till Venice: prompten och beskrivningarna tillsammans"
+          >
+            {limit ? `${count(sentLength)} av ${count(limit)} tecken` : `${count(sentLength)} tecken`}
+          </span>
+        )}
+      </div>
+      <PromptText
+        prompt={legend}
+        targets={targets}
+        audioTargets={audioTargets}
+        className={`overflow-y-auto text-[12px] text-muted ${compact ? 'max-h-24' : 'max-h-40'}`}
+      />
+      {changed && (
+        <p className="mt-1.5 text-[11px] leading-snug text-accent">
+          En beskrivning har ändrats sedan agenten frågade – det här är vad som skulle ha skickats då.
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -897,6 +1061,29 @@ function AudioRow({ audio }: { audio: FormAudio }) {
 }
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
+
+/**
+ * "Promptspråk" from Settings (the legend's words: "References" or "Referenser"); undefined until read, so a
+ * legend is never compared in the wrong language. Read again when the window comes back to the front.
+ */
+function usePromptLanguageSetting(): PromptLanguage | undefined {
+  const [language, setLanguage] = useState<PromptLanguage>()
+  useEffect(() => {
+    let active = true
+    const read = () =>
+      window.studio.getSettings().then(
+        (s) => active && setLanguage(s.promptLanguage === 'sv' ? 'sv' : 'en'),
+        () => {}
+      )
+    void read()
+    window.addEventListener('focus', read)
+    return () => {
+      active = false
+      window.removeEventListener('focus', read)
+    }
+  }, [])
+  return language
+}
 
 /** "Säkert läge för bilder" from Settings; undefined until read. */
 function useImageSafeMode(): boolean | undefined {

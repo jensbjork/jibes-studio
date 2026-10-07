@@ -23,13 +23,17 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   (*Kort* / *Tabell*, with keyboard navigation), search in the prompts, filters (status, model, the asset whose
   photos or voice were used, rating, unrated or reviewed, time, standalone or in a sequence), sorting (newest,
   oldest, rating, cost, length) and a summary of the filtered clips. A detail drawer shows the player, the prompt
-  with its tokens, the references and voices that were sent, the settings, and your own rating (1–5 stars), note
-  and tags next to the agents' reviews.
+  with its tokens (and *Skickad prompt*, the prompt exactly as it was sent, when descriptions were appended), the
+  references and voices that were sent, the settings, and your own rating (1–5 stars), note and tags next to the
+  agents' reviews.
 - **A reference-aware prompt editor.** In reference mode the prompt points at the photos as `@Image1`, `@Image2` …
   and at the voice and sound clips as `@Audio1`, `@Audio2` …; the editor colours each token like the asset it points
   at, shows the photo on hover and plays the voice, offers an `@` menu, flags wrong or malformed tokens with one-click
   fixes, and blocks generation while a reference is wrong. The same check runs again in the main process before
-  anything is sent to Venice.
+  anything is sent to Venice. **Drag a reference photo or voice to another place** and its number changes, with
+  every token in the prompt following it. **The descriptions of the referenced characters, places, outfits and
+  poses are appended automatically** when the prompt is sent, as a short *References* list, so you write what
+  happens rather than what everyone looks like.
 - **Library of characters, environments, outfits and poses** (*Karaktärer*, *Miljöer*, *Kläder*, *Poser*): a name, a
   description and ordered reference photos, each in its own folder. A character can have a default outfit that comes
   along automatically, and **a voice** (*Röst*); an environment can have **a soundscape** (*Ljudmiljö*). Each audio
@@ -178,6 +182,34 @@ it doesn't come along (a note says so).
 **Poses.** A pose chip applies to the characters you choose (all of them by default):
 `Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)` (`… och … i posen …` in Swedish).
 
+**Reordering.** Drag a reference thumbnail (or a voice or sound chip) to another place — an insertion marker
+shows where it lands and every badge shows the number it will get — or focus it and press ⌥← / ⌥→. Its `@ImageN`
+(or `@AudioN`) changes, and every token in the prompt and the negative prompt is renumbered in the same step so it
+keeps pointing at the same picture or clip: with references [A, B, C] and `@Image1 hugs @Image3`, dragging C to
+the front gives [C, A, B] and `@Image2 hugs @Image1`. Pictures past the model's limit are marked *skickas inte*
+(not sent); dragging one forward sends it instead of the last one. This works in Generera and in the sequence
+clip editor, so photos can be renumbered without picking or uploading them again in another order.
+
+**Descriptions are appended to the prompt.** When a generation is sent, Studio appends the descriptions of the
+assets whose photos or voices it sends as a *References* legend, with each asset's tokens:
+
+```
+Anna (@Image1, @Image2, voice @Audio1) walks along the beach promenade (@Image3) …
+
+References:
+- Anna (@Image1, @Image2; voice @Audio1): tall woman in her thirties, short red hair, green raincoat
+- Beach promenade (@Image3): a windswept pebble beach at dawn
+```
+
+The legend is composed when the generation is sent, from the descriptions as they are in the library then — so
+an edited description applies to the next generation — and is never written into the prompt you edit (so *Använd
+igen* doesn't add it twice). The box **Läggs till i prompten** under the prompt shows it live: each described
+asset with its tokens and an excerpt, a switch per asset, *Ta med beskrivningar* to switch them all off,
+*Ändra beskrivning* to open the asset, and the composed length against the model's prompt limit. If the legend
+would make the prompt too long, the descriptions are shortened at word boundaries (marked *förkortad*); if not even
+the names fit, none are appended. The heading and words follow **Promptspråk** (`Referenser:` and `röst` in
+Swedish). The clip feed keeps both texts: the prompt you wrote and, as *Skickad prompt*, what Venice got.
+
 In the prompt editor:
 
 - each `@ImageN` and `@AudioN` is coloured like the asset it points at; hover to see the photo or play the voice;
@@ -191,7 +223,10 @@ In the prompt editor:
 The rules live in [`src/shared/prompt-refs.ts`](src/shared/prompt-refs.ts) and are applied by the editor, by the
 main process before every paid submission (including *Generate missing* and agent requests) and by the agent
 tools, so a mistyped `@Image9` or a 20 s voice clip is never sent to Venice. Text-to-video and image-to-video
-prompts must not contain tokens.
+prompts must not contain tokens (and get no legend: they send no references). The legend is composed by
+[`src/shared/prompt-compose.ts`](src/shared/prompt-compose.ts) and tokens are renumbered by
+[`src/shared/prompt-remap.ts`](src/shared/prompt-remap.ts), both shared by the window, the main process and the
+agent tools.
 
 ## Sequences
 
@@ -240,7 +275,7 @@ made from, record reviews, and save *learnings* that every later session reads b
 shows you with the prompt, references, voices and price, and nothing is sent to Venice until you approve it.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 46
+Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 47
 tools, the review loop and troubleshooting.
 
 ## Security
@@ -270,10 +305,11 @@ Done:
 6. Voices and soundscapes (`@AudioN`), poses, a clip feed with filters and a table view, ratings, and a review and
    learning loop for agents
 7. Storyboards with start and end images and *Skapa bild…*, redoing a clip between its neighbours
+8. Asset descriptions appended to the prompt automatically, references reordered by drag and drop
 
 Next:
 
-8. Cost overview, cancelling a running export, transitions (fades) between clips
+9. Cost overview, cancelling a running export, transitions (fades) between clips
 
 Ideas where help is welcome: an English UI (i18n), an automated test suite, signed and notarized builds.
 

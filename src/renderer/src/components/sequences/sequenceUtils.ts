@@ -1,4 +1,5 @@
 import { durationSeconds, endImageVariant, imageToVideoVariant } from '@shared/models'
+import { remapPromptReferences } from '@shared/prompt-remap'
 import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
 import {
   NEEDS_CONSENT,
@@ -243,6 +244,41 @@ export function stableJson(value: unknown): string {
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     )
   })
+}
+
+/**
+ * A take's list as the clip's: the pictures (or clips) the take had that the clip no longer has by that path are
+ * paired, in order, with the clip's own that the take didn't have – an outside file the take sent as its copy in
+ * Referensbilder, a picture swapped since – so their tokens keep their place as before. The rest are matched by
+ * path; one left over has left the clip.
+ */
+function takeListAsClips(take: readonly string[], clip: readonly string[]): string[] {
+  const inClip = new Set(clip)
+  const inTake = new Set(take)
+  const newcomers = clip.filter((p) => !inTake.has(p))
+  return take.map((p) => (inClip.has(p) ? p : (newcomers.shift() ?? p)))
+}
+
+/**
+ * A take's prompts as they read with the clip's references now ("Använd prompt"): every @ImageN / @AudioN token
+ * renumbered from the take's reference lists to the clip's (remapPromptReferences), so after the references were
+ * reordered or one removed the take's words come back naming the same pictures and clips, not whatever holds
+ * their old numbers now. A token whose picture or clip has left the clip goes.
+ */
+export function takePromptsFor(
+  take: Pick<GenerationParams, 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios'>,
+  clip: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'>
+): { prompt: string; negativePrompt?: string } {
+  const clipImages = clip.referenceImages ?? []
+  const clipAudios = clip.referenceAudios ?? []
+  const takeAudioPaths = takeListAsClips(
+    (take.referenceAudios ?? []).map((a) => a.path),
+    clipAudios.map((a) => a.path)
+  )
+  const images = { before: takeListAsClips(take.referenceImages ?? [], clipImages), after: clipImages }
+  const audios = { before: takeAudioPaths.map((path) => ({ path })), after: clipAudios }
+  const negative = take.negativePrompt && remapPromptReferences(take.negativePrompt, images, audios)
+  return { prompt: remapPromptReferences(take.prompt, images, audios), negativePrompt: negative || undefined }
 }
 
 /** Finds a consent request in an error message, also when it is wrapped (e.g. "Klipp 2: NEEDS_CONSENT:{…}"). */

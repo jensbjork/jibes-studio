@@ -185,3 +185,20 @@ export const referenceItem = z.object({
       "When no audio_ids are given: add the asset's first audio clip (a character's voice, an environment's soundscape). Default: true for characters when the model takes reference audio, false otherwise; a default voice shorter than 2 s is left out and reported in not_added_audio."
     )
 })
+
+/** The "Ta med beskrivningar" switch, as set_form, validate_prompt, add_segment and update_segment take it. */
+export const includeDescriptionsInput = z
+  .boolean()
+  .optional()
+  .describe(
+    "Append the descriptions of the referenced assets to the prompt as a References legend (Studio's \"Ta med beskrivningar\"). Default true; false sends the prompt alone."
+  )
+
+/** Assets whose description is left out of the References legend, as the same tools take them. */
+export const excludedDescriptionsInput = z
+  .array(z.string())
+  .max(50)
+  .optional()
+  .describe(
+    "Asset ids whose descriptions are NOT appended (the others still are). Replaces the list; [] appends all of them again."
+  )

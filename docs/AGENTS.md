@@ -163,7 +163,7 @@ connect (see [Troubleshooting](#troubleshooting)).
 
 ## Tools
 
-Studio offers **46 tools** — 23 that read, 19 that write (free) and 4 paid ones that only ask for approval — plus
+Studio offers **47 tools** — 23 that read, 20 that write (free) and 4 paid ones that only ask for approval — plus
 one prompt and one resource. Tool errors come back as readable tool errors; their messages are in Swedish, like the
 app's UI. Tools that touch the library fail with an explanation until a library is open, and the tools that read or
 fill the Generate form need the Studio window to be open.
@@ -171,12 +171,12 @@ fill the Generate form need the Studio window to be open.
 | Area | Read | Write | Paid |
 | --- | --- | --- | --- |
 | Guide and library (`tools/library.ts`) | `get_studio_guide`, `list_assets`, `get_asset`, `list_models`, `list_prompts`, `list_generations`, `get_generation` | `create_asset`, `update_asset`, `update_asset_audio`, `save_prompt` | |
-| Generate form (`tools/form.ts`) | `get_workspace`, `validate_prompt` | `set_form`, `set_references`, `open_in_studio` | |
+| Generate form (`tools/form.ts`) | `get_workspace`, `validate_prompt` | `set_form`, `set_references`, `reorder_references`, `open_in_studio` | |
 | Sequences (`tools/sequences.ts`) | `list_sequences`, `get_sequence` | `create_sequence`, `add_segment`, `update_segment`, `delete_segment`, `move_segment` | |
 | Storyboards (`tools/storyboard.ts`) | `list_image_models`, `list_stills`, `get_still`, `preview_segment_frames` | `save_frame_as_still`, `bridge_segment` | |
 | Approvals (`tools/paid.ts`) | `get_approval` | | `request_generation`, `request_segment_generation`, `request_generate_all`, `request_image_generation` |
 | Reviews and learnings (`tools/review.ts`) | `review_generation`, `get_frames`, `list_exports`, `review_export`, `review_sequence`, `list_reviews`, `list_learnings` | `add_review`, `delete_review`, `save_learning`, `update_learning`, `delete_learning` | |
-| **Total (46)** | **23** | **19** | **4** |
+| **Total (47)** | **23** | **20** | **4** |
 
 **Images and sound.** Tools that return media send pictures as MCP image content (JPEG) and sound as MCP **audio
 content** (MP3, mono), each preceded by a text label that says what it is (`Reference @Audio1 = Anna's voice
@@ -192,16 +192,16 @@ frames, reference images and text work without it.
 | Tool | What it does |
 | --- | --- |
 | `get_studio_guide` | How Studio works and how to write video prompts for it (voices, poses and the review loop included), ending with the learnings recorded so far. Read once at the start of a session. |
-| `get_workspace` | What the user is looking at (view, open sequence and clip) and the Generate form: mode, model, settings, prompt, reference token maps (`@ImageN` and `@AudioN`), validation issues, price. |
+| `get_workspace` | What the user is looking at (view, open sequence and clip) and the Generate form: mode, model, settings, prompt, reference token maps (`@ImageN` and `@AudioN`), pictures past the model's limit (`not_sent`), `composed_prompt` (the prompt as it is sent, with the References legend of the referenced assets' descriptions) and `description_entries`, validation issues, price. |
 | `list_assets` | Characters, environments, outfits and poses with ids, descriptions, photo ids, default outfits and — for characters and environments — their audio clips (`audio_id`, role `voice` or `soundscape`, duration, reference window `clip_start` / `clip_length`); optional `kind` and `query` filters. |
 | `get_asset` | One asset with its photos as images (JPEG, at most 768 px; `max_images` 1–12, default 4), each labelled with its photo number and `image_id`; for an outfit, the characters wearing it by default. With `include_audio` (the first clip, or the one named by `audio_id`) also a clip's reference window as MP3 audio, exactly as Venice would get it. |
 | `list_models` | Venice's usable video models (optionally one `kind`) with mode, durations, resolutions, aspect ratios, reference image limit, whether they take reference audio (`audio_input`, `max_reference_audios`), audio and prompt length limit; the default model is marked. |
 | `list_prompts` | The prompt library, favourites first. |
 | `list_generations` | Generations filtered and sorted like Studio's clip feed (`query`, `status`, `model`, `asset_id`, `min_rating`, `unrated`, `since_days`, `placement`, `has_reviews`, `sort`, `limit` 1–50 default 20, `offset`), each with status, prompt, settings, price, the user's rating, review count and a reference summary, plus totals for the filtered set. |
-| `get_generation` | One generation with its token maps, the clip it is a take of, the user's rating and every review, its poster frame and optionally up to 6 `frames` from the video. |
+| `get_generation` | One generation with its token maps, `sent_prompt` (what Venice got, when descriptions were appended), the clip it is a take of, the user's rating and every review, its poster frame and optionally up to 6 `frames` from the video. |
 | `list_sequences` | Sequences with clip count and the length of the current cut. |
-| `get_sequence` | One sequence with its clips and its number of stills; each clip with its `notes`, token maps, `start_image` / `end_image` (`{kind: "previous" \| "next", from_clip}`, `{kind: "image", still_id \| asset_image_id, path}` or null), `continue_from_previous`, `end_from_next`, `supports_end_image`, validation issues, `frame_problems` (why its neighbours' frames can't be had yet) and selected take; poster frames with `include_thumbnails` (default true). |
-| `validate_prompt` | Checks a prompt's `@ImageN` and `@AudioN` tokens (and the audio windows) against the form's references or a given set — the same check Studio applies before every paid generation. |
+| `get_sequence` | One sequence with its clips and its number of stills; each clip with its `notes`, token maps, `composed_prompt` and `description_entries`, `start_image` / `end_image` (`{kind: "previous" \| "next", from_clip}`, `{kind: "image", still_id \| asset_image_id, path}` or null), `continue_from_previous`, `end_from_next`, `supports_end_image`, validation issues, `frame_problems` (why its neighbours' frames can't be had yet) and selected take; poster frames with `include_thumbnails` (default true). |
+| `validate_prompt` | Checks a prompt's `@ImageN` and `@AudioN` tokens (and the audio windows) against the form's references or a given set — the same check Studio applies before every paid generation — and answers with `composed_prompt` and `description_entries` (`include_descriptions` / `excluded_description_asset_ids` try other switches), measured against the model's `prompt_character_limit`. |
 | `get_approval` | The state of an approval request: `pending`, `approved` (with `generation_ids`, or for an image request the `still_id` and whether it was put into its clip), `declined`, `expired` or `failed`. |
 | `list_image_models` | Venice's image models for `request_image_generation`, with the price of one picture: text-to-image models (prompt only) and models that combine up to `max_input_images` references; the Seedream defaults are marked. Also says whether *Säkert läge för bilder* is on (`safe_mode`: Venice blurs adult content; only you can switch it, under Inställningar → Bilder). |
 | `list_stills` | The stills of a sequence's storyboard (or all), newest first: generated pictures, uploaded pictures and saved frames, each with its prompt, model, references and `used_by` (the clips using it as start or end image); small thumbnails with `include_thumbnails` (default true). |
@@ -215,20 +215,21 @@ frames, reference images and text work without it.
 | `list_reviews` | Reviews by the user (author `user`) and agents, most recently changed first (for one generation: the user's first), filtered by `generation_id`, `author`, `tag` or `min_rating`; outside a single generation each comes with that generation's prompt and model. |
 | `list_learnings` | The learnings so far, pinned first, then the most recently changed; filters `query` (every word in the title, insight, model or tags), `model` (that model's plus the general ones), `tag`, `author`; `limit` default 50. Also tells the agent the name its own reviews and learnings are recorded under (`your_name`). |
 
-### Write (19 tools; free, change the library or the form)
+### Write (20 tools; free, change the library or the form)
 
 | Tool | What it does |
 | --- | --- |
-| `set_form` | Fills in the Generate form (mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, start image) and shows the Generate view. All or nothing: invalid values change nothing. |
-| `set_references` | Sets the form's reference images and audio from assets, in order (`replace` or `append`): all photos or chosen `image_ids` (`[]` for none, e.g. only a voice); with a model that takes reference audio, a character's first voice clip unless `include_voice` is false, an environment's first sound clip with `include_voice: true`, or chosen `audio_ids`. Switches the form to reference-to-video if needed and returns the token maps (`references`, `audio_references`) to write the prompt with. Photos and clips over the model's limits (9 images for Seedance; 3 clips, 15 s of audio in all) are listed in `not_added` / `not_added_audio`, and so is a default voice under 2 s (no model takes it). |
+| `set_form` | Fills in the Generate form (mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, start image, and which descriptions are appended: `include_descriptions`, `excluded_description_asset_ids`) and shows the Generate view. All or nothing: invalid values change nothing. |
+| `set_references` | Sets the form's reference images and audio from assets, in order (`replace` or `append`): all photos or chosen `image_ids` (`[]` for none, e.g. only a voice); with a model that takes reference audio, a character's first voice clip unless `include_voice` is false, an environment's first sound clip with `include_voice: true`, or chosen `audio_ids`. Switches the form to reference-to-video if needed and returns the token maps (`references`, `audio_references`) to write the prompt with. Photos and clips over the model's limits (9 images for Seedance; 3 clips, 15 s of audio in all) are listed in `not_added` / `not_added_audio`, and so is a default voice under 2 s (no model takes it). Replacing the references doesn't renumber the prompt's tokens; `reorder_references` does. |
+| `reorder_references` | Changes the order of the form's (`target: "form"`, default) or a clip's (`target: {segment_id}`) reference images (`images`) and/or audio clips (`audios`), like dragging a thumbnail in Studio, and renumbers every `@ImageN` / `@AudioN` in the prompt and negative prompt so each keeps pointing at the same picture or clip: references [A, B, C] with "@Image1 hugs @Image3", `images: ["@Image3"]` → [C, A, B] and "@Image2 hugs @Image1". References are named by token, `image_id` / `audio_id` or `asset_id` (all of that asset's photos or clips); the named ones come first, the rest keep their order. Answers with the new token maps, `moved` (old → new token), the prompt, `composed_prompt` and the pictures past the model's limit (`not_sent`; moving one forward sends it). Not for a clip that sends no references. |
 | `open_in_studio` | Brings the Generate view or a sequence (optionally one clip) to the front. |
 | `create_asset` | Creates a character, environment, outfit or pose with a name and description. Photos and audio clips can only be added by the user in Studio. |
-| `update_asset` | Changes an asset's name, description or (characters) default outfit. Renaming also renames its folder. |
+| `update_asset` | Changes an asset's name, description or (characters) default outfit. Renaming also renames its folder. The description is appended to every later prompt that sends the asset's photos or voice. |
 | `update_asset_audio` | Moves or resizes an audio clip's reference window (`clip_start`, `clip_length`); Studio keeps it 2–15 s inside the file and says when it adjusted it. |
 | `save_prompt` | Saves a prompt to the prompt library. |
 | `create_sequence` | Creates an empty sequence with the default settings. |
-| `add_segment` | Adds a clip — a storyboard panel — (`notes`, prompt, references with the same items as `set_references`, model and options, `continue_from_previous`, `end_from_next`, `start_image` / `end_image`), validated like a generation. A clip that continues from the previous one, or has a start or end image, is image-to-video and takes no references, so no voices either. |
-| `update_segment` | Changes a clip; only the fields passed change (`references` replaces its photos and audio). `start_image` / `end_image` take `{still_id}`, `{asset_image_id}`, `{generation_id, time}` (a frame, saved as a still), `"previous"` / `"next"` or `null`; a picture makes the clip image-to-video (with a model that takes an end image when it has one), drops its references and takes the `@` tokens out of a prompt the agent didn't rewrite. `selected_take_id` chooses which of its finished takes is in the cut. Existing takes are kept. |
+| `add_segment` | Adds a clip — a storyboard panel — (`notes`, prompt, references with the same items as `set_references`, model and options, `include_descriptions` / `excluded_description_asset_ids` (by default those of the clip before), `continue_from_previous`, `end_from_next`, `start_image` / `end_image`), validated like a generation. A clip that continues from the previous one, or has a start or end image, is image-to-video and takes no references, so no voices either. |
+| `update_segment` | Changes a clip; only the fields passed change (`references` replaces its photos and audio; `include_descriptions` / `excluded_description_asset_ids` choose the descriptions appended to its prompt). `start_image` / `end_image` take `{still_id}`, `{asset_image_id}`, `{generation_id, time}` (a frame, saved as a still), `"previous"` / `"next"` or `null`; a picture makes the clip image-to-video (with a model that takes an end image when it has one), drops its references and takes the `@` tokens out of a prompt the agent didn't rewrite. `selected_take_id` chooses which of its finished takes is in the cut. Existing takes are kept. |
 | `delete_segment` | Removes a clip (marked destructive). Its takes are kept as ordinary generations. |
 | `move_segment` | Moves a clip to another position (`to_clip_number`, 1-based). |
 | `save_frame_as_still` | Saves a frame of a finished clip (`generation_id`, `time` in seconds) as a still of a sequence, to use as a keyframe or a reference. The frame is the first one at or after `time`, as `review_generation` and `get_frames` show it, so a time from their `frame_times` / `times` (given to the millisecond, like the captions) saves exactly the frame the agent looked at. |
@@ -261,7 +262,8 @@ Each takes an optional `note` (up to 500 characters) that is shown to the user i
 
 ### What agents cannot do
 
-Agents cannot add or remove photos, add, remove or reorder audio clips (only move a clip's reference window),
+Agents cannot add or remove photos, add, remove or reorder an asset's audio clips (only move a clip's reference
+window; the order of a form's or clip's *references* is theirs to change with `reorder_references`),
 upload pictures or delete stills (they can save frames and ask for generated pictures), delete assets, prompts,
 generations or sequences, rename sequences, export, change settings (*Säkert läge för bilder* included), switch the
 library, or approve anything. They cannot set the user's own rating, note or tags, pin learnings, or change or
@@ -282,19 +284,22 @@ with the same validation.
 2. Studio asks Venice for the price and creates the request. The tool answers at once with
    `{approval_id, status: "pending", price_usd, expires}`. Asking again for exactly the same thing returns the same
    request; a new request for the same clip replaces an older pending one. At most 10 requests can wait at a time.
-3. Studio shows the approval dialog with the prompt (tokens coloured), the reference images, the voices and sounds
-   with their windows and play buttons, the price and the agent's note. A clip that starts or ends on its
-   neighbours' frames shows both frames, live, and can't be approved while they are being fetched: if a
-   neighbour's take or trim changes after the request was made, the request lapses (approving it says why) and the
-   agent has to ask again, so a frame the user never saw is never paid for. An image request shows the prompt, the
+3. Studio shows the approval dialog with the prompt (tokens coloured) and, set apart below it, the References legend
+   that is appended to it (the descriptions of the referenced assets, as they were when the agent asked, with the
+   length that is sent), the reference images, the voices and sounds with their windows and play buttons, the
+   price and the agent's note. A clip that starts or ends on its neighbours' frames shows both frames, live, and
+   can't be approved while they are being fetched: if a neighbour's take or trim changes after the request was
+   made, the request lapses (approving it says why) and the agent has to ask again, so a frame the user never saw
+   is never paid for. An image request shows the prompt, the
    references in the order they are sent (the base first), the model and format, which clip and slot the picture
    goes to (it can't be approved once that clip has moved) and whether *Säkert läge för bilder* is on. If Studio is
    not in front, its Dock icon bounces once. Pending requests are also listed in the activity drawer.
-4. You approve or decline (optionally with a reason). On approval Studio re-checks that the clips and the image
-   and audio files are still exactly what was shown (the Generate form was captured when the request was made, so
-   later edits to the form don't change it), then submits through the normal generation path. If Venice first
-   needs you to accept a model's terms, the consent dialog appears; accepting it submits the request, and until
-   then the request stays pending.
+4. You approve or decline (optionally with a reason). On approval Studio re-checks that the clips, the image and
+   audio files and the composed prompt are still exactly what was shown — a description edited or switched off, or
+   the prompt language changed, since the request makes it lapse, and the dialog says so before you click (the
+   Generate form was captured when the request was made, so later edits to the form don't change it) — then
+   submits through the normal generation path, sending exactly the composed prompt that was checked. If Venice first needs you to accept a model's terms, the consent
+   dialog appears; accepting it submits the request, and until then the request stays pending.
 5. The agent polls `get_approval` (every 15–30 seconds is plenty) and then follows the result with
    `get_generation` or `get_sequence` — or, for a picture, `get_still`. A picture is made while the dialog waits
    (*Skapar bilden…*, usually 10–30 seconds), and the dialog then shows it to you too; if it couldn't be put into
@@ -302,6 +307,37 @@ with the same validation.
 
 A request **expires** after 30 minutes without an answer, and immediately when the token is replaced, the library
 is switched or the agent connection is switched off.
+
+## Descriptions in the prompt and the order of references
+
+When a generation is sent, Studio appends the descriptions of the assets whose photos or voices it sends to the
+prompt, as a References legend (in the prompt language: `Referenser:` and `röst` in Swedish):
+
+```
+<the prompt>
+
+References:
+- Anna (@Image1, @Image2; voice @Audio1): <Anna's description>
+- Beach promenade (@Image3): <its description>
+```
+
+- Only assets with a description, and only those whose pictures or clips are actually sent (within the model's
+  limits, in reference mode); the entries are ordered by their first token. A description is written as it is in
+  the library at the moment of sending, on one line and without `@`, so an `update_asset` applies to the next
+  generation (and makes a pending approval that uses the asset lapse).
+- The prompt agents write (and `prompt` in every answer) never contains the legend. `composed_prompt` in
+  `get_workspace`, `validate_prompt`, `get_sequence` and `reorder_references` is the text that would be sent, with
+  `description_entries` (asset, tokens, description, `included` = switched on, `sent` = in `composed_prompt` right
+  now, `shortened`), `composed_characters` against
+  `prompt_character_limit`, and a `descriptions_note` when descriptions were shortened to fit the model's limit,
+  dropped because not even the names fit, or not appended because the prompt is empty. `get_generation` and
+  `review_generation` return `sent_prompt` when it differs from the prompt.
+- `include_descriptions: false` (on `set_form`, `add_segment`, `update_segment`, `validate_prompt`) sends the prompt
+  alone; `excluded_description_asset_ids` leaves out chosen assets (`[]` appends all again). A new clip starts with
+  the switches of the clip before it.
+- `reorder_references` changes the order of a form's or clip's references and renumbers every `@ImageN` /
+  `@AudioN` in the prompt and the negative prompt with it, the same way dragging a thumbnail in Studio does; the
+  legend follows the new numbers. `set_references` with `mode: "replace"` does not renumber anything.
 
 ## Prompt-writing guidance
 
@@ -315,9 +351,11 @@ learnings recorded so far (the pinned ones and the ten most recently changed). T
 starts from the prompt-writing part of the guide, with the clip's actual references (or, for an image-to-video
 clip, the prompts of the neighbours it starts and ends on), its storyboard notes and the learnings for its model.
 Agents are asked to talk to the user in Swedish and to write video prompts in the language chosen under
-**Inställningar → Promptspråk** (English by default). Image prompts are always English: one still frame —
-subject, composition and framing, place, light and style — referring to the references as "image 1", "image 2" …
-in the order they are sent, never with `@` tokens.
+**Inställningar → Promptspråk** (English by default). The guide tells them that the descriptions of the referenced
+assets are appended automatically as a References legend — so they write the action, camera and mood instead of
+repeating them — and the `write_video_prompt` context lists the descriptions that will be appended. Image prompts
+are always English: one still frame — subject, composition and framing, place, light and style — referring to the
+references as "image 1", "image 2" … in the order they are sent, never with `@` tokens.
 
 ## Reviews and learnings
 

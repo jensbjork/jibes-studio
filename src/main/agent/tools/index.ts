@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { kindOfModelId } from '@shared/models'
+import { composePrompt, describedAssets, includesDescriptions } from '@shared/prompt-compose'
 import type { GenerationParams, Learning } from '@shared/types'
 import { isLibraryReady } from '../../paths'
 import { promptWritingGuide, studioGuide } from '../guide'
@@ -32,6 +33,27 @@ function tokenLines(images: TokenEntry[], audios: AudioTokenEntry[]): string {
   return lines.join('\n')
 }
 
+/**
+ * What Studio appends to the prompt from the referenced assets' descriptions (the References legend), for the
+ * write_video_prompt context: so the agent writes the action, camera and mood instead of repeating them.
+ */
+function descriptionContext(params: GenerationParams, assets: AssetIndex): string {
+  const all = composePrompt(params, describedAssets(assets.assets), { language: 'en', include: true }).entries
+  if (!all.length) {
+    return params.referenceImages?.length
+      ? "\nNone of these assets has a description, so nothing is appended to the prompt: say in words what matters about their looks that the photos don't show (or improve the descriptions with update_asset)."
+      : ''
+  }
+  if (!includesDescriptions(params)) {
+    return '\nThe descriptions of the references are switched off here ("Ta med beskrivningar" is off), so nothing is appended: say in the prompt what matters about their looks.'
+  }
+  const off = new Set(params.excludedDescriptionAssetIds ?? [])
+  const lines = all.map(
+    (e) => `- ${e.name} (${e.tokens.join(', ')}): ${off.has(e.assetId) ? '(switched off – not appended)' : e.description}`
+  )
+  return `\nStudio appends these descriptions after your prompt as a References legend – don't repeat them; write the action, camera and mood:\n${lines.join('\n')}`
+}
+
 /** The references of reference-mode params, for the write_video_prompt context. */
 function referenceContext(params: GenerationParams, assets: AssetIndex, empty: string): string {
   const images = tokenMap(params.referenceImages, assets)
@@ -41,7 +63,8 @@ function referenceContext(params: GenerationParams, assets: AssetIndex, empty: s
       ? ''
       : '\nThe model takes reference audio, but none is chosen (characters with a voice clip get it with set_references).'
     : '\nThe model takes no reference audio: write no @Audio tokens.'
-  return `Its references:\n${images.length || audios.length ? tokenLines(images, audios) : empty}${voices}`
+  const references = images.length || audios.length ? tokenLines(images, audios) : empty
+  return `Its references:\n${references}${voices}${descriptionContext(params, assets)}`
 }
 
 /**

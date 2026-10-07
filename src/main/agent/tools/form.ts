@@ -8,19 +8,40 @@ import {
   maxReferenceImages,
   type Kind
 } from '@shared/models'
-import { canonicalizeTokens, findAudioTokens, findImageTokens, hasBlockingIssues } from '@shared/prompt-refs'
+import { includesDescriptions } from '@shared/prompt-compose'
+import {
+  audioToken,
+  canonicalizeTokens,
+  findAudioTokens,
+  findImageTokens,
+  hasBlockingIssues,
+  imageToken,
+  type ReferenceKind
+} from '@shared/prompt-refs'
 import type {
   AgentFormState,
   AgentOpenArgs,
   AgentOpenResult,
+  AgentReorderReferencesArgs,
   AgentSetFormArgs,
   AgentSetReferencesArgs,
+  GenerationParams,
   ReferenceAudio,
   Sequence,
   VideoModel
 } from '@shared/types'
 import * as store from '../../sequence-store'
 import { callService } from '../local-ipc'
+import {
+  inOrder,
+  movedSummary,
+  movedTokens,
+  namedPositions,
+  newOrder,
+  notSentInfo,
+  reorderAnswer,
+  unchanged
+} from '../reorder'
 import {
   AssetIndex,
   MODES,
@@ -31,9 +52,12 @@ import {
   canonical,
   checkOutputOptions,
   checkPromptLength,
+  descriptionInfo,
+  errorText,
   issueList,
   loadModels,
   modelForMode,
+  modelsIfAvailable,
   normalizeAspectRatio,
   normalizeDuration,
   normalizeResolution,
@@ -48,7 +72,19 @@ import {
   usableModels,
   type ReferenceItem
 } from '../studio'
-import { READ_ONLY, WRITE, defineTool, priceValue, quote, readForm, referenceItem, type ToolContext } from './kit'
+import {
+  READ_ONLY,
+  WRITE,
+  defineTool,
+  excludedDescriptionsInput,
+  includeDescriptionsInput,
+  priceValue,
+  quote,
+  readForm,
+  referenceItem,
+  type ToolContext
+} from './kit'
+import { reorderClipReferences } from './sequences'
 
 // The Generate form in Studio's window and what the user is looking at. These tools go through the window (the
 // form is its state), so the user sees every change as it happens.
@@ -66,28 +102,48 @@ export function referenceLimits(modelId: string, models?: readonly VideoModel[])
   }
 }
 
-/** The form as the tools report it: settings, the token maps, problems and (optionally) the price. */
+/**
+ * The form's reference images in order, including those past the model's limit: the window reports the sent
+ * ones as params (what a generation would send) and the rest apart, so the user's "skickas inte" pictures are
+ * there for an agent to see and move forward.
+ */
+function formImages(state: AgentFormState): string[] {
+  const unsent = (Array.isArray(state.unsentReferences) ? state.unsentReferences : [])
+    .filter((r) => typeof r?.path === 'string' && Number.isFinite(r.position))
+    .sort((a, b) => a.position - b.position)
+    .map((r) => r.path)
+  return [...(state.params.referenceImages ?? []), ...unsent]
+}
+
+/**
+ * The form as the tools report it: settings, the token maps, the prompt as it is sent (with the descriptions of
+ * its references appended), problems and (optionally) the price.
+ */
 async function formInfo(state: AgentFormState, index: AssetIndex, withPrice: boolean): Promise<Record<string, unknown>> {
   const params = state.params
   const problem = blockingProblem(params)
+  // Also what makes main remember the models' prompt limits, which the descriptions are fitted into.
+  const models = await modelsIfAvailable()
+  const reference = kindOfModelId(params.model) === 'reference-to-video'
   return {
     ...paramsInfo(params, index),
+    ...(reference ? notSentInfo(formImages(state), params.model, index) : {}),
+    ...descriptionInfo(params, index),
     issues: issueList(promptIssues(params)),
     ready: !problem,
     ...(problem ? { blocking_problem: problem } : {}),
-    ...referenceLimits(params.model),
+    ...referenceLimits(params.model, models),
     ...(withPrice ? { price_usd: priceValue(await quote(params)) } : {})
   }
 }
 
-/** Models for the audio decisions; undefined when Venice can't be reached (the shared helper decides then). */
-async function modelsIfAvailable(): Promise<VideoModel[] | undefined> {
-  try {
-    return await loadModels()
-  } catch {
-    return undefined
-  }
+/** The asset ids an agent wants left out of the References legend, each checked to be an asset (no duplicates). */
+export function excludedIds(ids: readonly string[], index: AssetIndex): string[] {
+  return [...new Set(ids.map((id) => index.require(id.trim()).id))]
 }
+
+const sameIds = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean =>
+  JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort())
 
 /** The model references are chosen for: the form's, or the reference-to-video model Studio would switch it to. */
 function referenceModel(currentModel: string, models: readonly VideoModel[] | undefined): string {
@@ -102,6 +158,9 @@ function referenceModel(currentModel: string, models: readonly VideoModel[] | un
 const sameAudio = (a: ReferenceAudio, b: ReferenceAudio): boolean =>
   a.path.normalize('NFC') === b.path.normalize('NFC')
 
+const samePaths = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((p, i) => p.normalize('NFC') === b[i].normalize('NFC'))
+
 /** What set_form changed, for the activity log. */
 function formChanges(args: Record<string, unknown>): string {
   const labels: [string, string][] = [
@@ -112,9 +171,11 @@ function formChanges(args: Record<string, unknown>): string {
     ['aspect_ratio', 'bildformat'],
     ['audio', 'ljud'],
     ['negative_prompt', 'negativ prompt'],
-    ['start_image', 'startbild']
+    ['start_image', 'startbild'],
+    ['include_descriptions', 'beskrivningarna'],
+    ['excluded_description_asset_ids', 'beskrivningarna']
   ]
-  const others = labels.filter(([key]) => args[key] !== undefined).map(([, label]) => label)
+  const others = [...new Set(labels.filter(([key]) => args[key] !== undefined).map(([, label]) => label))]
   const prompt = args.prompt !== undefined
   if (prompt && others.length) return `satte prompten och ändrade ${others.join(', ')}`
   if (prompt) return 'satte prompten'
@@ -130,7 +191,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get workspace',
       description:
-        "What the user is looking at in Studio right now (the view, and the sequence and clip open in the sequence editor) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. Start here to see what the user is working on.",
+        "What the user is looking at in Studio right now (the view, and the sequence and clip open in the sequence editor) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included) and whether it is in composed_prompt now (sent); include_descriptions and excluded_description_asset_ids are the form's switches, changed with set_form). Start here to see what the user is working on.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'tittade på arbetsytan'
@@ -157,7 +218,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Set references',
       description:
-        "Sets the Generate form's references (reference-to-video mode) from assets: each item adds all photos of an asset, or just the image_ids you list, in order – and for models that take reference audio (audio_input in list_models) its audio: by default a character's first voice clip, or the audio_ids you list (include_voice: false leaves the voice out; true also adds an environment's soundscape). Photos become @Image1, @Image2 … and audio clips @Audio1, @Audio2 … in the order given. mode \"replace\" (default) makes these the references; \"append\" adds them after the current ones (duplicates skipped). The model's limits apply (9 images for Seedance; at most 3 audio clips and 15 s of audio in total); what doesn't fit is reported in not_added / not_added_audio. A pose asset is a picture of how people stand – add it like any asset and refer to it in the prompt (see the guide). A character's default outfit is NOT added automatically – add it (or another outfit) yourself. Returns the resulting token maps (references, audio_references) – write the prompt with exactly these tokens. Choose the references first and write the prompt afterwards: changing the references does not renumber tokens already in the prompt (check the returned issues and notes). If the form is not in reference-to-video mode, Studio switches it (see notes). An empty items list with mode \"replace\" removes all references.",
+        "Sets the Generate form's references (reference-to-video mode) from assets: each item adds all photos of an asset, or just the image_ids you list, in order – and for models that take reference audio (audio_input in list_models) its audio: by default a character's first voice clip, or the audio_ids you list (include_voice: false leaves the voice out; true also adds an environment's soundscape). Photos become @Image1, @Image2 … and audio clips @Audio1, @Audio2 … in the order given. mode \"replace\" (default) makes these the references; \"append\" adds them after the current ones (duplicates skipped). The model's limits apply (9 images for Seedance; at most 3 audio clips and 15 s of audio in total); what doesn't fit is reported in not_added / not_added_audio. A pose asset is a picture of how people stand – add it like any asset and refer to it in the prompt (see the guide). A character's default outfit is NOT added automatically – add it (or another outfit) yourself. Returns the resulting token maps (references, audio_references) – write the prompt with exactly these tokens. Choose the references first and write the prompt afterwards: setting the references (mode \"replace\") does not renumber tokens already in the prompt (check the returned issues and notes) – to change only their order, use reorder_references, which does. If the form is not in reference-to-video mode, Studio switches it (see notes). An empty items list with mode \"replace\" removes all references.",
       input: {
         items: z.array(referenceItem).describe('Assets in the order their photos (and audio) should get @Image / @Audio numbers.'),
         mode: z.enum(['replace', 'append']).default('replace')
@@ -218,7 +279,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Set Generate form',
       description:
-        "Fills in Studio's Generate form and shows the Generate view. Only the fields you pass change. Values are checked against the model (see list_models): duration like \"8s\", resolution like \"480p\", aspect_ratio like \"16:9\". Passing mode alone switches to that mode's model in the same family (as Studio's mode switch does). start_image is one photo of an asset (its cover unless you give image_id) that becomes the first frame; it switches the form to image-to-video. @ImageN tokens are normalised (\"@image3\" → \"@Image3\"). All or nothing: if any value is invalid, nothing changes and the error lists every problem. Returns the form with the token map, validation issues, the price and notes about anything Studio adjusted on its own (e.g. a duration the new model doesn't offer). To use reference images, call set_references.",
+        "Fills in Studio's Generate form and shows the Generate view. Only the fields you pass change. Values are checked against the model (see list_models): duration like \"8s\", resolution like \"480p\", aspect_ratio like \"16:9\". Passing mode alone switches to that mode's model in the same family (as Studio's mode switch does). start_image is one photo of an asset (its cover unless you give image_id) that becomes the first frame; it switches the form to image-to-video. @ImageN tokens are normalised (\"@image3\" → \"@Image3\"). include_descriptions and excluded_description_asset_ids decide which descriptions of the referenced assets Studio appends to the prompt as a References legend (all of them by default – don't repeat them in the prompt). All or nothing: if any value is invalid, nothing changes and the error lists every problem. Returns the form with the token map, the composed prompt, validation issues, the price and notes about anything Studio adjusted on its own (e.g. a duration the new model doesn't offer). To use reference images, call set_references; to reorder them, reorder_references.",
       input: {
         mode: z.enum(MODES).optional().describe('"reference-to-video" (default mode), "image-to-video" or "text-to-video".'),
         model: z.string().optional().describe('A model id from list_models.'),
@@ -231,13 +292,19 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         start_image: z
           .object({ asset_id: z.string(), image_id: z.string().optional() })
           .optional()
-          .describe('The photo that becomes the first frame (image-to-video).')
+          .describe('The photo that becomes the first frame (image-to-video).'),
+        include_descriptions: includeDescriptionsInput,
+        excluded_description_asset_ids: excludedDescriptionsInput
       },
       annotations: WRITE,
       summary: (args) => formChanges(args)
     },
     async (input) => {
       const index = await AssetIndex.load()
+      const excluded =
+        input.excluded_description_asset_ids === undefined
+          ? undefined
+          : excludedIds(input.excluded_description_asset_ids, index)
       const duration = normalizeDuration(input.duration)
       const resolution = normalizeResolution(input.resolution)
       const aspectRatio = normalizeAspectRatio(input.aspect_ratio)
@@ -287,13 +354,24 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       if (input.prompt !== undefined) args.prompt = canonical(input.prompt)
       if (input.negative_prompt !== undefined) args.negative_prompt = canonical(input.negative_prompt)
       if (input.start_image) args.start_image = assetPhotoPath(input.start_image.asset_id, input.start_image.image_id, index)
+      if (input.include_descriptions !== undefined) args.include_descriptions = input.include_descriptions
+      if (excluded !== undefined) args.excluded_description_asset_ids = excluded
 
       const state = await ctx.bridge.send<AgentFormState>('set_form', args)
+      const notes = [...(state.notes ?? [])]
+      // The switches only matter if the window took them; an agent must not believe a description is left out
+      // (or sent) when it isn't.
+      if (input.include_descriptions !== undefined && includesDescriptions(state.params) !== input.include_descriptions) {
+        notes.push('Studio-fönstret ändrade inte ”Ta med beskrivningar” – kontrollera include_descriptions i svaret.')
+      }
+      if (excluded !== undefined && !sameIds(state.params.excludedDescriptionAssetIds, excluded)) {
+        notes.push('Studio-fönstret ändrade inte vilka beskrivningar som är avslagna – kontrollera description_entries i svaret.')
+      }
       return {
         data: {
           view: state.view,
           form: await formInfo(state, index, true),
-          ...(state.notes?.length ? { notes: state.notes } : {})
+          ...(notes.length ? { notes } : {})
         }
       }
     }
@@ -306,7 +384,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Validate prompt',
       description:
-        "Checks a prompt's @ImageN and @AudioN tokens against a set of references without changing anything – the same check Studio applies before every paid generation (tokens that point at nothing or past the model's limits, malformed ones like \"@Image 3\" or \"@Voice1\", audio with a model that takes none, audio without any reference image, more than 15 s of audio in total, references never mentioned). By default (use_form: true) it uses the Generate form's references and model; pass reference_asset_ids (all photos of each asset, in order, plus characters' voices) or references (items like set_references) to check against another set, e.g. a planned sequence clip, and model or mode to check for another mode. Returns ok (no errors), the issues (Swedish messages, errors block generation, warnings are advice), the token maps with which references the prompt mentions, and the prompt with tokens normalised.",
+        "Checks a prompt's @ImageN and @AudioN tokens against a set of references without changing anything – the same check Studio applies before every paid generation (tokens that point at nothing or past the model's limits, malformed ones like \"@Image 3\" or \"@Voice1\", audio with a model that takes none, audio without any reference image, more than 15 s of audio in total, references never mentioned). By default (use_form: true) it uses the Generate form's references, model and description switches; pass reference_asset_ids (all photos of each asset, in order, plus characters' voices) or references (items like set_references) to check against another set, e.g. a planned sequence clip, and model or mode to check for another mode. Returns ok (no errors), the issues (Swedish messages, errors block generation, warnings are advice), the token maps with which references the prompt mentions, the prompt with tokens normalised, and composed_prompt: the prompt as it would be sent, with the descriptions of the referenced assets appended as a References legend (description_entries; include_descriptions / excluded_description_asset_ids change it like set_form's), measured against the model's prompt_character_limit.",
       input: {
         prompt: z.string(),
         negative_prompt: z.string().optional(),
@@ -320,7 +398,11 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         use_form: z
           .boolean()
           .default(true)
-          .describe("Use the Generate form's references and model for whatever you don't pass. Default true.")
+          .describe(
+            "Use the Generate form's references and model for whatever you don't pass (and, with the form's references, its description switches). Default true."
+          ),
+        include_descriptions: includeDescriptionsInput,
+        excluded_description_asset_ids: excludedDescriptionsInput
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'kontrollerade en prompt'
@@ -336,8 +418,9 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       let paths: string[]
       let audios: ReferenceAudio[]
       const notes: string[] = []
+      // Also what makes main remember the models' prompt limits, which the descriptions are fitted into.
+      const models = await modelsIfAvailable()
       if (explicitRefs) {
-        const models = await modelsIfAvailable()
         // The proposal as it is: limits are what the check is for, so nothing is trimmed here.
         const resolved = resolveReferences(explicitRefs, index, { ...audioTarget(model, models), enforceLimits: false })
         paths = resolved.paths
@@ -347,12 +430,21 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         paths = form?.params.referenceImages ?? []
         audios = form?.params.referenceAudios ?? []
       }
-      const params = {
+      // The description switches follow the references: the form's go with the form's references.
+      const switches = explicitRefs ? undefined : form?.params
+      const excluded =
+        input.excluded_description_asset_ids !== undefined
+          ? excludedIds(input.excluded_description_asset_ids, index)
+          : switches?.excludedDescriptionAssetIds
+      const params: GenerationParams = {
         model,
         prompt: input.prompt,
         negativePrompt: input.negative_prompt,
+        duration: form?.params.duration ?? '',
         referenceImages: paths,
-        referenceAudios: audios.length ? audios : undefined
+        referenceAudios: audios.length ? audios : undefined,
+        includeDescriptions: input.include_descriptions ?? switches?.includeDescriptions,
+        ...(excluded?.length ? { excludedDescriptionAssetIds: excluded } : {})
       }
       const issues = promptIssues(params)
       const mentioned = new Set(findImageTokens(input.prompt).map((t) => t.index))
@@ -372,9 +464,118 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             ? { audio_references: audioTokenMap(audios, index).map((t, i) => ({ ...t, mentioned: mentionedAudio.has(i + 1) })) }
             : {}),
           ...(normalized !== input.prompt ? { normalized_prompt: normalized } : {}),
+          ...descriptionInfo({ ...params, prompt: normalized }, index),
           ...(notes.length ? { notes } : {})
         },
         summary: errors ? `kontrollerade en prompt – ${errors} fel` : 'kontrollerade en prompt – inga fel'
+      }
+    }
+  )
+
+  defineTool(
+    server,
+    ctx,
+    'reorder_references',
+    {
+      title: 'Reorder references',
+      description:
+        "Changes the order of the reference images and/or reference audio of the Generate form (target \"form\", the default) or of a sequence clip (target {segment_id}) – like dragging a thumbnail in Studio – and renumbers every @ImageN / @AudioN token in the prompt and the negative prompt so each keeps pointing at the same picture or clip. Example: references [A, B, C] and the prompt \"@Image1 hugs @Image3\"; images [\"@Image3\"] gives [C, A, B] and \"@Image2 hugs @Image1\". Name references by their token in the current numbering (\"@Image3\", \"@Audio2\"), by image_id / audio_id, or by asset_id (all of that asset's photos or clips, in their current order). The ones you name come first, in the order you name them; the others follow in their current order – so naming one moves it to the front, and naming all of them gives the full order. Nothing is added or removed. With a model that takes fewer images than the list has, only the first max_reference_images are sent: moving a picture to the front makes it sent (not_sent lists the ones left over). The descriptions appended to the prompt (composed_prompt, description_entries) follow the new order. Use this instead of set_references when only the order should change: set_references with mode \"replace\" does not renumber tokens already in the prompt. Returns the new token maps, which tokens moved (moved), the new prompt and its issues. Not for a clip that continues from the previous one or has a start or end image (it sends no references).",
+      input: {
+        target: z
+          .union([z.literal('form'), z.object({ segment_id: z.string() }).strict()])
+          .default('form')
+          .describe('"form" (the Generate form, default) or {segment_id} for a sequence clip.'),
+        images: z
+          .array(z.string())
+          .optional()
+          .describe('Reference images in their new order: tokens ("@Image3"), image_ids or asset_ids. The rest follow in their current order.'),
+        audios: z
+          .array(z.string())
+          .optional()
+          .describe('Reference audio clips in their new order: tokens ("@Audio2"), audio_ids or asset_ids. The rest follow in their current order.')
+      },
+      annotations: { ...WRITE, idempotentHint: false },
+      summary: ({ target }) =>
+        target === 'form' ? 'ändrade ordningen på referenserna' : 'ändrade ordningen på ett klipps referenser'
+    },
+    async ({ target, images, audios }) => {
+      if (!images?.length && !audios?.length) {
+        throw new Error('Ange images och/eller audios: referenserna i den ordning de ska ha.')
+      }
+      if (target !== 'form') return reorderClipReferences(target.segment_id, images, audios)
+      const index = await AssetIndex.load()
+      const before = await readForm(ctx)
+      const params = before.params
+      const kind = kindOfModelId(params.model)
+      if (kind !== 'reference-to-video') {
+        throw new Error(
+          `Formuläret är i läget ${kind} och skickar inga referenser, så det finns inget att ordna om. Byt till reference-to-video med set_form först.`
+        )
+      }
+      const paths = formImages(before)
+      const clips = params.referenceAudios ?? []
+      const imageOrder = images?.length ? newOrder('image', images, paths, index, 'formuläret') : undefined
+      const audioOrder = audios?.length
+        ? newOrder('audio', audios, clips.map((a) => a.path), index, 'formuläret')
+        : undefined
+      const imagesMove = !!imageOrder && !unchanged(imageOrder)
+      const audiosMove = !!audioOrder && !unchanged(audioOrder)
+      if (!imagesMove && !audiosMove) {
+        return {
+          data: {
+            target: 'form',
+            ...reorderAnswer({ ...params, referenceImages: paths }, index, { images: [], audios: [] }),
+            notes: ['Referenserna låg redan i den ordningen, så inget ändrades.']
+          },
+          summary: 'tittade på ordningen på referenserna (oförändrad)'
+        }
+      }
+      // The references the agent named, by path, so the window moves the very pictures and clips named even if the
+      // user changes the form before the command arrives: one of them gone refuses it (all or nothing), and the
+      // others keep the order the form has then. Tokens only when a path is in the list twice. The window renumbers
+      // the prompt with the same shared helper Studio's own drag and drop uses, in one change of the form.
+      const leading = (kind: ReferenceKind, wanted: readonly string[], list: readonly string[]): string[] => {
+        const first = namedPositions(kind, wanted, list, index, 'formuläret')
+        if (new Set(list).size === list.length) return inOrder(list, first)
+        return first.map((i) => (kind === 'image' ? imageToken(i + 1) : audioToken(i + 1)))
+      }
+      const args: AgentReorderReferencesArgs = {
+        ...(imagesMove ? { images: leading('image', images!, paths) } : {}),
+        ...(audiosMove ? { audios: leading('audio', audios!, clips.map((a) => a.path)) } : {})
+      }
+      const byPath = [...(args.images ?? []), ...(args.audios ?? [])].filter((entry) => entry.startsWith('/'))
+      const state = await ctx.bridge.send<AgentFormState>('reorder_references', args).catch((err: unknown) => {
+        // A picture or clip named by path that the window no longer has: the user removed it meanwhile.
+        if (byPath.some((path) => errorText(err).includes(path))) {
+          throw new Error(
+            'Inget ändrades: formuläret ändrades samtidigt, så en av referenserna du nämnde finns inte längre där. Läs formuläret igen med get_workspace.'
+          )
+        }
+        throw err
+      })
+      const after = state.params
+      const notes = [...(state.notes ?? [])]
+      const wantedImages = imagesMove ? inOrder(paths, imageOrder) : paths
+      const wantedAudios = audiosMove ? inOrder(clips, audioOrder).map((a) => a.path) : clips.map((a) => a.path)
+      const gotImages = formImages(state)
+      const gotAudios = (after.referenceAudios ?? []).map((a) => a.path)
+      // The user may have changed the form at the same moment; the agent hears what it is now, not what it asked.
+      if (!samePaths(gotImages, wantedImages) || !samePaths(gotAudios, wantedAudios)) {
+        notes.push(
+          'Referenserna i formuläret blev inte exakt i den ordning du bad om (formuläret ändrades kanske samtidigt) – se references i svaret.'
+        )
+      }
+      const moved = {
+        images: movedTokens('image', paths, gotImages, index),
+        audios: movedTokens('audio', clips.map((a) => a.path), gotAudios, index)
+      }
+      return {
+        data: {
+          target: 'form',
+          ...reorderAnswer({ ...after, referenceImages: gotImages }, index, moved),
+          ...(notes.length ? { notes } : {})
+        },
+        summary: `ändrade ordningen på referenserna${movedSummary(moved)}`
       }
     }
   )

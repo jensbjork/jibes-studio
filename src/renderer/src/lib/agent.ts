@@ -141,6 +141,14 @@ export function startAgentFeed(): () => void {
   }
 }
 
+/**
+ * Fetches the requests again. Main lists a pending request with its params following files moved since it was
+ * made, so a view that saw the library change (e.g. "Städa upp") gets the paths as they are now.
+ */
+export function refreshApprovals(): Promise<void> {
+  return window.studio.listApprovals().then(applyApprovals, () => {})
+}
+
 export async function refreshAgentStatus(): Promise<void> {
   try {
     applyStatus(await window.studio.getAgentStatus())

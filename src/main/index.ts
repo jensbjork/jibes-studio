@@ -3,6 +3,7 @@ import { unlink } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import type { ExportProgress, Generation, GenerationParams, VideoModel } from '@shared/types'
 import { AgentService, recordIpcHandlers, registerAgentIpc } from './agent'
+import { isAgentCall } from './agent/local-ipc'
 import * as db from './db'
 import { ffmpegStatus, stopAllFfmpeg } from './ffmpeg'
 import { JobManager, prepareSubmission, toPublic } from './jobs'
@@ -47,7 +48,8 @@ registerMediaScheme()
 recordIpcHandlers()
 
 const venice = new VeniceClient(getApiKey)
-const jobs = new JobManager(venice)
+// Submits read the models' prompt limits (for the descriptions appended to a prompt) from main's cached list.
+const jobs = new JobManager(venice, () => loadVideoModels())
 let modelCache: { at: number; models: VideoModel[] } | undefined
 /** Exports and "generate all" runs; set once the sequence handlers are registered. */
 let sequencesBusy: () => string | undefined = () => undefined
@@ -176,7 +178,7 @@ function registerIpc(): void {
   ipcMain.handle('models:list', (_e, force?: boolean) => loadVideoModels(force === true))
 
   ipcMain.handle('video:quote', (_e, params: GenerationParams) => venice.quote(params))
-  ipcMain.handle('video:generate', async (_e, params: GenerationParams) => {
+  ipcMain.handle('video:generate', async (e, params: GenerationParams, sentPrompt?: unknown) => {
     // Counted as on its way from the start: a library switch must not close the database while the price
     // is quoted, or the job would be paid for and then have nowhere to be recorded.
     const release = jobs.holdSubmit()
@@ -185,7 +187,10 @@ function registerIpc(): void {
       // is refused here rather than after a network round trip (submit checks again; it is idempotent).
       const p = await prepareSubmission(params)
       const quote = await venice.quote(p).catch(() => undefined)
-      return await jobs.submit(p, { quote })
+      // An agent's approved request sends the composed prompt the user approved (and its check compared just
+      // now), not one composed again after the quote's round trip from descriptions that may have changed since.
+      const approved = isAgentCall(e) && typeof sentPrompt === 'string' ? { sentPrompt } : {}
+      return await jobs.submit(p, { quote, ...approved })
     } finally {
       release()
     }

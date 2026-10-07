@@ -9,6 +9,7 @@ import { KIND_TONE } from '../pickers/assetKinds'
 import Popover from '../pickers/Popover'
 import SequencePicker, { type AddedToSequence } from '../pickers/SequencePicker'
 import { titleFromPrompt } from '../pickers/text'
+import { sentPromptDiffers } from '../prompt/descriptions'
 import { CopyButton } from '../prompts/controls'
 import { formatWhen } from '../prompts/prompt-utils'
 import { requestLearning, useLearnings } from '../prompts/useLearnings'
@@ -28,6 +29,7 @@ import {
   type LibraryIndex
 } from './references'
 import { AgentReviews, YourReview } from './ReviewSection'
+import SentPrompt from './SentPrompt'
 import { useReviews } from './useReviews'
 
 interface Props {
@@ -235,6 +237,19 @@ export default function ClipDrawer({
               onHover={setHighlighted}
               className="text-[13px]"
             />
+            {/* What Venice actually got, when Studio appended the referenced assets' descriptions to it. Keyed by
+                clip, so an unfolded prompt folds again on the next one. */}
+            {sentPromptDiffers(g.prompt, g.sentPrompt) && (
+              <SentPrompt
+                key={`sent:${g.id}`}
+                prompt={g.prompt}
+                sentPrompt={g.sentPrompt}
+                images={refs.images}
+                audios={refs.audios}
+                highlighted={highlighted}
+                onHover={setHighlighted}
+              />
+            )}
             {g.params.negativePrompt && (
               <div className="mt-3">
                 <h4 className="mb-1 text-[11px] text-muted">Negativ prompt</h4>

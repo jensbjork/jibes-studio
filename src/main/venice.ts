@@ -7,6 +7,7 @@ import {
   referenceAudioWindow,
   rememberModelKinds
 } from '@shared/models'
+import { rememberPromptLimits } from '@shared/prompt-compose'
 import { audioToken } from '@shared/prompt-refs'
 import type { GenerationParams, ReferenceAudio, VideoModel, VideoModelType } from '@shared/types'
 import { encodeAudioClip, probeAudio } from './ffmpeg'
@@ -334,8 +335,10 @@ export class VeniceClient {
     const res = await this.request('/models?type=video', {}, false)
     const json = (await res.json()) as { data: RawModel[] }
     const models = json.data.map(toVideoModel)
-    // So the shared kindOfModelId (used by paramsForSubmit and imageToVideoVariant) agrees with this list.
+    // So the shared kindOfModelId (used by paramsForSubmit and imageToVideoVariant) agrees with this list, and the
+    // descriptions appended to a prompt (composeSubmission) are fitted into the same limit wherever it is composed.
     rememberModelKinds(models)
+    rememberPromptLimits(models)
     return models
   }
 

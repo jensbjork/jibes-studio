@@ -3,8 +3,17 @@ import { existsSync } from 'node:fs'
 import { readdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { shell } from 'electron'
+import { pathKey } from '@shared/generation-filter'
 import { DEFAULT_AUDIO_CLIP_SECONDS, MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
-import type { Asset, AssetAudio, AssetImage, AssetInput, AssetKind } from '@shared/types'
+import type {
+  Asset,
+  AssetAudio,
+  AssetImage,
+  AssetInput,
+  AssetKind,
+  DescribedAsset,
+  GenerationParams
+} from '@shared/types'
 import { getDb, isStoredPathRecorded, rewriteStoredPrefix } from './db'
 import { probeAudio } from './ffmpeg'
 import {
@@ -606,6 +615,49 @@ export function listAssets(kind?: unknown): Asset[] {
     .filter((r) => isAssetKind(r.kind))
     .map((r) => assetFromRow(r, images.get(r.id) ?? [], audio.get(r.id) ?? []))
     .sort((a, b) => nameCollator.compare(a.name, b.name) || a.createdAt - b.createdAt)
+}
+
+/**
+ * The assets with a description (not blank) that one of the params' reference images or audio clips belongs to,
+ * as the prompt composer reads them (composePrompt in src/shared/prompt-compose.ts), with all their photo and clip
+ * paths (absolute). Read from the database at the moment of the call: a submission appends the descriptions as
+ * they are when it is sent, so one edited in the library a moment ago already counts. Files are matched as the
+ * library compares paths (pathKey). Which of the references are actually sent is composePrompt's decision.
+ */
+export function describedAssetsFor(
+  params: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'>
+): DescribedAsset[] {
+  const wanted = new Set<string>()
+  for (const path of Array.isArray(params?.referenceImages) ? params.referenceImages : []) {
+    if (typeof path === 'string' && path) wanted.add(pathKey(path))
+  }
+  for (const clip of Array.isArray(params?.referenceAudios) ? params.referenceAudios : []) {
+    if (clip && typeof clip.path === 'string' && clip.path) wanted.add(pathKey(clip.path))
+  }
+  if (!wanted.size) return []
+  const db = getDb()
+  // Descriptions are saved trimmed; the check in SQL only spares reading the files of assets without one.
+  const described = `SELECT id FROM assets WHERE trim(description) != ''`
+  const rows = (db.prepare(`SELECT * FROM assets WHERE id IN (${described})`).all() as AssetRow[]).filter((r) =>
+    isAssetKind(r.kind)
+  )
+  if (!rows.length) return []
+  const images = groupImages(
+    db
+      .prepare(`SELECT * FROM asset_images WHERE asset_id IN (${described}) ORDER BY asset_id, position, created_at`)
+      .all() as AssetImageRow[]
+  )
+  const audio = groupAudio(
+    db
+      .prepare(`SELECT * FROM asset_audio WHERE asset_id IN (${described}) ORDER BY asset_id, position, created_at`)
+      .all() as AssetAudioRow[]
+  )
+  return rows.flatMap((r) => {
+    const imagePaths = (images.get(r.id) ?? []).map((img) => img.path)
+    const audioPaths = (audio.get(r.id) ?? []).map((clip) => clip.path)
+    if (![...imagePaths, ...audioPaths].some((p) => wanted.has(pathKey(p)))) return []
+    return [{ id: r.id, kind: r.kind, name: r.name, description: r.description, imagePaths, audioPaths }]
+  })
 }
 
 async function createAsset(

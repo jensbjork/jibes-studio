@@ -73,8 +73,11 @@ import {
 } from './pickers/audioRefs'
 import Popover from './pickers/Popover'
 import PromptLibraryPicker from './pickers/PromptLibraryPicker'
+import { moveItem } from './pickers/reorder'
 import SavePromptDialog from './pickers/SavePromptDialog'
 import { formatClipSeconds } from './pickers/text'
+import DescriptionsBox from './prompt/DescriptionsBox'
+import { assetIdsInForm, withAssetDescription, withDescriptionsIncluded } from './prompt/descriptions'
 import NegativePromptIssues, { negativePromptIssues } from './prompt/NegativePromptIssues'
 import PromptEditor, { type PromptEditorHandle } from './prompt/PromptEditor'
 import { promptReferences, type AssetGroup, type ReferenceGroup } from './prompt/promptText'
@@ -423,6 +426,15 @@ export default function ParamsForm({
     setRefNote(undefined)
   }
 
+  /**
+   * A clip dragged to another place (or moved with ⌥← / ⌥→; 0-based positions): the @AudioN tokens of both
+   * prompts follow their clips in the same update, as the pictures' do when the image strip is reordered.
+   */
+  const moveAudio = (from: number, to: number) => {
+    setReferences({ audios: moveItem(audioRefs, from, to) })
+    setRefNote(undefined)
+  }
+
   // Which characters each pose applies to ("gäller"): form state only, like "bärs av"; it shapes the text a
   // pose chip inserts. undefined: every character in the form, also ones added later.
   const [posePeople, setPosePeople] = useState<Record<string, string[] | undefined>>({})
@@ -485,6 +497,22 @@ export default function ParamsForm({
         navigate(ASSET_VIEW[k])
       }
     : undefined
+
+  /** Opens one asset in its library view, e.g. to edit the description the prompt gets ("Ändra beskrivning"). */
+  const openAsset = navigate
+    ? (a: Asset) => {
+        closePicker()
+        navigate(ASSET_VIEW[a.kind], { type: 'open-asset', assetId: a.id })
+      }
+    : undefined
+
+  // ── Descriptions appended to the prompt ("Läggs till i prompten") ─────────────
+  // Both flags are params, so they travel with the form, a sequence clip's saved params and "Använd igen", and
+  // main composes the legend from them at submit. Built on the latest params, like every other setter here.
+
+  const includeDescriptions = (on: boolean) => setParams((p) => withDescriptionsIncluded(p, on))
+  const toggleDescription = (assetId: string, on: boolean) =>
+    setParams((p) => withAssetDescription(p, assetId, on, assetIdsInForm(p, assets)))
 
   /** The tab a single-image picker opens on: the current image's kind, else the first kind with photos. */
   const singleImageKind = (path: string | undefined): AssetKind =>
@@ -833,6 +861,7 @@ export default function ParamsForm({
                 language={language}
                 onInsert={insertIntoPrompt}
                 onRemove={(index) => removeAudios([index])}
+                onMove={moveAudio}
               />
               <div className="mt-1.5 flex items-start gap-3 text-[11px] text-muted">
                 <span className="min-w-0 flex-1">
@@ -883,6 +912,8 @@ export default function ParamsForm({
               className={`mr-1 text-[11px] ${
                 params.prompt.length > model.promptCharacterLimit ? 'text-accent' : 'text-muted'
               }`}
+              // The text written here; descriptions appended when it is sent are counted under it.
+              title={`Din prompt: ${params.prompt.length} av högst ${model.promptCharacterLimit} tecken`}
             >
               {params.prompt.length}/{model.promptCharacterLimit}
             </span>
@@ -960,6 +991,15 @@ export default function ParamsForm({
               </div>
             )
           }
+        />
+        <DescriptionsBox
+          params={params}
+          assets={assets}
+          language={language}
+          limit={model?.promptCharacterLimit}
+          onInclude={includeDescriptions}
+          onToggle={toggleDescription}
+          onOpenAsset={openAsset}
         />
       </div>
 

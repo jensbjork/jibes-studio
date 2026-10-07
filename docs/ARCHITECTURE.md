@@ -51,22 +51,22 @@ folds the SQLite WAL back into `studio.db`.
 
 | Module | Responsibility |
 | --- | --- |
-| `index.ts` | App entry: profiles, single-instance lock, window creation, the core IPC handlers (settings — a change of *Säkert läge för bilder* is broadcast as `settings:change`, since Inställningar and the image dialogs each show it —, models, quote/generate, generations, files), wiring of the services (generations are sent with their review summary; the sequence service gets the cached video model list and the stills service's import and save-frame functions), shutdown. |
+| `index.ts` | App entry: profiles, single-instance lock, window creation, the core IPC handlers (settings — a change of *Säkert läge för bilder* is broadcast as `settings:change`, since Inställningar and the image dialogs each show it —, models, quote/generate, generations, files), wiring of the services (generations are sent with their review summary; the job manager and the sequence service get the cached video model list — the job manager for the models' prompt limits — and the sequence service the stills service's import and save-frame functions), shutdown. |
 | `settings.ts` | `settings.json` in the profile's `userData`: base folder, prompt language, *Säkert läge för bilder* (image safe mode, on unless switched off), accepted Venice consents, agent port/on-off; the Venice API key and the agent token encrypted with `safeStorage`. |
 | `images.ts` | Venice image client for stills: text-to-image models from `/models?type=image` (background removers and upscalers left out) and edit models that combine references from `/models?type=inpaint` (only those with `combineImages`; `maxInputImages` 3 when the list doesn't say), cached for 10 minutes; prices from `model_spec.pricing` (per quality, per resolution or flat, plus `inputImages.additional` per extra reference); the `/image/generate` and `/image/multi-edit` bodies (references as data URLs within Venice's input limits, decoded as Studio shows them by `input-image.ts`, base first; models without an aspect-ratio list get width/height), safe mode from settings, and Swedish errors (402 balance, 4xx detail, the `x-venice-is-content-violation` header, a 4-minute limit after which the picture may still have been charged). Paid requests are never retried. |
 | `stills.ts` | Stills: rows, `planStill` (model, references, options and price checked before anything is paid for; also what an agent's image approval shows), generating (`images:generate`), saving the frame a paused player shows (`stills:saveFrame`), importing dropped files (deduplicated by content), placement in `Sekvenser/<sequence>/Storyboard/` or `Referensbilder/<day>/` (safe against a sequence folder renamed or deleted meanwhile), deleting (a still other rows use is kept in `Referensbilder`), the still-work busy state, and the `images:*` and `stills:*` handlers. A paid picture that can't be saved in the library is written to the user's Downloads folder instead (its path is in the error). |
-| `venice.ts` | Venice API client (`/models` incl. `audio_input`, `/api_keys/rate_limits`, `/video/quote`, `/video/queue`, `/video/retrieve`, `/video/complete`), request bodies (images become downscaled JPEG data URLs, decoded by `input-image.ts`; each reference audio window becomes an MP3 data URL of whole frames, 2–15 s each and 15 s in all), measuring reference audio (`resolveReferenceAudios`), `VeniceError` / `NetworkError`. |
-| `jobs.ts` | `JobManager`: the guard in front of every paid submission (`prepareSubmission`: `@ImageN`/`@AudioN` checks, canonical tokens, audio clips measured), queueing at Venice, polling with backoff, saving videos into the library, posters and durations, resuming pending jobs and backfilling missing posters. |
+| `venice.ts` | Venice API client (`/models` incl. `audio_input`, `/api_keys/rate_limits`, `/video/quote`, `/video/queue`, `/video/retrieve`, `/video/complete`; a fetched model list is remembered by the shared `rememberModelKinds` and `rememberPromptLimits`), request bodies (images become downscaled JPEG data URLs, decoded by `input-image.ts`; each reference audio window becomes an MP3 data URL of whole frames, 2–15 s each and 15 s in all), measuring reference audio (`resolveReferenceAudios`), `VeniceError` / `NetworkError`. |
+| `jobs.ts` | `JobManager`: the guard in front of every paid submission (`prepareSubmission`: `@ImageN`/`@AudioN` checks, canonical tokens, audio clips measured), composing the prompt that is sent (`composeSubmission`: the References legend of the referenced assets' descriptions, read from the database at that moment and fitted into the model's prompt limit) and storing it as `sent_prompt`, queueing at Venice, polling with backoff, saving videos into the library, posters and durations, resuming pending jobs and backfilling missing posters. |
 | `db.ts` | The SQLite connection (WAL, foreign keys), the migrations, generation rows, and stored-path maintenance: prefix rewrites, relativizing, "is this path recorded" checks. |
 | `paths.ts` | Folder layout constants (`FOLDERS`, `APP_DATA`, `TAKES_FOLDER`, `STORYBOARD_FOLDER`), conversion between absolute and stored paths, Finder-safe names, unique names, verified moves and renames, the "base folder is still there" check and the library-wide operation lock. |
 | `library-root.ts` | The base folder's lifecycle: opening it at startup, status, choosing/inspecting/switching (`move`, `open`, `new`), converting an earlier layout, refusing a library from before a folder existed whose base folder holds a folder of the user's own by that name (*Miljöer*, *Kläder* from schema 6, *Poser* from 7), *Städa upp* (reorganize, asset photos and audio clips, stills included), revealing folders in Finder. |
 | `library.ts` | The prompt library (CRUD, tags, favourites, usage) and registration of the asset and prompt IPC handlers. |
-| `assets.ts` | Characters, environments, outfits and poses: rows, one folder per asset with copies of its photos (and, for characters and environments, audio clips probed with ffprobe, each with a clamped reference window) and `Beskrivning.txt`, renames that move the folder, deletes to the Trash (a photo or clip that generations still use is kept in `Referensbilder`), default outfits. |
+| `assets.ts` | Characters, environments, outfits and poses: rows, one folder per asset with copies of its photos (and, for characters and environments, audio clips probed with ffprobe, each with a clamped reference window) and `Beskrivning.txt`, renames that move the folder, deletes to the Trash (a photo or clip that generations still use is kept in `Referensbilder`), default outfits, and `describedAssetsFor` (the described assets behind a set of params' files, straight from the database, for composing the prompt). |
 | `input-image.ts` | Decodes a picture for Venice (and for agents) the way Studio's views show it: a JPEG turned upright by its EXIF orientation (`nativeImage` ignores it, so a portrait phone photo would be sent sideways and an image-to-video take come out rotated), a WebP (which `nativeImage` can't read) decoded by ffmpeg (`stillToPng`), so both get the usual size limits. |
 | `references.ts` | Copies start/end/reference images and reference audio from outside the library into `Referensbilder/<day>/` (deduplicated by content hash) and the shared `placeFile` / `copyInto` helpers that write via the scratch folder. |
 | `reviews.ts` | The user's and agents' reviews of generations (`attachReviewSummary` puts the user's rating and the review count on generations), learnings, the list of exported films, and their IPC handlers (an agent writes under its own name and may only change its own). |
-| `sequences.ts` | `SequenceService`: sequences and clips (reference audio included; continuing clips drop it), keyframes (`setSegmentImage`), *Gör om mellan grannarna* (`bridgeSegment`), frame previews, takes, the neighbours' frames (continuation and end frames), *Generera saknade* runs in dependency order, keeping sequence folders (with their `Storyboard/`) in step with names, deleting a sequence with its stills, export, and the sequence IPC handlers. |
-| `sequence-store.ts` | Row access and assembly for sequences, segments (notes and `endFromNext` included) and stills, take selection (`seamTrims`: a side the new take was made to meet exactly starts untrimmed) and trim clamping, folder and file naming. |
+| `sequences.ts` | `SequenceService`: sequences and clips (reference audio included; continuing clips drop it), the prompt a take sends (`composeClipPrompt`; a take composes it together with the clip read and the approval guard), keyframes (`setSegmentImage`), *Gör om mellan grannarna* (`bridgeSegment`), frame previews, takes, the neighbours' frames (continuation and end frames), *Generera saknade* runs in dependency order, keeping sequence folders (with their `Storyboard/`) in step with names, deleting a sequence with its stills, export, and the sequence IPC handlers. |
+| `sequence-store.ts` | Row access and assembly for sequences, segments (notes, `endFromNext` and the description switches included) and stills, take selection (`seamTrims`: a side the new take was made to meet exactly starts untrimmed) and trim clamping, folder and file naming. |
 | `sequence-export.ts` | Turns the selected, trimmed takes into ffmpeg concat clips (dropping the duplicated picture where a take was made from its neighbour's frame: `repeatsPreviousFrame`, `dropsLastFrame`) and reserves the export's file name. |
 | `ffmpeg.ts` | Finds `ffmpeg`/`ffprobe`, probes videos and audio files (decoding when the header only estimates the length), extracts frames (the frame showing at a moment, and the first frame at or after a start trim: `extractFrameAtOrAfter`, `frameStartAtOrAfter`) and posters, decodes still pictures to PNG (`stillToPng`), cuts reference audio windows to mono MP3 (`encodeAudioClip`), JPEG frames and sound previews for agents' reviews (`extractFrames`, `extractAudioPreview`), renders the concat export, and kills/cleans up running processes on quit. |
 | `media-protocol.ts` | The `media://` scheme (video, image and audio types). |
@@ -82,7 +82,8 @@ folds the SQLite WAL back into `studio.db`.
 | `agent/guide.ts` | The MCP server instructions, the Studio guide and the prompt-writing guide for agents. |
 | `agent/images.ts` | Photos and posters as MCP image content (JPEG, at most 768 px), with a small cache, and the MCP image and audio content blocks for the JPEG frames and MP3s ffmpeg makes. |
 | `agent/media.ts` | Video frames, a clip's sound and reference audio windows as MCP image and audio content for the review tools (through `ffmpeg.ts`). |
-| `agent/studio.ts` | Helpers shared by the tools: asset index (photos and audio clips), `@ImageN` and `@AudioN` token maps, model and option checks, prompt problems. |
+| `agent/studio.ts` | Helpers shared by the tools: asset index (photos and audio clips), `@ImageN` and `@AudioN` token maps, model and option checks, prompt problems, and the composed prompt with its description entries (`descriptionInfo`, through main's `composeSubmission`). |
+| `agent/reorder.ts` | `reorder_references`: reading the new order an agent names (tokens, photo or clip ids, asset ids), which tokens moved, and the pictures past the model's limit. |
 | `agent/tools/*.ts` | The MCP tools (`library.ts`, `form.ts`, `sequences.ts` with keyframes and notes, `storyboard.ts` for stills, image models, frame previews and bridging, `paid.ts` with the image request, and `review.ts` for reviewing clips, films and sequences, reviews and learnings), the `defineTool` frame (`kit.ts`, image and audio content, older clients get a note instead of audio) and registration of the tools, the `write_video_prompt` prompt and the `studio://guide` resource (`index.ts`). |
 
 ### `src/preload`
@@ -98,24 +99,24 @@ folds the SQLite WAL back into `studio.db`.
 | --- | --- |
 | `main.tsx`, `App.tsx` | Entry and root component: the library gate (setup screen until a base folder is open), the views, the agent feed, bridge and approval dialog. |
 | `styles.css` | Tailwind CSS v4 import and theme tokens (`bg`, `panel`, `raised`, `line`, `muted`, `text`, `accent`). |
-| `lib/generateStore.ts` | The Generate form as an app-level store above the views, persisted to `localStorage`, so agents can read and fill it while another view is open. Follows library audio clips that move or get a new window. |
-| `lib/agentBridge.ts` | The renderer half of the form bridge: applies `get_form`, `set_form`, `set_references` (photos and audio clips, with the 3-clip and 15 s caps) and `open` to the form store and replies with the token maps. |
+| `lib/generateStore.ts` | The Generate form as an app-level store above the views, persisted to `localStorage`, so agents can read and fill it while another view is open. Follows library audio clips that move or get a new window; the description switches are cleaned with `sanitizeDescriptionFlags` when the form is loaded. |
+| `lib/agentBridge.ts` | The renderer half of the form bridge: applies `get_form`, `set_form` (the description switches included), `set_references` (photos and audio clips, with the 3-clip and 15 s caps), `reorder_references` (the shared `reorderReferences`, prompt and negative prompt in the same change) and `open` to the form store and replies with the token maps and the pictures past the model's limit (`unsentReferences`). |
 | `lib/agent.ts` | Live agent status, activity and approval requests for the indicator, the drawer, the dialog and Settings. |
 | `lib/promptIssues.ts` | The `@ImageN` and `@AudioN` checks for a set of params, with the rules main applies. |
 | `lib/hooks.ts` | Shared data hooks (model list, assets, prompts, price quote) and `ipcErrorMessage`. |
 | `lib/library.ts` | `localStorage` keys that hold library data and how they are rewritten or forgotten after a library switch; `withImportedCopies`, which points the form at the copies in `Referensbilder` of images and audio picked from outside the library once a generation is submitted. |
 | `lib/assets.ts`, `lib/media.ts`, `lib/navigation.ts`, `lib/workspace.ts` | Asset kind wording, `media://` URLs and formatting, cross-view navigation intents, where the user is in the sequence editor. |
-| `components/GenerateView.tsx`, `ParamsForm.tsx`, `GenerationCard.tsx`, `ImageInput.tsx` | The Generate view: the form (references, voices and sounds, poses), the clip feed's cards, image inputs. |
-| `components/feed/` | The clip feed in Generera: toolbar with search, filters (the shared `generation-filter`), sort and summary; poster-only cards; a windowed table with sortable columns and keyboard navigation; the detail drawer with player, highlighted `@ImageN`/`@AudioN`, the references and audio windows sent, settings, the user's rating, note and tags, and agents' reviews; kept live through `onGenerationUpdate`, `onGenerationDelete` and `onReviewChange`. |
-| `components/prompt/` | The reference-aware prompt editor: `@ImageN` and `@AudioN` colouring, hover cards and players, the `@` menu, issue list and quick fixes. |
+| `components/GenerateView.tsx`, `ParamsForm.tsx`, `GenerationCard.tsx`, `ImageInput.tsx` | The Generate view: the form (references, voices and sounds, poses, the descriptions box), the clip feed's cards, image inputs (the reference strip reorders by drag and drop or ⌥← / ⌥→, showing the numbers each picture will get and which won't be sent). |
+| `components/feed/` | The clip feed in Generera: toolbar with search, filters (the shared `generation-filter`), sort and summary; poster-only cards; a windowed table with sortable columns and keyboard navigation; the detail drawer with player, highlighted `@ImageN`/`@AudioN`, *Skickad prompt* (`SentPrompt.tsx`: the prompt as sent, its legend set apart, when it differs), the references and audio windows sent, settings, the user's rating, note and tags, and agents' reviews; kept live through `onGenerationUpdate`, `onGenerationDelete` and `onReviewChange`. |
+| `components/prompt/` | The reference-aware prompt editor: `@ImageN` and `@AudioN` colouring, hover cards and players, the `@` menu, issue list and quick fixes; *Läggs till i prompten* (`DescriptionsBox.tsx`, with the pure `descriptions.ts` asking the shared composer what is sent): the legend's entries live, a switch per asset and *Ta med beskrivningar*, the composed length against the model's limit. |
 | `components/prompts/` | The prompt library view (*Prompter*) and its *Lärdomar* tab (learnings: list, editor, evidence clips). |
 | `components/assets/` | The *Karaktärer*, *Miljöer*, *Kläder* and *Poser* views: list, editor, photos, default outfit, and the sound section (voice or soundscape clips, a shared player, the reference window editor). |
-| `components/pickers/` | Pickers and dialogs shared by the views (assets, audio clips, outfits, prompts, sequences, modal, popover) and the form's asset and audio helpers (`assetRefs`, `audioRefs`). |
+| `components/pickers/` | Pickers and dialogs shared by the views (assets, audio clips, outfits, prompts, sequences, modal, popover), the form's asset and audio helpers (`assetRefs`, which re-exports the shared remap, `audioRefs`), and reordering: `reorder.ts` (gap arithmetic, live positions, the nearest gap on wrapped rows) and `useReorder.ts` (the HTML5 drag and drop and ⌥← / ⌥→ hook shared by the image strip and the audio chips, with focus restore and an `aria-live` announcement). |
 | `components/sequences/` | The *Sekvenser* view: list, header with the *Tidslinje / Storyboard* switch (remembered per sequence in `viewMode.ts`), timeline (with *Gör om mellan grannarna* on the cards), clip editor (`KeyframeBox`: *Startbild från föregående klipp* / *Slutbild från nästa klipp* with live frame previews; `NotesField`: *Vad händer*), takes, trims, preview player, the shared clip checks (`clipChecks.ts`) and frame previews (`useFramePreview.ts`: cached, at most two at a time). |
 | `components/sequences/storyboard/` | The Storyboard view: a responsive grid of panels (`StoryboardPanel`: number, take, start slot → end slot, notes, prompt, price, *Generera tagning*, *Gör om mellan grannarna*), drag to reorder, *+ Ny ruta*, keyframe slots (`ImageSlot`: upload or drop, library photo, still, a frame from a clip, *Skapa bild…*, the previous or next clip) and the stills strip (`StillsStrip`). |
 | `components/images/` | *Skapa bild…* (`CreateImageDialog`: prompt, references with the base first, model, format, resolution and quality, the safe-mode note, live price, *Använd som startbild / slutbild*), the frame picker (`FramePickerDialog`: any finished take of the sequence, frame-exact stepping, *Använd den här bildrutan*), `StillThumb` (draggable as `application/x-studio-still`), `StillViewer`, and the image model and price helpers (`imageModels.ts`). |
 | `components/library/` | Library setup screen, folder choice, switching overlay and *Inställningar → Bibliotek*. |
-| `components/agent/` | Agent settings section, sidebar indicator, activity drawer, approval dialog (with the voices a request sends, the start and end frames of a clip that takes them from its neighbours, and image requests with their references and the finished picture) and their Swedish wording. |
+| `components/agent/` | Agent settings section, sidebar indicator, activity drawer, approval dialog (with the References legend a request appends, set apart under the prompt and marked when a description has changed since, the voices a request sends, the start and end frames of a clip that takes them from its neighbours, and image requests with their references and the finished picture) and their Swedish wording. |
 | `components/SettingsView.tsx`, `Sidebar.tsx`, `ConsentDialog.tsx`, `DevBadge.tsx` | Settings (*Bilder → Säkert läge för bilder* among them), navigation, Venice's consent dialog, the *Dev* badge. |
 
 ## Data model
@@ -126,7 +127,7 @@ base folder is.
 
 | Table | Holds |
 | --- | --- |
-| `generations` | Every generation: model, prompt, params (JSON), status (`queued`, `processing`, `completed`, `failed`), Venice queue id, price quote, timings, `file_path`, `thumb_path`, `video_duration`, and `segment_id` when it is a take of a sequence clip. |
+| `generations` | Every generation: model, prompt, params (JSON), status (`queued`, `processing`, `completed`, `failed`), Venice queue id, price quote, timings, `file_path`, `thumb_path`, `video_duration`, `segment_id` when it is a take of a sequence clip, and `sent_prompt`: the prompt exactly as Venice got it (`prompt` and `params.prompt` stay the user's text, which *Använd igen* puts back; NULL before migration 9). |
 | `assets` | Characters, environments, outfits and poses: `kind` (`character`, `environment`, `outfit`, `pose`), name, description, `folder`, `default_outfit_id` (characters only, a self-reference set to NULL when the outfit is deleted). |
 | `asset_images` | An asset's photos: `file_path` and `position` (position 0 is the cover). |
 | `asset_audio` | A character's voice or an environment's soundscape clips: `file_path`, `position` (position 0 comes along when the character is added to a form), `duration`, and the reference window `clip_start` / `clip_length` (NULL: the default, min(duration, 10 s)). Deleted with their asset. |
@@ -154,6 +155,7 @@ reorder an entry, add a new one at the end (see [DEVELOPMENT.md](DEVELOPMENT.md#
 | 6 | Assets: renamed `characters` → `assets` and `character_images` → `asset_images` (`character_id` → `asset_id`), added `kind` (existing rows become `character`) and `default_outfit_id`, rebuilt the indexes. `ASSETS_SCHEMA_VERSION = 6` marks libraries that own *Miljöer* and *Kläder*. |
 | 7 | Voices, reviews and learnings: created `asset_audio` (+ index by asset and position), `generation_reviews` (+ index by generation, unique user review per generation) and `learnings`. Poses need no schema change (`assets.kind` is text); `POSES_SCHEMA_VERSION = 7` marks libraries that own *Poser*. |
 | 8 | Storyboards: added `end_from_next` and `notes` to `segments`; created `stills` (+ index by sequence and creation time). |
+| 9 | Descriptions in the prompt: added `sent_prompt` to `generations` (the prompt with the References legend, as sent). |
 
 A library from before the base folder could be chosen (`studio.db`, `generations/`, `thumbs/`, `characters/`,
 `exports/`, `frames/` directly in the folder) is converted to the current layout by `library-root.ts` when it is
@@ -244,24 +246,36 @@ agent request — ends in `JobManager.submit` (`src/main/jobs.ts`). (Stills are 
    measured with ffprobe and its window filled in, and the checks run again on the real lengths (each clip 2–15 s,
    15 s in all, at least one reference image). The `video:generate` handler (and a sequence take) runs this before
    it quotes the price and counts the submit as busy, so a library switch can't close the database under it.
-2. **Prepare.** The library must be open; every image and audio file must still exist. Images and audio from
+   The prompt as it will be sent (below) is checked by the same rules.
+2. **Compose.** `composeSubmission` appends the References legend (`composePrompt` in `src/shared/prompt-compose.ts`)
+   to the user's prompt: one line per asset with a description that has a picture or clip among the references
+   actually sent, with its tokens, its name and its description — read from the database at that moment
+   (`describedAssetsFor`), so an edit in the library applies to the next generation — unless the params switch it
+   off (`includeDescriptions: false`, `excludedDescriptionAssetIds`). The words follow the prompt language, and the
+   descriptions are shortened (or the legend dropped) to fit the model's `promptCharacterLimit`, which the job
+   manager reads from main's cached model list (`rememberPromptLimits`). A sequence take composes it when it reads
+   the clip, together with its approval guard, and passes it as `sentPrompt`, so a description edited while the
+   frames are taken doesn't change what was checked; an agent's approved form request passes the text the user
+   approved the same way. The request body carries the composed prompt; the row keeps
+   the user's prompt in `prompt` and `params` and the composed one in `sent_prompt`.
+3. **Prepare.** The library must be open; every image and audio file must still exist. Images and audio from
    outside the library are copied into `Referensbilder/<day>/` so the stored params point at the library's copies.
    The request body carries the images as JPEG data URLs (at most 2048 px, turned upright by their EXIF orientation
    like every view shows them) and each audio window as a mono
    44.1 kHz MP3 data URL (`reference_audio_urls`, encoded to whole MP3 frames so the clips stay within Venice's
    limits), plus Venice's consent attestation for Seedance models once the user has accepted it.
-3. **Queue.** `POST /video/queue`. A `409 needs_consent` comes back as a `NEEDS_CONSENT:` error that the window
+4. **Queue.** `POST /video/queue`. A `409 needs_consent` comes back as a `NEEDS_CONSENT:` error that the window
    turns into the consent dialog. On success a `generations` row is written with status `queued` and the queue id,
    and `generation:update` is broadcast.
-4. **Poll.** Every 5 seconds `POST /video/retrieve`: still processing (status `processing`, timings updated), the
+5. **Poll.** Every 5 seconds `POST /video/retrieve`: still processing (status `processing`, timings updated), the
    video itself, or a download URL. Network errors, 5xx and 429 are retried with backoff (up to 70 attempts, a bit
    over an hour, since the job is already paid for); other unexpected errors get 5 quick retries; other 4xx
    responses fail the job.
-5. **Save.** The video is written to `.studio/tmp/<id>.mp4` and moved to its place: `Sekvenser/<name>/Tagningar/`
+6. **Save.** The video is written to `.studio/tmp/<id>.mp4` and moved to its place: `Sekvenser/<name>/Tagningar/`
    for a take, `Genereringar/<day>/` otherwise, named after the submit time and the prompt's first line.
-6. **Poster.** `ffprobe` reads the duration and `ffmpeg` writes a poster to `.studio/miniatyrer/<id>.jpg`. This is
+7. **Poster.** `ffprobe` reads the duration and `ffmpeg` writes a poster to `.studio/miniatyrer/<id>.jpg`. This is
    best effort: a missing ffmpeg never fails a generation.
-7. **Settle.** The row becomes `completed` (or `failed` with the error), `settled` fires once (sequences use it to
+8. **Settle.** The row becomes `completed` (or `failed` with the error), `settled` fires once (sequences use it to
    select a fresh take automatically) and `POST /video/complete` asks Venice to delete its copy.
 
 When a library is opened, `resume()` picks up jobs that were still pending (a job that never got a queue id is
@@ -486,28 +500,39 @@ agent ──HTTP──▶ AgentServer (/mcp) ──▶ McpServer per session ─
   images and audio (each block after a text label; audio is replaced by a one-line note for a session whose
   protocol version predates audio content, 2025-03-26), turns exceptions into tool errors the agent can read
   (Swedish, like the UI) and records every call in the activity log. Tools carry MCP annotations (`readOnlyHint`,
-  `destructiveHint`, `openWorldHint`). The 46 tools live in `tools/library.ts`, `form.ts`, `sequences.ts`,
+  `destructiveHint`, `openWorldHint`). The 47 tools live in `tools/library.ts`, `form.ts`, `sequences.ts`,
   `storyboard.ts`, `paid.ts` and `review.ts`; [AGENTS.md](AGENTS.md#tools) lists them.
 - **Same services as the window.** `recordIpcHandlers` wraps `ipcMain.handle` before any module registers its
   handlers, so `callService(channel, …args)` runs exactly the handler a window would, with every validation, busy
   check, folder move and change notification. Handlers can tell an agent's call apart with `isAgentCall(event)`
   (used to refuse clip changes during *Generera saknade*).
 - **Form commands.** The Generate form lives in the renderer (`lib/generateStore.ts`), because it is what the user
-  sees and edits. `FormBridge.send` posts `agent:command` (`get_form`, `set_form`, `set_references` or `open`, with
-  a deadline) to the focused window, and `lib/agentBridge.ts` applies it with the form's own rules (mode switching,
-  model options, the reference cap) and answers with `agent:reply`. Only the window that got the command may
-  answer, and main gives up after 10 seconds ("is the window open?").
+  sees and edits. `FormBridge.send` posts `agent:command` (`get_form`, `set_form`, `set_references`,
+  `reorder_references` or `open`, with a deadline) to the focused window, and `lib/agentBridge.ts` applies it with
+  the form's own rules (mode switching, model options, the reference cap, the description switches, tokens
+  following a reorder) and answers with `agent:reply`; the form state it reports includes the pictures past the
+  model's limit (`unsentReferences`), which `reorder_references` can move forward (main names the references to move
+  by path, so a form the user changed meanwhile still gets the pictures named, or refuses). Only the window that got the
+  command may answer, and main gives up after 10 seconds ("is the window open?"). A clip's references are
+  reordered in main with the same shared `reorderReferences`.
 - **Approvals.** The paid tools (`tools/paid.ts`) validate the request (`request_generation` and
   `request_segment_generation` run `prepareSubmission`, so reference audio is measured before the user is asked;
   `request_generation` keeps the measured windows in the request; `request_segment_generation` and
   `request_generate_all` also refuse a clip whose neighbours' frames can't be had; `request_image_generation` runs
   `planStill`, the check and price the window's dialog uses), quote the price and create an `ApprovalPlan` in
   `ApprovalStore`: a fingerprint (an identical pending request is reused), a target (a newer request for the same
-  clip replaces the older one), `verify` (refuses if the clip or the actual image and audio files changed since)
-  and `execute`. The window shows `ApprovalDialog` with the prompt, references and voices (the Dock icon bounces if
-  Studio isn't focused). Approving runs `verify`, then `execute`, which calls `video:generate`, `segments:generate` or
-  `sequences:generateAll` through `callService` — the latter two with a submit guard that re-checks the clip
-  against what the user approved right before each take is sent. An image request (`ApprovalRequest.kind` `image`,
+  clip replaces the older one), `verify` (refuses if the clip, the actual image and audio files or the composed
+  prompt – the References legend main's `composeSubmission` appends from the assets' descriptions, which the request
+  carries as `composedPrompt` / `descriptionLegend` for the dialog, or per clip as `clipLegends` for *generate all*
+  – changed since)
+  and `execute`. A pending request is listed with its params following files moved since (`paramsNow`:
+  `followRewrites`), so the dialog shows the pictures and composes the legend from the files as they are. The window
+  shows `ApprovalDialog` with the prompt, references and voices (the Dock icon bounces if Studio isn't focused); it
+  composes each clip's legend as main would and disables *Godkänn* when one differs from the request's. Approving
+  runs `verify`, then `execute`, which calls `video:generate` (passing the approved composed prompt, which an
+  agent's call may give as its second argument), `segments:generate` or `sequences:generateAll` through
+  `callService` — the latter two with a submit guard that re-checks the clip against what the user approved right
+  before each take is sent. An image request (`ApprovalRequest.kind` `image`,
   with `image`: the still's params, references and target slot) runs `images:generate` and then, when it names a
   clip, `segments:setImage`; the approval records the `stillId` (and a `notice` when only the assignment failed),
   and the dialog waits for the picture (*Skapar bilden…*) and shows it. Requests expire after 30 minutes; at most
@@ -532,6 +557,8 @@ agent ──HTTP──▶ AgentServer (/mcp) ──▶ McpServer per session ─
 | `types.ts` | Every type that crosses the process boundary (segments with keyframes and notes, stills, image models, approval requests including image requests), the `StudioApi` interface, `NEEDS_CONSENT`. |
 | `models.ts` | The three modes (`KINDS`), `DEFAULT_MODEL` per mode (Seedance 2.5 basic), `PREFERRED` options, `DEFAULT_PARAMS` (8s, 480p, 16:9, audio on), `rememberModelKinds` / `kindOfModelId`, `pickOption`, `audioForModel`, `imageToVideoVariant`, `supportsEndImage` (the models known to take an end image: ids with `first-last-frame` or `transition`, Seedance image-to-video, Kling V3/O3 image-to-video; Venice's list has no flag for it) and `endImageVariant`, `maxReferenceImages` (9, or 7 for Grok and 4 for Kling models), reference audio (`supportsAudioInput`, `maxReferenceAudios` = 3, `MIN`/`MAX_AUDIO_CLIP_SECONDS` = 2/15, `MAX_REFERENCE_AUDIO_SECONDS` = 15, `referenceAudioWindow`, `sanitizeReferenceAudios`), `paramsForSubmit` (an end image only for a model that takes one), `durationSeconds`. |
 | `prompt-refs.ts` | Pure `@ImageN` and `@AudioN` logic: finding tokens and near misses (`@Image 3`, `@img3`, `@Bild3`, `@audio 1`, `@Ljud1`, `@Voice1` …), validation with issue codes (`no-references`, `out-of-range`, `over-model-limit`, `malformed`, `unused-reference`, `not-reference-mode`, and for audio `audio-out-of-range`, `audio-over-limit`, `audio-not-supported`, `audio-length`, `audio-too-long`, `unused-audio`), `validationContext`, canonicalisation, and `blockingPromptError` / `blockingContinuationError`. The editor, the submit guard and the agent tools all use it, so they agree. |
+| `prompt-compose.ts` | The References legend: `composePrompt` (which described assets are among the sent references, their tokens in order, whitespace collapsed and `@` removed, proportional shortening at word boundaries within the model's limit, `truncated` / `dropped`), `composeOptionsFor`, `describedAssets`, `sanitizeDescriptionFlags` (the switches stored as absent while they have their defaults) and the remembered prompt limits (`rememberPromptLimits`, `promptLimitOf`). The editor's box, the submit, the approval dialog and the agent tools compose with it, so they show and send the same text. |
+| `prompt-remap.ts` | Keeping tokens on their pictures and clips when the reference lists change: `remapPromptReferences` (any letter case, near misses including ranges and glued words, `(…)` groups, an outfit swap) and `reorderReferences` (a new order named by tokens or paths, the prompt and the negative prompt renumbered in one change), with `referenceOrder` and `referenceMoves`. The form, the bridge, the agents' clip tools, the clip editor's draft merge (an agent's reorder while the user types) and *Använd prompt* on an earlier take use it. |
 | `seams.ts` | Whether a take was made from its neighbour's frame as it is now (`startsOnLastFrameOf`, `endsOnFirstFrameOf`), read from the names main gives the frames it extracts. The clip editor's and timeline's warnings and the export's dedupe both use it, so a cut the editor calls seamless is the one the export dedupes. |
 | `generation-filter.ts` | The clip feed's filter and sort (`filterGenerations`, `sortGenerations`, `queryGenerations`, `summarizeGenerations`, `indexAssetPaths`), shared by the feed and the agents' `list_generations`, so both show the same clips. |
 | `prompts.ts` | `titleFromBody`, the automatic title of an untitled prompt. |
