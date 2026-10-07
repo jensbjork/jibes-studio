@@ -85,11 +85,18 @@ interface RunOptions {
   timeoutMs?: number
   /** Receives stdout as it arrives; stdout is then not collected. */
   onStdout?: (text: string) => void
+  /**
+   * Collects stdout as raw bytes (RunResult.bytes) instead of text, for output piped to `pipe:1` (MP3, JPEG).
+   * More than maxBytes kills the process and fails the run, so a runaway command can't fill memory.
+   */
+  binaryStdout?: { maxBytes: number }
 }
 
 interface RunResult {
   stdout: string
   stderr: string
+  /** Set when binaryStdout was asked for. */
+  bytes?: Buffer
 }
 
 const running = new Set<ChildProcess>()
@@ -182,8 +189,11 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
 
     let stdout = ''
     let stderr = ''
+    const chunks: Buffer[] = []
+    let byteCount = 0
     let aborted = false
     let timedOut = false
+    let tooMuchOutput = false
     let done = false
 
     const onAbort = (): void => {
@@ -205,13 +215,29 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
       if (timer) clearTimeout(timer)
       opts.signal?.removeEventListener('abort', onAbort)
       if (err) reject(err)
+      else if (opts.binaryStdout) resolvePromise({ stdout, stderr, bytes: Buffer.concat(chunks, byteCount) })
       else resolvePromise({ stdout, stderr })
     }
 
-    child.stdout!.setEncoding('utf8').on('data', (chunk: string) => {
-      if (opts.onStdout) opts.onStdout(chunk)
-      else stdout += chunk
-    })
+    const binary = opts.binaryStdout
+    if (binary) {
+      child.stdout!.on('data', (chunk: Buffer) => {
+        if (tooMuchOutput) return
+        byteCount += chunk.length
+        if (byteCount > binary.maxBytes) {
+          tooMuchOutput = true
+          chunks.length = 0
+          child.kill('SIGKILL')
+          return
+        }
+        chunks.push(chunk)
+      })
+    } else {
+      child.stdout!.setEncoding('utf8').on('data', (chunk: string) => {
+        if (opts.onStdout) opts.onStdout(chunk)
+        else stdout += chunk
+      })
+    }
     child.stderr!.setEncoding('utf8').on('data', (chunk: string) => {
       stderr = (stderr + chunk).slice(-MAX_STDERR)
     })
@@ -228,6 +254,7 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
     child.on('close', (code, signal) => {
       if (aborted) return finish(abortError())
       if (timedOut) return finish(new Error(`${name} svarade inte inom ${Math.round(opts.timeoutMs! / 1000)} s.`))
+      if (tooMuchOutput) return finish(new Error(`${name} gav mer data än väntat.`))
       if (code === 0) return finish()
       finish(new Error(stderrTail(stderr) || `${name} avslutades oväntat (${code ?? signal}).`))
     })
@@ -277,25 +304,35 @@ function positive(value: string | undefined): number | undefined {
   return value !== undefined && Number.isFinite(n) && n > 0 ? n : undefined
 }
 
-export async function probe(path: string): Promise<ProbeResult> {
+/**
+ * ffprobe's streams and format, plus what it logged at `loglevel`; failures become "<failure>: <why>" (e.g.
+ * "Kunde inte läsa videofilen: …").
+ */
+async function ffprobeJson(
+  path: string,
+  failure: string,
+  loglevel: 'error' | 'warning' = 'error'
+): Promise<{ info: FfprobeOutput; log: string }> {
   const { ffprobe } = await binaries()
-  let stdout: string
+  let result: RunResult
   try {
-    ;({ stdout } = await run(
+    result = await run(
       ffprobe,
-      ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', resolve(path)],
+      ['-v', loglevel, '-print_format', 'json', '-show_format', '-show_streams', resolve(path)],
       { timeoutMs: PROBE_TIMEOUT_MS }
-    ))
+    )
   } catch (err) {
-    throw new Error(`Kunde inte läsa videofilen: ${errorMessage(err)}`)
+    throw new Error(`${failure}: ${errorMessage(err)}`)
   }
-
-  let info: FfprobeOutput
   try {
-    info = JSON.parse(stdout) as FfprobeOutput
+    return { info: JSON.parse(result.stdout) as FfprobeOutput, log: result.stderr }
   } catch {
-    throw new Error('Kunde inte läsa videofilen: oväntat svar från ffprobe.')
+    throw new Error(`${failure}: oväntat svar från ffprobe.`)
   }
+}
+
+export async function probe(path: string): Promise<ProbeResult> {
+  const { info } = await ffprobeJson(path, 'Kunde inte läsa videofilen')
   const streams = info.streams ?? []
   const video = streams.find((s) => s.codec_type === 'video' && !s.disposition?.attached_pic)
   if (!video || !video.width || !video.height) throw new Error('Filen innehåller inget videospår.')
@@ -547,4 +584,255 @@ function abortedExport(): Error {
   const err = new Error('Exporten avbröts.')
   err.name = 'AbortError'
   return err
+}
+
+// ── Audio ────────────────────────────────────────────────────────────────────
+
+const AUDIO_TIMEOUT_MS = 60_000
+/** Far above anything these helpers make (300 s at 128 kb/s is under 5 MB); a guard, not a format limit. */
+const MAX_AUDIO_BYTES = 16 * 1024 * 1024
+/** Less than this may not hold a single MP3 frame. */
+const MIN_AUDIO_SECONDS = 0.05
+/** The longest stretch of a video's sound extractAudioPreview returns (base64 in an MCP reply grows fast). */
+export const MAX_AUDIO_PREVIEW_SECONDS = 300
+
+const NO_AUDIO = 'Filen innehåller inget ljud.'
+
+/** A failure as the user should read it: "no audio" and "ffmpeg is missing" as they are, the rest prefixed. */
+function audioFailure(err: unknown, prefix: string): Error {
+  const message = errorMessage(err)
+  // "Stream map '' matches no streams" may fall outside the stderr tail; the line after it names the map.
+  if (/matches no streams|value '0:a:0' for option 'map'/i.test(message)) return new Error(NO_AUDIO)
+  if (message === NOT_FOUND || message.startsWith('ffprobe hittades inte')) return new Error(message)
+  return new Error(`${prefix}: ${message}`)
+}
+
+/**
+ * `length` seconds of the file's first audio stream from `start`, as mono 44.1 kHz MP3 bytes. Rejects (from ffmpeg)
+ * when there is no audio stream; resolves with an empty buffer when the stretch lies past the end.
+ */
+async function encodeMp3(path: string, start: number, length: number, bitrate: string): Promise<Buffer> {
+  const { ffmpeg } = await binaries()
+  const { bytes } = await run(
+    ffmpeg,
+    [
+      '-nostdin', '-hide_banner', '-v', 'error',
+      '-ss', secs(start),
+      '-i', resolve(path),
+      '-t', secs(length),
+      '-map', '0:a:0', '-vn', '-sn', '-dn',
+      '-ac', '1', '-ar', '44100',
+      '-c:a', 'libmp3lame', '-b:a', bitrate,
+      // A bare MP3 stream: the file's own tags (title, artist, cover art…) are nobody's business at Venice or an
+      // agent, and leading MPEG frames are what every audio sniffer recognizes.
+      '-map_metadata', '-1', '-map_chapters', '-1', '-id3v2_version', '0', '-write_xing', '0',
+      '-f', 'mp3', 'pipe:1'
+    ],
+    { timeoutMs: AUDIO_TIMEOUT_MS, binaryStdout: { maxBytes: MAX_AUDIO_BYTES } }
+  )
+  return bytes ?? Buffer.alloc(0)
+}
+
+/**
+ * The reference window of an audio clip as Venice gets it: `length` seconds from `start`, mono 44.1 kHz MP3 at
+ * 128 kb/s, without the file's tags. The caller keeps the window inside the file (and within Venice's 2–15 s);
+ * a window past the end of the file rejects rather than sending silence.
+ */
+export async function encodeAudioClip(path: string, start: number, length: number): Promise<Buffer> {
+  if (!Number.isFinite(start) || !Number.isFinite(length) || length < MIN_AUDIO_SECONDS) {
+    throw new Error('Ogiltigt ljudutdrag: start och längd måste vara sekunder.')
+  }
+  let mp3: Buffer
+  try {
+    mp3 = await encodeMp3(path, Math.max(0, start), length, '128k')
+  } catch (err) {
+    throw audioFailure(err, 'Kunde inte förbereda ljudklippet')
+  }
+  if (!mp3.length) throw new Error('Ljudutdraget är tomt: det börjar efter ljudfilens slut.')
+  return mp3
+}
+
+/** Decodes the whole audio stream to find its length, for files whose headers don't say (some OGG and AAC). */
+async function decodedAudioDuration(path: string): Promise<number | undefined> {
+  const { ffmpeg } = await binaries()
+  let seconds: number | undefined
+  let pending = ''
+  const onStdout = (chunk: string): void => {
+    pending += chunk
+    let nl: number
+    // Whole lines only: a chunk may end in the middle of "out_time_us=12000000".
+    while ((nl = pending.indexOf('\n')) >= 0) {
+      const m = /^out_time_(?:us|ms)=(\d+)$/.exec(pending.slice(0, nl).trim())
+      pending = pending.slice(nl + 1)
+      if (m) seconds = Number(m[1]) / 1e6
+    }
+  }
+  try {
+    await run(
+      ffmpeg,
+      ['-nostdin', '-hide_banner', '-v', 'error', '-i', resolve(path), '-map', '0:a:0', '-progress', 'pipe:1',
+        '-nostats', '-f', 'null', '-'],
+      { timeoutMs: AUDIO_TIMEOUT_MS, onStdout }
+    )
+  } catch {
+    return undefined
+  }
+  return seconds !== undefined && seconds > 0 ? seconds : undefined
+}
+
+/**
+ * The length of an audio file (or of a video's sound) in seconds. Rejects when the file has no audio stream.
+ * Where the headers don't tell (a streamed Matroska file) or ffprobe only guesses from the bitrate (raw AAC,
+ * VBR MP3 without a Xing header: off by a factor of two or ten), the audio is decoded to measure it.
+ */
+export async function probeAudio(path: string): Promise<{ duration: number }> {
+  const { info, log } = await ffprobeJson(path, 'Kunde inte läsa ljudfilen', 'warning')
+  const audio = info.streams?.find((s) => s.codec_type === 'audio')
+  if (!audio) throw new Error(NO_AUDIO)
+  const guessed = /Estimating duration from bitrate/i.test(log)
+  const stated = guessed ? undefined : (positive(audio.duration) ?? positive(info.format?.duration))
+  const duration = stated ?? (await decodedAudioDuration(path)) ?? positive(info.format?.duration)
+  if (duration === undefined) throw new Error('Kunde inte avgöra hur långt ljudet är.')
+  return { duration }
+}
+
+/**
+ * Up to `length` seconds of a video's sound from `start` (kept inside the video, at most
+ * MAX_AUDIO_PREVIEW_SECONDS), as mono MP3 at 96 kb/s: enough to judge a voice, music or effects, small enough to
+ * hand an agent. Null when the video has no sound (or none in that stretch).
+ */
+export async function extractAudioPreview(videoPath: string, start: number, length: number): Promise<Buffer | null> {
+  if (!Number.isFinite(start) || !Number.isFinite(length) || length <= 0) {
+    throw new Error('Ogiltigt ljudutdrag: start och längd måste vara sekunder.')
+  }
+  const info = await probe(videoPath)
+  if (!info.hasAudio) return null
+  const from = clamp(start, 0, Math.max(0, info.duration - MIN_AUDIO_SECONDS))
+  const span = Math.min(length, info.duration - from, MAX_AUDIO_PREVIEW_SECONDS)
+  if (span < MIN_AUDIO_SECONDS) return null
+  let mp3: Buffer
+  try {
+    mp3 = await encodeMp3(videoPath, from, span, '96k')
+  } catch (err) {
+    const failure = audioFailure(err, 'Kunde inte ta ut ljudet ur videon')
+    if (failure.message === NO_AUDIO) return null
+    throw failure
+  }
+  return mp3.length ? mp3 : null
+}
+
+// ── Frames for reviews ───────────────────────────────────────────────────────
+
+/** One still of a video: `time` is the moment it shows (the asked-for time, kept inside the video). */
+export interface VideoFrame {
+  time: number
+  jpeg: Buffer
+}
+
+/** Per call; a review of a long film asks for a few per clip, never hundreds. */
+const MAX_FRAMES_PER_CALL = 200
+/** Small JPEGs; the guard only stops a runaway process. */
+const MAX_FRAME_BYTES = 8 * 1024 * 1024
+/** Frames are grabbed a few at a time: each is its own short ffmpeg run. */
+const FRAME_CONCURRENCY = 3
+
+/** Runs fn over items with at most `limit` running at once. */
+async function forEachLimited<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < items.length) await fn(items[next++])
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+}
+
+/** One JPEG from the first video stream (input/output options around `-i`); undefined when ffmpeg wrote none. */
+async function grabJpeg(
+  videoPath: string,
+  input: string[],
+  filters: string,
+  output: string[] = []
+): Promise<Buffer | undefined> {
+  const { ffmpeg } = await binaries()
+  const { bytes } = await run(
+    ffmpeg,
+    [
+      '-nostdin', '-hide_banner', '-v', 'error',
+      ...input,
+      '-i', resolve(videoPath),
+      ...output,
+      '-map', '0:V:0', '-an', '-sn', '-dn',
+      '-vf', filters,
+      '-frames:v', '1', '-c:v', 'mjpeg', '-q:v', '3',
+      '-f', 'image2pipe', 'pipe:1'
+    ],
+    { timeoutMs: IMAGE_TIMEOUT_MS, binaryStdout: { maxBytes: MAX_FRAME_BYTES } }
+  )
+  return bytes?.length ? bytes : undefined
+}
+
+/**
+ * The very last frame: the last two seconds are decoded and played backwards, so the first frame out is the
+ * last one in (scaled first, so only small frames are buffered). From the end of the container as a fallback,
+ * for files whose video stream doesn't say how long it is.
+ */
+async function lastFrameJpeg(videoPath: string, duration: number, scale: string): Promise<Buffer | undefined> {
+  const reversed = `${scale},reverse`
+  const fromStart = await grabJpeg(videoPath, ['-ss', secs(Math.max(0, duration - 2))], reversed).catch(() => undefined)
+  return fromStart ?? (await grabJpeg(videoPath, ['-sseof', '-3'], reversed).catch(() => undefined))
+}
+
+/** The first frame at or after `time` (seconds, already inside the video); at the very end, the last frame. */
+async function frameJpeg(
+  videoPath: string,
+  time: number,
+  info: ProbeResult,
+  scale: string
+): Promise<Buffer | undefined> {
+  // The last frame starts one frame before the end; from there on a seek finds no frame to show.
+  const frame = 1 / (info.fps || 24)
+  if (time >= info.duration - frame / 2) return lastFrameJpeg(videoPath, info.duration, scale)
+  // Input seeking is fast and, since ffmpeg decodes from the keyframe before it, frame accurate.
+  let jpeg = await grabJpeg(videoPath, ['-ss', secs(time)], scale).catch(() => undefined)
+  // A timestamp inside the last frame (a variable frame rate fooling the check above) finds nothing: that
+  // frame is the one showing then.
+  if (!jpeg && time > info.duration - 1) jpeg = await lastFrameJpeg(videoPath, info.duration, scale)
+  // Odd files can make input seeking miss; decoding from the start is slow but finds it.
+  if (!jpeg) jpeg = await grabJpeg(videoPath, [], scale, ['-ss', secs(time)]).catch(() => undefined)
+  return jpeg
+}
+
+/**
+ * Stills of a video as JPEG (at most `width` px wide, never upscaled, rotation applied) at the given times in
+ * seconds, in the order asked for. Times are kept inside the video: anything at or past the end gives the very
+ * last frame, which is what a continuation clip starts from. A frame that can't be extracted is left out (and
+ * logged); rejects when the video can't be read or not a single frame could be extracted.
+ */
+export async function extractFrames(videoPath: string, times: number[], width = 512): Promise<VideoFrame[]> {
+  if (!Array.isArray(times) || !times.length) return []
+  if (times.length > MAX_FRAMES_PER_CALL) throw new Error(`Högst ${MAX_FRAMES_PER_CALL} bildrutor åt gången.`)
+  if (times.some((t) => typeof t !== 'number' || !Number.isFinite(t))) {
+    throw new Error('Ogiltig tidpunkt för en bildruta: ange sekunder.')
+  }
+  const w = typeof width === 'number' && Number.isFinite(width) ? Math.round(clamp(width, 16, 4096)) : 512
+  // Quoted so the comma inside min() isn't read as a filter separator.
+  const scale = `scale='min(${w},iw)':-2`
+  const info = await probe(videoPath)
+  // Millisecond precision: finer than any frame, and the same request twice shares one grab.
+  const at = (t: number): number => Math.round(clamp(t, 0, info.duration) * 1000) / 1000
+  const grabbed = new Map<number, Buffer>()
+  await forEachLimited([...new Set(times.map(at))], FRAME_CONCURRENCY, async (time) => {
+    try {
+      const jpeg = await frameJpeg(videoPath, time, info, scale)
+      if (jpeg) grabbed.set(time, jpeg)
+      else console.warn(`No frame at ${time} s in ${videoPath}`)
+    } catch (err) {
+      console.warn(`Extracting the frame at ${time} s from ${videoPath} failed: ${errorMessage(err)}`)
+    }
+  })
+  const frames = times.map(at).flatMap((time) => {
+    const jpeg = grabbed.get(time)
+    return jpeg ? [{ time, jpeg }] : []
+  })
+  if (!frames.length) throw new Error('Kunde inte ta ut några bildrutor ur videon.')
+  return frames
 }

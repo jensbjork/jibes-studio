@@ -1,11 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { ShapeOutput, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js'
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js'
+import { z } from 'zod'
 import { paramsForSubmit } from '@shared/models'
 import type { AgentFormState, GenerationParams, PromptLanguage } from '@shared/types'
 import type { ApprovalStore } from '../approvals'
 import type { FormBridge } from '../bridge'
-import type { ImageBlock } from '../images'
+import type { AudioBlock, ImageBlock } from '../images'
 import { callService } from '../local-ipc'
 import { errorText } from '../studio'
 
@@ -20,6 +21,8 @@ export interface ToolContext {
   promptLanguage(): PromptLanguage
   /** The agent's name, as shown in the activity log and on approval requests. */
   clientName(): string
+  /** The client's protocol version knows audio content (2025-03-26 and later). */
+  audioContent(): boolean
   /** False once the session has ended or the connection was switched off; nothing is asked of the user then. */
   connected(): boolean
   /** `readOnly`: a call that changes nothing (a poll), which the log may fold into an earlier identical one. */
@@ -32,10 +35,18 @@ export interface LabeledImage {
   image: ImageBlock
 }
 
+export interface LabeledAudio {
+  /** Says what the sound is, e.g. "@Audio1 = Anna's voice, 0.0–8.0 s". */
+  label: string
+  audio: AudioBlock
+}
+
 export interface ToolOutput {
   /** Serialized as compact JSON. */
   data: unknown
   images?: LabeledImage[]
+  /** MCP audio content (MP3), each after its label; clients that can't play it simply ignore it. */
+  audio?: LabeledAudio[]
   /** The activity log's summary when it depends on the result (e.g. the asset's name). */
   summary?: string
   approvalId?: string
@@ -84,6 +95,15 @@ export function defineTool<S extends ZodRawShapeCompat>(
       })
       const content: CallToolResult['content'] = [{ type: 'text', text: JSON.stringify(out.data) }]
       for (const { label, image } of out.images ?? []) content.push({ type: 'text', text: label }, image)
+      const audio = out.audio ?? []
+      if (audio.length && !ctx.audioContent()) {
+        content.push({
+          type: 'text',
+          text: `(${audio.length === 1 ? 'One audio clip was' : `${audio.length} audio clips were`} left out: this MCP client's protocol version has no audio content.)`
+        })
+      } else {
+        for (const { label, audio: block } of audio) content.push({ type: 'text', text: label }, block)
+      }
       return { content }
     } catch (err) {
       const message = errorText(err)
@@ -140,3 +160,28 @@ export function priceValue(v: number | undefined): number | undefined {
 
 export const READ_ONLY: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
 export const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
+
+// ── Shared input shapes ──────────────────────────────────────────────────────
+
+/** One asset's references, as set_references, validate_prompt, add_segment and update_segment take them. */
+export const referenceItem = z.object({
+  asset_id: z.string().describe('An asset id from list_assets.'),
+  image_ids: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Only these photos, in this order (image_ids from list_assets/get_asset). All the asset's photos when left out; [] for none of them (e.g. to use only a character's voice)."
+    ),
+  audio_ids: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Only these audio clips of the asset (audio_ids from list_assets/get_asset), in this order, as @AudioN references. Only for models with audio_input."
+    ),
+  include_voice: z
+    .boolean()
+    .optional()
+    .describe(
+      "When no audio_ids are given: add the asset's first audio clip (a character's voice, an environment's soundscape). Default: true for characters when the model takes reference audio, false otherwise; a default voice shorter than 2 s is left out and reported in not_added_audio."
+    )
+})

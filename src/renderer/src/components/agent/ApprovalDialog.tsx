@@ -21,6 +21,16 @@ import { formatUsd, mediaUrl } from '../../lib/media'
 import { blockingPromptIssue, promptIssuesOf } from '../../lib/promptIssues'
 import ConsentDialog from '../ConsentDialog'
 import { KIND_TONE } from '../pickers/assetKinds'
+import AudioPlayButton from '../pickers/AudioPlayButton'
+import {
+  audioLabel,
+  audioLabelParts,
+  audioSourcesByPath,
+  formAudios,
+  windowLabel,
+  type AudioSource,
+  type FormAudio
+} from '../pickers/audioRefs'
 import Modal from '../pickers/Modal'
 import { effectiveParams, needsTake, parseConsent, pendingTake } from '../sequences/sequenceUtils'
 import { approvalOutcome, approvalTitle, expiresText } from './agentText'
@@ -96,6 +106,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const { models } = useModels()
   const assets = useAssets()
   const photos = useMemo(() => photoIndex(assets), [assets])
+  const voices = useMemo(() => audioSourcesByPath(assets), [assets])
   const { sequence, error: sequenceError } = useSequence(a.sequenceId)
   const now = useNow(15_000)
 
@@ -300,6 +311,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             clip={clip}
             models={models}
             photos={photos}
+            voices={voices}
             compact={clips.length > 1}
           />
         ))}
@@ -397,11 +409,14 @@ function ClipSummary({
   clip,
   models,
   photos,
+  voices,
   compact
 }: {
   clip: Clip
   models: VideoModel[]
   photos: ReadonlyMap<string, Photo>
+  /** Library audio clips by path, to name the voices and soundscapes that are sent. */
+  voices: ReadonlyMap<string, AudioSource>
   compact: boolean
 }) {
   const p = clip.params
@@ -416,6 +431,9 @@ function ClipSummary({
       label: photo ? `${photo.asset.name} (foto ${photo.number})` : (path.split('/').pop() ?? path)
     }
   })
+  // Only what is sent: paramsForSubmit already dropped audio the model doesn't take (and past its limit).
+  const audios = formAudios(p.referenceAudios ?? [], voices, Infinity, true)
+  const audioTargets: TokenTarget[] = audios.map((a) => ({ kind: a.source?.asset.kind, label: audioLabel(a) }))
   const settings = [
     model?.name ?? p.model,
     mode,
@@ -435,6 +453,7 @@ function ClipSummary({
         <PromptText
           prompt={p.prompt}
           targets={targets}
+          audioTargets={audioTargets}
           className={`overflow-y-auto rounded-md border border-line bg-raised px-3 py-2 ${compact ? 'max-h-32' : 'max-h-60'}`}
         />
       ) : (
@@ -456,6 +475,17 @@ function ClipSummary({
               <ImageTile key={path} path={path} badge={`@Image${i + 1}`} photo={photos.get(path)} />
             ))}
           </div>
+        </>
+      )}
+
+      {kind === 'reference-to-video' && audios.length > 0 && (
+        <>
+          <Label className="mt-3">Röster och ljud</Label>
+          <ul className="space-y-1">
+            {audios.map((a) => (
+              <AudioRow key={`${a.path}:${a.start}:${a.length}`} audio={a} />
+            ))}
+          </ul>
         </>
       )}
 
@@ -522,6 +552,24 @@ function ImageTile({ path, badge, photo }: { path: string; badge: string; photo?
         </span>
       )}
     </div>
+  )
+}
+
+/** One reference audio clip that will be sent: its token, whose voice or sound it is, the window, a play button. */
+function AudioRow({ audio }: { audio: FormAudio }) {
+  const token = `@Audio${audio.index}`
+  const { name, detail } = audioLabelParts(audio)
+  const tone = audio.source ? KIND_TONE[audio.source.asset.kind].text : 'text-text'
+  return (
+    <li className="flex items-center gap-2 rounded-md border border-line bg-raised px-2 py-1.5 text-[12px]">
+      <AudioPlayButton path={audio.path} start={audio.start} length={audio.length} label={`${token} (${name})`} />
+      <span className="rounded bg-black/40 px-1 text-[10px]">{token}</span>
+      <span className={`truncate font-medium ${tone}`} title={audio.path}>
+        {name}
+      </span>
+      <span className="truncate text-muted">{detail}</span>
+      <span className="ml-auto shrink-0 tabular-nums text-muted">{windowLabel(audio)}</span>
+    </li>
   )
 }
 

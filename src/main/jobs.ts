@@ -8,9 +8,17 @@ import { NEEDS_CONSENT, type ConsentRequest, type Generation, type GenerationPar
 import * as db from './db'
 import { extractThumbnail, ffmpegStatus, probe } from './ffmpeg'
 import { dayStamp, generationsDayDir, promptExcerpt, sequenceTakesDir, thumbsDir, timeStamp, tmpDir } from './paths'
-import { importExternalImages, placeFile } from './references'
+import { importExternalReferences, placeFile } from './references'
 import { getAcceptedConsents } from './settings'
-import { buildRequestBody, download, ensureImagesExist, NetworkError, VeniceClient, VeniceError } from './venice'
+import {
+  buildRequestBody,
+  download,
+  ensureImagesExist,
+  NetworkError,
+  resolveReferenceAudios,
+  VeniceClient,
+  VeniceError
+} from './venice'
 
 const POLL_INTERVAL_MS = 5000
 /** Longest pause between polls while Venice can't be reached. */
@@ -55,6 +63,28 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * The params exactly as a paid submission sends them, or a Swedish refusal: the prompt's @ImageN and @AudioN
+ * references are checked against what the caller has (so a token past the model's limit is reported as such),
+ * tokens are canonicalised, inputs the model doesn't use are dropped (paramsForSubmit), and every reference
+ * audio clip is measured and its window filled in, so that a clip shorter than 2 s or clips longer than 15 s
+ * together — which Venice would refuse after the upload — are refused here. Nothing is copied or sent.
+ * JobManager.submit runs it on every submission; callers that quote first (a sequence take) run it before the
+ * quote too.
+ */
+export async function prepareSubmission(params: GenerationParams): Promise<GenerationParams> {
+  const problem = blockingPromptError(params)
+  if (problem) throw new Error(problem)
+  const checked = paramsForSubmit(canonicalizeParams(params))
+  if (!checked.referenceAudios?.length) return checked
+  // "The clip no longer exists" says more than ffprobe failing to open it.
+  ensureImagesExist(checked)
+  const measured = await resolveReferenceAudios(checked)
+  const late = blockingPromptError(measured)
+  if (late) throw new Error(late)
+  return measured
 }
 
 /** The folder of the sequence a segment belongs to; undefined if the segment is gone or the sequence has none. */
@@ -140,18 +170,17 @@ export class JobManager extends EventEmitter<JobEvents> {
 
   /**
    * Sends a paid generation. Every submission passes here (the Generate view, a segment's take, "generate
-   * all", an agent's approved request), so this is where the prompt's @ImageN references are checked against
-   * what is actually sent: a wrong one would spend money on a video made from the wrong picture, or none.
+   * all", an agent's approved request), so this is where the prompt's @ImageN and @AudioN references and the
+   * reference audio windows are checked against what is actually sent (prepareSubmission): a wrong one would
+   * spend money on a video made from the wrong picture or voice, or none.
    */
   async submit(params: GenerationParams, opts: SubmitOptions = {}): Promise<Generation> {
-    // Checked on the params as the caller has them, before image inputs the mode doesn't use are dropped, so
-    // a token pointing past the model's limit is reported as such. Refused before anything is copied or sent.
+    // The prompt is checked at once, before anything is copied or sent; measuring audio clips takes a moment.
     const problem = blockingPromptError(params)
     if (problem) throw new Error(problem)
-    const checked = paramsForSubmit(canonicalizeParams(params))
     this.submitting++
     try {
-      return await this.queue(checked, opts)
+      return await this.queue(await prepareSubmission(params), opts)
     } finally {
       this.submitting--
     }
@@ -189,8 +218,8 @@ export class JobManager extends EventEmitter<JobEvents> {
     // The upload below can take seconds; an asset renamed meanwhile (or "Städa upp") moves its pictures,
     // and the row written afterwards must point at where they are now (db.followRewrites).
     const mark = db.rewriteMark()
-    // Outside images are copied into Referensbilder first, so the stored params point at the library copies.
-    params = await importExternalImages(params)
+    // Outside images and audio are copied into Referensbilder first, so the stored params point at the copies.
+    params = await importExternalReferences(params)
     const body = await buildRequestBody(params)
     if (params.model.includes('seedance') && getAcceptedConsents().seedance) {
       body.consents = {
@@ -219,7 +248,9 @@ export class JobManager extends EventEmitter<JobEvents> {
       queueId: res.queue_id,
       downloadUrl: res.download_url,
       quote: opts.quote,
-      segmentId: opts.segmentId
+      segmentId: opts.segmentId,
+      reviewCount: 0,
+      agentReviewCount: 0
     }
     try {
       db.insertGeneration(g)

@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { Asset } from '@shared/types'
-import { ASSET_COPY, ASSET_FOLDER, swedishList } from '../../lib/assets'
+import { ASSET_COPY, ASSET_FOLDER, assetAudio, audioCountLabel, swedishList } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
 import OpenFolderButton from '../library/OpenFolderButton'
 import AssetAvatar from './AssetAvatar'
 import AssetImages from './AssetImages'
+import AssetSounds from './AssetSounds'
 import DefaultOutfitPicker from './DefaultOutfitPicker'
-import { droppedPaths, imageCountLabel, isFileDrag } from './imageUtils'
+import { droppedPaths, fileDragKinds, imageCountLabel, isFileDrag, type FileDragKinds } from './imageUtils'
 import { useAssetDraft, type SaveState } from './useAssetDraft'
 
 interface Props {
@@ -20,10 +21,13 @@ interface Props {
   /** Focus and select the name, e.g. right after creating the asset. */
   autoFocusName: boolean
   /** Images currently being copied into the library. */
-  adding: number
+  addingImages: number
+  /** Sound clips currently being copied into the library. */
+  addingAudio: number
   navigate: Navigate
   onUpdated: (a: Asset) => void
-  onAddImages: (paths: string[]) => void
+  /** Files dropped or picked: photos, and sound clips for the kinds that have them. */
+  onAddFiles: (paths: string[]) => void
   onDelete: () => Promise<void>
   onError: (message: string) => void
 }
@@ -31,8 +35,9 @@ interface Props {
 const createdFormat = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })
 
 /**
- * Name, description, actions and reference images of one character, environment or outfit (plus a
- * character's default outfit, and which characters wear an outfit by default). Mount with key={asset.id}.
+ * Name, description, actions and reference images of one character, environment, outfit or pose (plus a
+ * character's default outfit and voice, an environment's sound, which characters wear an outfit by default
+ * and how a pose is used). Mount with key={asset.id}.
  */
 export default function AssetEditor({
   asset,
@@ -40,10 +45,11 @@ export default function AssetEditor({
   outfitsLoaded,
   wearers,
   autoFocusName,
-  adding,
+  addingImages,
+  addingAudio,
   navigate,
   onUpdated,
-  onAddImages,
+  onAddFiles,
   onDelete,
   onError
 }: Props) {
@@ -51,9 +57,12 @@ export default function AssetEditor({
   const draft = useAssetDraft(asset, onUpdated)
   const nameRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
-  const [fileOver, setFileOver] = useState(false)
+  const [fileOver, setFileOver] = useState<FileDragKinds>()
   const [copied, setCopied] = useState(false)
+  const [audioBusy, setAudioBusy] = useState(false)
   const imageCount = asset.images.length
+  const audioCount = assetAudio(asset).length
+  const audioLabel = audioCountLabel(asset.kind, audioCount)
   const isCharacter = asset.kind === 'character'
   const outfit = isCharacter && draft.defaultOutfitId ? outfits.find((o) => o.id === draft.defaultOutfitId) : undefined
 
@@ -89,11 +98,12 @@ export default function AssetEditor({
     }
   }
 
-  // Files can be dropped anywhere in the editor; the image grid lights up as the target.
+  // Files can be dropped anywhere in the editor; photos go to the images and sound to the clips, and each
+  // section lights up for what is being dragged.
   const onDragEnter = (e: DragEvent) => {
     if (!isFileDrag(e)) return
     dragDepth.current += 1
-    setFileOver(true)
+    if (dragDepth.current === 1) setFileOver(fileDragKinds(e))
   }
   const onDragOver = (e: DragEvent) => {
     if (!isFileDrag(e)) return
@@ -103,22 +113,22 @@ export default function AssetEditor({
   const onDragLeave = (e: DragEvent) => {
     if (!isFileDrag(e)) return
     dragDepth.current = Math.max(0, dragDepth.current - 1)
-    if (dragDepth.current === 0) setFileOver(false)
+    if (dragDepth.current === 0) setFileOver(undefined)
   }
   const onDrop = (e: DragEvent) => {
     if (!isFileDrag(e)) return
     e.preventDefault()
     dragDepth.current = 0
-    setFileOver(false)
+    setFileOver(undefined)
     const paths = droppedPaths(e)
-    if (paths.length) onAddImages(paths)
+    if (paths.length) onAddFiles(paths)
   }
 
-  // Generera reads the asset from the library, so photos still being copied and a just-picked outfit (or
-  // name) still being saved must land first, or the form would get the asset as it was. A click meanwhile
-  // is kept and carried out once they have.
+  // Generera reads the asset from the library, so photos and clips still being copied, a just-picked outfit
+  // (or name) and a just-moved voice window still being saved must land first, or the form would get the
+  // asset as it was. A click meanwhile is kept and carried out once they have.
   const [generateWaiting, setGenerateWaiting] = useState(false)
-  const settling = adding > 0 || draft.state.kind === 'saving'
+  const settling = addingImages > 0 || addingAudio > 0 || audioBusy || draft.state.kind === 'saving'
   useEffect(() => {
     if (!generateWaiting || settling) return
     setGenerateWaiting(false)
@@ -127,7 +137,8 @@ export default function AssetEditor({
 
   const generateTitle = !imageCount
     ? 'Lägg till minst en bild först'
-    : `Öppnar Generera i referensläget med ${copy.possessive} bilder${outfit ? ` och ${outfit.name}` : ''}`
+    : `Öppnar Generera i referensläget med ${copy.possessive} bilder${outfit ? ` och ${outfit.name}` : ''}` +
+      (isCharacter && audioCount ? ' – och rösten, om modellen tar emot ljud' : '')
 
   return (
     <div
@@ -160,7 +171,8 @@ export default function AssetEditor({
                 className="-ml-2 w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-xl font-semibold outline-none hover:border-line focus:border-muted focus:bg-raised"
               />
               <p className="mt-0.5 text-muted">
-                {imageCountLabel(imageCount)} · Skapad {createdFormat.format(asset.createdAt)}
+                {imageCountLabel(imageCount)}
+                {audioLabel && audioCount > 0 && ` · ${audioLabel}`} · Skapad {createdFormat.format(asset.createdAt)}
               </p>
             </div>
           </header>
@@ -192,6 +204,7 @@ export default function AssetEditor({
               <DeleteControl
                 name={draft.name.trim() || asset.name}
                 imageCount={imageCount}
+                audioLabel={audioCount > 0 ? audioLabel : undefined}
                 note={
                   wearers.length
                     ? `${swedishList(wearers.map((c) => c.name))} har den som standardklädsel och blir utan.`
@@ -238,6 +251,13 @@ export default function AssetEditor({
             </section>
           )}
 
+          {copy.usage && (
+            <section className="mt-6 rounded-lg border border-line bg-panel px-4 py-3">
+              <h2 className="mb-1 font-medium">Så används {copy.definite}</h2>
+              <p className="text-[12px] leading-relaxed text-muted">{copy.usage}</p>
+            </section>
+          )}
+
           {asset.kind === 'outfit' && (
             <Wearers
               wearers={wearers}
@@ -248,13 +268,27 @@ export default function AssetEditor({
           <section className="mt-8">
             <AssetImages
               asset={asset}
-              adding={adding}
-              fileOver={fileOver}
-              onAdd={onAddImages}
+              adding={addingImages}
+              fileOver={!!fileOver?.image}
+              onAdd={onAddFiles}
               onUpdated={onUpdated}
               onError={onError}
             />
           </section>
+
+          {copy.audio && (
+            <section className="mt-10">
+              <AssetSounds
+                asset={asset}
+                adding={addingAudio}
+                fileOver={!!fileOver?.audio}
+                onAdd={onAddFiles}
+                onUpdated={onUpdated}
+                onError={onError}
+                onBusyChange={setAudioBusy}
+              />
+            </section>
+          )}
         </div>
       </div>
     </div>
@@ -290,6 +324,13 @@ function Wearers({ wearers, onOpen }: { wearers: Asset[]; onOpen: (characterId: 
   )
 }
 
+/** " och 3 bilder", ", 3 bilder och 1 röstklipp", " och 1 röstklipp" or "": what goes with the asset. */
+function deletedFiles(imageCount: number, audioLabel: string | undefined): string {
+  const files = [imageCount ? imageCountLabel(imageCount) : undefined, audioLabel].filter(Boolean) as string[]
+  if (!files.length) return ''
+  return files.length === 1 ? ` och ${files[0]}` : `, ${swedishList(files)}`
+}
+
 function SaveIndicator({ state }: { state: SaveState }) {
   if (state.kind === 'saving') return <span className="text-[11px] text-muted">Sparar…</span>
   if (state.kind === 'saved') return <span className="text-[11px] text-muted">Sparat</span>
@@ -307,11 +348,14 @@ function SaveIndicator({ state }: { state: SaveState }) {
 function DeleteControl({
   name,
   imageCount,
+  audioLabel,
   note,
   onConfirm
 }: {
   name: string
   imageCount: number
+  /** "2 röstklipp", when the asset has sound clips. */
+  audioLabel?: string
   /** A consequence worth knowing before confirming, shown under the question. */
   note?: string
   onConfirm: () => Promise<void>
@@ -348,8 +392,11 @@ function DeleteControl({
 
   return (
     <div className="flex items-center gap-2">
-      <span className={`text-muted ${note ? 'max-w-xs' : ''}`} title="Bilderna flyttas till papperskorgen – utom de som genereringar eller klipp använder, de flyttas till Referensbilder.">
-        Radera ”{name}”{imageCount ? ` och ${imageCountLabel(imageCount)}` : ''}?
+      <span
+        className={`text-muted ${note ? 'max-w-xs' : ''}`}
+        title={`${audioLabel ? 'Bilderna och ljudklippen' : 'Bilderna'} flyttas till papperskorgen – utom de som genereringar eller klipp använder, de flyttas till Referensbilder.`}
+      >
+        Radera ”{name}”{deletedFiles(imageCount, audioLabel)}?
         {note && <span className="mt-0.5 block text-[11px] leading-snug">{note}</span>}
       </span>
       <button

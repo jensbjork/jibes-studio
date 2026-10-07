@@ -60,7 +60,14 @@ export function CopyButton({ text, disabled }: { text: string; disabled?: boolea
 }
 
 /** Two-step delete: the first click arms it, the second deletes. Disarms itself after a few seconds. */
-export function ConfirmDeleteButton({ onConfirm }: { onConfirm: () => void }) {
+export function ConfirmDeleteButton({
+  onConfirm,
+  confirmLabel = 'Radera prompten'
+}: {
+  onConfirm: () => void
+  /** The second step's button. */
+  confirmLabel?: string
+}) {
   const [armed, setArmed] = useState(false)
 
   useEffect(() => {
@@ -89,7 +96,7 @@ export function ConfirmDeleteButton({ onConfirm }: { onConfirm: () => void }) {
         }}
         className="rounded-md bg-accent/15 px-2.5 py-1.5 font-medium text-accent transition hover:bg-accent hover:text-white"
       >
-        Radera prompten
+        {confirmLabel}
       </button>
     </span>
   )

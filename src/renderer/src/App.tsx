@@ -121,7 +121,8 @@ function Workspace() {
       />
       <main className="min-w-0 flex-1">
         {view === 'generate' && <GenerateView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />}
-        {/* Keyed so Karaktärer, Miljöer and Kläder each start with their own selection, search and drafts. */}
+        {/* Keyed so Karaktärer, Miljöer, Kläder and Poser each start with their own selection, search, drafts
+            and sound players. */}
         {assetKind && (
           <AssetsView
             key={assetKind}

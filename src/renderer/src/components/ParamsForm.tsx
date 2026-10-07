@@ -12,19 +12,24 @@ import {
 import {
   DEFAULT_MODEL,
   KINDS,
+  MAX_REFERENCE_AUDIO_SECONDS,
   PREFERRED,
   audioForModel,
   kindOfModelId,
+  maxReferenceAudios,
   maxReferenceImages,
+  paramsForSubmit,
   pickOption,
+  supportsAudioInput,
   type Kind
 } from '@shared/models'
-import { blockingContinuationError, blockingPromptError } from '@shared/prompt-refs'
+import { blockingContinuationError, blockingPromptError, validationContext } from '@shared/prompt-refs'
 import {
   ASSET_KINDS,
   type Asset,
   type AssetKind,
   type GenerationParams,
+  type ReferenceAudio,
   type SavedPrompt,
   type VideoModel
 } from '@shared/types'
@@ -32,16 +37,18 @@ import { ASSET_COPY, ASSET_VIEW } from '../lib/assets'
 import { useAssets, usePrompts } from '../lib/hooks'
 import type { Navigate } from '../lib/navigation'
 import ImageInput, { type ImageCaption } from './ImageInput'
-import AssetChips from './pickers/AssetChips'
+import AssetChips, { posePeopleOf } from './pickers/AssetChips'
 import AssetPicker from './pickers/AssetPicker'
+import AudioChips from './pickers/AudioChips'
+import AudioPicker from './pickers/AudioPicker'
 import { KIND_TONE, PICKER_COPY } from './pickers/assetKinds'
 import {
-  addAsset,
+  addAssetToForm,
   addPaths,
   assetRefsOf,
   assetsByPath,
   outfitsWornBy,
-  remapPromptImages,
+  remapPromptReferences,
   removeAsset,
   resolvePairings,
   sameList,
@@ -49,9 +56,24 @@ import {
   type AssetRef,
   type RefsChange
 } from './pickers/assetRefs'
+import {
+  addAudios,
+  audioIndicesOf,
+  audioSourcesByPath,
+  clipsOf,
+  fitsAudio,
+  formAudios,
+  referenceAudioOf,
+  removeAudiosOf,
+  sameAudios,
+  totalSeconds,
+  type AudiosChange,
+  type FormAudio
+} from './pickers/audioRefs'
 import Popover from './pickers/Popover'
 import PromptLibraryPicker from './pickers/PromptLibraryPicker'
 import SavePromptDialog from './pickers/SavePromptDialog'
+import { formatClipSeconds } from './pickers/text'
 import NegativePromptIssues, { negativePromptIssues } from './prompt/NegativePromptIssues'
 import PromptEditor, { type PromptEditorHandle } from './prompt/PromptEditor'
 import { promptReferences, type AssetGroup, type ReferenceGroup } from './prompt/promptText'
@@ -77,11 +99,14 @@ interface Props {
   navigate?: Navigate
 }
 
-/** The open popover: the prompt library, a start/end image picker, or the reference picker on a kind's tab. */
-type Picker = 'library' | 'start' | 'end' | `references:${AssetKind}`
+/**
+ * The open popover: the prompt library, a start/end image picker, the reference picker on a kind's tab, or the
+ * audio picker.
+ */
+type Picker = 'library' | 'start' | 'end' | 'audio' | `references:${AssetKind}`
 
 /** Tab order for a start/end image picker when the image isn't a library photo: environments make good opening frames. */
-const SINGLE_IMAGE_KINDS: readonly AssetKind[] = ['environment', 'character', 'outfit']
+const SINGLE_IMAGE_KINDS: readonly AssetKind[] = ['environment', 'character', 'outfit', 'pose']
 
 const select = 'w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted'
 const smallButton =
@@ -93,28 +118,72 @@ export function unavailableModel(model: VideoModel | undefined): string | undefi
 }
 
 /**
- * Why the params can't be submitted yet, or undefined if they can. Includes what is wrong with the @ImageN
- * references of the prompt and the negative prompt: the main process refuses such params with the same words.
- * `continuing`: a sequence clip that continues from the previous clip, generated image-to-video from that
- * clip's last frame (so it needs no start image of its own) and without reference images.
+ * Why the params can't be submitted yet, or undefined if they can. Includes what is wrong with the @ImageN and
+ * @AudioN references of the prompt and the negative prompt, and with the audio clips themselves (2–15 s each,
+ * 15 s together): the main process refuses such params with the same words. `continuing`: a sequence clip that
+ * continues from the previous clip, generated image-to-video from that clip's last frame (so it needs no start
+ * image of its own) and without reference images or audio.
  */
 export function missingInput(params: GenerationParams, continuing = false): string | undefined {
   const kind = kindOfModelId(params.model)
   if (!params.prompt.trim()) return 'Skriv en prompt'
   if (continuing) return blockingContinuationError(params)?.replace(/\.\s*$/, '')
   if (kind === 'image-to-video' && !params.startImage) return 'Lägg till en startbild'
-  if (kind === 'reference-to-video' && !params.referenceImages?.length) return 'Lägg till minst en referensbild'
+  if (kind === 'reference-to-video' && !params.referenceImages?.length) {
+    // Venice refuses reference audio on its own, which is worth saying when a voice is all there is.
+    return paramsForSubmit(params).referenceAudios?.length
+      ? 'Lägg till minst en referensbild – ljud skickas bara tillsammans med en bild'
+      : 'Lägg till minst en referensbild'
+  }
   return blockingPromptError(params)?.replace(/\.\s*$/, '')
 }
 
-/** What a library asset among the references is called in the prompt, with the clothes a character wears. */
-function referenceGroupOf(entry: AssetRef, assetRefs: AssetRef[], pairings: ReadonlyMap<string, string>): AssetGroup {
+/**
+ * What a library asset among the references is called in the prompt: with a character's voice and the clothes
+ * it wears, an environment's sound, or for a pose the characters that take it.
+ */
+function referenceGroupOf(
+  entry: AssetRef,
+  assetRefs: AssetRef[],
+  pairings: ReadonlyMap<string, string>,
+  sentAudios: readonly FormAudio[],
+  posePeople: Readonly<Record<string, string[] | undefined>>
+): AssetGroup {
   const { asset, indices } = entry
   const outfits =
     asset.kind === 'character'
       ? outfitsWornBy(asset.id, assetRefs, pairings).map((w) => ({ name: w.asset.name, indices: w.indices }))
       : undefined
-  return { asset, name: asset.name, indices, outfits }
+  const audios = audioIndicesOf(sentAudios, asset.id)
+  const people =
+    asset.kind === 'pose'
+      ? posePeopleOf(
+          asset.id,
+          assetRefs.filter((r) => r.asset.kind === 'character'),
+          posePeople
+        ).map((p) => ({ name: p.asset.name, indices: p.indices }))
+      : undefined
+  return {
+    asset,
+    name: asset.name,
+    indices,
+    kind: asset.kind,
+    ...(audios.length ? { audios } : {}),
+    ...(outfits ? { outfits } : {}),
+    ...(people ? { people } : {})
+  }
+}
+
+/**
+ * A reference model that takes audio, to offer when the current one doesn't: the app's default reference model,
+ * else the first one (by name) that does.
+ */
+function audioModelOf(models: readonly VideoModel[]): VideoModel | undefined {
+  const usable = models.filter((m) => !m.offline && supportsAudioInput(m))
+  return (
+    usable.find((m) => m.id === DEFAULT_MODEL['reference-to-video']) ??
+    [...usable].sort((a, b) => a.name.localeCompare(b.name))[0]
+  )
 }
 
 /** The model to use for a mode: the same family if it exists there, then the app default, then any online one. */
@@ -152,10 +221,13 @@ export default function ParamsForm({
   const characterButton = useRef<HTMLButtonElement>(null)
   const environmentButton = useRef<HTMLButtonElement>(null)
   const outfitButton = useRef<HTMLButtonElement>(null)
+  const poseButton = useRef<HTMLButtonElement>(null)
+  const audioButton = useRef<HTMLButtonElement>(null)
   const kindButtons: Record<AssetKind, RefObject<HTMLButtonElement | null>> = {
     character: characterButton,
     environment: environmentButton,
-    outfit: outfitButton
+    outfit: outfitButton,
+    pose: poseButton
   }
   const referenceKind = picker?.startsWith('references:')
     ? (picker.slice('references:'.length) as AssetKind)
@@ -202,10 +274,9 @@ export default function ParamsForm({
 
   const supportsEndImage = /first-last-frame|transition/.test(params.model)
 
-  // ── Library assets (characters, environments, outfits) ───────────────────────
+  // ── Library assets (characters, environments, outfits, poses) ────────────────
 
   const byPath = useMemo(() => assetsByPath(assets), [assets])
-  const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
   const outfits = useMemo(() => assets.filter((a) => a.kind === 'outfit'), [assets])
 
   const caption = (path: string): ImageCaption | undefined => {
@@ -251,37 +322,117 @@ export default function ParamsForm({
     })
   }, [outfitsInForm])
 
+  // ── Reference audio (voices, sounds; @AudioN) ────────────────────────────────
+
+  const audioRefs = params.referenceAudios ?? []
+  const audioSupported = kind === 'reference-to-video' && supportsAudioInput(model ?? params.model)
+  const maxAudios = maxReferenceAudios(params.model)
+  const audioSources = useMemo(() => audioSourcesByPath(assets), [assets])
+  const audioKey = audioRefs.map((a) => `${a.path}\u0000${a.start}\u0000${a.length}`).join('\n')
+  const audios = useMemo(
+    () => formAudios(audioRefs, audioSources, maxAudios, audioSupported),
+    [audioKey, audioSources, maxAudios, audioSupported]
+  )
+  const sentAudios = useMemo(() => audios.filter((a) => a.sent), [audios])
+  const audioSeconds = totalSeconds(audioRefs, audioSources)
+  const audioModel = useMemo(() => audioModelOf(models), [models])
+
   /**
-   * Sets the reference images. A removed or swapped picture shifts the ones after it, so the prompt's
-   * @ImageN tokens follow their pictures in the same update (see remapPromptImages); `swap` names the
-   * outfits taken off and the one put on.
+   * Sets the reference images and audio. A removed or swapped picture (or clip) shifts the ones after it, so the
+   * prompt's @ImageN and @AudioN tokens follow them in the same update (see remapPromptReferences); `swap` names
+   * the outfits taken off and the one put on.
    */
-  const setRefs = (next: string[], swap?: { from: Asset[]; to: Asset | null }) => {
-    if (sameList(next, refs)) return
+  const setReferences = (
+    next: { refs?: string[]; audios?: ReferenceAudio[] },
+    swap?: { from: Asset[]; to: Asset | null }
+  ) => {
+    const nextRefs = next.refs ?? refs
+    const nextAudios = next.audios ?? audioRefs
+    if (sameList(nextRefs, refs) && sameAudios(nextAudios, audioRefs)) return
+    const images = { before: refs, after: nextRefs }
+    const sounds = { before: audioRefs, after: nextAudios }
     const before = params.prompt
-    const prompt = remapPromptImages(before, refs, next, swap)
+    const prompt = remapPromptReferences(before, images, sounds, swap)
     if (prompt !== before) ownPrompt.current = prompt
-    // The negative prompt may name pictures too; its tokens follow them the same way (no outfit swap there:
-    // that renames the outfit in the description, which belongs to the prompt).
+    // The negative prompt may name pictures and clips too; its tokens follow them the same way (no outfit swap
+    // there: that renames the outfit in the description, which belongs to the prompt).
     const negativeBefore = params.negativePrompt
-    const negative = negativeBefore && remapPromptImages(negativeBefore, refs, next)
+    const negative = negativeBefore && remapPromptReferences(negativeBefore, images, sounds)
     setParams((p) => ({
       ...p,
-      referenceImages: next,
+      referenceImages: nextRefs,
+      referenceAudios: nextAudios.length ? nextAudios : undefined,
       ...(p.prompt === before ? { prompt } : {}),
       ...(negativeBefore && p.negativePrompt === negativeBefore ? { negativePrompt: negative || undefined } : {})
     }))
   }
+
+  const setRefs = (next: string[], swap?: { from: Asset[]; to: Asset | null }) => setReferences({ refs: next }, swap)
 
   const applyRefs = ({ refs: next, note }: RefsChange, swap?: { from: Asset[]; to: Asset | null }) => {
     setRefs(next, swap)
     setRefNote(note)
   }
 
+  const applyAudios = ({ audios: next, note }: AudiosChange) => {
+    setReferences({ audios: next })
+    setRefNote(note)
+  }
+
+  /** Adds an asset's photos (a character's default outfit and, when the model takes audio, its voice too). */
+  const addAssetRefs = (a: Asset) => {
+    const change = addAssetToForm({ referenceImages: refs, referenceAudios: audioRefs }, a, assets, params.model)
+    setReferences({ refs: change.referenceImages, audios: change.referenceAudios ?? [] })
+    setRefNote(change.note)
+  }
+
+  /** ✕ on a chip: the asset's photos go, and its voice or sound with them. */
   const removeAssetRefs = (a: Asset) => {
-    setRefs(removeAsset(refs, a))
+    setReferences({ refs: removeAsset(refs, a), audios: removeAudiosOf(audioRefs, a) })
     setRefNote(undefined)
   }
+
+  /** "Ta med rösten" on a chip: the asset's first clip in, or all of its clips out. */
+  const toggleAssetAudio = (a: Asset, include: boolean) => {
+    const first = clipsOf(a)[0]
+    if (!include) {
+      setReferences({ audios: removeAudiosOf(audioRefs, a) })
+      setRefNote(undefined)
+    } else if (first) applyAudios(addAudios(audioRefs, [referenceAudioOf(first)], audioSources, maxAudios))
+  }
+
+  const assetAudioFits = (a: Asset) => {
+    const first = clipsOf(a)[0]
+    return first ? fitsAudio(audioRefs, referenceAudioOf(first), audioSources, maxAudios) : { fits: false }
+  }
+
+  /** Takes clips (1-based @AudioN numbers) out of the form; their tokens follow. */
+  const removeAudios = (indices: readonly number[]) => {
+    setReferences({ audios: audioRefs.filter((_, i) => !indices.includes(i + 1)) })
+    setRefNote(undefined)
+  }
+
+  // Which characters each pose applies to ("gäller"): form state only, like "bärs av"; it shapes the text a
+  // pose chip inserts. undefined: every character in the form, also ones added later.
+  const [posePeople, setPosePeople] = useState<Record<string, string[] | undefined>>({})
+  const posesInForm = [
+    ...new Set(
+      refs.flatMap((p) => {
+        const a = byPath.get(p)
+        return a?.kind === 'pose' ? [a.id] : []
+      })
+    )
+  ]
+    .sort()
+    .join()
+  useEffect(() => {
+    const present = new Set(posesInForm.split(','))
+    setPosePeople((chosen) => {
+      const ids = Object.keys(chosen)
+      const keep = ids.filter((id) => present.has(id))
+      return keep.length === ids.length ? chosen : Object.fromEntries(keep.map((id) => [id, chosen[id]]))
+    })
+  }, [posesInForm])
 
   const swapOutfitOf = (character: Asset, outfit: Asset | null) => {
     const wearing = outfitsWornBy(character.id, assetRefs, pairings).map((r) => r.asset)
@@ -299,15 +450,22 @@ export default function ParamsForm({
     () => (kind === 'reference-to-video' ? promptReferences(refs, byPath, maxRefs) : []),
     [kind, refs.join('\n'), byPath, maxRefs]
   )
-  const groups = assetRefs.map((entry) => referenceGroupOf(entry, assetRefs, pairings))
+  const groups = assetRefs.map((entry) => referenceGroupOf(entry, assetRefs, pairings, sentAudios, posePeople))
 
-  /** "@" menu → "Lägg till från biblioteket": adds the photos and tells the editor how to name the asset. */
+  /**
+   * "@" menu → "Lägg till från biblioteket": adds the photos (and a character's voice) and tells the editor how
+   * to name the asset with its new @ImageN (and @AudioN) numbers.
+   */
   const addFromLibrary = (asset: Asset): ReferenceGroup | undefined => {
-    const change = addAsset(refs, asset, assetById, maxRefs)
-    applyRefs(change)
-    const after = assetRefsOf(change.refs, byPath, maxRefs)
+    const change = addAssetToForm({ referenceImages: refs, referenceAudios: audioRefs }, asset, assets, params.model)
+    setReferences({ refs: change.referenceImages, audios: change.referenceAudios ?? [] })
+    setRefNote(change.note)
+    const after = assetRefsOf(change.referenceImages, byPath, maxRefs)
     const entry = after.find((r) => r.asset.id === asset.id)
-    return entry && referenceGroupOf(entry, after, resolvePairings(after, wornBy))
+    const audiosAfter = formAudios(change.referenceAudios ?? [], audioSources, maxAudios, audioSupported).filter(
+      (a) => a.sent
+    )
+    return entry && referenceGroupOf(entry, after, resolvePairings(after, wornBy), audiosAfter, posePeople)
   }
 
   const manageKind = navigate
@@ -436,15 +594,16 @@ export default function ParamsForm({
   }, [!!params.negativePrompt])
   const negativeRef = useRef<HTMLTextAreaElement>(null)
   const negativeIssuesId = useId()
-  // @ImageN mistakes in the negative prompt block generating as well.
-  const negativeHasError = negativePromptIssues(
-    params.negativePrompt ?? '',
-    references.length,
-    kind,
-    maxRefs,
-    continuing
-  ).some((i) => i.severity === 'error')
+  // What both prompts are checked against: exactly what the main process checks before sending.
+  const checks = validationContext(params, { continuing })
+  // @ImageN and @AudioN mistakes in the negative prompt block generating as well.
+  const negativeHasError = negativePromptIssues(params.negativePrompt ?? '', checks).some((i) => i.severity === 'error')
   const switchToReference = kinds.includes('reference-to-video') ? () => switchKind('reference-to-video') : undefined
+  // Offered when the reference model takes no audio but the form has (or names) some.
+  const switchToAudioModel =
+    kind === 'reference-to-video' && !audioSupported && audioModel && audioModel.id !== params.model
+      ? () => set('model', audioModel.id)
+      : undefined
 
   return (
     <div className="space-y-5">
@@ -552,7 +711,7 @@ export default function ParamsForm({
             open={!!referenceKind}
             onClose={closePicker}
             align="end"
-            width={340}
+            width={380}
             maxHeight={480}
             label="Lägg till från biblioteket"
           >
@@ -568,8 +727,9 @@ export default function ParamsForm({
               }
               selectedPaths={refs}
               freeSlots={Math.max(0, maxRefs - refs.length)}
+              withVoice={audioSupported}
               onPickAsset={(a) => {
-                applyRefs(addAsset(refs, a, assetById, maxRefs))
+                addAssetRefs(a)
                 closePicker()
               }}
               onPickImage={(path) => {
@@ -587,6 +747,12 @@ export default function ParamsForm({
             refs={refs}
             max={maxRefs}
             language={language}
+            audios={audios}
+            audioSupported={audioSupported}
+            audioFits={assetAudioFits}
+            onToggleAudio={toggleAssetAudio}
+            posePeople={posePeople}
+            onPosePeople={(poseId, ids) => setPosePeople((chosen) => ({ ...chosen, [poseId]: ids }))}
             onInsert={insertIntoPrompt}
             onRemove={removeAssetRefs}
             onWear={(outfitId, characterId) => setWornBy((chosen) => ({ ...chosen, [outfitId]: characterId }))}
@@ -594,6 +760,89 @@ export default function ParamsForm({
             onManageOutfits={manageKind && (() => manageKind('outfit'))}
           />
           {refNote && <p className="mt-1 text-[11px] text-accent">{refNote}</p>}
+        </div>
+      )}
+
+      {kind === 'reference-to-video' && (audioSupported || audios.length > 0) && (
+        <div>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="text-muted">Röster och ljud</span>
+            {audioSupported && (
+              <button
+                ref={audioButton}
+                onClick={() => togglePicker('audio')}
+                className={`${smallButton} ${picker === 'audio' ? 'bg-raised text-text' : ''}`}
+                title="Skicka med en röst eller en ljudmiljö från biblioteket"
+              >
+                ＋ Ljud
+              </button>
+            )}
+          </div>
+          <Popover
+            anchorRef={audioButton}
+            open={picker === 'audio'}
+            onClose={closePicker}
+            align="end"
+            width={360}
+            maxHeight={480}
+            label="Lägg till ljud"
+          >
+            <AudioPicker
+              assets={assets}
+              audios={audioRefs}
+              byPath={audioSources}
+              max={maxAudios}
+              onPick={(clip) => {
+                applyAudios(addAudios(audioRefs, [referenceAudioOf(clip)], audioSources, maxAudios))
+                closePicker()
+              }}
+              onManage={manageKind}
+            />
+          </Popover>
+          {audios.length > 0 ? (
+            <>
+              <AudioChips
+                audios={audios}
+                language={language}
+                onInsert={insertIntoPrompt}
+                onRemove={(index) => removeAudios([index])}
+              />
+              <div className="mt-1.5 flex items-start gap-3 text-[11px] text-muted">
+                <span className="min-w-0 flex-1">
+                  Klicka på ett ljud för att infoga det i prompten – ▶ spelar utdraget som skickas.
+                </span>
+                <span
+                  className={`shrink-0 tabular-nums ${
+                    audioSeconds > MAX_REFERENCE_AUDIO_SECONDS || audios.length > maxAudios ? 'text-accent' : ''
+                  }`}
+                  title={
+                    `${audios.length} av max ${maxAudios} ljudklipp, ${formatClipSeconds(audioSeconds)} av max ` +
+                    `${MAX_REFERENCE_AUDIO_SECONDS} s tillsammans. Venice tar 2–15 s per klipp.`
+                  }
+                >
+                  Ljud {formatClipSeconds(audioSeconds).replace(/ s$/, '')}/{MAX_REFERENCE_AUDIO_SECONDS} s
+                </span>
+              </div>
+            </>
+          ) : (
+            <p className="rounded-md border border-dashed border-line px-3 py-2 text-[11px] text-muted">
+              Skicka med hur någon låter: en karaktär med röst tar med den när du lägger till karaktären, eller välj
+              under ＋ Ljud. Hänvisa till ljudet med @Audio1 … i prompten.
+            </p>
+          )}
+          {!audioSupported && audios.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-accent">
+              <span>{model?.name ?? 'Modellen'} tar inte emot ljud – ljudklippen skickas inte.</span>
+              {switchToAudioModel && audioModel && (
+                <button onClick={switchToAudioModel} className="text-text hover:underline">
+                  Byt till {audioModel.name}
+                </button>
+              )}
+              <button onClick={() => removeAudios(audios.map((a) => a.index))} className="text-text hover:underline">
+                Ta bort ljudet
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -648,18 +897,24 @@ export default function ParamsForm({
           rows={7}
           placeholder={
             kind === 'reference-to-video'
-              ? 'Beskriv scenen, rörelsen och kameran… Skriv @ för att hänvisa till en referensbild.'
+              ? audioSupported
+                ? 'Beskriv scenen, rörelsen och kameran… Skriv @ för att hänvisa till en referensbild eller ett ljud.'
+                : 'Beskriv scenen, rörelsen och kameran… Skriv @ för att hänvisa till en referensbild.'
               : 'Beskriv scenen, rörelsen och kameran…'
           }
           kind={kind}
-          continuing={continuing}
+          checks={checks}
           references={references}
+          audios={kind === 'reference-to-video' ? audios : []}
           maxImages={maxRefs}
           groups={groups}
           library={assets}
           onAddFromLibrary={kind === 'reference-to-video' ? addFromLibrary : undefined}
           onSwitchToReference={switchToReference}
           onAddReferences={kind === 'reference-to-video' ? () => setPicker('references:character') : undefined}
+          onRemoveAudio={audioRefs.length ? removeAudios : undefined}
+          onUseAudioModel={switchToAudioModel}
+          audioModelName={audioModel?.name}
           language={language}
           belowInput={
             (linkedPrompt || canUndo) && (
@@ -707,10 +962,10 @@ export default function ParamsForm({
           onChange={(v) => set('negativePrompt', v || undefined)}
           textareaRef={negativeRef}
           kind={kind}
-          referenceCount={references.length}
-          maxImages={maxRefs}
-          continuing={continuing}
+          checks={checks}
           onSwitchToReference={switchToReference}
+          onUseAudioModel={switchToAudioModel}
+          audioModelName={audioModel?.name}
         />
       </details>
 

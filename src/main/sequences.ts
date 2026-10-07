@@ -7,7 +7,7 @@ import { existsSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { ipcMain, shell } from 'electron'
-import { DEFAULT_PARAMS, imageToVideoVariant, kindOfModelId, paramsForSubmit } from '@shared/models'
+import { DEFAULT_PARAMS, imageToVideoVariant, kindOfModelId, paramsForSubmit, supportsAudioInput } from '@shared/models'
 import { blockingContinuationError, blockingPromptError } from '@shared/prompt-refs'
 import type {
   ExportProgress,
@@ -21,7 +21,7 @@ import type {
 import { isAgentCall } from './agent/local-ipc'
 import * as db from './db'
 import { concatClips, extractFrame, probe } from './ffmpeg'
-import { toPublic, type JobManager } from './jobs'
+import { prepareSubmission, toPublic, type JobManager } from './jobs'
 import {
   framesDir,
   generationsDayDir,
@@ -114,17 +114,18 @@ async function moveToFreeName(from: string, pick: () => string): Promise<string>
 
 /**
  * The params a take of the clip is sent with. A continuation always generates with the image-to-video
- * sibling; its start frame is only filled in when the take is generated.
+ * sibling, which takes no reference audio; its start frame is only filled in when the take is generated.
  */
 function takeParams(row: store.SegmentRow, continuing: boolean): GenerationParams {
   const params = store.parseParams(row.params)
-  return continuing ? { ...params, model: imageToVideoVariant(params.model) } : params
+  return continuing ? { ...params, model: imageToVideoVariant(params.model), referenceAudios: undefined } : params
 }
 
 /**
  * Why a take of the clip can't be sent as it stands (Swedish), or undefined when it can. Checked before
  * "generate all" pays for anything and again right before each take is sent; JobManager.submit checks the
- * prompt's references once more on what actually goes to Venice.
+ * prompt's references once more on what actually goes to Venice, and measures the audio clips (whose windows
+ * this checks only as far as the clip states them).
  */
 function clipProblem(params: GenerationParams, continuing: boolean): string | undefined {
   const kind = kindOfModelId(params.model)
@@ -132,7 +133,10 @@ function clipProblem(params: GenerationParams, continuing: boolean): string | un
   // The general message advises switching to reference mode, which a continuation can't do.
   if (continuing) return blockingContinuationError(params)
   if (kind === 'reference-to-video' && !params.referenceImages?.length) {
-    return 'Lägg till minst en referensbild för klippet.'
+    // Venice refuses reference audio without a picture, so a clip with only a voice needs one too.
+    return params.referenceAudios?.length && supportsAudioInput(params.model)
+      ? 'Lägg till minst en referensbild för klippet – ljudklipp skickas bara tillsammans med en bild.'
+      : 'Lägg till minst en referensbild för klippet.'
   }
   if (kind === 'image-to-video' && !params.startImage) {
     return 'Lägg till en startbild för klippet, eller låt det fortsätta från föregående klipp.'
@@ -312,13 +316,15 @@ export class SequenceService {
     const continuing = !!previous && (init.continueFromPrevious ?? !source)
     if (continuing) {
       // The start frame comes from the previous clip at generation time; image inputs would be stale. That
-      // includes an end image copied from the previous clip: it is where that clip was meant to end.
+      // includes an end image copied from the previous clip: it is where that clip was meant to end. The
+      // image-to-video model takes no reference audio either.
       params = {
         ...params,
         model: imageToVideoVariant(params.model),
         startImage: undefined,
         endImage: undefined,
-        referenceImages: undefined
+        referenceImages: undefined,
+        referenceAudios: undefined
       }
     }
 
@@ -484,8 +490,9 @@ export class SequenceService {
     if (problem) throw new Error(problem)
     if (continuing) params.startImage = await this.continuationFrame(rows[index - 1], index)
 
-    const p = paramsForSubmit(params)
-    ensureImagesExist(p)
+    ensureImagesExist(paramsForSubmit(params))
+    // Measures the voice clips before the quote: windows Venice would refuse cost nothing to refuse here.
+    const p = await prepareSubmission(params)
 
     const quote = await this.deps.venice.quote(p).catch(() => undefined)
     if (cancelled?.()) throw new RunStopped()
@@ -500,8 +507,9 @@ export class SequenceService {
   }
 
   /**
-   * Pictures from outside the library were copied into Referensbilder when the take was submitted. The
-   * segment uses those copies from now on, so it keeps working when the originals are moved or deleted.
+   * Pictures and audio clips from outside the library were copied into Referensbilder when the take was
+   * submitted. The segment uses those copies from now on (each clip keeping the window the segment chose), so
+   * it keeps working when the originals are moved or deleted.
    * Best effort: the take is already paid for, so nothing here may fail the submit.
    */
   private useImportedCopies(segmentId: string, sent: GenerationParams, stored: GenerationParams): void {
@@ -513,6 +521,7 @@ export class SequenceService {
       pair(sent.startImage, stored.startImage)
       pair(sent.endImage, stored.endImage)
       sent.referenceImages?.forEach((r, i) => pair(r, stored.referenceImages?.[i]))
+      sent.referenceAudios?.forEach((a, i) => pair(a.path, stored.referenceAudios?.[i]?.path))
       if (!copies.size) return
       const row = store.getSegmentRow(segmentId)
       if (!row) return
@@ -522,7 +531,8 @@ export class SequenceService {
         ...params,
         startImage: use(params.startImage),
         endImage: use(params.endImage),
-        referenceImages: params.referenceImages?.map((r) => copies.get(r) ?? r)
+        referenceImages: params.referenceImages?.map((r) => copies.get(r) ?? r),
+        referenceAudios: params.referenceAudios?.map((a) => ({ ...a, path: copies.get(a.path) ?? a.path }))
       }
       const json = store.serializeParams(next)
       if (json !== store.serializeParams(params)) {

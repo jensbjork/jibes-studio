@@ -109,7 +109,10 @@ export default function Popover({
         left: place?.left ?? 0,
         width: place?.width ?? width,
         maxHeight: place?.maxHeight ?? maxHeight,
-        visibility: place ? 'visible' : 'hidden'
+        // Transparent (not visibility: hidden) until it has measured where it fits, which happens before the
+        // first paint anyway: a hidden element can't take focus, so autoFocus inside the panel would miss.
+        opacity: place ? 1 : 0,
+        pointerEvents: place ? undefined : 'none'
       }}
     >
       {children}

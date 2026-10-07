@@ -16,20 +16,26 @@ const ENTRIES: Entry[] = [
   {
     target: 'characters',
     name: 'Karaktärer',
-    explanation: 'En mapp per karaktär med referensfotona och beskrivningen.',
-    example: () => 'Anna/foto.jpg, Anna/Beskrivning.txt'
+    explanation: 'En mapp per karaktär med referensfotona, röstklippen och beskrivningen.',
+    example: () => 'Anna/foto.jpg, Anna/röst.mp3, Anna/Beskrivning.txt'
   },
   {
     target: 'environments',
     name: 'Miljöer',
-    explanation: 'En mapp per miljö med referensbilderna och beskrivningen.',
-    example: () => 'Köket/kväll.jpg, Köket/Beskrivning.txt'
+    explanation: 'En mapp per miljö med referensbilderna, ljudklippen och beskrivningen.',
+    example: () => 'Köket/kväll.jpg, Köket/sorl.wav'
   },
   {
     target: 'outfits',
     name: 'Kläder',
     explanation: 'En mapp per klädsel med bilderna och beskrivningen.',
     example: () => 'Röd klänning/framsida.jpg'
+  },
+  {
+    target: 'poses',
+    name: 'Poser',
+    explanation: 'En mapp per pose med foton eller skisser av positionerna och beskrivningen.',
+    example: () => 'Kram/skiss.png, Kram/Beskrivning.txt'
   },
   {
     target: 'references',

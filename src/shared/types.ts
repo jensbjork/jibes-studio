@@ -16,6 +16,11 @@ export interface VideoModel {
   durations: string[]
   audio: boolean
   audioConfigurable: boolean
+  /**
+   * Accepts reference audio clips (`reference_audio_urls`, referred to as @Audio1… in the prompt): Venice's
+   * `constraints.audio_input`. Not the same as `audio`, which is whether the model can generate sound.
+   */
+  audioInput: boolean
   promptCharacterLimit?: number
   modelSets: string[]
 }
@@ -32,6 +37,25 @@ export interface GenerationParams {
   startImage?: string
   endImage?: string
   referenceImages?: string[]
+  /**
+   * Reference audio (voices, sound) for reference-to-video models with audio input; @Audio1… in the prompt
+   * refer to these in order. Absolute paths over IPC, stored relative like the images. Only the window
+   * (start/length) of each file is sent.
+   */
+  referenceAudios?: ReferenceAudio[]
+}
+
+/** One reference audio clip of a generation: the part of the file from `start` that lasts `length` seconds. */
+export interface ReferenceAudio {
+  /** Absolute path to a local audio file (normally an asset's voice or soundscape clip). */
+  path: string
+  /** Seconds into the file; default 0. */
+  start?: number
+  /**
+   * Seconds; default min(rest of the file, 10 s) (referenceAudioWindow in models.ts). Not clamped: a window
+   * outside Venice's 2–15 s is reported by the prompt checks instead of being changed quietly.
+   */
+  length?: number
 }
 
 export type GenerationStatus = 'queued' | 'processing' | 'completed' | 'failed'
@@ -62,6 +86,99 @@ export interface Generation {
    * Finder). Such a take can't be cut or continued from, so "generate all" makes a new one.
    */
   fileMissing?: boolean
+  /** The user's own rating (1–5 stars), if they have rated it. */
+  rating?: number
+  /** Reviews recorded for it: the user's (when it has a rating, note or tags) and agents'. */
+  reviewCount: number
+  /** Of those, the agents' reviews (what the feed's review badge counts; the user's own is shown as stars). */
+  agentReviewCount: number
+}
+
+// ── Reviews and learnings ────────────────────────────────────────────────────
+
+/**
+ * What someone thought of a generation: the user's own (author 'user', at most one per generation) or an
+ * agent's (author = the MCP client's name, any number).
+ */
+export interface GenerationReview {
+  id: string
+  generationId: string
+  /** 'user', or the agent's name. */
+  author: string
+  /** 1–5 stars. */
+  rating?: number
+  /** E.g. "prompt-followed", "identity-drift" (see the suggested vocabulary in the agent guide). */
+  tags: string[]
+  note: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** A short insight about prompting, distilled from reviewed results ("Lärdomar"). */
+export interface Learning {
+  id: string
+  title: string
+  insight: string
+  /** The model it applies to; undefined for every model. */
+  model?: string
+  tags: string[]
+  /** Ids of the generations it is based on. */
+  evidence: string[]
+  /** 'user', or the agent's name. */
+  author: string
+  pinned: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface LearningInput {
+  /** Omit to create a new learning. */
+  id?: string
+  title: string
+  insight: string
+  /** null clears it. */
+  model?: string | null
+  tags?: string[]
+  evidence?: string[]
+  pinned?: boolean
+}
+
+/** A finished film exported from a sequence. */
+export interface ExportSummary {
+  id: string
+  /** Undefined when the sequence has been deleted since. */
+  sequenceId?: string
+  sequenceName?: string
+  /** Absolute. */
+  path: string
+  createdAt: number
+  /** Seconds, when the file could be probed. */
+  duration?: number
+  /** The file is still on disk. */
+  exists: boolean
+}
+
+/** Which generations the clip feed (and the agents' list_generations) shows, and in what order. */
+export interface GenerationFilter {
+  /** Words that must all appear in the prompt (or negative prompt), letter case ignored. */
+  query?: string
+  /** 'pending': queued or processing. */
+  status?: GenerationStatus | 'pending'
+  model?: string
+  /** Generations whose params use this asset's photos or audio. */
+  assetId?: string
+  /** The user's rating is at least this many stars. */
+  minRating?: number
+  /** Not rated by the user. */
+  unrated?: boolean
+  /** Created at or after this time (epoch ms). */
+  since?: number
+  /** standalone: not a take of a sequence clip. sequence: a take. */
+  placement?: 'standalone' | 'sequence'
+  /** Has at least one review (the user's or an agent's). */
+  hasReviews?: boolean
+  /** Default 'newest'. */
+  sort?: 'newest' | 'oldest' | 'rating' | 'cost' | 'length'
 }
 
 export interface Settings {
@@ -145,6 +262,7 @@ export type LibraryFolderTarget =
   | 'characters'
   | 'environments'
   | 'outfits'
+  | 'poses'
   | 'references'
   | 'generations'
   | 'sequences'
@@ -166,20 +284,38 @@ export interface ConsentRequest {
 /** Prefix on error messages that carry a ConsentRequest as JSON. */
 export const NEEDS_CONSENT = 'NEEDS_CONSENT:'
 
-// ── Assets: characters, environments, outfits ────────────────────────────────
+// ── Assets: characters, environments, outfits, poses ─────────────────────────
 
 /**
  * character: who is in the shot (Karaktärer). environment: where it takes place (Miljöer). outfit: what a
- * character wears (Kläder). All three are a name, a description and reference photos in a folder of their own.
+ * character wears (Kläder). pose: how people stand and where, relative to each other (Poser). Each is a name, a
+ * description and reference photos in a folder of their own; characters and environments can also have
+ * audio clips (a voice, a soundscape).
  */
-export type AssetKind = 'character' | 'environment' | 'outfit'
+export type AssetKind = 'character' | 'environment' | 'outfit' | 'pose'
 
-export const ASSET_KINDS: readonly AssetKind[] = ['character', 'environment', 'outfit']
+export const ASSET_KINDS = ['character', 'environment', 'outfit', 'pose'] as const satisfies readonly AssetKind[]
 
 export interface AssetImage {
   id: string
   /** Absolute path to the copy stored in the library (e.g. Karaktärer/<name>/). */
   path: string
+}
+
+/**
+ * An audio clip of an asset: a character's voice ("Röst") or an environment's soundscape ("Ljudmiljö"). Only
+ * the reference window (clipStart, clipLength) is sent to Venice.
+ */
+export interface AssetAudio {
+  id: string
+  /** Absolute path to the copy stored in the asset's folder. */
+  path: string
+  /** Seconds, the whole file. */
+  duration: number
+  /** Seconds into the file where the reference window starts. */
+  clipStart: number
+  /** Seconds; always resolved (the default is min(duration, 10)), 2–15 and inside the file where possible. */
+  clipLength: number
 }
 
 export interface Asset {
@@ -190,6 +326,8 @@ export interface Asset {
   description: string
   /** Ordered; the first image is the cover. */
   images: AssetImage[]
+  /** Ordered; the first clip is the one the Generate form adds along with the asset. [] for kinds without audio. */
+  audio: AssetAudio[]
   /** Characters only: the outfit (an asset of kind 'outfit') the character wears unless told otherwise. */
   defaultOutfitId?: string
   createdAt: number
@@ -430,6 +568,22 @@ export interface AgentFormReference {
   path: string
 }
 
+/** One reference audio clip of the Generate form, as the bridge reports it. */
+export interface AgentFormAudioReference {
+  /** "@Audio1" for the first reference audio. */
+  token: string
+  assetId?: string
+  assetName?: string
+  kind?: AssetKind
+  /** The asset's clip (AssetAudio.id), when it is one. */
+  audioId?: string
+  /** Absolute. */
+  path: string
+  /** The window sent to Venice, in seconds. */
+  start?: number
+  length?: number
+}
+
 /** What get_form (and set_form, set_references) answer with. */
 export interface AgentFormState {
   /** The view Studio shows, e.g. 'generate' or 'sequences'. */
@@ -440,6 +594,8 @@ export interface AgentFormState {
   /** The Generate form. */
   params: GenerationParams
   references: AgentFormReference[]
+  /** The reference audio clips (params.referenceAudios with their tokens and assets). */
+  audioReferences?: AgentFormAudioReference[]
   issues: PromptIssue[]
   /** What the window adjusted on its own (Swedish), e.g. a mode switch or images that didn't fit. */
   notes?: string[]
@@ -466,6 +622,11 @@ export interface AgentSetFormArgs {
 /** set_references: photo paths (main resolved the agent's asset ids), in order. */
 export interface AgentSetReferencesArgs {
   paths: string[]
+  /**
+   * Reference audio clips (main resolved the agent's audio ids and windows), in order; follows `mode` like the
+   * photos. Omitted: replace clears the audio, append keeps it.
+   */
+  audios?: ReferenceAudio[]
   /** replace: these become the reference images. append: added after the ones there (duplicates skipped). */
   mode: 'replace' | 'append'
 }
@@ -503,11 +664,37 @@ export interface StudioApi {
   quote(params: GenerationParams): Promise<number>
   generate(params: GenerationParams): Promise<Generation>
   acceptConsent(flow: string, version: string): Promise<void>
+  /** Newest first, with the user's rating and the review count filled in. */
   listGenerations(): Promise<Generation[]>
   deleteGeneration(id: string): Promise<void>
   onGenerationUpdate(cb: (g: Generation) => void): () => void
+  /** Fires with the id of a generation that was deleted (from any view), so every list can drop it. */
+  onGenerationDelete(cb: (id: string) => void): () => void
 
-  // Assets (characters, environments, outfits)
+  // Reviews and learnings
+  /** The generation's reviews: the user's first, then agents' newest first. */
+  listReviews(generationId: string): Promise<GenerationReview[]>
+  /**
+   * Sets the user's own rating, note and tags (fields left out stay; rating null clears it). Resolves with
+   * the review, or null when nothing is left of it (no rating, note or tags), in which case it is removed.
+   */
+  setUserReview(
+    generationId: string,
+    input: { rating?: number | null; note?: string; tags?: string[] }
+  ): Promise<GenerationReview | null>
+  deleteReview(reviewId: string): Promise<void>
+  /** Pinned first, then most recently updated. */
+  listLearnings(): Promise<Learning[]>
+  /** Creates (no id; author 'user') or updates a learning. Rejects with a Swedish message. */
+  saveLearning(input: LearningInput): Promise<Learning>
+  deleteLearning(id: string): Promise<void>
+  /** Exported films, newest first. */
+  listExports(): Promise<ExportSummary[]>
+  /** Fires with the generation id whenever its reviews change (also an agent's). */
+  onReviewChange(cb: (generationId: string) => void): () => void
+  onLearningsChange(cb: () => void): () => void
+
+  // Assets (characters, environments, outfits, poses)
   /** Sorted by name; every kind when kind is omitted. */
   listAssets(kind?: AssetKind): Promise<Asset[]>
   /** Creates (no id) or updates an asset. Rejects with a Swedish message (empty name, unknown outfit…). */
@@ -519,6 +706,17 @@ export interface StudioApi {
   removeAssetImage(imageId: string): Promise<Asset>
   /** The given images first, in that order; any others keep their order after them. */
   reorderAssetImages(assetId: string, imageIds: string[]): Promise<Asset>
+  /**
+   * Copies audio files (MP3, WAV, M4A, AAC, AIFF, FLAC, OGG) into the asset's folder, after the clips it has.
+   * Characters and environments only. Rejects with a Swedish message (wrong format, shorter than 1 s, …).
+   */
+  addAssetAudio(assetId: string, paths: string[]): Promise<Asset>
+  /** Removes the clip (its copy goes to the Trash, or to Referensbilder when generations still use it). */
+  removeAssetAudio(audioId: string): Promise<Asset>
+  /** Moves or resizes the reference window; clamped to 2–15 s inside the file. */
+  updateAssetAudio(audioId: string, patch: { clipStart?: number; clipLength?: number }): Promise<Asset>
+  /** The given clips first, in that order; any others keep their order after them. */
+  reorderAssetAudio(assetId: string, audioIds: string[]): Promise<Asset>
 
   // Prompt library
   listPrompts(): Promise<SavedPrompt[]>
@@ -607,6 +805,8 @@ export interface StudioApi {
   // Files
   revealFile(path: string): Promise<void>
   pickImages(multiple: boolean): Promise<string[]>
+  /** File dialog for audio files; [] when cancelled. */
+  pickAudio(multiple: boolean): Promise<string[]>
   /** Absolute path of a file dropped onto the window. */
   pathForFile(file: File): string
 }

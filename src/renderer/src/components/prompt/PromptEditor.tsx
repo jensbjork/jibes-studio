@@ -11,10 +11,11 @@ import {
   type ReactNode,
   type Ref
 } from 'react'
-import type { Kind } from '@shared/models'
-import { validatePromptReferences } from '@shared/prompt-refs'
+import { maxReferenceAudios, type Kind } from '@shared/models'
+import { validatePromptReferences, type ReferenceKind, type ValidateOptions } from '@shared/prompt-refs'
 import type { Asset, PromptLanguage } from '@shared/types'
 import { KIND_TONE, OWN_IMAGE_TOKEN } from '../pickers/assetKinds'
+import type { FormAudio } from '../pickers/audioRefs'
 import PromptIssueList from './PromptIssueList'
 import {
   applyEdits,
@@ -22,6 +23,8 @@ import {
   diffEdit,
   groupInsertText,
   isDisabled,
+  markKey,
+  mentionedAudioIndices,
   mentionedIndices,
   promptMarks,
   removeRanges,
@@ -57,12 +60,18 @@ interface Props {
   onSubmit?: () => void
   placeholder?: string
   rows?: number
-  /** The selected model's mode; @ImageN tokens only mean something in reference mode. */
+  /** The selected model's mode; @ImageN and @AudioN tokens only mean something in reference mode. */
   kind: Kind
-  /** A sequence clip continuing from the previous one (see ValidateOptions.continuing). */
-  continuing?: boolean
+  /**
+   * What the prompt is checked against, exactly as the main process checks it before sending (prompt-refs
+   * validationContext of the form's params): reference count, mode, limits, the audio clips' lengths, whether a
+   * sequence clip continues from the previous one.
+   */
+  checks: { referenceCount: number; options: ValidateOptions }
   /** Every reference image in the form, in order (also the ones past the model's limit). */
   references: PromptReference[]
+  /** Every reference audio clip in the form, in order (also the ones that aren't sent). */
+  audios: FormAudio[]
   /** The model's limit on reference images. */
   maxImages: number
   /** The library assets among the references, and what naming them inserts. */
@@ -78,7 +87,12 @@ interface Props {
   onSwitchToReference?: () => void
   /** Opens the reference picker; offered when tokens are used without reference images. */
   onAddReferences?: () => void
-  /** Prompt language: the word between a character and its clothes. */
+  /** Takes audio clips (1-based @AudioN numbers) out of the form; offered when they are too long or not sent. */
+  onRemoveAudio?: (indices: number[]) => void
+  /** Switches to a reference model that takes audio (named `audioModelName`); offered when this one doesn't. */
+  onUseAudioModel?: () => void
+  audioModelName?: string
+  /** Prompt language: the words between a character and its voice and clothes ("voice"/"röst", "wearing"/"i"). */
   language: PromptLanguage
   /** Shown right under the text field. */
   belowInput?: ReactNode
@@ -89,8 +103,10 @@ interface MenuState {
   start: number
   end: number
   query: string
-  /** Opened by a quick fix to pick the picture a wrong token should name. */
+  /** Opened by a quick fix to pick the picture (or clip) a wrong token should name. */
   replace: boolean
+  /** Only pictures or only clips: what the wrong token is about. */
+  only?: ReferenceKind
   /**
    * The word after the caret is part of the "@word" (the caret is inside one that was there already, as in
    * "@Ima|ge3"). Not for an "@" just typed in front of a word ("the @|beach"): choosing must keep "beach".
@@ -107,8 +123,8 @@ function normalizeBreaks(text: string): string {
 }
 
 /** Tokens: colour, background and underline only (no padding or weight), so the mirror's text lines up exactly. */
-function markClass(mark: PromptMark, lit: number | undefined): string {
-  const glow = mark.index !== undefined && mark.index === lit ? ' ring-1 ring-white/50' : ''
+function markClass(mark: PromptMark, lit: string | undefined): string {
+  const glow = lit !== undefined && markKey(mark.ref, mark.index) === lit ? ' ring-1 ring-white/50' : ''
   if (mark.tone === 'error') {
     return (
       'rounded-[3px] bg-accent/15 text-red-300 underline decoration-accent decoration-wavy underline-offset-[3px] ' +
@@ -118,7 +134,9 @@ function markClass(mark: PromptMark, lit: number | undefined): string {
   if (mark.tone === 'warning') {
     return 'text-amber-200 underline decoration-amber-400/80 decoration-dotted underline-offset-[3px]'
   }
-  return `rounded-[3px] ${mark.kind ? KIND_TONE[mark.kind].token : OWN_IMAGE_TOKEN}${glow}`
+  // Clips are coloured by their asset like pictures, and underlined so a voice reads apart from a photo.
+  const audio = mark.ref === 'audio' ? ' underline decoration-current/60 decoration-dotted underline-offset-[3px]' : ''
+  return `rounded-[3px] ${mark.kind ? KIND_TONE[mark.kind].token : OWN_IMAGE_TOKEN}${audio}${glow}`
 }
 
 function sameRect(a: DOMRect | undefined, b: DOMRect | undefined): boolean {
@@ -127,10 +145,10 @@ function sameRect(a: DOMRect | undefined, b: DOMRect | undefined): boolean {
 
 /**
  * The prompt field. A transparent textarea (so typing, undo, IME, selection, spell check, resizing and
- * ⌘Enter stay native) over a mirror layer that renders the same text with the @ImageN tokens coloured by
- * the kind of asset they name, and wrong ones red with a wavy underline. Typing "@" opens a menu of the
- * references and library assets next to the caret. Below: the problems with quick fixes, and the key to
- * the reference images with the ones the prompt doesn't mention marked.
+ * ⌘Enter stay native) over a mirror layer that renders the same text with the @ImageN and @AudioN tokens
+ * coloured by the kind of asset they name, and wrong ones red with a wavy underline. Typing "@" opens a menu of
+ * the references, the audio clips and library assets next to the caret. Below: the problems with quick fixes,
+ * and the key to the reference images and clips with the ones the prompt doesn't mention marked.
  */
 export default function PromptEditor({
   ref,
@@ -141,14 +159,18 @@ export default function PromptEditor({
   placeholder,
   rows = 7,
   kind,
-  continuing = false,
+  checks,
   references,
+  audios,
   maxImages,
   groups,
   library,
   onAddFromLibrary,
   onSwitchToReference,
   onAddReferences,
+  onRemoveAudio,
+  onUseAudioModel,
+  audioModelName,
   language,
   belowInput
 }: Props) {
@@ -193,32 +215,53 @@ export default function PromptEditor({
 
   // ── Checks and highlighting ──────────────────────────────────────────────────
   const reference = kind === 'reference-to-video'
-  const referenceCount = reference ? references.length : 0
+  // The checks arrive as a fresh object with every render of the form; their content decides.
+  const checksKey = JSON.stringify(checks)
   const issues = useMemo(
-    () => validatePromptReferences(text, referenceCount, { kind, maxImages, continuing }),
-    [text, referenceCount, kind, maxImages, continuing]
+    () => validatePromptReferences(text, checks.referenceCount, checks.options),
+    [text, checksKey]
   )
+  const audioInput = reference && checks.options.audioInput !== false
+  const maxAudios = checks.options.maxAudios ?? maxReferenceAudios('')
   const marks = useMemo(
-    () => promptMarks(text, references, kind, maxImages, issues),
-    [text, references, kind, maxImages, issues]
+    () => promptMarks(text, { references, audios, kind, maxImages, maxAudios, audioInput }, issues),
+    [text, references, audios, kind, maxImages, maxAudios, audioInput, issues]
   )
   const segments = useMemo(() => segmentsOf(text.length, marks), [text, marks])
   const mentioned = useMemo(() => mentionedIndices(text), [text])
+  const mentionedAudio = useMemo(() => mentionedAudioIndices(text), [text])
   const views = useMemo(
     () =>
       issueViews({
         prompt: text,
         issues,
         references,
+        audios,
         groups,
         kind,
         language,
         canSwitchToReference: !!onSwitchToReference,
         canAddReferences: !!onAddReferences,
+        canRemoveAudio: !!onRemoveAudio,
+        audioModelName: onUseAudioModel ? audioModelName : undefined,
         library: onAddFromLibrary ? library : undefined,
         adviseUnused: true
       }),
-    [text, issues, references, groups, kind, language, !!onSwitchToReference, !!onAddReferences, library, !!onAddFromLibrary]
+    [
+      text,
+      issues,
+      references,
+      audios,
+      groups,
+      kind,
+      language,
+      !!onSwitchToReference,
+      !!onAddReferences,
+      !!onRemoveAudio,
+      onUseAudioModel ? audioModelName : undefined,
+      library,
+      !!onAddFromLibrary
+    ]
   )
   const hasError = views.some((v) => v.severity === 'error')
 
@@ -252,11 +295,12 @@ export default function PromptEditor({
 
   // ── Hover card and linked highlighting ────────────────────────────────────────
   const [hover, setHover] = useState<{ mark: number; rect: DOMRect }>()
-  const [highlighted, setHighlighted] = useState<number>()
+  /** The picture or clip ("image:3", "audio:1") hovered in the key below, whose tokens light up. */
+  const [highlighted, setHighlighted] = useState<string>()
   // A hover is tied to the highlighting it was measured on.
   useEffect(() => setHover(undefined), [marks])
   const hoveredMark = hover ? marks[hover.mark] : undefined
-  const lit = highlighted ?? (hoveredMark?.tone === 'valid' ? hoveredMark.index : undefined)
+  const lit = highlighted ?? (hoveredMark?.tone === 'valid' ? markKey(hoveredMark.ref, hoveredMark.index) : undefined)
 
   const onMouseMove = (x: number, y: number): void => {
     const m = mirror.current
@@ -295,12 +339,15 @@ export default function PromptEditor({
         ? tokenMenuSections({
             query: menu.query,
             references,
+            audios,
             groups,
             library: onAddFromLibrary ? library : undefined,
-            maxImages
+            maxImages,
+            audioInput,
+            only: menu.only
           })
         : [],
-    [menu?.query, menu !== undefined, references, groups, library, !!onAddFromLibrary, maxImages]
+    [menu?.query, menu?.only, menu !== undefined, references, audios, groups, library, !!onAddFromLibrary, maxImages, audioInput]
   )
   const items = useMemo(() => sections.flatMap((s) => s.items), [sections])
   const activeIndex =
@@ -441,6 +488,7 @@ export default function PromptEditor({
     const before = el.value.slice(0, m.start)
     let insert: string
     if (item.type === 'image') insert = `@Image${item.reference.index}`
+    else if (item.type === 'audio') insert = `@Audio${item.audio.index}`
     else if (item.type === 'group') insert = groupInsertText(item.group, language, before)
     else {
       const added = onAddFromLibrary?.(item.asset)
@@ -503,13 +551,26 @@ export default function PromptEditor({
       }
       case 'choose':
         reveal(action.range)
-        openAt({ start: action.range.start, end: action.range.end, query: '', replace: true, tail: true })
+        openAt({
+          start: action.range.start,
+          end: action.range.end,
+          query: '',
+          replace: true,
+          tail: true,
+          ...(action.ref ? { only: action.ref } : {})
+        })
         break
       case 'switch-to-reference':
         onSwitchToReference?.()
         break
       case 'add-references':
         onAddReferences?.()
+        break
+      case 'remove-audio':
+        onRemoveAudio?.(action.indices)
+        break
+      case 'use-audio-model':
+        onUseAudioModel?.()
         break
     }
   }
@@ -551,7 +612,11 @@ export default function PromptEditor({
   }
 
   const hoverReference =
-    hoveredMark?.index !== undefined && reference ? references[hoveredMark.index - 1] : undefined
+    hoveredMark?.index !== undefined && reference && hoveredMark.ref !== 'audio'
+      ? references[hoveredMark.index - 1]
+      : undefined
+  const hoverAudio =
+    hoveredMark?.index !== undefined && reference && hoveredMark.ref === 'audio' ? audios[hoveredMark.index - 1] : undefined
 
   return (
     <div>
@@ -642,12 +707,14 @@ export default function PromptEditor({
       {reference && (
         <ReferenceStrip
           references={references}
+          audios={audios}
           mentioned={mentioned}
+          mentionedAudio={mentionedAudio}
           showUnused={!!text.trim()}
           maxImages={maxImages}
           highlighted={lit}
           onHighlight={setHighlighted}
-          onInsert={(index) => insertAtCaret(`@Image${index}`)}
+          onInsert={insertAtCaret}
         />
       )}
 
@@ -661,12 +728,13 @@ export default function PromptEditor({
           onChoose={choose}
           query={menu.query}
           replacing={menu.replace}
+          only={menu.only}
           noReferences={!references.length}
         />
       )}
 
       {hover && hoveredMark && !menu && (
-        <TokenHoverCard mark={hoveredMark} reference={hoverReference} rect={hover.rect} />
+        <TokenHoverCard mark={hoveredMark} reference={hoverReference} audio={hoverAudio} rect={hover.rect} />
       )}
     </div>
   )

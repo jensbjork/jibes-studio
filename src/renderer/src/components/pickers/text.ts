@@ -1,6 +1,6 @@
 // Small text helpers shared by the pickers and the params form.
 
-import type { PromptLanguage } from '@shared/types'
+import type { AssetKind, PromptLanguage } from '@shared/types'
 import { swedishList } from '../../lib/assets'
 
 /** "@Image1–@Image3, @Image5" for 1-based reference indices. */
@@ -20,15 +20,46 @@ export function formatImageRefs(indices: number[]): string {
     .join(', ')
 }
 
-/**
- * Prompt text that ties a library asset to its reference images, e.g. "Strandpromenaden (@Image4)".
- * Every index is spelled out because the model reads each @ImageN token on its own.
- */
-export function assetReference(name: string, indices: number[]): string {
-  return `${name} (${[...indices]
+/** "@Audio1, @Audio2" for 1-based reference audio indices (always spelled out: there are at most a few). */
+export function formatAudioRefs(indices: readonly number[]): string {
+  return [...indices]
     .sort((a, b) => a - b)
-    .map((i) => `@Image${i}`)
-    .join(', ')})`
+    .map((i) => `@Audio${i}`)
+    .join(', ')
+}
+
+/**
+ * The word in front of an asset's @AudioN inside its brackets, in the prompt language: a character's clip is its
+ * voice ("Anna (@Image1, voice @Audio1)"), anything else a sound ("Stranden (@Image4, sound @Audio2)").
+ */
+export function audioWord(kind: AssetKind | undefined, language: PromptLanguage): string {
+  if (kind === 'character') return language === 'sv' ? 'röst' : 'voice'
+  return language === 'sv' ? 'ljud' : 'sound'
+}
+
+/**
+ * What goes inside an asset's brackets: its @ImageN tokens, then its @AudioN tokens each with the word that says
+ * what the sound is ("@Image1, @Image2, voice @Audio1"). Every index is spelled out because the model reads each
+ * token on its own.
+ */
+export function referenceTokens(indices: readonly number[], audios: readonly number[] = [], word = 'voice'): string {
+  return [
+    ...[...indices].sort((a, b) => a - b).map((i) => `@Image${i}`),
+    ...[...audios].sort((a, b) => a - b).map((i) => `${word} @Audio${i}`)
+  ].join(', ')
+}
+
+/**
+ * Prompt text that ties a library asset to its reference images (and audio), e.g. "Strandpromenaden (@Image4)"
+ * or "Anna (@Image1, @Image2, voice @Audio1)".
+ */
+export function assetReference(
+  name: string,
+  indices: readonly number[],
+  audios: readonly number[] = [],
+  word = 'voice'
+): string {
+  return `${name} (${referenceTokens(indices, audios, word)})`
 }
 
 /** The word between a character and its clothes in the prompt language ("Promptspråk" in Settings). */
@@ -51,16 +82,39 @@ export function wearingText(outfits: { name: string; indices: number[] }[], lang
 }
 
 /**
- * A character with what it wears, e.g. "Anna (@Image1, @Image2) wearing Röd klänning (@Image3)" (or "… i …"
- * when prompts are written in Swedish), so the model knows whose clothes the outfit images are.
+ * A character with its voice and what it wears, e.g. "Anna (@Image1, @Image2, voice @Audio1) wearing Röd klänning
+ * (@Image3)" (or "Anna (@Image1, @Image2, röst @Audio1) i …" when prompts are written in Swedish), so the model
+ * knows whose voice the audio is and whose clothes the outfit images are.
  */
 export function characterReference(
   name: string,
   indices: number[],
   outfits: { name: string; indices: number[] }[] = [],
+  language: PromptLanguage = 'en',
+  voices: readonly number[] = []
+): string {
+  return assetReference(name, indices, voices, audioWord('character', language)) + wearingText(outfits, language)
+}
+
+/** The words between the people and a pose: "Anna (@Image1) and Erik (@Image3) posed as in Kram (@Image5)". */
+const POSED_AS_IN: Record<PromptLanguage, string> = { en: 'posed as in', sv: 'i posen' }
+
+/**
+ * A pose with the characters it applies to: "Anna (@Image1) and Erik (@Image3) posed as in Kram (@Image5)", or
+ * "Anna (@Image1) och Erik (@Image3) i posen Kram (@Image5)" in Swedish. The characters are named with their own
+ * photos only, so it says who takes which position without repeating their voices or clothes. Without any
+ * characters it is just "posed as in Kram (@Image5)".
+ */
+export function poseReference(
+  pose: { name: string; indices: readonly number[] },
+  people: readonly { name: string; indices: readonly number[] }[],
   language: PromptLanguage = 'en'
 ): string {
-  return assetReference(name, indices) + wearingText(outfits, language)
+  const who = promptList(
+    people.map((p) => assetReference(p.name, p.indices)),
+    language
+  )
+  return `${who ? `${who} ` : ''}${POSED_AS_IN[language]} ${assetReference(pose.name, pose.indices)}`
 }
 
 /** "1 bild", "3 bilder". */
@@ -68,11 +122,26 @@ export function imageCount(n: number): string {
   return `${n} ${n === 1 ? 'bild' : 'bilder'}`
 }
 
-/** A short title from the first words of a prompt, without @Image tokens. */
+/** "1 ljudklipp", "3 ljudklipp". */
+export function clipCount(n: number): string {
+  return `${n} ljudklipp`
+}
+
+/** Seconds as the form shows them: "8 s", "7,5 s" (one decimal, Swedish decimal comma). */
+export function formatClipSeconds(seconds: number): string {
+  const rounded = Math.round(Math.max(0, seconds) * 10) / 10
+  return `${String(rounded).replace('.', ',')} s`
+}
+
+/** "(@Image1, @Image2, voice @Audio1)": a bracket holding nothing but reference tokens. */
+const TOKEN_BRACKET =
+  /\(\s*(?:(?:voice|sound|röst|ljud)\s+)?@(?:Image|Audio)\d+(?:\s*[,–-]\s*(?:(?:voice|sound|röst|ljud)\s+)?@(?:Image|Audio)\d+)*\s*\)/gi
+
+/** A short title from the first words of a prompt, without @Image and @Audio tokens. */
 export function titleFromPrompt(body: string, maxWords = 6, maxChars = 48): string {
   const clean = body
-    .replace(/\(\s*@Image\d+(?:\s*[,–-]\s*@Image\d+)*\s*\)/gi, '')
-    .replace(/@Image\d+/gi, '')
+    .replace(TOKEN_BRACKET, '')
+    .replace(/@(?:Image|Audio)\d+/gi, '')
     .replace(/\s+/g, ' ')
     .trim()
   let title = clean.split(' ').slice(0, maxWords).join(' ')

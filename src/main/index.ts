@@ -1,16 +1,16 @@
 import { dirname, join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { paramsForSubmit } from '@shared/models'
-import type { ExportProgress, GenerationParams, VideoModel } from '@shared/types'
+import type { ExportProgress, Generation, GenerationParams, VideoModel } from '@shared/types'
 import { AgentService, recordIpcHandlers, registerAgentIpc } from './agent'
 import * as db from './db'
 import { ffmpegStatus, stopAllFfmpeg } from './ffmpeg'
-import { JobManager, toPublic } from './jobs'
-import { assetWorkBusy, registerLibraryIpc } from './library'
+import { JobManager, prepareSubmission, toPublic } from './jobs'
+import { assetWorkBusy, AUDIO_FILE_TYPES, registerLibraryIpc } from './library'
 import { prepareLibrary, registerLibraryRootIpc } from './library-root'
 import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty } from './paths'
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
+import { attachReviewSummary, registerReviewIpc } from './reviews'
 import { registerSequenceIpc } from './sequences'
 import { acceptConsent, getApiKey, getSettings, setApiKey, setPromptLanguage } from './settings'
 import { VeniceClient } from './venice'
@@ -88,6 +88,14 @@ function broadcast(channel: string, payload?: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
 }
 
+/**
+ * Sends a changed generation to the feed with the user's stars and its review count: rows carry neither, and
+ * an update without them would wipe the rating off its card.
+ */
+function broadcastGeneration(g: Generation): void {
+  broadcast('generation:update', attachReviewSummary([g])[0])
+}
+
 /** The MCP server the user's own agents connect to (off until they switch it on in Settings). */
 const agent = new AgentService({ broadcast })
 
@@ -108,14 +116,24 @@ function broadcastAllSequences(): void {
   }
 }
 
+/**
+ * Re-sends to the feed the generations whose stored paths were rewritten (db.takeRewrittenGenerations) and any
+ * others given: the feed loads its list once, so it would go on filtering by, showing and reusing old paths.
+ */
+function broadcastRewrittenGenerations(more: readonly string[] = []): void {
+  if (!db.isDbOpen()) return
+  const moved = [...new Set([...more, ...db.takeRewrittenGenerations()])].flatMap((id) => {
+    const g = db.getGeneration(id)
+    return g ? [toPublic(g)] : []
+  })
+  for (const g of attachReviewSummary(moved)) broadcast('generation:update', g)
+}
+
 /** After "Städa upp" files may live elsewhere: views refetch, and moved generations are re-sent to the feed. */
 function broadcastLibraryReorganized(movedGenerationIds: string[]): void {
   broadcast('library:change')
   broadcastAllSequences()
-  for (const id of movedGenerationIds) {
-    const g = db.getGeneration(id)
-    if (g) broadcast('generation:update', toPublic(g))
-  }
+  broadcastRewrittenGenerations(movedGenerationIds)
 }
 
 function registerIpc(): void {
@@ -147,7 +165,9 @@ function registerIpc(): void {
     // is quoted, or the job would be paid for and then have nowhere to be recorded.
     const release = jobs.holdSubmit()
     try {
-      const p = paramsForSubmit(params)
+      // Checked, canonicalised and its audio clips measured before the quote: a voice that turns out too long
+      // is refused here rather than after a network round trip (submit checks again; it is idempotent).
+      const p = await prepareSubmission(params)
       const quote = await venice.quote(p).catch(() => undefined)
       return await jobs.submit(p, { quote })
     } finally {
@@ -156,7 +176,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('consent:accept', (_e, flow: string, version: string) => acceptConsent(flow, version))
-  ipcMain.handle('generations:list', () => db.listGenerations().map(toPublic))
+  ipcMain.handle('generations:list', () => attachReviewSummary(db.listGenerations().map(toPublic)))
   ipcMain.handle('generations:delete', async (_e, id: string) => {
     // Not while "Städa upp" or a switch moves files: the video could be moved away from the path trashed here.
     await libraryOperationSettled()
@@ -177,6 +197,8 @@ function registerIpc(): void {
       if (file && isInsideRoot(file)) await shell.trashItem(file).catch(() => unlink(file).catch(() => {}))
     }
     if (g.filePath) await removeDayFolderIfEmpty(dirname(g.filePath))
+    // Every view drops it, also the feed when the take was deleted in the sequence editor.
+    broadcast('generation:delete', id)
     for (const sequenceId of sequenceIds) broadcast('sequence:change', sequenceId)
   })
 
@@ -189,12 +211,32 @@ function registerIpc(): void {
     })
     return res.canceled ? [] : res.filePaths
   })
+  ipcMain.handle('file:pickAudio', async (e, multiple: boolean) => {
+    const win = BrowserWindow.fromWebContents(e.sender)!
+    const res = await dialog.showOpenDialog(win, {
+      properties: multiple ? ['openFile', 'multiSelections'] : ['openFile'],
+      filters: [{ name: 'Ljud', extensions: [...AUDIO_FILE_TYPES] }]
+    })
+    return res.canceled ? [] : res.filePaths
+  })
 
   registerLibraryIpc(
     () => broadcast('library:change'),
-    // A renamed asset folder rewrote the image paths in segment params; open segment editors refetch.
-    broadcastAllSequences
+    // A renamed asset folder (or a used photo or voice kept when its asset went) rewrote the image and audio paths
+    // in segment and generation params: open segment editors refetch, and the feed gets those generations again.
+    () => {
+      broadcastAllSequences()
+      broadcastRewrittenGenerations()
+    }
   )
+  // Reviews and learnings, from the window and from agents; changes go to every window. A review also changes
+  // the stars and count its generation's card shows, so the generation is sent again too.
+  registerReviewIpc((channel, payload) => {
+    broadcast(channel, payload)
+    if (channel !== 'review:change' || typeof payload !== 'string' || !db.isDbOpen()) return
+    const g = db.getGeneration(payload)
+    if (g) broadcastGeneration(toPublic(g))
+  })
   const sequences = registerSequenceIpc({
     jobs,
     venice,
@@ -219,7 +261,7 @@ function registerIpc(): void {
 void app.whenReady().then(async () => {
   if (!isPrimaryInstance) return
   handleMediaProtocol()
-  jobs.on('update', (g) => broadcast('generation:update', g))
+  jobs.on('update', (g: Generation) => broadcastGeneration(g))
   registerIpc()
   // Opens the chosen base folder (converting an old layout, clearing scratch files) and resumes pending
   // jobs. Without a usable folder the window still opens, on the library setup screen.

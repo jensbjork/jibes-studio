@@ -15,6 +15,7 @@ const items: Item[] = [
   { id: 'characters', label: 'Karaktärer', icon: <AssetIcon kind="character" /> },
   { id: 'environments', label: 'Miljöer', icon: <AssetIcon kind="environment" /> },
   { id: 'outfits', label: 'Kläder', icon: <AssetIcon kind="outfit" /> },
+  { id: 'poses', label: 'Poser', icon: <AssetIcon kind="pose" /> },
   { id: 'prompts', label: 'Prompter', icon: '❝' },
   { id: 'sequences', label: 'Sekvenser', icon: '▤' }
 ]

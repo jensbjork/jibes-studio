@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { SavedPrompt } from '@shared/types'
 import { usePromptsState } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
+import { loadTab, saveTab, type PromptsTab } from './learning-utils'
+import LearningsView from './LearningsView'
 import PromptEditor from './PromptEditor'
 import PromptFilters from './PromptFilters'
 import PromptListItem, { type PromptRow } from './PromptListItem'
@@ -15,7 +17,9 @@ import {
   titleFromBody,
   type SortKey
 } from './prompt-utils'
+import { takeRequestedLearning } from './useLearnings'
 import { usePromptDraft, type Draft } from './usePromptDraft'
+import ViewTabs from './ViewTabs'
 
 const SORT_KEY = 'prompts:sort'
 
@@ -39,7 +43,28 @@ function rowFromDraft(draft: Draft, useCount: number): PromptRow {
   }
 }
 
+/** Prompter: the prompt library, and (second tab) the learnings about what works in prompts. */
 export default function PromptsView({ navigate }: { navigate: Navigate }) {
+  // A clip's "Lärdomar från klippet" link opens the Lärdomar tab on that learning.
+  const [requested] = useState(takeRequestedLearning)
+  const [tab, setTabState] = useState<PromptsTab>(() => (requested ? 'learnings' : loadTab()))
+  const setTab = (next: PromptsTab) => {
+    setTabState(next)
+    saveTab(next)
+  }
+  useEffect(() => {
+    if (requested) saveTab('learnings')
+  }, [])
+
+  const tabs = <ViewTabs tab={tab} onTab={setTab} />
+  return tab === 'learnings' ? (
+    <LearningsView navigate={navigate} tabs={tabs} initialId={requested} />
+  ) : (
+    <PromptLibrary navigate={navigate} tabs={tabs} />
+  )
+}
+
+function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode }) {
   const { prompts, loaded } = usePromptsState()
   const editor = usePromptDraft(prompts)
   const { draft } = editor
@@ -150,8 +175,8 @@ export default function PromptsView({ navigate }: { navigate: Navigate }) {
   return (
     <div className="flex h-full">
       <aside className="flex w-[340px] shrink-0 flex-col border-r border-line">
-        <div className="drag flex h-12 shrink-0 items-center justify-between pl-5 pr-3">
-          <h1 className="font-semibold">Prompter</h1>
+        <div className="drag flex h-12 shrink-0 items-center justify-between pl-3 pr-3">
+          {tabs}
           <button
             type="button"
             onClick={newPrompt}

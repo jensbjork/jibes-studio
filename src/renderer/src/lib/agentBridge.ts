@@ -5,25 +5,30 @@ import {
   PREFERRED,
   audioForModel,
   kindOfModelId,
+  maxReferenceAudios,
   maxReferenceImages,
   paramsForSubmit,
   pickOption,
+  supportsAudioInput,
   type Kind
 } from '@shared/models'
-import { canonicalizeTokens, findImageTokens } from '@shared/prompt-refs'
+import { canonicalizeTokens, findAudioTokens, findImageTokens } from '@shared/prompt-refs'
 import type {
   AgentCommand,
   AgentCommandReply,
+  AgentFormAudioReference,
   AgentFormReference,
   AgentFormState,
   AgentOpenResult,
   Asset,
   GenerationParams,
+  ReferenceAudio,
   VideoModel
 } from '@shared/types'
 import { modelForKind } from '../components/ParamsForm'
 import { addPaths, sameList } from '../components/pickers/assetRefs'
-import { generateParamsFrozen, getGenerateParams, setGenerateParams } from './generateStore'
+import { addAudios, audioSourcesByPath, sameAudios, windowOf } from '../components/pickers/audioRefs'
+import { followGenerateAudio, generateParamsFrozen, getGenerateParams, setGenerateParams } from './generateStore'
 import { ipcErrorMessage, loadModels } from './hooks'
 import { followAssetImages, readRememberedImageIds } from './library'
 import type { Intent, Navigate, View } from './navigation'
@@ -33,8 +38,8 @@ import { openInSequenceEditor } from './workspace'
 // The renderer half of the agent connection. Tools that read or fill the Generate form (get_workspace,
 // set_form, set_references, open_in_studio) reach main's MCP server as an 'agent:command'; this applies them
 // to the form store with the same rules the form itself uses (mode switching, model options, the reference
-// cap) and answers with 'agent:reply'. Everything else the agent does goes straight to main's services.
-// Error messages are Swedish: they are shown to the agent, which talks to the user in Swedish.
+// caps for images and audio) and answers with 'agent:reply'. Everything else the agent does goes straight to
+// main's services. Error messages are Swedish: they are shown to the agent, which talks to the user in Swedish.
 
 /** An image of the form tied to the library photo it is (asset, photo number), like a reference minus its token. */
 export type FormImage = Omit<AgentFormReference, 'token'>
@@ -42,7 +47,7 @@ export type FormImage = Omit<AgentFormReference, 'token'>
 /**
  * The answer to get_form, set_form and set_references. `params` is what a generation would send now (inputs
  * the mode doesn't use are left out); `references` are in order, @Image1 first, only in reference mode and
- * only the images the model takes.
+ * only the images the model takes; `audioReferences` likewise, @Audio1 first, only when the model takes audio.
  */
 export interface FormSnapshot extends AgentFormState {
   view: View
@@ -229,7 +234,15 @@ export function applySetForm(
   const modelChanged = modelId !== current.model
   const before: GenerationParams = { ...current, model: modelId }
   const next = snapToModel(before, model)
-  if (modelChanged) notes.push(...adjustedNotes(current, next, explicit))
+  if (modelChanged) {
+    notes.push(...adjustedNotes(current, next, explicit))
+    const audios = current.referenceAudios?.length ?? 0
+    if (audios && supportsAudioInput(current.model) && !supportsAudioInput(model ?? modelId)) {
+      notes.push(
+        `${modelLabel} tar inte emot ljudreferenser – ljudet (${audios} klipp) ligger kvar i formuläret men skickas inte.`
+      )
+    }
+  }
 
   const unknownModel = () =>
     errors.push(`Modellen ${modelLabel} finns inte i Venice modellista längre – välj en annan med model.`)
@@ -306,15 +319,45 @@ export function applySetForm(
   return { params: next, notes }
 }
 
+/** A number of seconds from the agent: undefined when left out, NaN when it isn't one. */
+function seconds(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : Number.NaN
+}
+
+/** set_references' `audios`: reference audio clips (main resolved the agent's audio ids and windows). */
+function parseAudios(value: unknown): ReferenceAudio[] | undefined {
+  if (value === undefined || value === null) return undefined
+  const unreadable = 'Ljudreferenserna kunde inte läsas (audios ska vara en lista med ljudfiler och deras utdrag).'
+  if (!Array.isArray(value)) throw new BridgeError(unreadable)
+  return value.map((item): ReferenceAudio => {
+    const a = typeof item === 'string' ? { path: item } : asArgs(item)
+    const start = seconds(a.start)
+    const length = seconds(a.length)
+    if (typeof a.path !== 'string' || !a.path.startsWith('/') || Number.isNaN(start) || Number.isNaN(length)) {
+      throw new BridgeError(unreadable)
+    }
+    return {
+      path: a.path,
+      ...(start !== undefined ? { start } : {}),
+      ...(length !== undefined ? { length } : {})
+    }
+  })
+}
+
 /**
  * Applies set_references: the given photos (main has resolved asset ids to paths) replace the reference
- * images or are added after them, as many as the model takes. Switches to reference mode if needed. The
- * prompt is left alone: an agent typically writes it for the new list right after.
+ * images or are added after them, as many as the model takes, and the same for the reference audio (`audios`;
+ * left out, replace clears the audio and append keeps it). Audio is only added for a model that takes it, as
+ * many clips as fit (count and total length). Switches to reference mode if needed. The prompt is left alone:
+ * an agent typically writes it for the new lists right after. `assets` tells the audio clips' windows when main
+ * left them out.
  */
 export function applySetReferences(
   current: GenerationParams,
   rawArgs: unknown,
-  models: readonly VideoModel[]
+  models: readonly VideoModel[],
+  assets: readonly Asset[] = []
 ): FormChange {
   const args = asArgs(rawArgs)
   const paths = args.paths
@@ -323,6 +366,7 @@ export function applySetReferences(
   }
   const mode = args.mode ?? 'replace'
   if (mode !== 'replace' && mode !== 'append') throw new BridgeError('mode ska vara ”replace” eller ”append”.')
+  const wantedAudios = parseAudios(field(args, 'audios'))
 
   const notes: string[] = []
   let next: GenerationParams = { ...current }
@@ -339,8 +383,29 @@ export function applySetReferences(
   if (note) notes.push(note)
   next.referenceImages = refs
 
+  const audiosBefore = current.referenceAudios ?? []
+  const base = mode === 'append' ? audiosBefore : []
+  let audios = base
+  if (wantedAudios?.length) {
+    const model = models.find((m) => m.id === next.model)
+    if (!supportsAudioInput(model ?? next.model)) {
+      notes.push(
+        `${model?.name ?? next.model} tar inte emot ljudreferenser, så ljudet lades inte till. Välj en ` +
+          'referensmodell som tar emot ljud för att skicka med röster.'
+      )
+    } else {
+      const change = addAudios(base, wantedAudios, audioSourcesByPath(assets), maxReferenceAudios(next.model))
+      audios = change.audios
+      if (change.note) notes.push(change.note)
+    }
+  }
+  next.referenceAudios = audios.length ? audios : undefined
+
   if (mode === 'replace' && findImageTokens(next.prompt).length && !sameList(before, refs)) {
     notes.push('Prompten ändrades inte – se till att varje @ImageN i den pekar på rätt bild i den nya listan.')
+  }
+  if (mode === 'replace' && findAudioTokens(next.prompt).length && !sameAudios(audiosBefore, audios)) {
+    notes.push('Prompten ändrades inte – se till att varje @AudioN i den pekar på rätt ljud i den nya listan.')
   }
   return { params: next, notes }
 }
@@ -357,7 +422,25 @@ function photoIndex(assets: readonly Asset[]): Map<string, FormImage> {
   return map
 }
 
-/** The form as the agent should see it, with every image tied to its library asset. */
+/** A reference audio clip of the form tied to the library clip it is (asset, clip), with the window it sends. */
+function audioReferences(audios: readonly ReferenceAudio[], assets: readonly Asset[]): AgentFormAudioReference[] {
+  const sources = audioSourcesByPath(assets)
+  return audios.map((audio, i) => {
+    const source = sources.get(audio.path)
+    const { start, length } = windowOf(audio, source)
+    return {
+      token: `@Audio${i + 1}`,
+      ...(source
+        ? { assetId: source.asset.id, assetName: source.asset.name, kind: source.asset.kind, audioId: source.audio.id }
+        : {}),
+      path: audio.path,
+      start,
+      length
+    }
+  })
+}
+
+/** The form as the agent should see it, with every image and audio clip tied to its library asset. */
 export function describeForm(
   params: GenerationParams,
   assets: readonly Asset[],
@@ -371,6 +454,7 @@ export function describeForm(
     ...where,
     params: sent,
     references: (sent.referenceImages ?? []).map((path, i) => ({ token: `@Image${i + 1}`, ...describe(path) })),
+    audioReferences: audioReferences(sent.referenceAudios ?? [], assets),
     ...(sent.startImage ? { startImage: describe(sent.startImage) } : {}),
     ...(sent.endImage ? { endImage: describe(sent.endImage) } : {}),
     issues: promptIssuesOf(params),
@@ -405,13 +489,14 @@ async function modelList(ms: number): Promise<{ models: VideoModel[]; error?: st
 }
 
 /**
- * The library's assets, after pointing the form's photos at where they are now: a renamed character's photos
- * move with its folder (GenerateView does the same while it is open).
+ * The library's assets, after pointing the form's photos and audio clips at where they are now: a renamed
+ * character's photos and voice move with its folder (GenerateView and the store do the same on their own).
  */
 async function assetsFollowingForm(): Promise<Asset[]> {
   const assets = await window.studio.listAssets()
   const followed = followAssetImages(getGenerateParams(), assets, readRememberedImageIds())
   if (followed) setGenerateParams(followed)
+  followGenerateAudio(assets)
   return assets
 }
 
@@ -509,7 +594,7 @@ async function run(cmd: AgentCommand, ctx: BridgeContext): Promise<unknown> {
   const change =
     cmd.command === 'set_form'
       ? applySetForm(getGenerateParams(), cmd.args, models, error)
-      : applySetReferences(getGenerateParams(), cmd.args, models)
+      : applySetReferences(getGenerateParams(), cmd.args, models, assets)
   // The awaits may have outlasted main's patience, or a library switch may have gone through meanwhile.
   if (expired(cmd)) throw new BridgeError(TOO_LATE)
   if (generateParamsFrozen()) throw new BridgeError(SWITCHING_LIBRARY)

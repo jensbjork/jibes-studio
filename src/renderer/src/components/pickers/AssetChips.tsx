@@ -5,9 +5,17 @@ import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
 import { KIND_TONE } from './assetKinds'
 import { outfitsWornBy, type AssetRef } from './assetRefs'
+import { audioIndicesOf, clipsOf, type FormAudio } from './audioRefs'
 import OutfitMenu from './OutfitMenu'
 import Popover from './Popover'
-import { assetReference, characterReference, formatImageRefs } from './text'
+import {
+  assetReference,
+  audioWord,
+  characterReference,
+  formatAudioRefs,
+  formatImageRefs,
+  poseReference
+} from './text'
 
 interface Props {
   /** The assets among the reference images (see assetRefsOf). */
@@ -19,8 +27,19 @@ interface Props {
   /** All reference images in the form, including ones that aren't library photos. */
   refs: string[]
   max: number
-  /** Prompt language: decides the word between a character and its clothes ("wearing" / "i"). */
+  /** Prompt language: decides the words between a character and its voice and clothes ("voice"/"röst"…). */
   language: PromptLanguage
+  /** The form's reference audio as @AudioN references (also clips that aren't sent). */
+  audios: FormAudio[]
+  /** The model takes reference audio: characters and environments with clips offer to bring theirs along. */
+  audioSupported: boolean
+  /** Whether the asset's first clip would fit among the reference audio, and why not. */
+  audioFits: (asset: Asset) => { fits: boolean; reason?: string }
+  /** "Ta med rösten": adds the asset's first clip, or removes all of its clips. */
+  onToggleAudio: (asset: Asset, include: boolean) => void
+  /** Pose id → the characters it applies to; undefined: every character in the form. */
+  posePeople: Readonly<Record<string, string[] | undefined>>
+  onPosePeople: (poseId: string, characterIds: string[] | undefined) => void
   onInsert: (text: string) => void
   onRemove: (asset: Asset) => void
   /** "bärs av": who wears an outfit (null = nobody). */
@@ -32,9 +51,19 @@ interface Props {
 
 const chip = 'inline-flex max-w-full items-center rounded-full border text-[11px] transition'
 
+/** The characters a pose applies to: the chosen ones still in the form, or all of them by default. */
+export function posePeopleOf(
+  poseId: string,
+  characters: readonly AssetRef[],
+  chosen: Readonly<Record<string, string[] | undefined>>
+): AssetRef[] {
+  const ids = chosen[poseId]
+  return ids ? characters.filter((c) => ids.includes(c.asset.id)) : [...characters]
+}
+
 /**
- * The library assets among the reference images, grouped and coloured by kind, with their @Image tokens.
- * Clicking a chip inserts its prompt text; below them the image budget.
+ * The library assets among the reference images, grouped and coloured by kind, with their @Image (and @Audio)
+ * tokens. Clicking a chip inserts its prompt text; below them the image budget.
  */
 export default function AssetChips({
   assetRefs,
@@ -43,6 +72,12 @@ export default function AssetChips({
   refs,
   max,
   language,
+  audios,
+  audioSupported,
+  audioFits,
+  onToggleAudio,
+  posePeople,
+  onPosePeople,
   onInsert,
   onRemove,
   onWear,
@@ -50,8 +85,26 @@ export default function AssetChips({
   onManageOutfits
 }: Props) {
   const sorted = ASSET_KINDS.flatMap((k) => assetRefs.filter((r) => r.asset.kind === k))
-  const characters = assetRefs.filter((r) => r.asset.kind === 'character').map((r) => r.asset)
+  // Only clips that are sent get written into the prompt; a clip this model won't take would be a wrong token.
+  const sentAudios = audios.filter((a) => a.sent)
+  const characterRefs = assetRefs.filter((r) => r.asset.kind === 'character')
+  const characters = characterRefs.map((r) => r.asset)
   const over = refs.length > max
+
+  /** The toggle that brings a character's voice (or an environment's sound) along, when it has any. */
+  const audioToggle = (a: Asset): ReactNode => {
+    const included = audioIndicesOf(audios, a.id)
+    if (!clipsOf(a).length || (!audioSupported && !included.length)) return null
+    return (
+      <AudioToggle
+        asset={a}
+        included={included}
+        supported={audioSupported}
+        fits={audioFits(a)}
+        onToggle={(on) => onToggleAudio(a, on)}
+      />
+    )
+  }
 
   return (
     <div className="mt-2">
@@ -59,16 +112,19 @@ export default function AssetChips({
         <div className="flex flex-wrap gap-1.5">
           {sorted.map((entry) => {
             const a = entry.asset
+            const own = audioIndicesOf(sentAudios, a.id)
             if (a.kind === 'character') {
               return (
                 <CharacterChip
                   key={a.id}
                   entry={entry}
+                  voices={own}
                   wearing={outfitsWornBy(a.id, assetRefs, pairings)}
                   outfits={outfits}
                   refs={refs}
                   max={max}
                   language={language}
+                  audioToggle={audioToggle(a)}
                   onInsert={onInsert}
                   onRemove={() => onRemove(a)}
                   onSwapOutfit={(o) => onSwapOutfit(a, o)}
@@ -76,15 +132,40 @@ export default function AssetChips({
                 />
               )
             }
+            if (a.kind === 'pose') {
+              const people = posePeopleOf(a.id, characterRefs, posePeople)
+              return (
+                <AssetChip
+                  key={a.id}
+                  entry={entry}
+                  text={poseReference(
+                    { name: a.name, indices: entry.indices },
+                    people.map((p) => ({ name: p.asset.name, indices: p.indices })),
+                    language
+                  )}
+                  onInsert={onInsert}
+                  onRemove={() => onRemove(a)}
+                >
+                  <PosePeopleSelect
+                    pose={a}
+                    characters={characters}
+                    chosen={posePeople[a.id]}
+                    onChange={(ids) => onPosePeople(a.id, ids)}
+                  />
+                </AssetChip>
+              )
+            }
             const wearer = a.kind === 'outfit' ? pairings.get(a.id) : undefined
             return (
               <AssetChip
                 key={a.id}
                 entry={entry}
-                text={assetReference(a.name, entry.indices)}
+                audios={own}
+                text={assetReference(a.name, entry.indices, own, audioWord(a.kind, language))}
                 onInsert={onInsert}
                 onRemove={() => onRemove(a)}
               >
+                {audioToggle(a)}
                 {a.kind === 'outfit' && characters.length > 0 && (
                   <WearerSelect
                     outfit={a}
@@ -121,6 +202,8 @@ export default function AssetChips({
 
 interface ChipProps {
   entry: AssetRef
+  /** The asset's @AudioN numbers in the form, shown after its image tokens. */
+  audios?: number[]
   /** What a click inserts into the prompt. */
   text: string
   onInsert: (text: string) => void
@@ -131,10 +214,11 @@ interface ChipProps {
   children?: ReactNode
 }
 
-/** "● Strandpromenaden @Image4 ✕": click inserts the reference, ✕ removes the asset's photos. */
-function AssetChip({ entry, text, onInsert, onRemove, detail, children }: ChipProps) {
+/** "● Strandpromenaden @Image4 ✕": click inserts the reference, ✕ removes the asset's photos (and audio). */
+function AssetChip({ entry, audios = [], text, onInsert, onRemove, detail, children }: ChipProps) {
   const { asset: a, indices } = entry
   const tone = KIND_TONE[a.kind]
+  const copy = ASSET_COPY[a.kind]
   return (
     <span className={`${chip} ${tone.chip}`}>
       <button
@@ -144,13 +228,20 @@ function AssetChip({ entry, text, onInsert, onRemove, detail, children }: ChipPr
       >
         <AssetAvatar asset={a} className={`h-5 w-5 rounded-full ring-1 ${tone.ring}`} />
         <span className="min-w-0 truncate font-medium">{a.name}</span>
-        <span className="shrink-0 text-muted">{formatImageRefs(indices)}</span>
+        <span className="shrink-0 text-muted">
+          {formatImageRefs(indices)}
+          {audios.length > 0 && <span className={tone.text}> · {formatAudioRefs(audios)}</span>}
+        </span>
         {detail}
       </button>
       {children}
       <button
         onClick={onRemove}
-        title={`Ta bort ${ASSET_COPY[a.kind].possessive} bilder från referensbilderna`}
+        title={
+          audios.length
+            ? `Ta bort ${copy.possessive} bilder och ljud från referenserna`
+            : `Ta bort ${copy.possessive} bilder från referensbilderna`
+        }
         className="mr-1 shrink-0 rounded-full px-1 text-muted hover:text-text"
       >
         ✕
@@ -159,28 +250,92 @@ function AssetChip({ entry, text, onInsert, onRemove, detail, children }: ChipPr
   )
 }
 
+interface AudioToggleProps {
+  asset: Asset
+  /** The asset's @AudioN numbers in the form; empty while its audio isn't included. */
+  included: number[]
+  /** The model takes reference audio. */
+  supported: boolean
+  fits: { fits: boolean; reason?: string }
+  onToggle: (include: boolean) => void
+}
+
+/**
+ * "Ta med rösten" on a character chip (or "Ta med ljudmiljön" on an environment's): a microphone that is lit while
+ * the clip is among the reference audio. Off removes every clip of the asset from it.
+ */
+function AudioToggle({ asset, included, supported, fits, onToggle }: AudioToggleProps) {
+  const on = included.length > 0
+  const voice = asset.kind === 'character'
+  const label = voice ? 'Ta med rösten' : 'Ta med ljudmiljön'
+  const what = voice ? 'Rösten' : 'Ljudmiljön'
+  const disabled = !on && !fits.fits
+  const title = on
+    ? supported
+      ? `${what} skickas med som ${formatAudioRefs(included)} – klicka för att ta bort den`
+      : `${what} (${formatAudioRefs(included)}) skickas inte – modellen tar inte emot ljud. Klicka för att ta bort.`
+    : disabled
+      ? `${what} kan inte tas med: ${fits.reason ?? 'inget utrymme kvar'}`
+      : `${label} (${voice ? 'första röstklippet' : 'första ljudklippet'})`
+  return (
+    <button
+      onClick={() => onToggle(!on)}
+      disabled={disabled}
+      aria-pressed={on}
+      aria-label={label}
+      title={title}
+      className={`flex shrink-0 items-center rounded-full p-0.5 transition disabled:opacity-40 ${
+        on ? (supported ? KIND_TONE[asset.kind].text : 'text-accent') : 'text-muted hover:text-text'
+      }`}
+    >
+      <MicIcon crossed={!on} />
+    </button>
+  )
+}
+
+function MicIcon({ crossed }: { crossed: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden className="shrink-0">
+      <rect x="4" y="1" width="4" height="6.2" rx="2" fill="currentColor" />
+      <path
+        d="M2.4 5.6a3.6 3.6 0 0 0 7.2 0M6 9.2v1.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      {crossed && <path d="M1.5 1.5l9 9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.7" />}
+    </svg>
+  )
+}
+
 interface CharacterChipProps {
   entry: AssetRef
+  /** The character's @AudioN numbers in the form (its voice). */
+  voices: number[]
   /** The outfits paired with this character. */
   wearing: AssetRef[]
   outfits: Asset[]
   refs: string[]
   max: number
   language: PromptLanguage
+  audioToggle: ReactNode
   onInsert: (text: string) => void
   onRemove: () => void
   onSwapOutfit: (outfit: Asset | null) => void
   onManageOutfits?: () => void
 }
 
-/** A character chip shows what the character wears, inserts both together, and can swap the clothes. */
+/** A character chip shows its voice and what it wears, inserts them together, and can swap the clothes. */
 function CharacterChip({
   entry,
+  voices,
   wearing,
   outfits,
   refs,
   max,
   language,
+  audioToggle,
   onInsert,
   onRemove,
   onSwapOutfit,
@@ -194,12 +349,14 @@ function CharacterChip({
     c.name,
     indices,
     wearing.map((w) => ({ name: w.asset.name, indices: w.indices })),
-    language
+    language,
+    voices
   )
 
   return (
     <AssetChip
       entry={entry}
+      audios={voices}
       text={text}
       onInsert={onInsert}
       onRemove={onRemove}
@@ -209,6 +366,7 @@ function CharacterChip({
         )
       }
     >
+      {audioToggle}
       <button
         ref={button}
         onClick={() => setOpen((o) => !o)}
@@ -278,5 +436,102 @@ function WearerSelect({ outfit, wearer, characters, onChange }: WearerSelectProp
         ))}
       </select>
     </label>
+  )
+}
+
+interface PosePeopleSelectProps {
+  pose: Asset
+  /** The characters in the form. */
+  characters: Asset[]
+  /** The ones chosen; undefined: all of them. */
+  chosen: string[] | undefined
+  /** undefined goes back to "all of them" (which follows characters added later). */
+  onChange: (characterIds: string[] | undefined) => void
+}
+
+/**
+ * "gäller Anna, Erik ▾" on a pose chip: which of the form's characters take the pose. Only shapes the text the
+ * chip inserts ("Anna (@Image1) and Erik (@Image3) posed as in Kram (@Image5)"); nothing is stored.
+ */
+function PosePeopleSelect({ pose, characters, chosen, onChange }: PosePeopleSelectProps) {
+  const button = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  const close = useCallback(() => setOpen(false), [])
+  const selected = chosen ? characters.filter((c) => chosen.includes(c.id)) : characters
+  const summary = !characters.length
+    ? 'inga karaktärer'
+    : !selected.length
+      ? 'ingen'
+      : !chosen || selected.length === characters.length
+        ? characters.length === 1
+          ? characters[0].name
+          : 'alla'
+        : swedishList(selected.map((c) => c.name))
+
+  const toggle = (id: string): void => {
+    const current = new Set(selected.map((c) => c.id))
+    if (current.has(id)) current.delete(id)
+    else current.add(id)
+    const ids = characters.map((c) => c.id).filter((c) => current.has(c))
+    // Everyone chosen again: back to the default, so characters added later are included too.
+    onChange(ids.length === characters.length ? undefined : ids)
+  }
+
+  return (
+    <>
+      <button
+        ref={button}
+        onClick={() => setOpen((o) => !o)}
+        disabled={!characters.length}
+        title={
+          characters.length
+            ? `Vilka karaktärer ska stå som i ${pose.name}? Styr texten som infogas.`
+            : 'Lägg till karaktärer för att välja vilka som ska stå i posen.'
+        }
+        aria-label={`Vilka posen ${pose.name} gäller`}
+        className={`flex shrink-0 items-center gap-1 pr-1 transition disabled:opacity-60 ${
+          open ? 'text-text' : 'text-muted hover:text-text'
+        }`}
+      >
+        <span>gäller</span>
+        <span className={`max-w-24 truncate ${selected.length ? 'text-text' : ''}`}>{summary}</span>
+        <span aria-hidden>▾</span>
+      </button>
+      <Popover anchorRef={button} open={open} onClose={close} width={240} maxHeight={320} label="Vilka posen gäller">
+        <div className="border-b border-line px-3 py-2">
+          <p className="truncate font-medium">{pose.name} gäller</p>
+          <p className="mt-0.5 text-[11px] text-muted">Karaktärerna som ska stå så – styr texten som infogas.</p>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+          {characters.map((c) => {
+            const checked = selected.some((s) => s.id === c.id)
+            return (
+              <label
+                key={c.id}
+                className="flex cursor-pointer items-center gap-2.5 rounded-md p-1.5 hover:bg-raised/60"
+              >
+                <input type="checkbox" checked={checked} onChange={() => toggle(c.id)} className="accent-accent" />
+                <AssetAvatar asset={c} className={`h-6 w-6 rounded-full ring-1 ${KIND_TONE.character.ring}`} />
+                <span className="min-w-0 flex-1 truncate">{c.name}</span>
+              </label>
+            )
+          })}
+        </div>
+        <div className="flex gap-1 border-t border-line p-1.5 text-[11px]">
+          <button
+            onClick={() => onChange(undefined)}
+            className="flex-1 rounded px-2 py-1 text-muted hover:bg-raised hover:text-text"
+          >
+            Alla
+          </button>
+          <button
+            onClick={() => onChange([])}
+            className="flex-1 rounded px-2 py-1 text-muted hover:bg-raised hover:text-text"
+          >
+            Ingen
+          </button>
+        </div>
+      </Popover>
+    </>
   )
 }

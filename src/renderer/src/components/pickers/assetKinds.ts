@@ -51,6 +51,18 @@ export const PICKER_COPY: Record<AssetKind, PickerCopy> = {
     manage: 'Hantera kläder →',
     noMatch: 'Ingen klädsel matchar',
     needsImages: 'Lägg till bilder på klädseln först'
+  },
+  pose: {
+    add: 'Pose',
+    addTitle: 'Lägg till en sparad pose: bilder som visar hur personerna står och var, i förhållande till varandra',
+    search: 'Sök pose…',
+    emptyTitle: 'Inga poser än.',
+    emptyText:
+      'Spara ett foto eller en skiss av positionerna du vill ha – sedan hänvisar du till personerna i den med dina karaktärer.',
+    create: 'Skapa en pose',
+    manage: 'Hantera poser →',
+    noMatch: 'Ingen pose matchar',
+    needsImages: 'Lägg till bilder på posen först'
   }
 }
 
@@ -89,6 +101,13 @@ export const KIND_TONE: Record<AssetKind, KindTone> = {
     ring: 'ring-violet-400/70',
     caption: 'bg-violet-700/85',
     token: 'bg-violet-400/15 text-violet-300'
+  },
+  pose: {
+    text: 'text-pink-400',
+    chip: 'border-pink-400/30 bg-pink-400/10 hover:border-pink-400/60',
+    ring: 'ring-pink-400/70',
+    caption: 'bg-pink-700/85',
+    token: 'bg-pink-400/15 text-pink-300'
   }
 }
 

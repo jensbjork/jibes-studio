@@ -6,6 +6,7 @@ import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
 import { KIND_TONE, PICKER_COPY } from './assetKinds'
 import { defaultOutfitOf } from './assetRefs'
+import { bringsVoice } from './audioRefs'
 import { imageCount, matchesQuery } from './text'
 
 interface Props {
@@ -26,12 +27,14 @@ interface Props {
   onPickImage: (path: string, asset: Asset) => void
   /** Free reference slots; with onPickAsset, rows warn when an asset's photos won't fit. */
   freeSlots?: number
+  /** With onPickAsset: a character's first voice clip comes along (the model takes reference audio). */
+  withVoice?: boolean
   /** Opens the library view of a kind; used by the empty state and the footer link. */
   onManage?: (kind: AssetKind) => void
 }
 
 /**
- * Popover content: the library's characters, environments and outfits under one tab each. Pick a whole
+ * Popover content: the library's characters, environments, outfits and poses under one tab each. Pick a whole
  * asset or a single photo.
  */
 export default function AssetPicker({
@@ -43,13 +46,14 @@ export default function AssetPicker({
   onPickAsset,
   onPickImage,
   freeSlots,
+  withVoice = false,
   onManage
 }: Props) {
   const [kind, setKind] = useState(initialKind)
   const [query, setQuery] = useState('')
   const byId = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
   const counts = useMemo(() => {
-    const n: Record<AssetKind, number> = { character: 0, environment: 0, outfit: 0 }
+    const n: Record<AssetKind, number> = { character: 0, environment: 0, outfit: 0, pose: 0 }
     for (const a of assets) n[a.kind] += 1
     return n
   }, [assets])
@@ -94,7 +98,7 @@ export default function AssetPicker({
       <div className="border-b border-line px-3 py-2.5">
         <p className="font-medium">{title}</p>
         {hint && <p className="mt-0.5 text-[11px] text-muted">{hint}</p>}
-        <div role="tablist" onKeyDown={onTabKeyDown} className="mt-2 grid grid-cols-3 gap-1 rounded-md bg-raised p-0.5">
+        <div role="tablist" onKeyDown={onTabKeyDown} className="mt-2 grid grid-cols-4 gap-1 rounded-md bg-raised p-0.5">
           {ASSET_KINDS.map((k) => (
             <button
               key={k}
@@ -103,14 +107,15 @@ export default function AssetPicker({
               aria-selected={k === kind}
               tabIndex={k === kind ? 0 : -1}
               onClick={() => showTab(k)}
-              className={`flex items-center justify-center gap-1.5 rounded py-1 text-[12px] transition ${
+              title={ASSET_COPY[k].plural}
+              className={`flex min-w-0 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] transition ${
                 k === kind ? 'bg-line text-text' : 'text-muted hover:text-text'
               }`}
             >
               <span className={`flex ${KIND_TONE[k].text}`}>
                 <AssetIcon kind={k} />
               </span>
-              {ASSET_COPY[k].plural}
+              <span className="truncate">{ASSET_COPY[k].plural}</span>
               {counts[k] > 0 && <span className="text-[10px] text-muted">{counts[k]}</span>}
             </button>
           ))}
@@ -153,6 +158,7 @@ export default function AssetPicker({
               reference={!!onPickAsset}
               freeSlots={freeSlots}
               outfit={onPickAsset ? defaultOutfitOf(a, byId) : undefined}
+              voice={onPickAsset && withVoice && bringsVoice(a)}
               wornBy={defaultFor.get(a.id)}
               onPickRow={() => pickRow(a)}
               onPickImage={(path) => onPickImage(path, a)}
@@ -181,13 +187,25 @@ interface RowProps {
   freeSlots?: number
   /** A character's default outfit, added along with it. */
   outfit?: Asset
+  /** A character's first voice clip comes along with it. */
+  voice?: boolean
   /** Names of the characters that wear this outfit by default. */
   wornBy?: string[]
   onPickRow: () => void
   onPickImage: (path: string) => void
 }
 
-function AssetRow({ asset: a, selected, reference, freeSlots, outfit, wornBy, onPickRow, onPickImage }: RowProps) {
+function AssetRow({
+  asset: a,
+  selected,
+  reference,
+  freeSlots,
+  outfit,
+  voice = false,
+  wornBy,
+  onPickRow,
+  onPickImage
+}: RowProps) {
   const total = a.images.length
   const used = a.images.filter((img) => selected.has(img.path)).length
   const pending = total - used
@@ -202,11 +220,12 @@ function AssetRow({ asset: a, selected, reference, freeSlots, outfit, wornBy, on
           ? 'Bilden är tillagd'
           : `Alla ${total} bilder tillagda`
         : `${used} av ${total} bilder tillagda`
-  const extra = outfit
-    ? `bär ${outfit.name}`
-    : wornBy?.length
-      ? `standard för ${swedishList(wornBy)}`
-      : undefined
+  const extra = [
+    voice ? 'med röst' : undefined,
+    outfit ? `bär ${outfit.name}` : wornBy?.length ? `standard för ${swedishList(wornBy)}` : undefined
+  ]
+    .filter(Boolean)
+    .join(' · ')
   // The default outfit only comes along when all of its photos fit after the character's own.
   const outfitPending = outfit?.images.filter((img) => !selected.has(img.path)).length ?? 0
   const warning =
@@ -229,9 +248,8 @@ function AssetRow({ asset: a, selected, reference, freeSlots, outfit, wornBy, on
           !total
             ? PICKER_COPY[a.kind].needsImages
             : reference
-              ? outfit
-                ? `Lägg till alla bilder och standardklädseln ”${outfit.name}”`
-                : 'Lägg till alla bilder'
+              ? `Lägg till alla bilder${voice ? (outfit ? ', rösten' : ' och rösten') : ''}` +
+                (outfit ? ` och standardklädseln ”${outfit.name}”` : '')
               : 'Använd omslagsbilden'
         }
         className="flex w-full items-center gap-3 rounded-md text-left disabled:cursor-not-allowed disabled:opacity-50"
