@@ -92,7 +92,8 @@ Optional, but please use one when a change clearly belongs to an area. Pick the 
 | `prompt` | The prompt editor and `@ImageN` / `@AudioN` reference checks | `components/prompt/`, `shared/prompt-refs.ts` |
 | `library` | Characters, environments, outfits and poses, the prompt library, reviews and learnings | `components/assets/`, `components/prompts/`, `library.ts`, `reviews.ts` |
 | `assets` | Reference images, audio clips and asset folders on disk | `assets.ts`, `references.ts` |
-| `sequences` | Sequences, clips, takes, trims and preview | `components/sequences/`, `sequences.ts`, `sequence-store.ts` |
+| `sequences` | Sequences, clips, takes, trims, preview, storyboards and keyframes | `components/sequences/`, `sequences.ts`, `sequence-store.ts` |
+| `images` | Stills and Venice's image models (*Skapa bild…*, frames saved from takes) | `components/images/`, `images.ts`, `stills.ts` |
 | `export` | ffmpeg export of sequences | `sequence-export.ts`, `ffmpeg.ts` |
 | `agent` | Agent connection: approvals, activity, the agent guide | `agent/approvals.ts`, `agent/guide.ts`, `components/agent/` |
 | `mcp` | The MCP server, its tools and transport | `agent/server.ts`, `agent/network.ts`, `agent/tools/` |

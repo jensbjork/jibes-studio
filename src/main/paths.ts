@@ -49,6 +49,9 @@ export const APP_DATA = { thumbs: 'miniatyrer', frames: 'bildrutor', tmp: 'tmp' 
 /** Inside a sequence folder. */
 export const TAKES_FOLDER = 'Tagningar'
 
+/** Inside a sequence folder: the sequence's stills (keyframes generated, uploaded or saved from takes). */
+export const STORYBOARD_FOLDER = 'Storyboard'
+
 export const DB_FILE_NAME = 'studio.db'
 
 export const LIBRARY_NOT_READY = 'Välj en biblioteksmapp först.'

@@ -1,21 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import type { ConsentRequest, Generation, GenerationParams, Segment, Sequence, VideoModel } from '@shared/types'
+import type { ConsentRequest, GenerationParams, Segment, Sequence, VideoModel } from '@shared/types'
 import { ipcErrorMessage, useQuote } from '../../lib/hooks'
-import { formatUsd, mediaUrl } from '../../lib/media'
+import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import { useReportOpenSegment } from '../../lib/workspace'
 import ConsentDialog from '../ConsentDialog'
-import ParamsForm, { missingInput, unavailableModel } from '../ParamsForm'
+import ParamsForm from '../ParamsForm'
+import { clipBlocked } from './clipChecks'
 import ConfirmButton from './ConfirmButton'
-import { PlayIcon } from './icons'
-import {
-  continuationMismatch,
-  formatLength,
-  parseConsent,
-  readyTake,
-  stableJson,
-  takeDuration
-} from './sequenceUtils'
+import { CloseIcon, PlayIcon } from './icons'
+import KeyframeBox from './KeyframeBox'
+import NotesField from './NotesField'
+import { clipKey, continues, parseConsent, readyTake, stableJson } from './sequenceUtils'
 import { useDraft, useRegisterFlush, type DraftStatus, type FlushRegistry } from './useDraft'
 import type { SequenceStore } from './useSequence'
 
@@ -36,6 +32,14 @@ interface Props {
   handleRef: RefObject<EditorHandle | null>
   navigate: Navigate
   onPreviewFrom: (segmentId: string) => void
+  /** Configures the clip to be redone between its neighbours ("Gör om mellan grannarna"; free). */
+  onBridge: (segmentId: string) => Promise<void>
+  /** "Gör om mellan grannarna" just configured this clip; the frames box says what to do next. */
+  justBridged?: boolean
+  /** Shows the clip's notes ("Vad händer"); the storyboard has them on its panels already. */
+  showNotes?: boolean
+  /** Shown as a close button in the header (the storyboard's editor column). */
+  onClose?: () => void
 }
 
 const smallButton =
@@ -59,7 +63,11 @@ export default function SegmentEditor({
   flushers,
   handleRef,
   navigate,
-  onPreviewFrom
+  onPreviewFrom,
+  onBridge,
+  justBridged = false,
+  showNotes = true,
+  onClose
 }: Props) {
   const { mutate, patchSegment, addTake } = store
   const segmentId = segment.id
@@ -83,9 +91,8 @@ export default function SegmentEditor({
     }
   }, [handleRef, setParams])
 
-  const previous = index > 0 ? sequence.segments[index - 1] : undefined
-  const continuing = segment.continueFromPrevious && !!previous
-  const prevTake = previous && readyTake(previous)
+  const continuing = continues(segment, index)
+  const endFromNext = segment.endFromNext && index < sequence.segments.length - 1
   const model = models.find((m) => m.id === params.model)
   const quote = useQuote(params, model)
 
@@ -94,30 +101,16 @@ export default function SegmentEditor({
   const [error, setError] = useState<string>()
   // Venice's consent request, with the clip as main had it when it asked: accepting generates only that clip.
   const [consent, setConsent] = useState<{ request: ConsentRequest; clip: string }>()
-  // The clip as main has it now (what segments:generate would send, including the frame a continuation starts
-  // from), for comparing after the consent dialog.
-  const clipNow = stableJson([
-    segment.params,
-    continuing,
-    continuing ? [previous?.id, previous?.selectedGenerationId, previous?.trimEnd] : null
-  ])
+  // The clip as main has it now (what segments:generate would send, including the frames it starts and ends on
+  // from the neighbours), for comparing after the consent dialog.
+  const clipNow = clipKey(sequence, index)
   const clipNowRef = useRef(clipNow)
   useEffect(() => {
     clipNowRef.current = clipNow
   })
 
-  const blocked =
-    // Checked as main will send it: a continuation is image-to-video, where @ImageN tokens point at nothing.
-    missingInput(params, continuing) ??
-    (continuing && !ffmpegOk ? 'ffmpeg krävs för att fortsätta' : undefined) ??
-    (continuing && !prevTake ? `Klipp ${index} saknar färdig tagning` : undefined) ??
-    (!model
-      ? models.length
-        ? 'Välj en tillgänglig modell'
-        : modelsError
-          ? 'Modellerna kunde inte laddas'
-          : 'Laddar modeller…'
-      : unavailableModel(model))
+  // Checked as main will send it: a continuation is image-to-video, where @ImageN tokens point at nothing.
+  const blocked = clipBlocked({ sequence, index, params, models, modelsError, ffmpegOk })
 
   const generate = async () => {
     if (blocked || submitting) return
@@ -169,6 +162,34 @@ export default function SegmentEditor({
     }
   }
 
+  const toggleEndFromNext = async (on: boolean) => {
+    setToggling(true)
+    setError(undefined)
+    try {
+      // Main switches the clip to a model that takes an end image when it is turned on, keeping these params.
+      await flush()
+      await patchSegment(segmentId, { endFromNext: on })
+    } catch (e) {
+      setError(ipcErrorMessage(e))
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  const bridge = async () => {
+    setToggling(true)
+    setError(undefined)
+    try {
+      // The bridge keeps prompt, duration and sound, so the latest typing must be saved first.
+      if (!(await flush())) throw new Error('Ändringarna kunde inte sparas. Försök igen.')
+      await onBridge(segmentId)
+    } catch (e) {
+      setError(ipcErrorMessage(e))
+    } finally {
+      setToggling(false)
+    }
+  }
+
   const remove = async () => {
     discard()
     try {
@@ -213,18 +234,28 @@ export default function SegmentEditor({
             >
               Radera
             </ConfirmButton>
+            {onClose && (
+              <button onClick={onClose} title="Stäng redigeraren" aria-label="Stäng redigeraren" className={smallButton}>
+                <CloseIcon size={11} />
+              </button>
+            )}
           </div>
         </div>
 
-        <ContinueToggle
+        {showNotes && <NotesField segment={segment} store={store} flushers={flushers} className="mb-4" />}
+
+        <KeyframeBox
+          sequence={sequence}
           segment={segment}
           index={index}
-          previousTrimEnd={previous?.trimEnd ?? 0}
-          prevTake={prevTake}
+          models={models}
+          model={params.model}
           ffmpegOk={ffmpegOk}
           busy={toggling}
-          mismatch={continuationMismatch(segment, previous)}
-          onChange={toggleContinue}
+          justBridged={justBridged}
+          onContinue={(on) => void toggleContinue(on)}
+          onEndFromNext={(on) => void toggleEndFromNext(on)}
+          onBridge={() => void bridge()}
         />
 
         <ParamsForm
@@ -232,9 +263,12 @@ export default function SegmentEditor({
           modelsError={modelsError}
           params={params}
           setParams={setParams}
-          kinds={continuing ? ['image-to-video'] : undefined}
+          // A frame from a neighbour makes the clip image-to-video.
+          kinds={continuing || endFromNext ? ['image-to-video'] : undefined}
           continuing={continuing}
+          endImageRequired
           startImageNote={continuing ? `Sista bildrutan från klipp ${index} används som startbild.` : undefined}
+          endImageNote={endFromNext ? `Första bildrutan från klipp ${index + 2} används som slutbild.` : undefined}
           onSubmit={() => void generate()}
           navigate={navigate}
         />
@@ -268,97 +302,5 @@ function SaveState({ status, error }: { status: DraftStatus; error?: string }) {
   }
   return (
     <span className="text-[11px] text-muted">{status === 'idle' ? 'Sparat' : 'Sparar…'}</span>
-  )
-}
-
-function ContinueToggle({
-  segment,
-  index,
-  previousTrimEnd,
-  prevTake,
-  ffmpegOk,
-  busy,
-  mismatch,
-  onChange
-}: {
-  segment: Segment
-  index: number
-  previousTrimEnd: number
-  prevTake?: Generation
-  ffmpegOk: boolean
-  busy: boolean
-  mismatch: boolean
-  onChange: (on: boolean) => void
-}) {
-  const on = segment.continueFromPrevious && index > 0
-  const first = index === 0
-  // Turning it off must stay possible without ffmpeg; turning it on needs ffmpeg for the frame grab.
-  const disabled = first || busy || (!on && !ffmpegOk)
-  const frameTime = prevTake ? Math.max(0, takeDuration(prevTake) - previousTrimEnd) : undefined
-
-  const description = first
-    ? 'Det första klippet startar från din prompt och dina egna bilder.'
-    : !ffmpegOk && !on
-      ? 'Kräver ffmpeg (brew install ffmpeg).'
-      : on
-        ? `Startbilden hämtas från slutet av klipp ${index}${previousTrimEnd > 0 ? ' (efter trim)' : ''} när tagningen genereras, så övergången blir sömlös.`
-        : `Använd sista bildrutan i klipp ${index} som startbild för en sömlös övergång.`
-
-  return (
-    <div className="mb-5 rounded-lg border border-line bg-panel p-3">
-      <div
-        className={`flex items-start gap-3 ${disabled ? 'opacity-60' : 'cursor-pointer'}`}
-        onClick={() => !disabled && onChange(!on)}
-      >
-        <button
-          role="switch"
-          aria-checked={on}
-          disabled={disabled}
-          onClick={(e) => {
-            e.stopPropagation()
-            onChange(!on)
-          }}
-          className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition ${on ? 'bg-accent' : 'bg-line'}`}
-        >
-          <span
-            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${on ? 'left-[18px]' : 'left-0.5'}`}
-          />
-        </button>
-        <span className="min-w-0">
-          <span className="block">Fortsätt från föregående klipp</span>
-          <span className="mt-0.5 block text-[11px] leading-snug text-muted">{description}</span>
-        </span>
-      </div>
-
-      {on && prevTake?.filePath && frameTime !== undefined && (
-        <div className="mt-3 flex items-center gap-3 border-t border-line pt-3">
-          {/* The media fragment makes the browser show the exact frame the continuation will start from. */}
-          <video
-            key={`${prevTake.id}-${frameTime}`}
-            src={`${mediaUrl(prevTake.filePath)}#t=${Math.max(0, frameTime - 0.05).toFixed(2)}`}
-            preload="auto"
-            muted
-            className="pointer-events-none aspect-video w-28 shrink-0 rounded bg-black object-cover"
-          />
-          <p className="text-[11px] leading-snug text-muted">
-            Startbild: klipp {index}
-            {previousTrimEnd > 0 ? ` vid ${formatLength(frameTime)}` : ', sista bildrutan'}
-          </p>
-        </div>
-      )}
-
-      {on && !prevTake && (
-        <p className="mt-3 border-t border-line pt-3 text-[11px] leading-snug text-muted">
-          Klipp {index} behöver en färdig vald tagning innan det här klippet kan genereras.
-        </p>
-      )}
-
-      {mismatch && (
-        <p className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-300">
-          Den valda tagningen gjordes från en annan slutbild än den klipp {index} har nu. Generera en ny tagning för en
-          sömlös övergång.
-        </p>
-      )}
-    </div>
   )
 }

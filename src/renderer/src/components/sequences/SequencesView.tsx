@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { supportsEndImage } from '@shared/models'
 import type { ConsentRequest, FfmpegStatus, Generation, GenerationParams, Segment, Sequence } from '@shared/types'
 import { ipcErrorMessage, useModels } from '../../lib/hooks'
 import { LAST_SEQUENCE_KEY } from '../../lib/library'
@@ -6,15 +7,19 @@ import { formatUsd } from '../../lib/media'
 import type { Intent, Navigate } from '../../lib/navigation'
 import ConsentDialog from '../ConsentDialog'
 import { missingInput } from '../ParamsForm'
+import { ownEndImageRefused } from './clipChecks'
 import { CloseIcon, FilmIcon } from './icons'
 import PreviewPlayer from './PreviewPlayer'
 import SegmentEditor, { type EditorHandle } from './SegmentEditor'
 import SequenceHeader, { type ExportState } from './SequenceHeader'
 import SequenceList from './SequenceList'
+import Storyboard from './storyboard/Storyboard'
 import TakeList from './TakeList'
 import Timeline from './Timeline'
 import TrimControls from './TrimControls'
 import {
+  clipKey,
+  continues,
   effectiveParams,
   fileName,
   isPending,
@@ -22,12 +27,12 @@ import {
   parseConsent,
   pendingTake,
   readyTake,
-  stableJson,
   totalLength
 } from './sequenceUtils'
 import type { FlushRegistry } from './useDraft'
 import { useSequence, useSequenceList } from './useSequence'
 import { useTotalQuote } from './useTotalQuote'
+import { lastViewMode, loadViewMode, saveViewMode, type SequenceViewMode } from './viewMode'
 
 
 function loadLastOpen(): string | undefined {
@@ -45,27 +50,30 @@ function clipList(numbers: number[]): string {
 }
 
 /**
- * What "Generera saknade" would pay for, one key per clip: what its take sends and, for a continuation, the
- * frame it starts from. Compared after the consent dialog, so accepting it can't pay for clips that changed
+ * What "Generera saknade" would pay for, one key per clip: what its take sends and the frames it starts or ends
+ * on from its neighbours. Compared after the consent dialog, so accepting it can't pay for clips that changed
  * while the terms were shown.
  */
 function runPlanKeys(sequence: Sequence): string[] {
-  return sequence.segments.flatMap((s, i) => {
-    if (!needsTake(s) || pendingTake(s)) return []
-    const before = s.continueFromPrevious && i > 0 ? sequence.segments[i - 1] : undefined
-    const from = before ? [before.id, before.selectedGenerationId, before.trimEnd] : null
-    return [stableJson([s.id, effectiveParams(s, i), from])]
-  })
+  return sequence.segments.flatMap((s, i) => (!needsTake(s) || pendingTake(s) ? [] : [clipKey(sequence, i)]))
 }
 
 /** The first segment "Generera saknade" would have to generate but can't, so it can be pointed out up front. */
 function findRunProblem(sequence: Sequence, ffmpegOk: boolean): { segmentId: string; message: string } | undefined {
   for (const [i, s] of sequence.segments.entries()) {
     if (!needsTake(s) || pendingTake(s)) continue
-    const continuing = s.continueFromPrevious && i > 0
+    const continuing = continues(s, i)
+    // The run waits for a neighbour that is generated in the same run, so only what can never work is checked here.
+    const endFromNext = s.endFromNext && i < sequence.segments.length - 1
+    const params = effectiveParams(s, i)
     const reason =
-      missingInput(effectiveParams(s, i), continuing) ??
-      (continuing && !ffmpegOk ? 'ffmpeg krävs för att fortsätta från föregående klipp' : undefined)
+      missingInput(params, continuing) ??
+      (continuing && !ffmpegOk ? 'ffmpeg krävs för att fortsätta från föregående klipp' : undefined) ??
+      (endFromNext && !ffmpegOk ? 'ffmpeg krävs för att ta slutbilden från nästa klipp' : undefined) ??
+      (endFromNext && !supportsEndImage(params.model) ? 'modellen tar ingen slutbild – välj en annan' : undefined) ??
+      (ownEndImageRefused(params, endFromNext)
+        ? 'modellen tar ingen slutbild – välj en annan eller ta bort bilden'
+        : undefined)
     if (reason) return { segmentId: s.id, message: `Klipp ${i + 1}: ${reason}` }
   }
   return undefined
@@ -117,6 +125,12 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   const [runConsentOpen, setRunConsentOpen] = useState<ReadonlySet<string>>()
   const [dismissedRunError, setDismissedRunError] = useState<string>()
   const [exportDismissed, setExportDismissed] = useState<Record<string, boolean>>({})
+  // Tidslinje or Storyboard, per sequence (remembered in viewMode.ts).
+  const [modes, setModes] = useState<Record<string, SequenceViewMode>>({})
+  // The storyboard's editor column is open (on the selected clip, like the timeline's editor).
+  const [storyboardEditor, setStoryboardEditor] = useState(false)
+  // The clip "Gör om mellan grannarna" was just used on, so its editor says what to do next.
+  const [bridgedId, setBridgedId] = useState<string>()
 
   const flushers = useMemo<FlushRegistry>(() => new Set(), [])
   const editorHandle = useRef<EditorHandle | null>(null)
@@ -162,6 +176,19 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     setSelectedId(intent.sequenceId)
     onIntentHandled()
   }, [intent])
+
+  const mode = useMemo<SequenceViewMode>(
+    () => (sequenceId ? (modes[sequenceId] ?? loadViewMode(sequenceId)) : 'timeline'),
+    [sequenceId, modes]
+  )
+  const setMode = useCallback(
+    (next: SequenceViewMode, id = sequenceId) => {
+      if (!id) return
+      saveViewMode(id, next)
+      setModes((m) => ({ ...m, [id]: next }))
+    },
+    [sequenceId]
+  )
 
   const chosenId = sequenceId ? segmentChoice[sequenceId] : undefined
   const segmentIndex = sequence ? sequence.segments.findIndex((s) => s.id === chosenId) : -1
@@ -225,13 +252,15 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
 
   // ── Sequence actions ───────────────────────────────────────────────────────
 
-  const createSequence = async () => {
+  /** `as`: the view the new sequence opens in; default the one the open sequence is shown in. */
+  const createSequence = async (as: SequenceViewMode = sequenceId ? mode : lastViewMode()) => {
     setCreating(true)
     setNotice(undefined)
     try {
       const created = await window.studio.createSequence('')
-      // Start with one empty clip so the editor is ready right away.
+      // Start with one empty clip so the editor (or the first panel) is ready right away.
       await window.studio.addSegment(created.id).catch(() => undefined)
+      setMode(as, created.id)
       gone.current.delete(created.id)
       setFocusNameFor(created.id)
       setSelectedId(created.id)
@@ -403,6 +432,35 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
 
   const reusePrompt = (take: Generation) => editorHandle.current?.applyPrompt(take.params.prompt, take.params.negativePrompt)
 
+  /**
+   * "Gör om mellan grannarna": main sets the clip to start on the previous clip's last frame and end on the next
+   * clip's first frame with a model that takes both (free). The editor then shows the frames and the price;
+   * generating is the user's own click.
+   */
+  const bridge = async (segmentId: string) => {
+    if (!sequenceId) return
+    setNotice(undefined)
+    if (!(await flushAll())) {
+      setNotice({ text: 'Ändringarna kunde inte sparas. Försök igen.', sequenceId })
+      return
+    }
+    try {
+      await store.mutate(() => window.studio.bridgeSegment(segmentId))
+      setSegmentChoice((m) => ({ ...m, [sequenceId]: segmentId }))
+      // The editor is where the frames and the price are shown; the timeline always has it open.
+      if (mode === 'storyboard') setStoryboardEditor(true)
+      setBridgedId(segmentId)
+    } catch (e) {
+      setNotice({ text: ipcErrorMessage(e), sequenceId })
+    }
+  }
+
+  /** The timeline, on the clip: where its takes, trims and the comparison between takes are. */
+  const showInTimeline = (segmentId: string) => {
+    selectSegment(segmentId)
+    setMode('timeline')
+  }
+
   // ── Derived ────────────────────────────────────────────────────────────────
 
   const runPlan = useMemo(() => {
@@ -437,6 +495,35 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   const visibleNotice = notice && (!notice.sequenceId || notice.sequenceId === sequenceId) ? notice : undefined
   const ready = segment && readyTake(segment)
   const nextSegment = sequence && segmentIndex !== -1 ? sequence.segments[segmentIndex + 1] : undefined
+  const previousSegment = sequence && segmentIndex > 0 ? sequence.segments[segmentIndex - 1] : undefined
+
+  // The bridge note belongs to the clip it was given for, until another clip is opened.
+  useEffect(() => {
+    if (bridgedId && segment?.id !== bridgedId) setBridgedId(undefined)
+  }, [segment?.id, bridgedId])
+
+  const editor = (onClose?: () => void) =>
+    segment &&
+    sequence && (
+      <SegmentEditor
+        key={segment.id}
+        sequence={sequence}
+        segment={segment}
+        index={segmentIndex}
+        models={models}
+        modelsError={modelsError}
+        ffmpegOk={ffmpegOk}
+        store={store}
+        flushers={flushers}
+        handleRef={editorHandle}
+        navigate={navigate}
+        onPreviewFrom={(id) => void openPreview(id)}
+        onBridge={bridge}
+        justBridged={bridgedId === segment.id}
+        showNotes={!onClose}
+        onClose={onClose}
+      />
+    )
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -541,6 +628,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               exportBlocked={exportBlocked}
               autoFocusName={focusNameFor === sequence.id}
               onAutoFocused={() => setFocusNameFor(undefined)}
+              mode={mode}
+              onMode={(m) => setMode(m)}
               onRename={rename}
               onGenerateAll={() => void generateAll()}
               onStop={() => void stopAll()}
@@ -549,69 +638,87 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               onError={(text) => setNotice({ text, sequenceId: sequence.id })}
             />
             {banners}
-            <Timeline
-              sequence={sequence}
-              selectedId={segment?.id}
-              adding={adding}
-              onSelect={selectSegment}
-              onAdd={(after) => void addSegment(after)}
-              onMove={moveSegment}
-            />
-
-            {segment ? (
-              <div className="flex min-h-0 flex-1">
-                <section className="flex w-[360px] shrink-0 flex-col border-r border-line">
-                  <SegmentEditor
-                    key={segment.id}
-                    sequence={sequence}
-                    segment={segment}
-                    index={segmentIndex}
-                    models={models}
-                    modelsError={modelsError}
-                    ffmpegOk={ffmpegOk}
-                    store={store}
-                    flushers={flushers}
-                    handleRef={editorHandle}
-                    navigate={navigate}
-                    onPreviewFrom={(id) => void openPreview(id)}
-                  />
-                </section>
-                <section className="min-w-0 flex-1 overflow-y-auto">
-                  <div className="mx-auto max-w-4xl space-y-8 p-5">
-                    {ready ? (
-                      <TrimControls
-                        key={`${segment.id}:${ready.id}`}
-                        segment={segment}
-                        take={ready}
-                        number={segmentIndex + 1}
-                        nextContinues={!!nextSegment?.continueFromPrevious}
-                        patchSegment={store.patchSegment}
-                        flushers={flushers}
-                      />
-                    ) : (
-                      <SelectionHint segment={segment} />
-                    )}
-                    <TakeList
-                      segment={segment}
-                      number={segmentIndex + 1}
-                      models={models}
-                      currentPrompt={segment.params.prompt}
-                      onSelect={selectTake}
-                      onDelete={(take) => void deleteTake(take)}
-                      onUsePrompt={reusePrompt}
-                    />
-                  </div>
-                </section>
-              </div>
+            {mode === 'storyboard' ? (
+              <Storyboard
+                // Per sequence: dialogs, errors and drags of one storyboard never carry over to another.
+                key={`storyboard:${sequence.id}`}
+                sequence={sequence}
+                store={store}
+                models={models}
+                modelsError={modelsError}
+                ffmpegOk={ffmpegOk}
+                selectedId={segment?.id}
+                adding={adding}
+                flushers={flushers}
+                flushAll={flushAll}
+                navigate={navigate}
+                editor={storyboardEditor ? editor(() => setStoryboardEditor(false)) : undefined}
+                onSelect={selectSegment}
+                onEdit={(id) => {
+                  selectSegment(id)
+                  setStoryboardEditor(true)
+                }}
+                onAdd={(after) => void addSegment(after)}
+                onMove={moveSegment}
+                onBridge={bridge}
+                onShowTakes={showInTimeline}
+                onPreviewFrom={(id) => void openPreview(id)}
+                onError={(text) => setNotice({ text, sequenceId: sequence.id })}
+              />
             ) : (
-              sequence.segments.length === 0 && (
-                <div className="flex flex-1 items-center justify-center p-8">
-                  <p className="max-w-sm text-center leading-relaxed text-muted">
-                    Lägg till ett första klipp ovan. Varje klipp är en egen generering, och nästa klipp kan fortsätta
-                    från det förras sista bildruta så att övergången blir sömlös.
-                  </p>
-                </div>
-              )
+              <>
+                <Timeline
+                  sequence={sequence}
+                  selectedId={segment?.id}
+                  adding={adding}
+                  onSelect={selectSegment}
+                  onAdd={(after) => void addSegment(after)}
+                  onMove={moveSegment}
+                  onBridge={(id) => void bridge(id)}
+                />
+
+                {segment ? (
+                  <div className="flex min-h-0 flex-1">
+                    <section className="flex w-[360px] shrink-0 flex-col border-r border-line">{editor()}</section>
+                    <section className="min-w-0 flex-1 overflow-y-auto">
+                      <div className="mx-auto max-w-4xl space-y-8 p-5">
+                        {ready ? (
+                          <TrimControls
+                            key={`${segment.id}:${ready.id}`}
+                            segment={segment}
+                            take={ready}
+                            number={segmentIndex + 1}
+                            nextContinues={!!nextSegment?.continueFromPrevious}
+                            previousEndsHere={!!previousSegment?.endFromNext}
+                            patchSegment={store.patchSegment}
+                            flushers={flushers}
+                          />
+                        ) : (
+                          <SelectionHint segment={segment} />
+                        )}
+                        <TakeList
+                          segment={segment}
+                          number={segmentIndex + 1}
+                          models={models}
+                          currentPrompt={segment.params.prompt}
+                          onSelect={selectTake}
+                          onDelete={(take) => void deleteTake(take)}
+                          onUsePrompt={reusePrompt}
+                        />
+                      </div>
+                    </section>
+                  </div>
+                ) : (
+                  sequence.segments.length === 0 && (
+                    <div className="flex flex-1 items-center justify-center p-8">
+                      <p className="max-w-sm text-center leading-relaxed text-muted">
+                        Lägg till ett första klipp ovan. Varje klipp är en egen generering, och nästa klipp kan
+                        fortsätta från det förras sista bildruta så att övergången blir sömlös.
+                      </p>
+                    </div>
+                  )
+                )}
+              </>
             )}
           </>
         ) : (
@@ -623,7 +730,11 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               </Banner>
             )}
             {sequences?.length === 0 && !selectedId ? (
-              <EmptyState creating={creating} onCreate={() => void createSequence()} navigate={navigate} />
+              <EmptyState
+                creating={creating}
+                onCreate={(as) => void createSequence(as)}
+                navigate={navigate}
+              />
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted">
                 {selectedId && !store.error ? 'Laddar sekvens…' : ''}
@@ -696,7 +807,7 @@ function EmptyState({
   navigate
 }: {
   creating: boolean
-  onCreate: () => void
+  onCreate: (as: SequenceViewMode) => void
   navigate: Navigate
 }) {
   return (
@@ -708,23 +819,29 @@ function EmptyState({
           En generering blir som mest runt 15 sekunder. I en sekvens lägger du klipp efter varandra, låter varje klipp
           fortsätta från det förras sista bildruta, väljer de bästa tagningarna, trimmar och exporterar allt som en film.
         </p>
-        <div className="flex justify-center gap-2">
+        <div className="flex flex-wrap justify-center gap-2">
           <button
-            onClick={onCreate}
+            onClick={() => onCreate('timeline')}
             disabled={creating}
             className="rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
           >
             Skapa en sekvens
           </button>
           <button
-            onClick={() => navigate('generate')}
-            className="rounded-md border border-line px-4 py-2 transition hover:bg-raised"
+            onClick={() => onCreate('storyboard')}
+            disabled={creating}
+            title="Planera filmen ruta för ruta med start- och slutbilder"
+            className="rounded-md border border-line px-4 py-2 transition hover:bg-raised disabled:opacity-40"
           >
-            Till Generera
+            Börja med en storyboard
           </button>
         </div>
         <p className="mt-4 text-[11px] text-muted">
-          Du kan också lägga befintliga videor i en sekvens direkt från Generera.
+          Du kan också lägga befintliga videor i en sekvens direkt från{' '}
+          <button onClick={() => navigate('generate')} className="underline decoration-muted/50 underline-offset-2 hover:text-text">
+            Generera
+          </button>
+          .
         </p>
       </div>
     </div>

@@ -2,7 +2,8 @@
 // there, converting a phase-2 library (~/Movies/Studio with studio.db, generations/, thumbs/, …) to the
 // new layout, and "Städa upp", which puts every file the library knows about in its proper folder:
 // characters, environments, outfits and poses (assets) in Karaktärer/, Miljöer/, Kläder/ and Poser/, one folder
-// each holding the asset's photos and audio clips.
+// each holding the asset's photos and audio clips; a sequence's takes, stills and exports in its folder in
+// Sekvenser/ (Tagningar/, Storyboard/ and the folder itself).
 
 import { randomUUID } from 'node:crypto'
 import {
@@ -59,6 +60,7 @@ import {
   safeName,
   setActiveRoot,
   setRootLostHandler,
+  STORYBOARD_FOLDER,
   TAKES_FOLDER,
   timeStamp,
   toStoredPath,
@@ -552,8 +554,8 @@ function clearTmp(root: string): void {
 }
 
 /**
- * Half-written exports (written next to the finished film), posters and frames left by a crash or a force
- * quit. Takes are never written in place (they arrive through .studio/tmp), so Tagningar is left alone.
+ * Half-written exports (written next to the finished film), posters, frames and stills left by a crash or a
+ * force quit. Takes are never written in place (they arrive through .studio/tmp), so Tagningar is left alone.
  */
 function removePartials(root: string): void {
   const dirs = [
@@ -564,7 +566,9 @@ function removePartials(root: string): void {
   const sequences = join(root, FOLDERS.sequences)
   for (const name of listEntries(sequences) ?? []) {
     const dir = join(sequences, name)
-    if (isDir(dir)) dirs.push(dir)
+    if (!isDir(dir)) continue
+    dirs.push(dir)
+    if (isDir(join(dir, STORYBOARD_FOLDER))) dirs.push(join(dir, STORYBOARD_FOLDER))
   }
   removeLeftoverPartialFiles(dirs)
 }
@@ -923,7 +927,10 @@ async function moveLibraryFolders(source: string, target: string): Promise<Moved
   }
 }
 
-/** Every stored path to a file the database tracks itself: videos, posters, asset photos and audio, exports. */
+/**
+ * Every stored path to a file the database tracks itself: videos, posters, asset photos and audio, stills,
+ * exports.
+ */
 function trackedFilePaths(): string[] {
   return db
     .getDb()
@@ -932,6 +939,7 @@ function trackedFilePaths(): string[] {
        UNION ALL SELECT thumb_path FROM generations WHERE thumb_path IS NOT NULL
        UNION ALL SELECT file_path FROM asset_images
        UNION ALL SELECT file_path FROM asset_audio
+       UNION ALL SELECT file_path FROM stills
        UNION ALL SELECT file_path FROM exports`
     )
     .pluck()
@@ -1519,7 +1527,48 @@ async function tidyExports(report: ReorganizeReport, sequenceId?: string): Promi
   }
 }
 
-/** Folder of one sequence plus its takes and exports. Returns its folder name. */
+/**
+ * Stills into their sequence's Storyboard/, or Referensbilder/<the day they were made>/ when they belong to no
+ * sequence (any more); `sequenceId` limits it to one sequence's. They keep their names: generations and clips
+ * that use one as a start, end or reference image follow it.
+ */
+async function tidyStills(report: ReorganizeReport, sequenceId?: string): Promise<void> {
+  const conn = db.getDb()
+  const rows = conn
+    .prepare(
+      `SELECT t.id, t.file_path, t.created_at, q.folder FROM stills t LEFT JOIN sequences q ON q.id = t.sequence_id
+       WHERE ? IS NULL OR t.sequence_id = ? ORDER BY t.created_at`
+    )
+    .all(sequenceId ?? null, sequenceId ?? null) as {
+    id: string
+    file_path: string
+    created_at: number
+    folder: string | null
+  }[]
+  const stillExists = conn.prepare('SELECT 1 FROM stills WHERE id = ?')
+  for (const r of rows) {
+    // Re-read: an earlier move (a still another one was made from) may have rewritten this row's path.
+    const stored = conn.prepare('SELECT file_path FROM stills WHERE id = ?').pluck().get(r.id) as string | undefined
+    if (!stored) continue
+    const abs = fromStoredPath(stored)
+    if (!isInsideRoot(abs)) continue
+    if (!isFile(abs)) {
+      report.missing++
+      continue
+    }
+    try {
+      const dir = isPlainName(r.folder)
+        ? join(libraryRoot(), FOLDERS.sequences, r.folder, STORYBOARD_FOLDER)
+        : join(libraryRoot(), FOLDERS.references, dayStamp(new Date(r.created_at)))
+      if (dirname(abs) !== dir) ensureDirCounted(dir, report)
+      await relocate(abs, dir, report, { stillTracked: () => !!stillExists.get(r.id) })
+    } catch (err) {
+      report.errors.push(`${basename(abs)}: ${message(err)}`)
+    }
+  }
+}
+
+/** Folder of one sequence plus its takes, stills and exports. Returns its folder name. */
 async function tidySequence(id: string, report: ReorganizeReport): Promise<string | undefined> {
   const conn = db.getDb()
   const row = conn.prepare('SELECT id, name, folder FROM sequences WHERE id = ?').get(id) as EntityRow | undefined
@@ -1530,6 +1579,7 @@ async function tidySequence(id: string, report: ReorganizeReport): Promise<strin
     .pluck()
     .all(id) as string[]
   await tidyGenerations(report, new Set(takes))
+  await tidyStills(report, id)
   await tidyExports(report, id)
   return folder
 }
@@ -1558,6 +1608,7 @@ async function reorganizeTracked(report: ReorganizeReport): Promise<void> {
     }
   }
   await tidyGenerations(report)
+  await tidyStills(report)
   await tidyExports(report)
 }
 

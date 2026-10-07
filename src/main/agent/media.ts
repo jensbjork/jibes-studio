@@ -14,9 +14,12 @@ export const MAX_FRAME_WIDTH = 768
 /** How far before the end the "last frame" is taken, so the time is never past the final frame. */
 const END_MARGIN = 0.06
 
-/** "t = 2.4 s", the caption of a frame. */
+/**
+ * "t = 2.4 s" or "t = 2.458 s", the caption of a frame: to the millisecond (trailing zeros dropped), so a time read
+ * off a caption and passed back (save_frame_as_still, get_frames) gives that very frame, not a neighbour of it.
+ */
 export function timeCaption(t: number): string {
-  return `t = ${(Math.round(t * 10) / 10).toFixed(1)} s`
+  return `t = ${(Math.round(t * 1000) / 1000).toFixed(3).replace(/0{1,2}$/, '')} s`
 }
 
 /** The video's length in seconds: the measured one when known, else ffprobe's. */

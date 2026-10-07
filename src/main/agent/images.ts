@@ -1,5 +1,5 @@
-import { readFile, stat } from 'node:fs/promises'
-import { nativeImage } from 'electron'
+import { stat } from 'node:fs/promises'
+import { decodeImageFile } from '../input-image'
 
 /** An MCP image content block. */
 export interface ImageBlock {
@@ -73,10 +73,13 @@ export async function imageBlock(path: string, maxSide = AGENT_IMAGE_MAX_SIDE): 
   const cached = cache.get(key)
   if (cached) return remember(key, cached)
 
-  let image = nativeImage.createFromPath(path)
-  if (image.isEmpty()) {
+  // As Studio shows it and Venice gets it: a phone photo turned upright, a WebP decoded by ffmpeg.
+  const decoded = await decodeImageFile(path).catch(() => undefined)
+  if (!decoded) return undefined
+  let image = decoded.image
+  if (!image) {
     if (info.size > MAX_PASSTHROUGH_BYTES) return undefined
-    const bytes = await readFile(path)
+    const bytes = decoded.bytes
     const mimeType = sniffType(bytes)
     if (!mimeType) return undefined
     return remember(key, { type: 'image', data: bytes.toString('base64'), mimeType })

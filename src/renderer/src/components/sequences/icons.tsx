@@ -90,3 +90,88 @@ export function FilmIcon(props: IconProps) {
     </Icon>
   )
 }
+
+export function ArrowRightIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 8h10.5M9.5 4.5L13 8l-3.5 3.5" />
+    </Icon>
+  )
+}
+
+/** Drag handle: two columns of dots. */
+export function GripIcon(props: IconProps) {
+  return (
+    <Icon {...props} fill="currentColor" stroke="none">
+      <circle cx="6" cy="4" r="1.1" />
+      <circle cx="10" cy="4" r="1.1" />
+      <circle cx="6" cy="8" r="1.1" />
+      <circle cx="10" cy="8" r="1.1" />
+      <circle cx="6" cy="12" r="1.1" />
+      <circle cx="10" cy="12" r="1.1" />
+    </Icon>
+  )
+}
+
+/** "Gör om mellan grannarna": a clip redone between two fixed neighbours. */
+export function BridgeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="1.5" y="5" width="3" height="6" rx=".8" />
+      <rect x="11.5" y="5" width="3" height="6" rx=".8" />
+      <path d="M6.5 9.5a2 2 0 003 0M6.5 6.5a2 2 0 013 0" strokeDasharray="1.6 1.4" />
+    </Icon>
+  )
+}
+
+export function MoreIcon(props: IconProps) {
+  return (
+    <Icon {...props} fill="currentColor" stroke="none">
+      <circle cx="3.5" cy="8" r="1.2" />
+      <circle cx="8" cy="8" r="1.2" />
+      <circle cx="12.5" cy="8" r="1.2" />
+    </Icon>
+  )
+}
+
+export function ImageIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+      <circle cx="6" cy="6.5" r="1.2" />
+      <path d="M2.5 12l3.8-3.6 2.6 2.4 1.9-1.7 2.7 2.4" />
+    </Icon>
+  )
+}
+
+/** The storyboard view: panels in a grid. */
+export function GridIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2" y="2.5" width="5" height="4.5" rx="1" />
+      <rect x="9" y="2.5" width="5" height="4.5" rx="1" />
+      <rect x="2" y="9" width="5" height="4.5" rx="1" />
+      <rect x="9" y="9" width="5" height="4.5" rx="1" />
+    </Icon>
+  )
+}
+
+/** The timeline view: clips in a row. */
+export function StripIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="1.5" y="4.5" width="4" height="7" rx="1" />
+      <rect x="6" y="4.5" width="4" height="7" rx="1" />
+      <rect x="10.5" y="4.5" width="4" height="7" rx="1" />
+    </Icon>
+  )
+}
+
+export function SparkleIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.5l1.3 3.2 3.2 1.3-3.2 1.3L8 11.5 6.7 8.3 3.5 7l3.2-1.3z" />
+      <path d="M12.5 11v3M11 12.5h3" />
+    </Icon>
+  )
+}

@@ -23,6 +23,8 @@ const api: StudioApi = {
   testApiKey: () => ipcRenderer.invoke('settings:testApiKey'),
   ffmpegStatus: () => ipcRenderer.invoke('ffmpeg:status'),
   setPromptLanguage: (lang) => ipcRenderer.invoke('settings:setPromptLanguage', lang),
+  setImageSafeMode: (on) => ipcRenderer.invoke('settings:setImageSafeMode', on),
+  onSettingsChange: (cb) => on<void>('settings:change', () => cb()),
 
   // Generation
   listModels: (force) => ipcRenderer.invoke('models:list', force),
@@ -80,6 +82,22 @@ const api: StudioApi = {
   exportSequence: (sequenceId) => ipcRenderer.invoke('sequences:export', sequenceId),
   onSequenceChange: (cb) => on<string>('sequence:change', cb),
   onExportProgress: (cb) => on<ExportProgress>('export:progress', cb),
+
+  // Storyboard: keyframes and "Gör om mellan grannarna"
+  setSegmentImage: (segmentId, slot, source) => ipcRenderer.invoke('segments:setImage', segmentId, slot, source),
+  previewSegmentFrames: (segmentId) => ipcRenderer.invoke('segments:previewFrames', segmentId),
+  bridgeSegment: (segmentId) => ipcRenderer.invoke('segments:bridge', segmentId),
+
+  // Images and stills
+  listImageModels: () => ipcRenderer.invoke('images:models'),
+  quoteStill: (params) => ipcRenderer.invoke('images:quote', params),
+  generateStill: (params) => ipcRenderer.invoke('images:generate', params),
+  listStills: (sequenceId) => ipcRenderer.invoke('stills:list', sequenceId),
+  deleteStill: (id) => ipcRenderer.invoke('stills:delete', id),
+  saveFrameAsStill: (generationId, time, sequenceId) =>
+    ipcRenderer.invoke('stills:saveFrame', generationId, time, sequenceId),
+  // undefined (not null) when no sequence is named, as the type says.
+  onStillsChange: (cb) => on<string | undefined>('stills:change', (id) => cb(id ?? undefined)),
 
   // Library folder
   libraryStatus: () => ipcRenderer.invoke('library:status'),

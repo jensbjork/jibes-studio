@@ -21,6 +21,7 @@ import {
   paramsForSubmit,
   pickOption,
   supportsAudioInput,
+  supportsEndImage,
   type Kind
 } from '@shared/models'
 import { blockingContinuationError, blockingPromptError, validationContext } from '@shared/prompt-refs'
@@ -88,11 +89,18 @@ interface Props {
   kinds?: Kind[]
   /** Replaces the start image input (not the end image) with a note, e.g. when the start frame comes from the previous clip. */
   startImageNote?: string
+  /** Replaces the end image input with a note, e.g. when the end frame comes from the next clip ("Slutbild från nästa klipp"). */
+  endImageNote?: string
   /**
    * A sequence clip that continues from the previous clip: its mode is fixed, so the prompt checks advise
    * what can be done there (remove the references, or switch off continuing) instead of a mode switch.
    */
   continuing?: boolean
+  /**
+   * A sequence clip: an end image its model can't take stops the take (main refuses it rather than paying for one
+   * without the keyframe), where the Generate form just leaves the picture out. The note under it says which.
+   */
+  endImageRequired?: boolean
   /** Called on ⌘/Ctrl+Enter in the prompt field. */
   onSubmit?: () => void
   /** Lets the pickers link to the library views (characters, environments, outfits, prompts). */
@@ -202,7 +210,9 @@ export default function ParamsForm({
   setParams,
   kinds = KINDS.map((k) => k.id),
   startImageNote,
+  endImageNote,
   continuing = false,
+  endImageRequired = false,
   onSubmit,
   navigate
 }: Props) {
@@ -272,7 +282,8 @@ export default function ParamsForm({
     if (id) set('model', id)
   }
 
-  const supportsEndImage = /first-last-frame|transition/.test(params.model)
+  // Which image-to-video models take an end image is a curated list shared with main and the agents.
+  const endImagePossible = supportsEndImage(params.model)
 
   // ── Library assets (characters, environments, outfits, poses) ────────────────
 
@@ -662,18 +673,34 @@ export default function ParamsForm({
               {singleImagePicker('start', params.startImage)}
             </>
           )}
-          {/* Shown with the note too: the end image is still sent, so it must stay visible and removable. */}
-          {supportsEndImage && (
-            <>
-              <ImageInput
-                label="Slutbild (valfri)"
-                value={params.endImage ? [params.endImage] : []}
-                onChange={(v) => set('endImage', v[0])}
-                caption={caption}
-                action={libraryImageButton(endButton, 'end', 'Välj slutbild bland karaktärer, miljöer och kläder')}
-              />
-              {singleImagePicker('end', params.endImage)}
-            </>
+          {/* Also shown when a note replaces the start image: the end image is still sent, so it must stay
+              visible and removable. */}
+          {endImageNote ? (
+            <div>
+              <span className="mb-1.5 block text-muted">Slutbild</span>
+              <p className="rounded-md border border-dashed border-line px-3 py-2.5 text-muted">{endImageNote}</p>
+            </div>
+          ) : (
+            // An end image picked for another model stays visible (so it can be removed) but isn't sent.
+            (endImagePossible || params.endImage) && (
+              <>
+                <ImageInput
+                  label="Slutbild (valfri)"
+                  value={params.endImage ? [params.endImage] : []}
+                  onChange={(v) => set('endImage', v[0])}
+                  caption={caption}
+                  action={libraryImageButton(endButton, 'end', 'Välj slutbild bland karaktärer, miljöer och kläder')}
+                />
+                {!endImagePossible && (
+                  <p className="-mt-2 text-[11px] leading-relaxed text-accent">
+                    {endImageRequired
+                      ? 'Den här modellen tar ingen slutbild, så klippet kan inte genereras med den. Ta bort bilden eller välj en modell som klarar både start- och slutbild.'
+                      : 'Den här modellen tar ingen slutbild, så bilden skickas inte. Ta bort den eller välj en modell som klarar både start- och slutbild.'}
+                  </p>
+                )}
+                {singleImagePicker('end', params.endImage)}
+              </>
+            )
           )}
         </>
       )}

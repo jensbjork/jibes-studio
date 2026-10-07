@@ -10,6 +10,38 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Storyboards.** *Tidslinje / Storyboard* in a sequence (remembered per sequence; a new sequence can start as a
+  storyboard): one panel per clip with its take, a start image → end image, *Vad händer* notes, the prompt, the
+  price and *Generera tagning*; drag panels to reorder, *+ Ny ruta* between or after them. A slot takes an uploaded
+  or dropped picture, a library photo, a still, a frame picked from any finished take (*Bildruta från ett klipp*,
+  frame-exact), a picture from *Skapa bild…*, or automatically the previous clip's last frame / the next clip's first
+  frame. A clip with a start or end image is generated image-to-video with its family's model (one that takes an
+  end image for the end slot); its references are dropped and their `@` tokens taken out of the prompt. A stills
+  strip under the panels holds every picture of the sequence (drag onto a slot, view, delete).
+- **Skapa bild…**: pictures from Venice's image models — text-to-image, or combining up to the model's limit of
+  references (characters, outfits, places, poses, stills; the first is the base picture) — with model, format,
+  resolution and quality, a live price on the button (about $0.06 with the default Seedream models) and Swedish
+  messages for a low balance, refused content and other errors. Every result is saved as a still in
+  `Sekvenser/<sequence>/Storyboard/` and can be used as a start or end image right away.
+- **Säkert läge för bilder** (Inställningar → Bilder, on by default, also switchable in the *Skapa bild…*
+  dialog): Venice blurs adult content in the pictures it makes.
+- **Slutbild från nästa klipp** (`end_from_next`): a clip can end on the next clip's first frame after its start
+  trim, extracted automatically and sent as `end_image_url`, mirroring *Startbild från föregående klipp*. Turning
+  it on switches the clip to a model that takes an end image, with the durations and resolutions that model
+  offers. The clip editor shows live previews of both frames.
+- **Gör om mellan grannarna**, on the timeline cards, the storyboard panels and in the clip editor: sets a clip up
+  to start exactly on the previous clip's last frame and end exactly on the next clip's first frame, with an
+  image-to-video model that takes an end image, keeping its prompt, length and sound — so a bad clip in the middle
+  can be redone without touching its neighbours. The old take stays selected until you pick the new one (*Använd
+  den* on the panel) and stays among the takes. A take picked that was made from a neighbour's frame starts
+  untrimmed at that end, so an old trim can't cut the matched frame away, and a neighbour that continued from the
+  old take isn't flagged as out of date: the cut counts as seamless when either side was made from the other.
+- **Agent tools for storyboards** (7 new, 46 tools in all): `list_image_models`, `list_stills`, `get_still`,
+  `preview_segment_frames`, `save_frame_as_still`, `bridge_segment` and the paid `request_image_generation`
+  (approved in the app like a video; the dialog shows the references and the finished picture). `get_sequence`,
+  `add_segment` and `update_segment` know notes, start and end images and `end_from_next`; `update_segment` can
+  select a take; `list_image_models` says whether *Säkert läge för bilder* is on. The guide has sections on
+  storyboarding and on replacing a clip between its neighbours.
 - **Voices and soundscapes.** Characters get a *Röst* (voice) section and environments a *Ljudmiljö* (soundscape)
   section in the library: drop or pick MP3, WAV, M4A, AAC, AIFF, FLAC or OGG files (copied into the asset's folder),
   play them, reorder them, and choose each clip's 2–15 s **reference window** on a timeline. Files without sound or
@@ -50,7 +82,18 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
-- The library database is migrated to version 7 (`asset_audio`, `generation_reviews`, `learnings`). From this version
+- The library database is migrated to version 8 (`end_from_next` and `notes` on clips, `stills`). Stills follow
+  sequence renames, library moves and *Städa upp*; deleting a sequence keeps the stills other clips or generations
+  still use (in `Referensbilder`) and moves the rest to the Trash.
+- *Generera saknade* makes the clips in the order their frames allow (a clip that ends on the next clip after that
+  clip) and stops before paying for anything when two clips wait on each other; agents' *generate all* requests
+  list the clips in that order.
+- A new clip no longer copies the previous clip's start and end image (a new storyboard panel starts empty).
+- The clip editor's *Fortsätt från föregående klipp* switch is now *Startbild från föregående klipp*, next to
+  *Slutbild från nästa klipp*, both with a live preview of the frame.
+- An end image is only sent to models known to take one (`supportsEndImage`): Seedance image-to-video, Kling V3/O3
+  image-to-video, first-last-frame and transition models. The Generate form shows the end image for those.
+- The library database was migrated to version 7 (`asset_audio`, `generation_reviews`, `learnings`). From this version
   `Poser` belongs to the library; an older library whose base folder already holds a folder of your own named
   *Poser* is not opened until it is renamed. A library that a newer Studio has migrated is no longer opened by an
   older one (it says to update the app instead). Version 0.1.0 has no such check, so once a library is migrated, don't
@@ -69,11 +112,20 @@ breaking changes; they are called out under **Changed** or **Removed**.
 - ffmpeg is now also needed for voice and sound clips (measuring them and cutting out the part that is sent) and
   for the frames agents review; generating without voices still works without it.
 - Contributing: the pull request checklist asks for matching agent tools and guide text for every new user-facing
-  capability, and for a CHANGELOG entry. The development guide shows how to test voices, reviews and the exact
-  request body without spending money.
+  capability, and for a CHANGELOG entry; a new `images` commit scope covers stills and the image models. The
+  development guide shows how to test voices, reviews, pictures and the exact request body without spending money,
+  and how to check frames exactly.
 
 ### Fixed
 
+- Pictures sent to Venice (start and end images, references) are turned upright by their EXIF orientation, as
+  Studio shows them, so a portrait phone photo no longer gives a sideways (or rotated) clip; WebP pictures are
+  decoded and sized like the others.
+- The export drops a frame at a cut only where a take was actually made from its neighbour's frame; a clip whose
+  take was made otherwise (continuation switched on afterwards, an old take kept) keeps its first and last frames.
+- Exports no longer show a frame twice after cuts whose trims fall between two frames (trims come in 0.1 s steps):
+  each clip's sound is now cut to exactly the frames its picture keeps, so sound and picture stay together across
+  every cut.
 - Search fields in popovers (asset, outfit, prompt and sequence pickers) get the focus when the popover opens.
 
 ## [0.1.0] - 2026-10-06

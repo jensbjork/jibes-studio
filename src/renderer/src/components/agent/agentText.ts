@@ -1,7 +1,12 @@
 // Swedish wording for the agent connection: the sidebar indicator, the activity drawer and the approval dialog.
 
-import type { AgentActivity, AgentStatus, ApprovalRequest } from '@shared/types'
+import type { AgentActivity, AgentStatus, ApprovalRequest, SegmentImageSlot } from '@shared/types'
 import { swedishList } from '../../lib/assets'
+
+/** "startbild" / "slutbild". */
+export function slotName(slot: SegmentImageSlot): string {
+  return slot === 'end' ? 'slutbild' : 'startbild'
+}
 
 export type AgentTone = 'off' | 'waiting' | 'connected' | 'error'
 
@@ -65,6 +70,12 @@ export function activityText(a: AgentActivity): string {
 export function approvalTitle(a: ApprovalRequest, sequenceName?: string): string {
   const inSequence = sequenceName ? ` i ”${sequenceName}”` : ''
   switch (a.kind) {
+    case 'image': {
+      const target = a.image?.assignTo
+      if (target) return `En ${slotName(target.slot)} till klipp ${target.clipNumber}${inSequence}`
+      // Without a sequence the picture is a still of none, in Referensbilder.
+      return a.sequenceId ? `En bild till storyboarden${inSequence}` : 'En bild till Referensbilder'
+    }
     case 'generation':
       return 'En video från Generera'
     case 'segment':
@@ -84,18 +95,32 @@ export function expiresText(expiresAt: number, now: number): string {
   return minutes < 1 ? 'går ut om under en minut' : `går ut om ${minutes} min`
 }
 
+/** The verb for what the agent asks: "vill generera" a video, "vill skapa en bild". */
+export function approvalVerb(a: ApprovalRequest): string {
+  return a.kind === 'image' ? 'vill skapa' : 'vill generera'
+}
+
 /** Why an approval didn't lead to a generation, when main gave no message. */
 export function approvalOutcome(a: ApprovalRequest): string {
   switch (a.status) {
-    case 'approved':
-      return 'Godkänd – genereringen är skickad.'
+    case 'approved': {
+      if (a.kind !== 'image') return 'Godkänd – genereringen är skickad.'
+      if (a.notice) return a.notice
+      const target = a.image?.assignTo
+      if (target) {
+        return `Godkänd – bilden är skapad, sparad och blev ${slotName(target.slot)} för klipp ${target.clipNumber}.`
+      }
+      return a.sequenceId
+        ? 'Godkänd – bilden är skapad och sparad bland sekvensens bilder.'
+        : 'Godkänd – bilden är skapad och sparad i Referensbilder.'
+    }
     case 'declined':
       return 'Begäran avböjdes.'
     case 'expired':
       // Main says why when it wasn't the 30 minutes (replaced by a newer request, the connection switched off…).
       return a.error ?? 'Begäran hann gå ut (efter 30 minuter). Be agenten skicka den igen.'
     case 'failed':
-      return a.error ?? 'Genereringen kunde inte skickas.'
+      return a.error ?? (a.kind === 'image' ? 'Bilden kunde inte skapas.' : 'Genereringen kunde inte skickas.')
     case 'pending':
       return 'Väntar på ditt OK.'
   }
