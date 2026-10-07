@@ -199,7 +199,10 @@ export default function FeedToolbar({
           options={PLACEMENT_OPTIONS.map((o) => ({
             id: o.id,
             label: o.label,
-            text: o.id === 'sequence' ? 'Tagningar i en sekvens' : 'Klipp som inte ingår i någon sekvens'
+            text:
+              o.id === 'sequence'
+                ? 'Tagningar i en sekvens eller storyboard'
+                : 'Klipp som inte ingår i någon sekvens eller storyboard'
           }))}
           onChange={(placement) => set({ placement })}
           allLabel="Alla klipp"

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { pickOption } from '@shared/models'
 import type { ImageModel, Still, StillParams } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { samePath } from '../../lib/library'
 
 /**
  * Seedream by default: the same family as the Seedance video models, and about $0.06 a picture at 1K. With
@@ -224,6 +225,33 @@ export function stillParamsForSubmit(params: StillParams, model: ImageModel | un
     negativePrompt: references.length || !negative ? undefined : negative,
     referenceImages: references.length ? references : undefined
   }
+}
+
+// ── Storyboard boards ─────────────────────────────────────────────────────────
+
+/**
+ * "Använd föregående bild som referens": the references with the previous board's image first (on) or without it
+ * (off). The others keep their order; the previous image is never in the list twice.
+ */
+export function withPreviousReference(references: readonly string[], previous: string, on: boolean): string[] {
+  const rest = references.filter((p) => p !== previous)
+  return on ? [previous, ...rest] : rest
+}
+
+/**
+ * Whether an image just made for a board may go on it without asking: the board is empty, still shows what it
+ * showed when the image was asked for (`seen`; undefined for an empty board, null when that wasn't known), or shows
+ * an image made in the same dialog. Anything else was put there meanwhile (in the storyboard, by an agent) and is
+ * the user's newer choice.
+ */
+export function mayPlaceOnBoard(
+  now: string | undefined,
+  seen: string | undefined | null,
+  madeHere: readonly string[]
+): boolean {
+  if (!now) return true
+  if (madeHere.some((p) => samePath(p, now))) return true
+  return seen !== null && samePath(now, seen)
 }
 
 // ── Live data ─────────────────────────────────────────────────────────────────

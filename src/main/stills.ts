@@ -1,16 +1,16 @@
-// Stills: the pictures a storyboard is built from — keyframes generated with Venice's image models ("Skapa
-// bild…"), pictures the user dropped onto a panel, and frames saved from takes. Each still is a row in `stills`
-// and a file of its own: in its sequence's folder (Sekvenser/<sequence>/Storyboard/) or, without a sequence, in
-// Referensbilder/<day>/. Clips use a still by its path (as start or end image), like any other picture, so a
-// still that clips or generations still use is never trashed: deleting it moves the file to Referensbilder and
-// the rows that use it follow.
+// Stills: the pictures storyboards and keyframes are built from — images generated with Venice's image models
+// ("Skapa bild…"), pictures the user dropped onto a board or a slot, and frames saved from takes. Each still is a row
+// in `stills` and a file of its own: in its sequence's folder (Sekvenser/<sequence>/Storyboard/), its storyboard's
+// (Storyboards/<storyboard>/Bilder/) or, without either, in Referensbilder/<day>/. Clips and boards use a still by
+// its path, like any other picture, so a still that clips, boards or generations still use is never trashed:
+// deleting it moves the file to Referensbilder and the rows that use it follow.
 
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, createReadStream, existsSync } from 'node:fs'
 import { copyFile, link, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { app, ipcMain, shell } from 'electron'
-import type { GenerationParams, ImageModel, Still, StillParams } from '@shared/types'
+import type { GenerationParams, ImageModel, SequenceKind, Still, StillParams } from '@shared/types'
 import * as db from './db'
 import { extractFrame } from './ffmpeg'
 import {
@@ -32,6 +32,7 @@ import {
   FOLDERS,
   fromStoredPath,
   isInsideRoot,
+  KIND_FOLDERS,
   libraryOperationSettled,
   libraryRoot,
   movePath,
@@ -40,7 +41,7 @@ import {
   removeDayFolderIfEmpty,
   safeName,
   sequenceDir,
-  STORYBOARD_FOLDER,
+  sequenceKindOf,
   timeStamp,
   tmpDir,
   toStoredPath,
@@ -241,9 +242,12 @@ function insertStill(s: NewStill): Still {
   return getStill(id)
 }
 
-// ── Sequences ────────────────────────────────────────────────────────────────
+// ── Sequences and storyboards ────────────────────────────────────────────────
 
-/** The sequence's folder name; null when it has none yet (from before folders), undefined when it is gone. */
+/**
+ * The sequence's (or storyboard's) folder name, null when it has none yet (from before folders), undefined when it
+ * is gone.
+ */
 function sequenceFolder(sequenceId: string): string | null | undefined {
   const row = conn().prepare('SELECT folder FROM sequences WHERE id = ?').get(sequenceId) as
     | { folder: string | null }
@@ -254,17 +258,23 @@ function sequenceFolder(sequenceId: string): string | null | undefined {
   return folder && !/[/\\\0]/.test(folder) && folder !== '.' && folder !== '..' ? folder : null
 }
 
+/** Whether the row is a sequence or a storyboard (a gone row counts as a sequence; callers check it first). */
+function sequenceKind(sequenceId: string): SequenceKind {
+  return sequenceKindOf(conn().prepare('SELECT kind FROM sequences WHERE id = ?').pluck().get(sequenceId))
+}
+
 function requireSequence(sequenceId: string): void {
   if (sequenceFolder(sequenceId) === undefined) throw new Error(SEQUENCE_GONE)
 }
 
-/** The sequence's aspect ratio (its defaults for new clips), if it has one. */
+/** The format a sequence's stills get by default: a storyboard's aspect ratio, else the sequence's for its clips. */
 function sequenceAspectRatio(sequenceId: string | undefined): string | undefined {
   if (!sequenceId) return undefined
-  const json = conn().prepare('SELECT defaults FROM sequences WHERE id = ?').pluck().get(sequenceId) as
-    | string
+  const row = conn().prepare('SELECT defaults, aspect_ratio FROM sequences WHERE id = ?').get(sequenceId) as
+    | { defaults: string; aspect_ratio: string | null }
     | undefined
-  return json === undefined ? undefined : parseDefaults(json).aspectRatio
+  if (!row) return undefined
+  return row.aspect_ratio || parseDefaults(row.defaults).aspectRatio
 }
 
 /** The sequence a take belongs to, if it is one. */
@@ -312,7 +322,8 @@ type RecordStill = (path: string, sequenceId: string | undefined) => void
 
 /**
  * Moves a finished picture from the scratch folder to where its still belongs, and records it in the same
- * tick as the last look at where that is.
+ * tick as the last look at where that is: Sekvenser/<sequence>/Storyboard/ for a sequence's still,
+ * Storyboards/<storyboard>/Bilder/ for a storyboard's.
  *
  * A sequence's folder can be renamed at any moment (its name changed): sequences.ts moves the folder on disk
  * and then rewrites every stored path below it in one transaction. So the picture is linked into the folder
@@ -336,7 +347,9 @@ async function placeStill(
       record(path, sequenceId && sequenceFolder(sequenceId) !== undefined ? sequenceId : undefined)
       return path
     }
-    const parent = join(libraryRoot(), FOLDERS.sequences, folder)
+    const kind = sequenceKind(sequenceId!)
+    const layout = KIND_FOLDERS[kind]
+    const parent = join(libraryRoot(), layout.parent, folder)
     if (!existsSync(parent)) {
       // Being renamed right now (the database follows the move), or removed in Finder: give a rename a moment,
       // then bring the folder back like any other sequence folder removed in Finder.
@@ -344,10 +357,10 @@ async function placeStill(
         await delay(RENAME_WAIT_MS)
         continue
       }
-      sequenceDir(folder)
+      sequenceDir(folder, kind)
     }
     assertRootIntact()
-    const dir = join(parent, STORYBOARD_FOLDER)
+    const dir = join(parent, layout.stills)
     try {
       await mkdir(dir)
     } catch (err) {
@@ -366,7 +379,7 @@ async function placeStill(
     }
     return settle(dest, folder, sequenceId!, base, ext, record)
   }
-  throw new Error('Bilden kunde inte läggas i sekvensens mapp. Försök igen.')
+  throw new Error('Bilden kunde inte läggas i sekvensens eller storyboardens mapp. Försök igen.')
 }
 
 /** Records a picture just linked into the sequence's folder once it is where the database says (see placeStill). */
@@ -388,8 +401,8 @@ async function settle(
       record(path, undefined)
       return path
     }
-    const expected =
-      !now || now === folder ? dest : join(libraryRoot(), FOLDERS.sequences, now, STORYBOARD_FOLDER, name)
+    const layout = KIND_FOLDERS[sequenceKind(sequenceId)]
+    const expected = !now || now === folder ? dest : join(libraryRoot(), layout.parent, now, layout.stills, name)
     if (existsSync(expected)) {
       record(expected, sequenceId)
       return expected
@@ -401,7 +414,7 @@ async function settle(
     record(dest, sequenceFolder(sequenceId) === undefined ? undefined : sequenceId)
     return dest
   }
-  throw new Error('Bilden kom bort när sekvensens mapp flyttades. Försök igen.')
+  throw new Error('Bilden kom bort när mappen den skulle läggas i flyttades. Försök igen.')
 }
 
 /**
@@ -483,9 +496,16 @@ async function keepUsedFile(path: string): Promise<'moved' | 'kept' | false> {
   }
 }
 
-/** Removes a sequence's Storyboard folder (or a Referensbilder day) that a delete has just emptied. */
+/**
+ * Removes a sequence's Storyboard folder, a storyboard's Bilder folder (or a Referensbilder day) that a delete has
+ * just emptied.
+ */
 async function removeFolderIfEmptied(dir: string): Promise<void> {
-  if (basename(dir) === STORYBOARD_FOLDER) await removeDirIfEmpty(dir)
+  const stored = toStoredPath(dir).split('/')
+  const stillsFolder = Object.values(KIND_FOLDERS).some(
+    (layout) => stored.length === 3 && stored[0] === layout.parent && stored[2] === layout.stills
+  )
+  if (stillsFolder) await removeDirIfEmpty(dir)
   else await removeDayFolderIfEmpty(dir)
 }
 
@@ -666,9 +686,9 @@ export async function quoteStill(input: unknown): Promise<number | undefined> {
 
 /**
  * Generates a still with Venice (paid; the window confirms with the price, an agent's request needs the user's
- * approval) and saves it as a still of its sequence: Sekvenser/<sequence>/Storyboard/<HH.MM> <prompt>.png, or
- * Referensbilder/<day>/ without a sequence. Reference pictures from outside the library are copied into
- * Referensbilder first, so "Skapa igen" keeps working when the originals go.
+ * approval) and saves it as a still of its sequence: Sekvenser/<sequence>/Storyboard/<HH.MM> <prompt>.png (a
+ * storyboard's in Storyboards/<storyboard>/Bilder/), or Referensbilder/<day>/ without one. Reference pictures from
+ * outside the library are copied into Referensbilder first, so "Skapa igen" keeps working when the originals go.
  */
 export async function generateStill(input: unknown): Promise<Still> {
   return stillTask(async () => {
@@ -849,8 +869,8 @@ async function findUploadDuplicate(src: string, sequenceId: string | undefined):
 }
 
 /**
- * Copies a picture file into the library as a still ('upload') of the sequence — the 'file' source of a
- * storyboard slot, a picture dropped onto a panel — under its own name in the sequence's Storyboard folder.
+ * Copies a picture file into the library as a still ('upload') of the sequence or storyboard — the 'file' source of
+ * a keyframe slot or a board, a picture dropped onto one — under its own name in its Storyboard (Bilder) folder.
  * A still's own file gives that still, and the same picture dropped again into the same sequence gives the
  * still it became the first time.
  */

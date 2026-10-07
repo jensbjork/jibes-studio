@@ -11,7 +11,7 @@ export interface FramePreviewState {
 }
 
 // Main extracts a neighbour's frame with ffmpeg the first time and caches the file, so asking twice is cheap,
-// but a storyboard asks for every panel at once: keep a short memory of answers and only a couple of
+// but clicking through the clips asks again for each one: keep a short memory of answers and only a couple of
 // extractions running at a time.
 const MAX_RUNNING = 2
 const MAX_CACHED = 200

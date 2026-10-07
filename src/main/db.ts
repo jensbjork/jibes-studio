@@ -170,7 +170,27 @@ const migrations: string[] = [
   // Phase 8: the descriptions of the referenced assets are appended to the prompt as a References legend when it
   // is sent. sent_prompt is the prompt exactly as Venice got it; prompt (and params.prompt) stay the user's text,
   // which "Använd igen" puts back. NULL for generations from before.
-  `ALTER TABLE generations ADD COLUMN sent_prompt TEXT;`
+  `ALTER TABLE generations ADD COLUMN sent_prompt TEXT;`,
+
+  // Phase 9: storyboards as a workflow of their own. A storyboard is a row of `sequences` of kind 'storyboard' (so
+  // takes, folders, export and approvals work as for sequences) with an aspect ratio and ordered boards, one image
+  // each; its segments are the transitions between adjacent boards, tied to them by from_board_id / to_board_id.
+  // image_path is a stored path like every other (relative inside the library) and follows renames and moves.
+  `ALTER TABLE sequences ADD COLUMN kind TEXT NOT NULL DEFAULT 'sequence';
+  ALTER TABLE sequences ADD COLUMN aspect_ratio TEXT;
+  CREATE TABLE storyboard_boards (
+    id TEXT PRIMARY KEY,
+    sequence_id TEXT NOT NULL REFERENCES sequences(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    image_path TEXT,
+    still_id TEXT REFERENCES stills(id) ON DELETE SET NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX storyboard_boards_by_sequence ON storyboard_boards(sequence_id, position);
+  ALTER TABLE segments ADD COLUMN from_board_id TEXT REFERENCES storyboard_boards(id) ON DELETE SET NULL;
+  ALTER TABLE segments ADD COLUMN to_board_id TEXT REFERENCES storyboard_boards(id) ON DELETE SET NULL;`
 ]
 
 
@@ -182,6 +202,9 @@ export const ASSETS_SCHEMA_VERSION = 6
 
 /** The user_version from which a library has poses (and asset audio): from then on Poser is its own folder. */
 export const POSES_SCHEMA_VERSION = 7
+
+/** The user_version from which a library has storyboards of their own: from then on Storyboards is its own folder. */
+export const STORYBOARDS_SCHEMA_VERSION = 10
 
 /**
  * Why this build doesn't open a library whose database a newer Studio has migrated: it doesn't know the newer
@@ -443,7 +466,8 @@ function paramFilePaths(json: string): string[] {
 
 /**
  * Whether a row records this stored path (letter case ignored, like the disk): a generation, export, asset
- * image, asset audio or still file, or an image or audio clip in generation, segment or still params. A row
+ * image, asset audio or still file, a storyboard board's image, or an image or audio clip in generation, segment
+ * or still params. A row
  * whose file was deleted in Finder still claims its name: a new file given that name would otherwise be taken
  * for the old row's file — deleting that row would take the new file with it, and an old generation or clip
  * whose picture was removed would silently use somebody else's picture on "Använd igen" or a regenerated take.
@@ -459,6 +483,7 @@ export function isStoredPathRecorded(stored: string, opts: { ignoreStillId?: str
        UNION ALL SELECT 1 FROM asset_images WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM asset_audio WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM stills WHERE file_path = @p COLLATE NOCASE AND (@i IS NULL OR id != @i)
+       UNION ALL SELECT 1 FROM storyboard_boards WHERE image_path = @p COLLATE NOCASE
        LIMIT 1`
     )
     .get({ p: stored, i: ignore })
@@ -495,6 +520,7 @@ export function isStoredPrefixRecorded(folder: string): boolean {
        UNION ALL SELECT 1 FROM asset_images WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM asset_audio WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM stills WHERE instr(studio_fold(file_path), @p) = 1
+       UNION ALL SELECT 1 FROM storyboard_boards WHERE instr(studio_fold(image_path), @p) = 1
        LIMIT 1`
     )
     .get({ p: prefix })
@@ -513,7 +539,7 @@ export function isStoredPrefixRecorded(folder: string): boolean {
 
 /**
  * Every stored path in the library database (files, posters, params images and audio, asset files, stills,
- * exports).
+ * board images, exports).
  */
 export function listStoredPaths(): string[] {
   const paths: string[] = []
@@ -560,9 +586,9 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
 
 /**
  * Runs map over every stored path in the library database (generation files, posters and params, segment
- * params, asset images and audio, stills and the reference images in their params, exports) in one transaction
- * and writes back what changed. `contains`, when given, skips rows that can't hold a matching path.
- * `onGeneration` hears the id of every generation changed. Returns the number of rows changed.
+ * params, asset images and audio, stills and the reference images in their params, storyboard board images,
+ * exports) in one transaction and writes back what changed. `contains`, when given, skips rows that can't hold a
+ * matching path. `onGeneration` hears the id of every generation changed. Returns the number of rows changed.
  */
 export function mapStoredPaths(
   map: (stored: string) => string,
@@ -632,6 +658,20 @@ export function mapStoredPaths(
       rewrittenStills = true
       changed++
     }
+
+    // A board's image: a still or a library photo used where it is, which must follow it when it moves (its
+    // transitions' params, which hold the same path, are rewritten above).
+    const boards = conn
+      .prepare('SELECT id, image_path FROM storyboard_boards WHERE image_path IS NOT NULL')
+      .all() as { id: string; image_path: string }[]
+    const updateBoard = conn.prepare('UPDATE storyboard_boards SET image_path = ? WHERE id = ?')
+    for (const r of boards) {
+      if (!hit(r.image_path)) continue
+      const file = map(r.image_path)
+      if (file === r.image_path) continue
+      updateBoard.run(file, r.id)
+      changed++
+    }
   })()
   return changed
 }
@@ -685,7 +725,8 @@ export function takeRewrittenGenerations(): string[] {
 /**
  * Rewrites every stored relative path equal to or under oldRel to the same place under newRel: generations
  * (file_path, thumb_path, params incl. reference audio), segments.params, asset_images.file_path,
- * asset_audio.file_path, stills (file_path, the reference images in params), exports.file_path.
+ * asset_audio.file_path, stills (file_path, the reference images in params), storyboard_boards.image_path,
+ * exports.file_path.
  */
 export function rewriteStoredPrefix(oldRel: string, newRel: string): number {
   const from = cleanRelative(oldRel)

@@ -144,7 +144,7 @@ export function ImageIcon(props: IconProps) {
   )
 }
 
-/** The storyboard view: panels in a grid. */
+/** Panels in a grid. */
 export function GridIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -152,17 +152,6 @@ export function GridIcon(props: IconProps) {
       <rect x="9" y="2.5" width="5" height="4.5" rx="1" />
       <rect x="2" y="9" width="5" height="4.5" rx="1" />
       <rect x="9" y="9" width="5" height="4.5" rx="1" />
-    </Icon>
-  )
-}
-
-/** The timeline view: clips in a row. */
-export function StripIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <rect x="1.5" y="4.5" width="4" height="7" rx="1" />
-      <rect x="6" y="4.5" width="4" height="7" rx="1" />
-      <rect x="10.5" y="4.5" width="4" height="7" rx="1" />
     </Icon>
   )
 }

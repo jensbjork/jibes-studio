@@ -112,7 +112,7 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
  *   indexAssetPaths of it; without it nothing matches).
  * - minRating: the user gave at least that many stars. unrated: true for the ones the user hasn't rated.
  * - since: created at or after that time (epoch ms).
- * - placement: 'standalone' (not a take of a sequence clip) or 'sequence'.
+ * - placement: 'standalone' (not a take) or 'sequence' (a take of a sequence clip or a storyboard transition).
  * - hasReviews: true for the ones with a review (the user's or an agent's), false for the ones without.
  */
 export function filterGenerations<T extends FilterableGeneration>(

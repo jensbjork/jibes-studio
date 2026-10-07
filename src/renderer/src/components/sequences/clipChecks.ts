@@ -28,8 +28,8 @@ export interface ClipCheck {
 
 /**
  * Why a new take of the clip can't be generated right now (short Swedish text for a button), or undefined when it
- * can. Mirrors what main checks before any money is spent, so the storyboard's panels and the segment editor
- * don't offer a button that would only be refused: the prompt and its references, the frames from the
+ * can. Mirrors what main checks before any money is spent, so the segment editor doesn't offer a button that
+ * would only be refused: the prompt and its references, the frames from the
  * neighbours (they need ffmpeg and a finished take to come from), an end image the model can take, and a model
  * that is online.
  */

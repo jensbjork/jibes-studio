@@ -408,9 +408,9 @@ There are no down-migrations: once a newer Studio has migrated a library, older 
 3. **Main** — register `ipcMain.handle('area:doThing', …)` in the owning module's `register…` function. Treat the
    arguments as untrusted (they are untyped at runtime): validate them and reject with a Swedish, user-facing
    message.
-4. **Side effects** — broadcast the matching change event (`library:change`, `sequence:change`,
-   `generation:update` …) so open views refetch. Anything that moves files must respect the library-wide
-   operation lock (`libraryOperationSettled`) and, for sequences, the service's file queue.
+4. **Side effects** — broadcast the matching change event (`library:change`, `sequence:change`, `storyboard:change`,
+   `generation:update` …) so open views refetch. Anything that moves files must respect the library-wide operation
+   lock (`libraryOperationSettled`) and, for sequences, the service's file queue.
 5. **Agents** — handlers are recorded automatically, so agent tools can reach the new method with
    `callService('area:doThing', …)`. If agents must be treated differently, check `isAgentCall(event)` (as the
    review and learning handlers do: an agent passes its name as the last argument and may only change what it
@@ -425,8 +425,8 @@ There are no down-migrations: once a newer Studio has migrated a library, older 
 became `list_generations`' parameters through the shared `generation-filter.ts`; ratings and learnings became the
 review tools.
 
-Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, `storyboard.ts`, `paid.ts`,
-`review.ts`) and are registered with `defineTool` (`kit.ts`):
+Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, `stills.ts`, `storyboards.ts`,
+`paid.ts`, `review.ts`) and are registered with `defineTool` (`kit.ts`):
 
 - Give it a clear English `title` and `description` written for an LLM, a zod `input` schema with `.describe()`d
   fields, honest MCP `annotations` (`READ_ONLY`, `WRITE`, or destructive/open-world hints) and a short Swedish

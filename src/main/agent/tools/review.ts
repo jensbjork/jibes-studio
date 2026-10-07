@@ -10,10 +10,12 @@ import type {
   Learning,
   LearningInput,
   Segment,
-  Sequence
+  Sequence,
+  Storyboard
 } from '@shared/types'
 import * as db from '../../db'
 import { agentAuthor } from '../../reviews'
+import * as store from '../../sequence-store'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
 import {
@@ -44,8 +46,10 @@ import {
   tokenMap
 } from '../studio'
 import { READ_ONLY, WRITE, defineTool, priceValue, type LabeledAudio, type LabeledImage, type ToolContext } from './kit'
+import { isStoryboardId } from '../storyboard-rows'
 import { learningInfo, reviewInfo, takeOf } from './library'
 import { continues, endsOnNext, isUsableTake, loadSequence, selectedTake } from './sequences'
+import { boardNumbers, selectedTakeOf } from './storyboards'
 
 // Looking back at results to write better prompts: agents look at finished clips, sequences and exported films
 // (frames, the references they were made from, their sound), record honest reviews, and distil what generalises
@@ -83,6 +87,10 @@ const CLIP_CHECKLIST = [
   'Then add_review with an honest rating and tags, and save_learning for anything that would help the next prompt.'
 ]
 
+/** Added to CLIP_CHECKLIST for a take of a storyboard transition. */
+const TRANSITION_CHECK =
+  "Transition: does the clip start exactly on the first board's picture and end exactly on the second (compare the first and last frames with the start and end images)? Is the way between them one natural, continuous shot? (prompt-followed / bad-motion / continuity-break)"
+
 const CONTINUITY_CHECKLIST = [
   'At every cut: do the same people look the same (face, hair, outfit) on both sides? (continuity-good / continuity-break)',
   "A clip that continues from the previous one must start exactly where it ended (and one made to end on the next clip's first frame must end exactly there): same position, place, light – compare the last frame before the cut with the first after it.",
@@ -93,6 +101,14 @@ const CONTINUITY_CHECKLIST = [
 /** Frames at most per answer: plenty to judge a film, few enough for the agent's context. */
 const MAX_FILM_FRAMES = 24
 const MAX_SEQUENCE_FRAMES = 30
+
+/** Continuity in a storyboard's film: neighbouring transitions share a board's picture at every cut. */
+const STORYBOARD_CONTINUITY_CHECKLIST = [
+  "At every cut the film passes through a board's picture: the last frame of the transition before it and the first frame of the transition after it should both be that picture. Compare them – a jump means one of the takes didn't reach (or didn't start on) the picture.",
+  'Do the same people look the same (face, hair, outfit) all through the film? (continuity-good / continuity-break)',
+  'Does each transition move naturally from one milestone to the next, without a visible jump in the middle? (good-motion / bad-motion)',
+  'Review the takes behind a weak transition with review_generation and add_review; rewrite its prompt (update_transition) and ask for a new take; save_learning for patterns.'
+]
 /** How close a cut's frames are taken to the cut. */
 const BEFORE_CUT = 0.08
 const AFTER_CUT = 0.04
@@ -250,6 +266,19 @@ interface FilmClip {
   end: number
 }
 
+/** A transition of a storyboard's film: the clip between two boards' pictures. */
+interface FilmTransition {
+  transition_number: number
+  transition_id: string
+  from_board: number
+  to_board: number
+  generation_id: string
+  prompt: string
+  /** Seconds in the film. */
+  start: number
+  end: number
+}
+
 /**
  * Clip `i`'s take was made from the previous clip's last frame as it is now, so the export drops its first frame
  * (sequence-export's repeatsPreviousFrame; a length not measured yet counts as a match).
@@ -272,6 +301,7 @@ const CUT_TOLERANCE = (length: number): number => Math.max(0.35, length * 0.02)
  */
 async function filmClips(exp: ExportSummary, length: number): Promise<{ clips?: FilmClip[]; note?: string }> {
   if (!exp.sequenceId) return { note: 'The sequence this film was exported from has been deleted, so its cuts are unknown.' }
+  if (isStoryboardId(exp.sequenceId)) return { note: 'The film was exported from a storyboard.' }
   let sequence: Sequence
   try {
     sequence = await loadSequence(exp.sequenceId)
@@ -330,6 +360,73 @@ async function filmClips(exp: ExportSummary, length: number): Promise<{ clips?: 
         note: 'The sequence was changed after this export; its current cut has the same length as the film, so the cut times are likely right, but the clips listed may not be exactly the ones exported.'
       }
     : { clips }
+}
+
+/**
+ * Where each transition of a film exported from a storyboard starts and ends, from the storyboard as it is now –
+ * only when that is plausibly still the exported cut (as filmClips). The export drops the first frame of every
+ * transition after the first: it repeats the board picture the transition before it ended on.
+ */
+async function storyboardFilmClips(
+  exp: ExportSummary,
+  length: number
+): Promise<{ clips?: FilmTransition[]; note?: string }> {
+  let storyboard: Storyboard
+  try {
+    storyboard = await callService<Storyboard>('storyboards:get', exp.sequenceId)
+  } catch {
+    return { note: 'The storyboard this film was exported from could not be read, so its cuts are unknown.' }
+  }
+  const rows = new Map(store.listSegmentRows(storyboard.id).map((r) => [r.id, r]))
+  const clips: FilmTransition[] = []
+  let at = 0
+  for (const [i, t] of storyboard.transitions.entries()) {
+    const take = selectedTakeOf(t)
+    if (!take || !isUsableTake(take)) {
+      return { note: `Transition ${i + 1} of the storyboard has no finished selected take now, so the film's cuts can't be matched to it.` }
+    }
+    if (take.completedAt && take.completedAt > exp.createdAt + 1000) {
+      return { note: 'The storyboard has takes newer than this film, so its current cut is not the exported one.' }
+    }
+    const takeLength = await videoLength(take.filePath!, take.videoDuration).catch(() => undefined)
+    if (takeLength === undefined) return { note: `Transition ${i + 1}'s take could not be read, so the film's cuts are unknown.` }
+    const row = rows.get(t.id)
+    const trimStart = row?.trim_start ?? 0
+    // ~1/48 s: the repeated board picture at the start of every transition after the first.
+    const start = i > 0 ? Math.max(trimStart, 0.02) : trimStart
+    const end = takeLength - (row?.trim_end ?? 0)
+    const span = Math.max(0, end - start)
+    const { from, to } = boardNumbers(storyboard, t)
+    clips.push({
+      transition_number: i + 1,
+      transition_id: t.id,
+      from_board: from,
+      to_board: to,
+      generation_id: take.id,
+      prompt: t.params.prompt,
+      start: Math.round(at * 1000) / 1000,
+      end: Math.round((at + span) * 1000) / 1000
+    })
+    at += span
+  }
+  if (!clips.length) return { note: 'The storyboard has no transitions now, so the cuts of the film are unknown.' }
+  if (Math.abs(at - length) > CUT_TOLERANCE(length)) {
+    return {
+      note: `The storyboard's current cut is ${seconds(at)} s but the film is ${seconds(length)} s, so it has changed since the export and the cuts are unknown.`
+    }
+  }
+  return storyboard.updatedAt > exp.createdAt + 1000
+    ? {
+        clips,
+        note: 'The storyboard was changed after this export; its current cut has the same length as the film, so the cut times are likely right, but the transitions listed may not be exactly the ones exported.'
+      }
+    : { clips }
+}
+
+/** The film's owner as the tools name it: the sequence or the storyboard it was exported from. */
+function exportOwner(e: ExportSummary): Record<string, unknown> {
+  if (e.sequenceId && isStoryboardId(e.sequenceId)) return { storyboard_id: e.sequenceId, storyboard_name: e.sequenceName }
+  return { sequence_id: e.sequenceId ?? null, sequence_name: e.sequenceName }
 }
 
 // ── Sequences ────────────────────────────────────────────────────────────────
@@ -461,7 +558,10 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         audio.push(...refs.audio)
         if (refs.missing.length) data.references_not_returned = refs.missing
       }
-      data.how_to_review = CLIP_CHECKLIST
+      data.how_to_review =
+        g.segmentId && (data.take_of as Record<string, unknown> | undefined)?.storyboard_id
+          ? [TRANSITION_CHECK, ...CLIP_CHECKLIST]
+          : CLIP_CHECKLIST
       data.suggested_tags = REVIEW_TAGS
       return { data, images, audio, summary }
     }
@@ -528,23 +628,24 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List exported films',
       description:
-        'Films exported from sequences (newest first): export_id, the sequence it came from (if it still exists), the file, when it was made, its length and whether the file is still on disk. Look at one with review_export or get_frames.',
+        'Films exported from sequences and storyboards (newest first): export_id, the sequence or storyboard it came from (if it still exists), the file, when it was made, its length and whether the file is still on disk. Look at one with review_export or get_frames.',
       input: {
         sequence_id: z.string().optional().describe('Only films exported from this sequence.'),
+        storyboard_id: z.string().optional().describe('Only films exported from this storyboard.'),
         limit: z.number().int().min(1).max(100).default(20)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'listade exporterade filmer'
     },
-    async ({ sequence_id, limit }) => {
-      const list = (await listExports()).filter((e) => !sequence_id || e.sequenceId === sequence_id)
+    async ({ sequence_id, storyboard_id, limit }) => {
+      const owner = storyboard_id ?? sequence_id
+      const list = (await listExports()).filter((e) => !owner || e.sequenceId === owner)
       return {
         data: {
           count: list.length,
           exports: list.slice(0, limit).map((e) => ({
             export_id: e.id,
-            sequence_id: e.sequenceId ?? null,
-            sequence_name: e.sequenceName,
+            ...exportOwner(e),
             file: basename(e.path),
             created: localTime(e.createdAt),
             ...(e.duration !== undefined ? { seconds: seconds(e.duration) } : {}),
@@ -562,7 +663,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Review an exported film',
       description:
-        "Look at a whole exported film to judge continuity across its cuts. When the film still matches its sequence (same selected takes and trims), you get the clips with their place in the film, frames_per_clip frames inside every clip, and the last frame before and the first frame after every cut, each captioned with its time in the film (\"t = 8.0 s\"); otherwise frames evenly spread over the film and a note why the cuts are unknown. Compare across the cuts: faces, outfits, place, light, and whether continuing clips really continue. include_audio adds up to 30 s of the film's sound from audio_start. Review weak clips further with review_generation; record what you learn with add_review and save_learning. Free; changes nothing.",
+        "Look at a whole exported film (of a sequence or a storyboard) to judge continuity across its cuts. When the film still matches its sequence or storyboard (same selected takes and trims), you get the clips – a storyboard's transitions – with their place in the film, frames_per_clip frames inside every clip, and the last frame before and the first frame after every cut, each captioned with its time in the film (\"t = 8.0 s\"); otherwise frames evenly spread over the film and a note why the cuts are unknown. Compare across the cuts: faces, outfits, place, light, and whether continuing clips really continue. include_audio adds up to 30 s of the film's sound from audio_start. Review weak clips further with review_generation; record what you learn with add_review and save_learning. Free; changes nothing.",
       input: {
         export_id: z.string().describe('An export_id from list_exports.'),
         frames_per_clip: z.number().int().min(1).max(4).default(2).describe('Frames inside each clip (1–4). Default 2.'),
@@ -576,12 +677,23 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     async ({ export_id, frames_per_clip, include_cut_frames, include_audio, audio_start }) => {
       const exp = await requireExport(export_id)
       const length = await videoLength(exp.path, exp.duration)
-      const { clips, note } = await filmClips(exp, length)
+      const fromStoryboard = !!exp.sequenceId && isStoryboardId(exp.sequenceId)
+      const film: { clips?: (FilmClip | FilmTransition)[]; note?: string } = fromStoryboard
+        ? await storyboardFilmClips(exp, length)
+        : await filmClips(exp, length)
+      const note = film.note
+      // One shape for the frames below: a clip of a sequence, or a transition of a storyboard (named so).
+      const clips = film.clips?.map((c) =>
+        'transition_number' in c
+          ? { number: c.transition_number, start: c.start, end: c.end }
+          : { number: c.clip_number, start: c.start, end: c.end }
+      )
+      const word = fromStoryboard ? 'transition' : 'clip'
+      const Word = fromStoryboard ? 'Transition' : 'Clip'
       const wanted: { t: number; label: string }[] = []
       const data: Record<string, unknown> = {
         export_id: exp.id,
-        sequence_id: exp.sequenceId ?? null,
-        sequence_name: exp.sequenceName,
+        ...exportOwner(exp),
         file: basename(exp.path),
         created: localTime(exp.createdAt),
         seconds: seconds(length)
@@ -590,9 +702,9 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
       const cutFrames = include_cut_frames && clips ? 2 * (clips.length - 1) : 0
       const room = MAX_FILM_FRAMES - cutFrames
       const perClip = clips && room >= 0 ? Math.min(frames_per_clip, Math.floor(room / clips.length)) : 0
-      if (clips) {
-        data.cuts_from = 'sequence'
-        data.clips = clips.map((c) => ({ ...c, start: seconds(c.start), end: seconds(c.end) }))
+      if (film.clips) {
+        data.cuts_from = fromStoryboard ? 'storyboard' : 'sequence'
+        data[fromStoryboard ? 'transitions' : 'clips'] = film.clips.map((c) => ({ ...c, start: seconds(c.start), end: seconds(c.end) }))
       } else {
         data.cuts_from = 'unknown'
       }
@@ -601,16 +713,16 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
           // Inside the clip, away from the cuts (those have frames of their own).
           const margin = Math.min(0.25, (c.end - c.start) / 4)
           for (const t of spreadTimes(c.start + margin, c.end - margin, perClip)) {
-            wanted.push({ t: clampTime(t, length), label: `Clip ${c.clip_number}` })
+            wanted.push({ t: clampTime(t, length), label: `${Word} ${c.number}` })
           }
-          if (include_cut_frames && c.clip_number < clips.length) {
+          if (include_cut_frames && c.number < clips.length) {
             wanted.push({
               t: clampTime(c.end - BEFORE_CUT, length),
-              label: `Cut ${c.clip_number}→${c.clip_number + 1}: last frame of clip ${c.clip_number}`
+              label: `Cut ${c.number}→${c.number + 1}: last frame of ${word} ${c.number}`
             })
             wanted.push({
               t: clampTime(c.end + AFTER_CUT, length),
-              label: `Cut ${c.clip_number}→${c.clip_number + 1}: first frame of clip ${c.clip_number + 1}`
+              label: `Cut ${c.number}→${c.number + 1}: first frame of ${word} ${c.number + 1}`
             })
           }
         }
@@ -628,7 +740,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         data.note = clips
           ? [
               note,
-              `The film has ${clips.length} clips – too many cuts to show each one; frames are evenly spread instead. Use get_frames around the cuts (clips lists where they are).`
+              `The film has ${clips.length} ${word}s – too many cuts to show each one; frames are evenly spread instead. Use get_frames around the cuts (${word}s lists where they are).`
             ]
               .filter(Boolean)
               .join(' ')
@@ -658,7 +770,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
           data.audio_error = errorText(err)
         }
       }
-      data.how_to_review = CONTINUITY_CHECKLIST
+      data.how_to_review = fromStoryboard ? STORYBOARD_CONTINUITY_CHECKLIST : CONTINUITY_CHECKLIST
       return {
         data,
         images,
@@ -684,6 +796,12 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
       summary: () => 'granskade en sekvens'
     },
     async ({ sequence_id, frames_per_clip }) => {
+      requireLibrary()
+      if (isStoryboardId(sequence_id)) {
+        throw new Error(
+          'Det här är en storyboard, inte en sekvens. Granska dess övergångar en och en med review_generation (get_storyboard visar tagningarna) och en exporterad film med review_export.'
+        )
+      }
       const sequence = await loadSequence(sequence_id)
       const index = await AssetIndex.load()
       const count = sequence.segments.length

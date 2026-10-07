@@ -12,7 +12,8 @@ import { learningsForGuide, registerLibraryTools } from './library'
 import { registerPaidTools } from './paid'
 import { registerReviewTools } from './review'
 import { continues, endsOnNext, loadClip, registerSequenceTools } from './sequences'
-import { registerStoryboardTools } from './storyboard'
+import { registerStillTools } from './stills'
+import { boardNumbers, loadTransition, registerStoryboardTools } from './storyboards'
 
 export type { ToolContext } from './kit'
 
@@ -78,10 +79,32 @@ async function learningLines(model: string): Promise<string> {
   return `\nLearnings to apply (list_learnings has them all):\n${relevant.map((l) => `- ${l.title}: ${l.insight.replace(/\s*\n\s*/g, ' ')}`).join('\n')}`
 }
 
-/** What write_video_prompt tells the agent about the references it writes for. */
-async function promptContext(ctx: ToolContext, segmentId: string | undefined): Promise<string> {
+/** What write_video_prompt tells the agent about a storyboard transition: the two boards it goes between. */
+async function transitionContext(transitionId: string): Promise<string> {
+  const { storyboard, index, transition } = await loadTransition(transitionId)
+  const { from, to } = boardNumbers(storyboard, transition)
+  const p = transition.params
+  const board = (number: number, role: string): string => {
+    const b = storyboard.boards[number - 1]
+    if (!b) return `${role}: a board that can't be found.`
+    const note = b.note.trim() ? `, whose note ("Vad visar bilden?") says:\n"""${b.note.trim()}"""` : ' (no note).'
+    const picture = b.imagePath ? '' : '\nIt has no picture yet: it needs one before the transition can be generated.'
+    return `${role}: board ${number}${note}${picture}`
+  }
+  return [
+    `You are writing the prompt for transition ${index + 1} of the storyboard "${storyboard.name}" (transition_id ${transition.id}), ${p.duration}, model ${p.model}.`,
+    `It is image-to-video from two pictures: it starts on board ${from}'s picture and must end exactly on board ${to}'s picture – look at both with preview_transition first. No references and no @ tokens: describe how the first picture becomes the second, as one continuous shot.`,
+    board(from, 'Start'),
+    board(to, 'End'),
+    p.prompt.trim() ? `Its prompt so far:\n"""${p.prompt.trim()}"""` : 'It has no prompt yet.'
+  ].join('\n') + (await learningLines(p.model))
+}
+
+/** What write_video_prompt tells the agent about the references (or pictures) it writes for. */
+async function promptContext(ctx: ToolContext, segmentId: string | undefined, transitionId?: string): Promise<string> {
   if (!isLibraryReady()) return 'Studio has no library open yet, so there are no references to describe.'
   try {
+    if (transitionId) return await transitionContext(transitionId)
     const assets = await AssetIndex.load()
     if (segmentId) {
       const { sequence, index, segment } = await loadClip(segmentId)
@@ -90,7 +113,7 @@ async function promptContext(ctx: ToolContext, segmentId: string | undefined): P
       const generated = asGenerated(segment.params, continuing, ending)
       const head = `You are writing the prompt for clip ${index + 1} of the sequence "${sequence.name}" (segment_id ${segment.id}), ${generated.duration}, model ${generated.model}.`
       const notes = segment.notes?.trim()
-        ? `\nThe storyboard notes for the shot ("Vad händer"):\n"""${segment.notes.trim()}"""`
+        ? `\nThe clip's notes ("Vad händer"):\n"""${segment.notes.trim()}"""`
         : ''
       if (continuing || ending || kindOfModelId(generated.model) === 'image-to-video') {
         const start = continuing
@@ -124,6 +147,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
   registerLibraryTools(server, ctx)
   registerFormTools(server, ctx)
   registerSequenceTools(server, ctx)
+  registerStillTools(server, ctx)
   registerStoryboardTools(server, ctx)
   registerPaidTools(server, ctx)
   registerReviewTools(server, ctx)
@@ -133,14 +157,15 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Write a video prompt',
       description:
-        "Write a video prompt for Studio – for the Generate form, or for one sequence clip – from an idea, using the clip's actual references (photos and voices), the learnings recorded so far and Studio's prompt-writing guide.",
+        "Write a video prompt for Studio – for the Generate form, one sequence clip or one storyboard transition – from an idea, using the clip's actual references (photos and voices) or the transition's two board pictures, the learnings recorded so far and Studio's prompt-writing guide.",
       argsSchema: {
         idea: z.string().optional().describe('What should happen in the clip, in any language.'),
-        segment_id: z.string().optional().describe('Write for this sequence clip instead of the Generate form.')
+        segment_id: z.string().optional().describe('Write for this sequence clip instead of the Generate form.'),
+        transition_id: z.string().optional().describe('Write for this storyboard transition instead.')
       }
     },
-    async ({ idea, segment_id }) => {
-      const context = await promptContext(ctx, segment_id)
+    async ({ idea, segment_id, transition_id }) => {
+      const context = await promptContext(ctx, segment_id, transition_id)
       const task = idea?.trim()
         ? `Write the video prompt for this idea: ${idea.trim()}`
         : 'Ask the user (in Swedish) what should happen in the clip, then write the video prompt.'
@@ -150,9 +175,11 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         context,
         '## Task',
         task,
-        segment_id
-          ? 'Then save it with update_segment and check that the clip is ready (get_sequence).'
-          : 'Then put it into the form with set_form({prompt, negative_prompt}) and check it with validate_prompt({use_form: true}).'
+        transition_id
+          ? 'Then save it with update_transition and check that the transition is ready (get_storyboard).'
+          : segment_id
+            ? 'Then save it with update_segment and check that the clip is ready (get_sequence).'
+            : 'Then put it into the form with set_form({prompt, negative_prompt}) and check it with validate_prompt({use_form: true}).'
       ].join('\n\n')
       return { messages: [{ role: 'user', content: { type: 'text', text } }] }
     }

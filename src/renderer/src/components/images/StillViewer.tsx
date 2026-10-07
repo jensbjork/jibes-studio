@@ -15,12 +15,12 @@ import {
 interface Props {
   /** The still shown; the viewer is open while it is set. */
   still?: Still
-  /** Stills to browse with ← and → (e.g. the storyboard's strip), in the order they are shown there. */
+  /** Stills to browse with ← and → (e.g. a storyboard's images), in the order they are shown there. */
   stills?: Still[]
   onClose: () => void
   /**
    * Offers "Radera" (two steps). Main refuses, or moves the file to Referensbilder instead of the Trash, when a
-   * clip still uses the image; its Swedish message is shown here.
+   * clip or a board still uses the image; its Swedish message is shown here.
    */
   deletable?: boolean
   onDeleted?: (still: Still) => void
@@ -126,7 +126,7 @@ export default function StillViewer({ still, stills, onClose, deletable = false,
               question="Radera bilden?"
               onConfirm={() => void remove(current)}
               disabled={deleting}
-              title="Flyttar bilden till papperskorgen (till Referensbilder om något klipp använder den)"
+              title="Flyttar bilden till papperskorgen (till Referensbilder om ett klipp eller en ruta använder den)"
               className={`${button} hover:text-accent`}
             >
               Radera

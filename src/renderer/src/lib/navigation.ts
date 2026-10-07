@@ -6,6 +6,7 @@ export type View =
   | 'poses'
   | 'prompts'
   | 'sequences'
+  | 'storyboards'
   | 'settings'
 
 /** Cross-view requests, e.g. "generate with this character". Consumed once by the target view. */
@@ -20,5 +21,7 @@ export type Intent =
   | { type: 'use-prompt'; promptId: string }
   /** Sequences view: open that sequence, on the given clip (else the newest one). */
   | { type: 'open-sequence'; sequenceId: string; segmentId?: string }
+  /** Storyboards view: open that storyboard. */
+  | { type: 'open-storyboard'; storyboardId: string }
 
 export type Navigate = (view: View, intent?: Intent) => void

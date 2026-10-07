@@ -10,6 +10,7 @@ import PromptsView from './components/prompts/PromptsView'
 import SequencesView from './components/sequences/SequencesView'
 import SettingsView from './components/SettingsView'
 import Sidebar from './components/Sidebar'
+import StoryboardsView from './components/storyboards/StoryboardsView'
 import { startAgentFeed } from './lib/agent'
 import { useAgentBridge } from './lib/agentBridge'
 import { assetKindOfView } from './lib/assets'
@@ -137,6 +138,9 @@ function Workspace() {
         {view === 'prompts' && <PromptsView navigate={navigate} />}
         {view === 'sequences' && (
           <SequencesView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />
+        )}
+        {view === 'storyboards' && (
+          <StoryboardsView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />
         )}
         {view === 'settings' && settings && <SettingsView settings={settings} onChanged={refreshSettings} />}
       </main>

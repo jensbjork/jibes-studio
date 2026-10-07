@@ -1,4 +1,5 @@
-// Turns a sequence's selected, trimmed takes into ffmpeg concat clips and picks the output file name.
+// Turns a sequence's (or a storyboard's) selected, trimmed takes into ffmpeg concat clips and picks the output file
+// name.
 
 import { join } from 'node:path'
 import { endsOnFirstFrameOf, startsOnLastFrameOf, type SeamTake } from '@shared/seams'
@@ -23,6 +24,13 @@ export function missingTakesMessage(clipNumbers: number[]): string {
   return clipNumbers.length === 1
     ? `Klipp ${clipNumbers[0]} saknar en färdig vald tagning.`
     : `Klipp ${swedishList(clipNumbers)} saknar färdiga valda tagningar.`
+}
+
+/** The storyboard's words for missingTakesMessage: transitions rather than clips. */
+export function missingTransitionsMessage(numbers: number[]): string {
+  return numbers.length === 1
+    ? `Övergång ${numbers[0]} saknar en färdig vald tagning.`
+    : `Övergång ${swedishList(numbers)} saknar färdiga valda tagningar.`
 }
 
 /**
@@ -111,6 +119,61 @@ export async function buildConcatClips(
     const end = dropLast ? Math.min(length - row.trim_end, length - 1.5 / fps) : length - row.trim_end
     if (!(end - start > MIN_CLIP_SECONDS)) throw new Error(`Klipp ${i + 1} blir för kort efter trimningen.`)
     clips.push({ path: takes[i].filePath, start, end })
+  }
+  return clips
+}
+
+/** Two picture paths name the same file (letter case and Unicode form ignored, like the disk). */
+function samePicture(a: string | undefined, b: string | undefined): boolean {
+  return !!a && !!b && a.normalize('NFC').toLowerCase() === b.normalize('NFC').toLowerCase()
+}
+
+/**
+ * Whether a storyboard transition's take starts on the very picture the previous transition's take ends on: both
+ * were made from the board between them (the take's start image is the previous take's end image), so its first
+ * frame shows that board again right after the previous transition's last frame did. A take made from another
+ * picture (one of them made before the board's image was changed) starts on a picture of its own, which stays.
+ */
+export function repeatsBoardImage(take: SeamTake, previousTake: SeamTake): boolean {
+  return samePicture(take.params.startImage, previousTake.params.endImage)
+}
+
+/**
+ * The storyboard's concat clips: one per transition, in order. `takes[i]` must be the usable selected take of
+ * `rows[i]`. Adjacent transitions share their board's image: the earlier one ends on it and the later one starts on
+ * it, so the later one's first frame is dropped (see repeatsBoardImage) and the board is shown once, the way a
+ * sequence's continuation drops the frame it repeats. Nothing else is cut: transitions have no other dedupe.
+ */
+export async function buildStoryboardClips(
+  rows: SegmentRow[],
+  takes: (Generation & { filePath: string })[]
+): Promise<ConcatClip[]> {
+  const clips: ConcatClip[] = []
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const take = takes[i]
+    let info: ProbeResult | undefined
+    const probeTake = async (): Promise<ProbeResult> => {
+      try {
+        info ??= await probe(take.filePath)
+        return info
+      } catch (err) {
+        throw new Error(`Övergång ${i + 1} kunde inte läsas: ${errorText(err)}`)
+      }
+    }
+    const length = take.videoDuration ?? (await probeTake()).duration
+    const dropFirst = i > 0 && repeatsBoardImage(take, takes[i - 1])
+    let fps = FALLBACK_FPS
+    if (dropFirst) {
+      const probed = await probeTake()
+      if (probed.fps > 0) fps = probed.fps
+    }
+    // Half a frame skips the repeated first frame without risking the second one to timestamp rounding (as the
+    // sequence export does); a start trim that long has already removed it.
+    const start = dropFirst ? Math.max(row.trim_start, 0.5 / fps) : row.trim_start
+    const end = length - row.trim_end
+    if (!(end - start > MIN_CLIP_SECONDS)) throw new Error(`Övergång ${i + 1} blir för kort.`)
+    clips.push({ path: take.filePath, start, end })
   }
   return clips
 }

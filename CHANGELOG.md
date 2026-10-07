@@ -41,38 +41,66 @@ breaking changes; they are called out under **Changed** or **Removed**.
   set apart under the prompt, and a request lapses when a description it appends changes before you approve (the
   dialog says so first, for *Generera saknade* too); an approved request sends exactly the prompt you approved. The
   guide says not to repeat the descriptions in the prompt, but to write the action, camera and mood.
-- **Storyboards.** *Tidslinje / Storyboard* in a sequence (remembered per sequence; a new sequence can start as a
-  storyboard): one panel per clip with its take, a start image → end image, *Vad händer* notes, the prompt, the
-  price and *Generera tagning*; drag panels to reorder, *+ Ny ruta* between or after them. A slot takes an uploaded
-  or dropped picture, a library photo, a still, a frame picked from any finished take (*Bildruta från ett klipp*,
-  frame-exact), a picture from *Skapa bild…*, or automatically the previous clip's last frame / the next clip's first
-  frame. A clip with a start or end image is generated image-to-video with its family's model (one that takes an
-  end image for the end slot); its references are dropped and their `@` tokens taken out of the prompt. A stills
-  strip under the panels holds every picture of the sequence (drag onto a slot, view, delete).
+- **Storyboards**, a view of their own next to Sekvenser: mock up a film's milestones as pictures, one per board,
+  and generate the clips between them. A storyboard has a name, a format (16:9, 9:16, 1:1, 4:3, 3:4 or 21:9) and a
+  row of large boards, each with one picture and a note (*Vad visar bilden?*). A board's picture is made with
+  *Skapa bild…* or taken from the library, the storyboard's earlier pictures (which open full size, to be used or
+  deleted), an uploaded or dropped file or a frame of any clip (*Bildruta ur ett klipp…*, with ffmpeg); a picture in
+  another shape than the storyboard's is marked *Annat format*.
+  Boards are reordered by dragging or with ⌥← / ⌥→ and added with **+** before, between or after them (pictures
+  dropped on *Ny ruta* become one board each). Between every two neighbouring boards there is a **transition**: the
+  clip from the first picture to the second (Seedance image-to-video, 5 s, 480p by default), with *Vad händer?* (and
+  *Föreslå*, which fills in a plain template from the two notes), length, resolution, sound, a model that can end on
+  a picture, the price, *Generera* and its takes (and a negative prompt an agent set, which can be removed there).
+  Moving, inserting or removing a board re-pairs the transitions, asking first when a transition with a prompt or
+  takes would go; the takes of transitions that go are kept as ordinary generations. A take made before a board got
+  another picture is marked *Tidigare bild* until a take made from the pictures there now is done and takes its
+  place; deleting the selected take selects another finished one. The header has *Generera saknade* (every missing
+  transition, with the total price once all of them can be made; nothing is paid for while one of them can't be,
+  and no take is sent without both of its pictures), *Förhandsvisa*, *Exportera* (one film in `Storyboards/<name>/`, the
+  board two transitions share shown once) and, under ⋯, *Gör om till sekvens* (an ordinary sequence with one clip
+  and a copy of the selected take per transition), *Öppna mappen i Finder* and *Radera storyboarden*. Files live
+  in `Storyboards/<name>/`: `Övergångar/` for the takes, `Bilder/` for the pictures.
 - **Skapa bild…**: pictures from Venice's image models — text-to-image, or combining up to the model's limit of
   references (characters, outfits, places, poses, stills; the first is the base picture) — with model, format,
   resolution and quality, a live price on the button (about $0.06 with the default Seedream models) and Swedish
-  messages for a low balance, refused content and other errors. Every result is saved as a still in
-  `Sekvenser/<sequence>/Storyboard/` and can be used as a start or end image right away.
+  messages for a low balance, refused content and other errors. For a storyboard board, *Använd föregående bild som
+  referens* (on by default) puts the previous board's picture first, for continuity, and the finished picture goes
+  onto the board (never over a picture put there meanwhile). Every result is saved as a still of its storyboard
+  (`Storyboards/<name>/Bilder/`) or sequence (`Sekvenser/<sequence>/Storyboard/`). Deleting a storyboard moves its
+  pictures that nothing else uses to the Trash, as its confirmation says.
+- **Bildruta ur ett klipp…**: scrub any finished video in the library, searchable by prompt, and save the exact
+  frame as a picture.
 - **Säkert läge för bilder** (Inställningar → Bilder, on by default, also switchable in the *Skapa bild…*
   dialog): Venice blurs adult content in the pictures it makes.
 - **Slutbild från nästa klipp** (`end_from_next`): a clip can end on the next clip's first frame after its start
   trim, extracted automatically and sent as `end_image_url`, mirroring *Startbild från föregående klipp*. Turning
   it on switches the clip to a model that takes an end image, with the durations and resolutions that model
   offers. The clip editor shows live previews of both frames.
-- **Gör om mellan grannarna**, on the timeline cards, the storyboard panels and in the clip editor: sets a clip up
-  to start exactly on the previous clip's last frame and end exactly on the next clip's first frame, with an
-  image-to-video model that takes an end image, keeping its prompt, length and sound — so a bad clip in the middle
-  can be redone without touching its neighbours. The old take stays selected until you pick the new one (*Använd
-  den* on the panel) and stays among the takes. A take picked that was made from a neighbour's frame starts
+- **Gör om mellan grannarna**, on the timeline cards and in the clip editor: sets a clip up to start exactly on the
+  previous clip's last frame and end exactly on the next clip's first frame, with an image-to-video model that takes
+  an end image, keeping its prompt, length and sound — so a bad clip in the middle can be redone without touching its
+  neighbours. The old take stays selected until you pick the new one (*Välj* among the takes) and stays among the
+  takes. A take picked that was made from a neighbour's frame starts
   untrimmed at that end, so an old trim can't cut the matched frame away, and a neighbour that continued from the
   old take isn't flagged as out of date: the cut counts as seamless when either side was made from the other.
-- **Agent tools for storyboards** (7 new, 46 tools in all): `list_image_models`, `list_stills`, `get_still`,
-  `preview_segment_frames`, `save_frame_as_still`, `bridge_segment` and the paid `request_image_generation`
-  (approved in the app like a video; the dialog shows the references and the finished picture). `get_sequence`,
-  `add_segment` and `update_segment` know notes, start and end images and `end_from_next`; `update_segment` can
-  select a take; `list_image_models` says whether *Säkert läge för bilder* is on. The guide has sections on
-  storyboarding and on replacing a clip between its neighbours.
+- **Agent tools for storyboards** (13 new, 60 tools in all): `list_storyboards`, `get_storyboard`,
+  `preview_transition` (both pictures and the price), `create_storyboard` (with one note per board),
+  `update_storyboard`, `add_board`, `update_board`, `move_board`, `delete_board`, `update_transition`,
+  `convert_storyboard_to_sequence` and the paid `request_transition_generation` and `request_generate_storyboard`
+  (approved in the app; the dialog shows the two board pictures side by side, the prompt and the price).
+  `request_image_generation` takes `assign_to: {board_id}`, `previous_board_as_reference` and `storyboard_id`;
+  `list_stills`, `get_still`, `save_frame_as_still` and `list_exports` take storyboards; `get_generation`,
+  `review_generation` and `review_export` know transitions and storyboard films; `write_video_prompt` takes
+  `transition_id`; `open_in_studio` opens a storyboard and `get_workspace` says which one is open. The guide has a
+  Storyboards section: plan the milestones as boards, make each picture with references (and the previous board's
+  picture for continuity), write each transition as the motion from picture A to picture B, review, regenerate.
+- **Agent tools for keyframes and stills** (7 new, 46 tools in all): `list_image_models`, `list_stills`,
+  `get_still`, `preview_segment_frames`, `save_frame_as_still`, `bridge_segment` and the paid
+  `request_image_generation` (approved in the app like a video; the dialog shows the references and the finished
+  picture). `get_sequence`, `add_segment` and `update_segment` know notes, start and end images and
+  `end_from_next`; `update_segment` can select a take; `list_image_models` says whether *Säkert läge för bilder* is
+  on. The guide has a section on replacing a clip between its neighbours.
 - **Voices and soundscapes.** Characters get a *Röst* (voice) section and environments a *Ljudmiljö* (soundscape)
   section in the library: drop or pick MP3, WAV, M4A, AAC, AIFF, FLAC or OGG files (copied into the asset's folder),
   play them, reorder them, and choose each clip's 2–15 s **reference window** on a timeline. Files without sound or
@@ -113,6 +141,18 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- **Storyboards moved out of Sekvenser** into their own view, as a workflow of their own (milestone pictures with
+  the clips between them generated; see *Added*). Sekvenser no longer has the *Tidslinje / Storyboard* switch, the
+  panel grid or the stills strip; its timeline, clip editor, notes and keyframe controls (*Startbild från
+  föregående klipp*, *Slutbild från nästa klipp*, *Gör om mellan grannarna*) stay. Sequences and storyboards are
+  separate lists, in the app and for agents (`list_sequences` and `get_sequence` leave storyboards out and point to
+  the storyboard tools). Agents' `tools/storyboard.ts` is now `tools/stills.ts`.
+- The clip feed marks every take as *Tagning* (the filter is *Tagningar*): the badge opens the sequence clip or
+  storyboard transition it belongs to, and the detail drawer names it (*Klipp 3 i …*, *Övergång 2 i …*).
+- The library database is migrated to version 10: sequences get a `kind` (existing ones stay sequences) and
+  storyboards an aspect ratio, `storyboard_boards` holds the boards and clips can belong to a storyboard as its
+  transitions. From this version `Storyboards` belongs to the library; an older library whose base folder already
+  holds a folder of your own named *Storyboards* is not opened until it is renamed.
 - The library database is migrated to version 9: `generations.sent_prompt` keeps the prompt as it was sent (with
   the descriptions legend); `prompt` stays the text you wrote.
 - Reference images past the model's limit are marked *skickas inte* in the reference strip instead of getting an
@@ -127,7 +167,7 @@ breaking changes; they are called out under **Changed** or **Removed**.
 - *Generera saknade* makes the clips in the order their frames allow (a clip that ends on the next clip after that
   clip) and stops before paying for anything when two clips wait on each other; agents' *generate all* requests
   list the clips in that order.
-- A new clip no longer copies the previous clip's start and end image (a new storyboard panel starts empty).
+- A new clip no longer copies the previous clip's start and end image.
 - The clip editor's *Fortsätt från föregående klipp* switch is now *Startbild från föregående klipp*, next to
   *Slutbild från nästa klipp*, both with a live preview of the frame.
 - An end image is only sent to models known to take one (`supportsEndImage`): Seedance image-to-video, Kling V3/O3
