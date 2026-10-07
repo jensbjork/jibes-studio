@@ -1,4 +1,5 @@
-import { durationSeconds, imageToVideoVariant } from '@shared/models'
+import { durationSeconds, endImageVariant, imageToVideoVariant } from '@shared/models'
+import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
 import {
   NEEDS_CONSENT,
   type ConsentRequest,
@@ -55,10 +56,39 @@ export function takeProgress(g: Generation): number | undefined {
   return Math.min(0.97, g.executionDuration / g.averageExecutionTime)
 }
 
-/** The params a new take of the segment will actually be generated with (continuations use the I2V sibling). */
+/** The segment takes its start frame from the previous clip (never the first clip). */
+export function continues(segment: Segment, index: number): boolean {
+  return segment.continueFromPrevious && index > 0
+}
+
+/**
+ * The params a new take of the segment will actually be generated with: a clip whose start or end frame comes
+ * from a neighbour is generated with the image-to-video sibling of its model, exactly as main's takeParams does.
+ * Not the end-capable model: main switches to one when "Slutbild från nästa klipp" is turned on (and
+ * patchSegmentLocally does until its answer arrives), but a model the user picks afterwards is theirs, and one that
+ * can't take an end image is refused (clipBlocked says so) rather than priced as another model.
+ */
 export function effectiveParams(segment: Segment, index: number): GenerationParams {
-  if (!segment.continueFromPrevious || index === 0) return segment.params
+  if (!continues(segment, index) && !segment.endFromNext) return segment.params
   return { ...segment.params, model: imageToVideoVariant(segment.params.model) }
+}
+
+/**
+ * What a new take of the clip would be made from, as one comparable string: its params and the neighbours'
+ * frames it starts or ends on. Used to tell whether a clip changed while a dialog (Venice's terms) was open, so
+ * accepting can never pay for something other than what the user looked at.
+ */
+export function clipKey(sequence: Sequence, index: number): string {
+  const s = sequence.segments[index]
+  if (!s) return ''
+  const before = continues(s, index) ? sequence.segments[index - 1] : undefined
+  const after = s.endFromNext ? sequence.segments[index + 1] : undefined
+  return stableJson([
+    s.id,
+    effectiveParams(s, index),
+    before ? [before.id, before.selectedGenerationId, before.trimEnd] : null,
+    after ? [after.id, after.selectedGenerationId, after.trimStart] : null
+  ])
 }
 
 /**
@@ -70,27 +100,44 @@ export function needsTake(segment: Segment): boolean {
 }
 
 /**
- * True when the segment continues from the previous one but its selected take was made from another frame
- * than the one the previous clip now ends on (a different take was chosen or its end trim changed).
- * Relies on the main process naming extracted frames `<takeId>-<last|ms>.png`.
+ * The cut between `left` and `right` is seamless as far as their selected takes say: one side was made from the
+ * other side's frame as it is now. Either direction will do: a clip redone between its neighbours ends on the next
+ * clip's first frame without that clip being made again, and the next clip, continuing from the old take, still
+ * meets it exactly (see @shared/seams; the export drops one copy of that picture either way).
+ */
+function seamMade(left: Segment, leftTake: Generation, right: Segment, rightTake: Generation): boolean {
+  return (
+    (right.continueFromPrevious && startsOnLastFrameOf(rightTake, leftTake, left.trimEnd)) ||
+    (left.endFromNext && endsOnFirstFrameOf(leftTake, rightTake, right.trimStart))
+  )
+}
+
+/**
+ * True when the segment continues from the previous one but neither take at the cut was made from the other's
+ * frame as it is now: the selected take was made from another frame than the one the previous clip now ends on
+ * (a different take was chosen or its end trim changed, or continuation was switched on after generating), and
+ * the previous clip wasn't made to end on this take's first frame either.
  */
 export function continuationMismatch(segment: Segment, previous: Segment | undefined): boolean {
   if (!segment.continueFromPrevious || !previous) return false
   const take = selectedTake(segment)
   const prevTake = readyTake(previous)
   if (!take || take.status !== 'completed' || !prevTake) return false
-  const start = take.params.startImage
-  // Not made from an extracted frame at all, e.g. continuation was switched on after generating. Frames live in
-  // .studio/bildrutor/ (frames/ in libraries from before the base folder could be chosen).
-  if (!start || !/[/\\](frames|bildrutor)[/\\]/.test(start)) return true
-  const name = fileName(start)
-  if (!name.startsWith(prevTake.id)) return true
-  const at = /-(last|\d+)\.png$/.exec(name)?.[1]
-  if (!at) return false
-  if (at === 'last') return previous.trimEnd > 0
-  if (previous.trimEnd <= 0) return true
-  if (prevTake.videoDuration === undefined) return false
-  return Math.abs(Number(at) / 1000 - (prevTake.videoDuration - previous.trimEnd)) > 0.05
+  return !seamMade(previous, prevTake, segment, take)
+}
+
+/**
+ * The end-frame counterpart of continuationMismatch: the segment takes its end frame from the next clip, but its
+ * selected take was made from another frame than the one the next clip now starts on (another take was chosen
+ * there, or its start trim changed, or the switch was turned on after generating), and the next clip's take
+ * wasn't made from this take's last frame either.
+ */
+export function endMismatch(segment: Segment, next: Segment | undefined): boolean {
+  if (!segment.endFromNext || !next) return false
+  const take = selectedTake(segment)
+  const nextTake = readyTake(next)
+  if (!take || take.status !== 'completed' || !nextTake) return false
+  return !seamMade(segment, take, next, nextTake)
 }
 
 /** Applies a patch to the local copy the same way the main process will, for instant feedback. */
@@ -105,6 +152,11 @@ export function patchSegmentLocally(sequence: Sequence, segmentId: string, patch
         next.continueFromPrevious = patch.continueFromPrevious
         if (patch.continueFromPrevious) next.params = { ...next.params, model: imageToVideoVariant(next.params.model) }
       }
+      if (patch.endFromNext !== undefined) {
+        next.endFromNext = patch.endFromNext
+        if (patch.endFromNext) next.params = { ...next.params, model: endImageVariant(next.params.model) }
+      }
+      if (patch.notes !== undefined) next.notes = patch.notes
       if (patch.trimStart !== undefined) next.trimStart = patch.trimStart
       if (patch.trimEnd !== undefined) next.trimEnd = patch.trimEnd
       if (patch.selectedGenerationId !== undefined) next.selectedGenerationId = patch.selectedGenerationId ?? undefined
@@ -125,7 +177,8 @@ export function moveSegmentLocally(sequence: Sequence, segmentId: string, toInde
     segments: segments.map((s, i) => ({
       ...s,
       position: i,
-      continueFromPrevious: i === 0 ? false : s.continueFromPrevious
+      continueFromPrevious: i === 0 ? false : s.continueFromPrevious,
+      endFromNext: i === segments.length - 1 ? false : s.endFromNext
     }))
   }
 }
@@ -215,6 +268,13 @@ export function formatLength(seconds: number): string {
   if (seconds < 59.95) return `${decimal.format(seconds)} s`
   const total = Math.round(seconds)
   return `${Math.floor(total / 60)} min ${total % 60} s`
+}
+
+/** "0:07,5": where in a clip a frame sits, to a tenth of a second. */
+export function formatFrameTime(seconds: number): string {
+  const tenths = Math.max(0, Math.round(seconds * 10))
+  const s = Math.floor(tenths / 10)
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')},${tenths % 10}`
 }
 
 /** "1:07" for player clocks. */

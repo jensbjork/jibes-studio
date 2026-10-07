@@ -90,6 +90,39 @@ export function imageToVideoVariant(modelId: string): string {
   return modelId.replace(/(reference|text)-to-video/, 'image-to-video')
 }
 
+// ── Keyframes: start and end image ──────────────────────────────────────────
+// Venice's /video/queue takes `image_url` (the first frame) and, with some image-to-video models, `end_image_url`
+// (the last frame). The model list has no flag for the latter, so the models known to take it are listed here
+// by id: Seedance's image-to-video models (first + last frame), Kling V3 and O3 image-to-video, and the models
+// built for it (flux-3-first-last-frame-to-video, PixVerse's *-transition).
+
+/** Whether the model takes an end image (`end_image_url`) besides its start image. */
+export function supportsEndImage(modelId: string): boolean {
+  if (typeof modelId !== 'string') return false
+  const id = modelId.toLowerCase()
+  if (id.includes('first-last-frame') || id.includes('transition')) return true
+  return /^seedance-.+-image-to-video(-.*)?$/.test(id) || /^kling-[vo]3-.*image-to-video/.test(id)
+}
+
+/**
+ * The model a clip with an end image is generated with: the model itself when it takes one, else its family's
+ * image-to-video sibling when that does, else (only when `available`, the model list's ids, shows they exist)
+ * the family's first-last-frame or transition model, else Seedance's image-to-video model. `available` also
+ * rules out siblings Venice doesn't offer.
+ */
+export function endImageVariant(modelId: string, available?: readonly string[]): string {
+  const offered = (id: string): boolean => supportsEndImage(id) && (!available || available.includes(id))
+  const i2v = imageToVideoVariant(modelId)
+  // Ids made up from the family name are only tried against the list: without it they may not exist at all.
+  const guessed = available
+    ? [i2v.replace(/image-to-video/, 'first-last-frame-to-video'), i2v.replace(/-image-to-video.*$/, '-transition')]
+    : []
+  const found = [modelId, i2v, ...guessed].find(offered)
+  if (found) return found
+  const fallback = DEFAULT_MODEL['image-to-video']
+  return !available || available.includes(fallback) ? fallback : (available.find(supportsEndImage) ?? fallback)
+}
+
 export function maxReferenceImages(modelId: string): number {
   if (modelId.includes('grok')) return 7
   if (modelId.includes('kling')) return 4
@@ -168,9 +201,9 @@ export function referenceAudioWindow(clip: ReferenceAudio, duration?: number): {
 }
 
 /**
- * Drops inputs the model doesn't use, so stale form state isn't sent: start and end images outside
- * image-to-video, reference images outside reference-to-video (and past the model's limit), and reference
- * audio unless the model takes it (and past its limit).
+ * Drops inputs the model doesn't use, so stale form state isn't sent: start images outside image-to-video,
+ * end images unless the model takes one (supportsEndImage), reference images outside reference-to-video (and
+ * past the model's limit), and reference audio unless the model takes it (and past its limit).
  */
 export function paramsForSubmit(params: GenerationParams): GenerationParams {
   const kind = kindOfModelId(params.model)
@@ -178,7 +211,7 @@ export function paramsForSubmit(params: GenerationParams): GenerationParams {
   return {
     ...params,
     startImage: kind === 'image-to-video' ? params.startImage : undefined,
-    endImage: kind === 'image-to-video' ? params.endImage : undefined,
+    endImage: kind === 'image-to-video' && supportsEndImage(params.model) ? params.endImage : undefined,
     referenceImages:
       kind === 'reference-to-video' ? params.referenceImages?.slice(0, maxReferenceImages(params.model)) : undefined,
     referenceAudios: audios?.slice(0, maxReferenceAudios(params.model))

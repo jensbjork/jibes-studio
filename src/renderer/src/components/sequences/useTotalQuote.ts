@@ -20,6 +20,34 @@ function cachedQuote(p: GenerationParams): Promise<number> {
   return quote
 }
 
+/**
+ * USD price of one take with the params (from the same cache as the totals, since a storyboard shows a price on
+ * every panel and they mostly share their settings); undefined while loading or if the quote fails.
+ */
+export function useClipQuote(params: GenerationParams | undefined): number | undefined {
+  const [quote, setQuote] = useState<number>()
+  const key = params ? quoteKey(params) : ''
+
+  useEffect(() => {
+    setQuote(undefined)
+    if (!params) return
+    let cancelled = false
+    const t = setTimeout(() => {
+      cachedQuote(params).then(
+        (q) => !cancelled && setQuote(q),
+        () => !cancelled && setQuote(undefined)
+      )
+    }, 250)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+    // `key` captures everything in `params` that affects the price.
+  }, [key])
+
+  return quote
+}
+
 /** Summed USD price for generating one take with each of the params; undefined while loading or if a quote fails. */
 export function useTotalQuote(list: GenerationParams[]): number | undefined {
   const [total, setTotal] = useState<number>()

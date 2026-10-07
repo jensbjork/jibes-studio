@@ -18,6 +18,7 @@ const scopes = [
   'library',
   'assets',
   'sequences',
+  'images',
   'export',
   'agent',
   'mcp',

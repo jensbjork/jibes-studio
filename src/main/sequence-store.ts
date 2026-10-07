@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { readdir, rm, rmdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios } from '@shared/models'
+import { isExtractedFirstFrame, isExtractedFrame } from '@shared/seams'
 import type { Generation, GenerationParams, Segment, Sequence, SequenceSummary } from '@shared/types'
 import * as db from './db'
 import { toPublic } from './jobs'
@@ -17,6 +18,7 @@ import {
   libraryRoot,
   promptExcerpt,
   safeName,
+  STORYBOARD_FOLDER,
   TAKES_FOLDER,
   timeStamp,
   toStoredParams,
@@ -44,9 +46,25 @@ export interface SegmentRow {
   position: number
   params: string
   continue_from_previous: number
+  /** 1: the clip's end image is the next clip's first frame (never on the last clip). */
+  end_from_next: number
+  notes: string
   selected_generation_id: string | null
   trim_start: number
   trim_end: number
+  created_at: number
+}
+
+/** A row of the stills table (paths in stored form). */
+export interface StillRow {
+  id: string
+  sequence_id: string | null
+  file_path: string
+  source: string
+  prompt: string
+  model: string | null
+  params: string
+  cost: number | null
   created_at: number
 }
 
@@ -95,14 +113,23 @@ export function touchSequence(id: string): void {
 }
 
 /**
- * Writes positions 0..n-1 in the given order. The first segment has nothing to continue from,
- * so its flag is always cleared.
+ * Writes positions 0..n-1 in the given order. The first segment has nothing to continue from and the last
+ * one nothing to take its end image from, so those flags are always cleared there (after a move, a delete or
+ * an insert at the end).
  */
 export function renumberSegments(orderedIds: string[]): void {
   const setPosition = conn().prepare('UPDATE segments SET position = ? WHERE id = ?')
   const clearContinue = conn().prepare('UPDATE segments SET continue_from_previous = 0 WHERE id = ?')
+  const clearEndFromNext = conn().prepare('UPDATE segments SET end_from_next = 0 WHERE id = ?')
   orderedIds.forEach((id, i) => setPosition.run(i, id))
-  if (orderedIds.length) clearContinue.run(orderedIds[0])
+  if (!orderedIds.length) return
+  clearContinue.run(orderedIds[0])
+  clearEndFromNext.run(orderedIds[orderedIds.length - 1])
+}
+
+/** Notes as stored: any string (the user's text, kept exactly as typed); anything else is none. */
+export function cleanNotes(value: unknown): string {
+  return typeof value === 'string' ? value : ''
 }
 
 // ── Params ───────────────────────────────────────────────────────────────────
@@ -223,9 +250,45 @@ export function clampTrims(
   return { trimStart: round(start), trimEnd: round(end) }
 }
 
-/** Points a segment at a take, re-clamping the trims to that take's length. */
+/**
+ * The trims a segment keeps when `take` becomes its selected take. Trims belong to the segment and carry over to
+ * another take, except at a side the take was made to meet exactly: a start made from the previous clip's last
+ * frame (the clip continues from it), or from a frame of one of the segment's own takes (where "Gör om mellan
+ * grannarna" lets the first clip keep its opening); an end made from the next clip's first frame (the clip ends on
+ * it). A trim there was meant for another take, and would cut away the very frame this one was generated from, and
+ * with it the seamless cut it was paid for. `row` carries the link flags the segment has (or is about to have).
+ */
+export function seamTrims(row: SegmentRow, take: Generation): { trimStart: number; trimEnd: number } {
+  const start = take.params.startImage
+  const end = take.params.endImage
+  const startMet = row.continue_from_previous ? isExtractedFrame(start) : !!start && isOwnFrameStill(row.id, start)
+  const endMet = !!row.end_from_next && isExtractedFirstFrame(end)
+  return { trimStart: startMet ? 0 : row.trim_start, trimEnd: endMet ? 0 : row.trim_end }
+}
+
+/** The picture is a still saved from a frame of one of the segment's own takes. */
+function isOwnFrameStill(segmentId: string, path: string): boolean {
+  const stored = toStoredPath(path)
+  return !!conn()
+    .prepare(
+      `SELECT 1 FROM stills s JOIN generations g ON g.id = json_extract(s.params, '$.frame.generationId')
+       WHERE s.file_path = ? COLLATE NOCASE AND s.source = 'frame' AND g.segment_id = ? LIMIT 1`
+    )
+    .get(stored, segmentId)
+}
+
+/**
+ * Points a segment at a take, re-clamping the trims to that take's length (and starting a side the take was made
+ * to meet exactly untrimmed, see seamTrims).
+ */
 export function setSelectedTake(row: SegmentRow, take: Generation | undefined): void {
-  const { trimStart, trimEnd } = clampTrims(row.trim_start, row.trim_end, take && takeLength(take), 'end')
+  const kept = take && take.id !== row.selected_generation_id ? seamTrims(row, take) : undefined
+  const { trimStart, trimEnd } = clampTrims(
+    kept?.trimStart ?? row.trim_start,
+    kept?.trimEnd ?? row.trim_end,
+    take && takeLength(take),
+    'end'
+  )
   conn()
     .prepare('UPDATE segments SET selected_generation_id = ?, trim_start = ?, trim_end = ? WHERE id = ?')
     .run(take?.id ?? null, trimStart, trimEnd, row.id)
@@ -252,6 +315,8 @@ function toSegment(row: SegmentRow, takes: Generation[]): Segment {
     position: row.position,
     params: parseParams(row.params),
     continueFromPrevious: !!row.continue_from_previous,
+    endFromNext: !!row.end_from_next,
+    notes: row.notes ?? '',
     selectedGenerationId: row.selected_generation_id ?? undefined,
     trimStart: row.trim_start,
     trimEnd: row.trim_end,
@@ -392,6 +457,11 @@ export function takesPath(folder: string): string {
   return join(folderPath(folder), TAKES_FOLDER)
 }
 
+/** Sekvenser/<folder>/Storyboard without creating it (stills.ts puts the sequence's stills there). */
+export function storyboardPath(folder: string): string {
+  return join(folderPath(folder), STORYBOARD_FOLDER)
+}
+
 /** What a sequence's folder is called before de-duplication. */
 export function folderBaseName(sequenceName: string): string {
   return safeName(sequenceName, { fallback: UNTITLED_SEQUENCE })
@@ -497,7 +567,23 @@ export async function removeDirIfEmpty(dir: string): Promise<boolean> {
   }
 }
 
-/** Removes a sequence folder's Tagningar/ and then the folder itself, each only when empty. */
+/** Removes a sequence folder's Tagningar/ and Storyboard/ and then the folder itself, each only when empty. */
 export async function removeFolderIfEmpty(folder: string): Promise<void> {
-  if (await removeDirIfEmpty(takesPath(folder))) await removeDirIfEmpty(folderPath(folder))
+  const takesGone = await removeDirIfEmpty(takesPath(folder))
+  const storyboardGone = await removeDirIfEmpty(storyboardPath(folder))
+  if (takesGone && storyboardGone) await removeDirIfEmpty(folderPath(folder))
+}
+
+// ── Stills ───────────────────────────────────────────────────────────────────
+
+export function getStillRow(id: string): StillRow | undefined {
+  if (typeof id !== 'string' || !id) return undefined
+  return conn().prepare('SELECT * FROM stills WHERE id = ?').get(id) as StillRow | undefined
+}
+
+/** The sequence's stills, oldest first. */
+export function listStillRows(sequenceId: string): StillRow[] {
+  return conn()
+    .prepare('SELECT * FROM stills WHERE sequence_id = ? ORDER BY created_at, id')
+    .all(sequenceId) as StillRow[]
 }

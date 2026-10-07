@@ -1,17 +1,32 @@
 import { statSync } from 'node:fs'
+import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { paramsForSubmit } from '@shared/models'
 import { canonicalizeParams } from '@shared/prompt-refs'
-import type { ApprovalRequest, Generation, GenerationParams, Sequence } from '@shared/types'
+import type {
+  ApprovalImageReference,
+  ApprovalRequest,
+  Generation,
+  GenerationParams,
+  SegmentFramePreview,
+  SegmentImageSlot,
+  Sequence,
+  Still,
+  StillParams
+} from '@shared/types'
 import * as db from '../../db'
 import { prepareSubmission } from '../../jobs'
-import type { MissingClip, SubmitGuard } from '../../sequences'
+import { missingClipProblem, type MissingClip, type SubmitGuard } from '../../sequences'
 import * as store from '../../sequence-store'
+import { getImageSafeMode } from '../../settings'
+import { planStill } from '../../stills'
 import { ensureImagesExist } from '../../venice'
 import type { ApprovalPlan } from '../approvals'
 import { callService } from '../local-ipc'
 import {
+  AssetIndex,
+  StillIndex,
   asGenerated,
   blockingProblem,
   errorText,
@@ -22,7 +37,7 @@ import {
   requireLibrary
 } from '../studio'
 import { READ_ONLY, defineTool, priceValue, quote, readForm, usd, type ToolContext } from './kit'
-import { continues, isUsableTake, loadClip, loadSequence, selectedTake } from './sequences'
+import { assertNotRunning, continues, endsOnNext, isUsableTake, loadClip, loadSequence, selectedTake } from './sequences'
 
 // The paid tools never spend money themselves: each one checks the request, asks Venice for the price and
 // creates an approval request that the user answers in Studio. Only their OK submits it (see approvals.ts).
@@ -72,24 +87,69 @@ function paramsKey(p: GenerationParams, silent?: SilentModels): string {
   ])
 }
 
-/** A clip as it would be generated: its params, whether it continues and from which clip. */
-function clipKey(
-  params: GenerationParams,
-  continuing: boolean,
-  previousId: string | undefined,
-  silent?: SilentModels
-): string {
-  return `${paramsKey(asGenerated(params, continuing), silent)}|${continuing ? `continues:${previousId}` : 'own'}`
+/** Which neighbours a clip takes its frames from: the previous clip's last one, the next clip's first one. */
+interface Neighbours {
+  /** The clip it continues from (continue_from_previous). */
+  previousId?: string
+  /** The clip whose first frame it ends on (end_from_next). */
+  nextId?: string
+  /**
+   * With `pinned`: the frame each of them gives, as its selected take and the trim where it is cut ("<take>@<trim>").
+   * A neighbour's other take or trim is another frame, which the user must have seen before it is paid for.
+   */
+  previousFrame?: string
+  nextFrame?: string
+}
+
+/** A clip as it would be generated: its params, and which neighbours it takes its start and end frames from. */
+function clipKey(params: GenerationParams, from: Neighbours, silent?: SilentModels): string {
+  const generated = asGenerated(params, !!from.previousId, !!from.nextId)
+  return [
+    paramsKey(generated, silent),
+    from.previousId ? `continues:${from.previousId}${from.previousFrame ? `:${from.previousFrame}` : ''}` : 'own',
+    from.nextId ? `ends-on:${from.nextId}${from.nextFrame ? `:${from.nextFrame}` : ''}` : 'own-end'
+  ].join('|')
+}
+
+/** "<take>@<trim>": the frame a neighbour gives (see Neighbours). */
+const frameOf = (takeId: string | null | undefined, trim: number): string => `${takeId ?? 'none'}@${trim}`
+
+/**
+ * The neighbours a clip takes frames from, as its row and its sequence's rows say. `pinned` adds the frames they
+ * give (one clip's request, whose frames the dialog shows); not for "generate all", which makes some of those
+ * neighbours' takes itself.
+ */
+function rowNeighbours(rows: readonly store.SegmentRow[], index: number, pinned = false): Neighbours {
+  const row = rows[index]
+  const previous = index > 0 && row.continue_from_previous ? rows[index - 1] : undefined
+  const next = index < rows.length - 1 && row.end_from_next ? rows[index + 1] : undefined
+  return {
+    previousId: previous?.id,
+    nextId: next?.id,
+    ...(pinned && previous ? { previousFrame: frameOf(previous.selected_generation_id, previous.trim_end) } : {}),
+    ...(pinned && next ? { nextFrame: frameOf(next.selected_generation_id, next.trim_start) } : {})
+  }
+}
+
+/** The neighbours of a loaded sequence's clip (see rowNeighbours for `pinned`). */
+function clipNeighbours(sequence: Sequence, index: number, pinned = false): Neighbours {
+  const previous = continues(sequence, index) ? sequence.segments[index - 1] : undefined
+  const next = endsOnNext(sequence, index) ? sequence.segments[index + 1] : undefined
+  return {
+    previousId: previous?.id,
+    nextId: next?.id,
+    ...(pinned && previous ? { previousFrame: frameOf(previous.selectedGenerationId, previous.trimEnd) } : {}),
+    ...(pinned && next ? { nextFrame: frameOf(next.selectedGenerationId, next.trimStart) } : {})
+  }
 }
 
 /** The same key for a clip as the database has it right now; undefined when the clip is gone. */
-function storedClipKey(segmentId: string, silent?: SilentModels): string | undefined {
+function storedClipKey(segmentId: string, silent?: SilentModels, pinned = false): string | undefined {
   const row = store.getSegmentRow(segmentId)
   if (!row) return undefined
   const rows = store.listSegmentRows(row.sequence_id)
   const index = rows.findIndex((r) => r.id === row.id)
-  const continuing = index > 0 && !!row.continue_from_previous
-  return clipKey(store.parseParams(row.params), continuing, continuing ? rows[index - 1].id : undefined, silent)
+  return clipKey(store.parseParams(row.params), rowNeighbours(rows, index, pinned), silent)
 }
 
 /**
@@ -147,6 +207,68 @@ function pendingAnswer(request: ApprovalRequest, reused: boolean): Record<string
       : 'Waiting for the user to approve it in Studio. Tell them briefly what is waiting, then poll get_approval every 15–30 seconds.'
   }
 }
+
+// ── Images (stills for storyboards) ──────────────────────────────────────────
+
+/** The reference pictures an image request asks for, in the order they are sent: stills, photos, asset covers. */
+async function imageReferences(input: {
+  reference_still_ids?: string[]
+  reference_image_ids?: string[]
+  reference_asset_ids?: string[]
+}): Promise<ApprovalImageReference[]> {
+  const stillIds = input.reference_still_ids ?? []
+  const imageIds = input.reference_image_ids ?? []
+  const assetIds = input.reference_asset_ids ?? []
+  if (!stillIds.length && !imageIds.length && !assetIds.length) return []
+  const [assets, stills] = await Promise.all([AssetIndex.load(), stillIds.length ? StillIndex.load() : undefined])
+  const refs: ApprovalImageReference[] = []
+  for (const id of stillIds) {
+    const still = stills!.require(id)
+    const what = still.prompt.trim() ? still.prompt.trim().replace(/\s+/g, ' ') : basename(still.path)
+    refs.push({
+      path: still.path,
+      label: `Stillbild: ${what.length > 60 ? `${what.slice(0, 59)}…` : what}`,
+      name: 'Stillbild',
+      kind: 'still'
+    })
+  }
+  for (const id of imageIds) {
+    const photo = assets.requireImage(id)
+    refs.push({
+      path: photo.path,
+      label: `${photo.asset.name} (foto ${photo.photoNumber})`,
+      name: photo.asset.name,
+      kind: photo.asset.kind
+    })
+  }
+  for (const id of assetIds) {
+    const asset = assets.require(id)
+    const cover = asset.images[0]
+    if (!cover) throw new Error(`${q(asset.name)} har inga bilder än. Användaren behöver lägga till bilder i Studio först.`)
+    refs.push({ path: cover.path, label: `${asset.name} (foto 1)`, name: asset.name, kind: asset.kind })
+  }
+  // The same picture twice adds nothing but cost.
+  const seen = new Set<string>()
+  return refs.filter((r) => {
+    const key = r.path.normalize('NFC')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/** Reference paths carried along the renames made since `mark` (an asset renamed while the request waited). */
+function followReferences(paths: readonly string[] | undefined, mark: number): string[] | undefined {
+  if (!paths?.length) return undefined
+  return db.followRewrites({ model: '', prompt: '', duration: '', referenceImages: [...paths] }, mark).referenceImages
+}
+
+/** The files of an image request's references, as imageIdentity has them for videos. */
+function referenceIdentity(paths: readonly string[] | undefined): string {
+  return imageIdentity({ model: '', prompt: '', duration: '', referenceImages: paths ? [...paths] : undefined })
+}
+
+const SLOT_WORD: Record<SegmentImageSlot, string> = { start: 'startbild', end: 'slutbild' }
 
 export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
@@ -209,7 +331,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request clip generation (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating a new take of one sequence clip. Nothing is generated or paid for until they approve in Studio. The clip is checked first; a clip that continues from the previous one needs that clip's finished selected take (use request_generate_all to generate clips in order). Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. If the clip is changed before the user approves, the request lapses. A newer request for the same clip replaces a pending older one.",
+        "💰 Asks the user to approve generating a new take of one sequence clip. Nothing is generated or paid for until they approve in Studio. The clip is checked first; a clip that continues from the previous one needs that clip's finished selected take, and one with end_from_next the next clip's (use request_generate_all to generate clips in order). The dialog shows the user the clip's start and end frames. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. If the clip – or the selected take or trim of a neighbour it takes a frame from – is changed before the user approves, the request lapses. A newer request for the same clip replaces a pending older one.",
       input: {
         segment_id: z.string(),
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
@@ -223,30 +345,49 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const { sequence, index, segment } = await loadClip(segment_id)
       const clip = index + 1
       const continuing = continues(sequence, index)
-      const generated = asGenerated(segment.params, continuing)
-      const problem = blockingProblem(generated, continuing)
+      const endFromNext = endsOnNext(sequence, index)
+      const generated = asGenerated(segment.params, continuing, endFromNext)
+      const problem = blockingProblem(generated, continuing, endFromNext)
       if (problem) throw new Error(`Klipp ${clip}: ${problem}`)
       if (continuing && !isUsableTake(selectedTake(sequence.segments[index - 1]))) {
         throw new Error(
           `Klipp ${clip} fortsätter från klipp ${index}, som behöver en färdig vald tagning först. Använd request_generate_all för att generera klippen i ordning.`
         )
       }
-      if (!continuing) {
-        ensureImagesExist(paramsForSubmit(generated))
+      if (endFromNext && !isUsableTake(selectedTake(sequence.segments[index + 1]))) {
+        throw new Error(
+          `Klipp ${clip} slutar på första bildrutan i klipp ${index + 2}, som behöver en färdig vald tagning först. Använd request_generate_all för att generera klippen i rätt ordning.`
+        )
+      }
+      // The frames from the neighbours are checked the way the take will use them (a model without an end image,
+      // a frame that can't be read …), so the user isn't asked to pay for a take that would be refused.
+      if (continuing || endFromNext) {
+        const preview = await callService<SegmentFramePreview>('segments:previewFrames', segment.id)
+        if (preview.problems.length) throw new Error(`Klipp ${clip}: ${preview.problems[0]}`)
+      }
+      ensureImagesExist(paramsForSubmit(generated))
+      if (!continuing && !endFromNext) {
         // Its audio clips are measured like the take's submit will, so a bad window is refused before approval.
         await prepareSubmission(generated).catch((err: unknown) => {
           throw new Error(`Klipp ${clip}: ${errorText(err)}`)
         })
       }
       const [price, silent] = await Promise.all([quote(generated), silentModels()])
-      const previousId = continuing ? sequence.segments[index - 1].id : undefined
-      const key = clipKey(segment.params, continuing, previousId, silent)
+      // Pinned to the neighbours' takes and trims too: the dialog shows the frames they give now.
+      const neighbours = clipNeighbours(sequence, index, true)
+      const key = clipKey(segment.params, neighbours, silent)
       /** Why the clip as stored now isn't the one the user is shown, or undefined. */
       const changed = (): string | undefined => {
-        const now = storedClipKey(segment.id, silent)
+        const now = storedClipKey(segment.id, silent, true)
         if (!now) return 'Klippet finns inte längre.'
-        const then = clipKey(db.followRewrites(segment.params, mark), continuing, previousId, silent)
-        return now === then ? undefined : `Klippet ${CHANGED}`
+        const params = db.followRewrites(segment.params, mark)
+        if (now === clipKey(params, neighbours, silent)) return undefined
+        // The clip itself is as it was: a neighbour's other take or trim gives another frame.
+        const same = { previousId: neighbours.previousId, nextId: neighbours.nextId }
+        if (storedClipKey(segment.id, silent) === clipKey(params, same, silent)) {
+          return `Bildrutan som klippet tar från ett grannklipp ${CHANGED}`
+        }
+        return `Klippet ${CHANGED}`
       }
       const guard: SubmitGuard = (id) => (id === segment.id ? changed() : 'Fel klipp.')
       const { request, reused } = requestApproval(ctx, epoch, {
@@ -284,7 +425,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request generating all missing clips (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating every clip of a sequence that has no finished selected take, in order, each waiting for the one before (so continuation clips get their start frame). Clips already rendering are waited for, not paid again. Every clip to generate is checked first; problems come back as an error naming the clip. price_usd is the sum over the clips. Returns immediately with {approval_id, status: \"pending\", price_usd, clip_numbers}; follow it with get_approval, then get_sequence. If the sequence's clips change before the user approves, the request lapses.",
+        "💰 Asks the user to approve generating every clip of a sequence that has no finished selected take, in an order that gives every clip the frames it needs (a continuation after the clip before it, a clip with end_from_next after the clip after it). Clips already rendering are waited for, not paid again. Every clip to generate is checked first; problems come back as an error naming the clip. price_usd is the sum over the clips. Returns immediately with {approval_id, status: \"pending\", price_usd, clip_numbers}; follow it with get_approval, then get_sequence. If the sequence's clips change before the user approves, the request lapses.",
       input: {
         sequence_id: z.string(),
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
@@ -304,33 +445,31 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       }
       // The run refuses to start for the same reason, so it is better heard now than after the user's OK.
       const blocked = missing.find((c) => c.problem)
-      if (blocked) throw new Error(`Klipp ${blocked.clip}: ${blocked.problem}`)
+      if (blocked) throw new Error(missingClipProblem(blocked))
       const clips = missing.map(({ segmentId }) => {
         const index = sequence.segments.findIndex((s) => s.id === segmentId)
         if (index < 0) throw new Error('Sekvensen ändrades just nu. Försök igen.')
-        const continuing = continues(sequence, index)
-        const previousId = continuing ? sequence.segments[index - 1].id : undefined
-        return { id: segmentId, clip: index + 1, params: sequence.segments[index].params, continuing, previousId }
+        const neighbours = clipNeighbours(sequence, index)
+        const params = sequence.segments[index].params
+        const generated = asGenerated(params, !!neighbours.previousId, !!neighbours.nextId)
+        return { id: segmentId, clip: index + 1, params, generated, neighbours }
       })
-      for (const c of clips) if (!c.continuing) ensureImagesExist(paramsForSubmit(c.params))
+      for (const c of clips) ensureImagesExist(paramsForSubmit(c.generated))
       // Each clip's audio is measured like its take's submit will: a voice that was shortened on disk (or can't
       // be read) is refused before approval, not after the run has paid for the clips before it.
       for (const c of clips) {
-        if (c.continuing) continue
-        await prepareSubmission(asGenerated(c.params, false)).catch((err: unknown) => {
+        if (c.neighbours.previousId || c.neighbours.nextId) continue
+        await prepareSubmission(c.generated).catch((err: unknown) => {
           throw new Error(`Klipp ${c.clip}: ${errorText(err)}`)
         })
       }
-      const [prices, silent] = await Promise.all([
-        Promise.all(clips.map((c) => quote(asGenerated(c.params, c.continuing)))),
-        silentModels()
-      ])
+      const [prices, silent] = await Promise.all([Promise.all(clips.map((c) => quote(c.generated))), silentModels()])
       const price = prices.every((p) => p !== undefined) ? prices.reduce<number>((sum, p) => sum + (p ?? 0), 0) : undefined
-      const keys = clips.map((c) => `${c.id}:${clipKey(c.params, c.continuing, c.previousId, silent)}`)
+      const keys = clips.map((c) => `${c.id}:${clipKey(c.params, c.neighbours, silent)}`)
       const clipNumbers = clips.map((c) => c.clip)
       const approved = new Map(clips.map((c) => [c.id, c]))
       const approvedKey = (c: (typeof clips)[number]): string =>
-        clipKey(db.followRewrites(c.params, mark), c.continuing, c.previousId, silent)
+        clipKey(db.followRewrites(c.params, mark), c.neighbours, silent)
       // The run reads the sequence as it goes; this keeps it to the clips, and the settings, the user approved.
       const guard: SubmitGuard = (segmentId) => {
         const c = approved.get(segmentId)
@@ -375,11 +514,205 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
     server,
     ctx,
+    'request_image_generation',
+    {
+      title: 'Request an image (paid, needs approval)',
+      description:
+        "💰 Asks the user to approve making one still picture with Venice's image models – typically a keyframe (start or end image) for a storyboard clip. Cheap (about $0.06 with the default Seedream models) but paid, so nothing is generated until the user approves in Studio. With references it combines them into a new picture (an edit model, at most max_input_images – see list_image_models); without, it makes the picture from the prompt alone (a text-to-image model). References are sent in this order: reference_still_ids, reference_image_ids (library photos), then reference_asset_ids (each asset's cover photo); the first one is the base picture the model edits, so put the picture whose composition should be kept first. Write the prompt in English as one still frame: who and what, composition and framing, place, light, style; refer to references as \"image 1\", \"image 2\" … in that order, never with @ tokens. Left out: the default model for the case, the sequence's aspect ratio (the clip's when assign_to is given), 1K and the model's default quality. The request is checked first (model, number of references, files, options) and priced; problems come back as an error. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval, which gives the still_id once approved. Every result is saved as a still of the sequence (without sequence_id and assign_to: a still of no sequence, in Referensbilder); assign_to also makes it the start or end image of that clip (which switches the clip to image-to-video). Not while \"Generera saknade\" runs for the clip's sequence; if the clip is moved, or its slot starts or stops taking a neighbour's frame, before the user approves, the request lapses.",
+      input: {
+        prompt: z.string().min(1).max(4000).describe('English: one still frame – subject and moment, framing, place, light, style.'),
+        sequence_id: z
+          .string()
+          .optional()
+          .describe("The sequence whose storyboard gets the still; default the assign_to clip's sequence."),
+        model: z.string().optional().describe('An image model id from list_image_models; default Seedream.'),
+        reference_still_ids: z
+          .array(z.string())
+          .max(10)
+          .optional()
+          .describe('Stills (list_stills), e.g. an earlier keyframe.'),
+        reference_image_ids: z
+          .array(z.string())
+          .max(10)
+          .optional()
+          .describe('Library photos by image_id (list_assets / get_asset).'),
+        reference_asset_ids: z
+          .array(z.string())
+          .max(10)
+          .optional()
+          .describe("Assets by id; each adds its cover photo (photo 1)."),
+        aspect_ratio: z.string().optional().describe('e.g. "16:9"; must be one of the model\'s aspect_ratios.'),
+        resolution: z.string().optional().describe('e.g. "1K"; one of the model\'s resolutions.'),
+        quality: z.string().optional().describe("Only for models with qualities."),
+        negative_prompt: z.string().max(1500).optional().describe('Text-to-image models only.'),
+        assign_to: z
+          .object({
+            segment_id: z.string(),
+            slot: z.enum(['start', 'end']).describe('The clip\'s start image or its end image.')
+          })
+          .optional()
+          .describe('Also put the still into this clip once it is made.'),
+        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      summary: () => 'vill skapa en bild'
+    },
+    async (input) => {
+      const epoch = ctx.approvals.epoch()
+      const mark = db.rewriteMark()
+      requireLibrary()
+      const target = input.assign_to ? await loadClip(input.assign_to.segment_id) : undefined
+      if (target && input.sequence_id && target.sequence.id !== input.sequence_id) {
+        throw new Error('assign_to hör till en annan sekvens än sequence_id. Ange klippets egen sekvens, eller ingen.')
+      }
+      // The picture is put into the clip after it is paid for, which "Generera saknade" would refuse meanwhile.
+      if (target) assertNotRunning(target.sequence)
+      const sequence = target?.sequence ?? (input.sequence_id ? await loadSequence(input.sequence_id) : undefined)
+      const references = await imageReferences(input)
+      const asked: StillParams = {
+        sequenceId: sequence?.id,
+        prompt: input.prompt.replace(/\r\n?/g, '\n').trim(),
+        model: input.model ?? '',
+        negativePrompt: input.negative_prompt?.trim() || undefined,
+        referenceImages: references.length ? references.map((r) => r.path) : undefined,
+        aspectRatio: input.aspect_ratio?.trim().replace(/^(\d+)\s*[x/:]\s*(\d+)$/i, '$1:$2') || undefined,
+        resolution: input.resolution?.trim() || undefined,
+        quality: input.quality?.trim() || undefined
+      }
+      // Checked and filled in exactly as the window's dialog does it (model, references, options, price).
+      let plan = await planStill(asked)
+      // A keyframe should have its clip's format (image-to-video takes the format from the start image); the
+      // sequence's is the default, so only a clip of another format needs it asked for.
+      const clipRatio = target?.segment.params.aspectRatio
+      const clipFormatDiffers = !!clipRatio && plan.params.aspectRatio !== clipRatio
+      if (!asked.aspectRatio && clipFormatDiffers && plan.model.aspectRatios.includes(clipRatio)) {
+        plan = await planStill({ ...asked, aspectRatio: clipRatio })
+      }
+      const params = plan.params
+      const assignTo = target && input.assign_to
+        ? { segmentId: target.segment.id, slot: input.assign_to.slot, clipNumber: target.index + 1 }
+        : undefined
+      // Whether the slot takes a neighbour's frame now: the picture replaces it (see the notes below).
+      const slotWasAutomatic =
+        !!assignTo && !!target && (assignTo.slot === 'start' ? continues : endsOnNext)(target.sequence, target.index)
+      const notes = [...plan.notes]
+      // A picture replaces an automatic frame from a neighbour; better said now than discovered later.
+      if (assignTo?.slot === 'start' && target && continues(target.sequence, target.index)) {
+        notes.push(
+          `Klipp ${assignTo.clipNumber} börjar i dag på föregående klipps sista bildruta; bilden ersätter den och klippet slutar fortsätta från klipp ${assignTo.clipNumber - 1}.`
+        )
+      }
+      if (assignTo?.slot === 'end' && target && endsOnNext(target.sequence, target.index)) {
+        notes.push(
+          `Klipp ${assignTo.clipNumber} slutar i dag på nästa klipps första bildruta; bilden ersätter den.`
+        )
+      }
+      if (target && (target.segment.params.referenceImages?.length || target.segment.params.referenceAudios?.length)) {
+        notes.push(
+          `Klipp ${target.index + 1} använder i dag referenser. Med bilden genereras det bild-till-video: referenserna tas bort och prompten behöver beskriva rörelsen utan @-referenser (update_segment).`
+        )
+      }
+      const identity = referenceIdentity(params.referenceImages)
+      const { request, reused } = requestApproval(ctx, epoch, {
+        kind: 'image',
+        client: ctx.clientName(),
+        note: input.note,
+        image: { params, modelName: plan.model.name, references, assignTo },
+        sequenceId: sequence?.id,
+        sequenceName: sequence?.name,
+        segmentIds: assignTo ? [assignTo.segmentId] : undefined,
+        clipNumbers: assignTo ? [assignTo.clipNumber] : undefined,
+        priceUsd: plan.priceUsd,
+        fingerprint: `image:${JSON.stringify([params, assignTo?.segmentId, assignTo?.slot])}`,
+        // A newer picture for the same slot replaces one still waiting.
+        target: assignTo ? `image:${assignTo.segmentId}:${assignTo.slot}` : undefined,
+        verify: async () => {
+          // A path names a place, not a picture: the references must still be the very files shown.
+          if (referenceIdentity(followReferences(params.referenceImages, mark)) !== identity) {
+            throw new Error(`Referensbilderna i förfrågan ${CHANGED}`)
+          }
+          if (!assignTo) return
+          const row = store.getSegmentRow(assignTo.segmentId)
+          if (!row) throw new Error('Klippet som bilden skulle sättas i finns inte längre, så förfrågan gäller inte.')
+          // The user approves "klipp N" as the dialog names it: the clip must still be there, as it was.
+          const rows = store.listSegmentRows(row.sequence_id)
+          const index = rows.findIndex((r) => r.id === row.id)
+          if (index + 1 !== assignTo.clipNumber) {
+            throw new Error(
+              `Klippet som bilden skulle sättas i har flyttats (det var klipp ${assignTo.clipNumber}, nu klipp ${index + 1}), så förfrågan gäller inte längre. Be agenten fråga igen om bilden fortfarande ska skapas.`
+            )
+          }
+          const automatic =
+            assignTo.slot === 'start'
+              ? index > 0 && !!row.continue_from_previous
+              : index < rows.length - 1 && !!row.end_from_next
+          if (automatic !== slotWasAutomatic) throw new Error(`Klipp ${assignTo.clipNumber} ${CHANGED}`)
+          // Putting the picture into the clip would be refused after Venice was paid.
+          if ((await callService<Sequence>('sequences:get', row.sequence_id)).running) {
+            throw new Error(
+              '”Generera saknade” pågår för sekvensen, så bilden kan inte sättas i klippet nu och förfrågan gäller inte. Be agenten fråga igen när körningen är klar.'
+            )
+          }
+        },
+        execute: async () => {
+          const still = await callService<Still>('images:generate', {
+            ...params,
+            referenceImages: followReferences(params.referenceImages, mark)
+          })
+          if (!assignTo) return { stillId: still.id }
+          try {
+            await callService<Sequence>('segments:setImage', assignTo.segmentId, assignTo.slot, {
+              kind: 'still',
+              stillId: still.id
+            })
+            return { stillId: still.id }
+          } catch (err) {
+            // Paid for and saved either way; only putting it into the clip didn't work.
+            return {
+              stillId: still.id,
+              notice: `Bilden skapades och sparades bland sekvensens bilder, men kunde inte bli ${SLOT_WORD[assignTo.slot]} för klipp ${assignTo.clipNumber}: ${errorText(err)}`
+            }
+          }
+        }
+      })
+      const where = assignTo
+        ? ` till klipp ${assignTo.clipNumber}${sequence ? ` i ${q(sequence.name)}` : ''}`
+        : sequence
+          ? ` i ${q(sequence.name)}`
+          : ''
+      return {
+        data: {
+          ...pendingAnswer(request, reused),
+          model: params.model,
+          ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
+          ...(params.resolution ? { resolution: params.resolution } : {}),
+          ...(params.quality ? { quality: params.quality } : {}),
+          // The user's "Säkert läge för bilder": Venice blurs adult content while it is on.
+          safe_mode: getImageSafeMode(),
+          references: references.map((r, i) => ({
+            image: i + 1,
+            what: r.label,
+            ...(i === 0 ? { base: true } : {})
+          })),
+          ...(assignTo
+            ? { assign_to: { segment_id: assignTo.segmentId, clip_number: assignTo.clipNumber, slot: assignTo.slot } }
+            : {}),
+          ...(notes.length ? { notes } : {})
+        },
+        approvalId: request.id,
+        summary: `vill skapa en bild${where} (${usd(plan.priceUsd)}) – väntar på ditt OK`
+      }
+    }
+  )
+
+  defineTool(
+    server,
+    ctx,
     'get_approval',
     {
       title: 'Get approval status',
       description:
-        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, or replaced by a newer request) or failed (the error). Poll every 15–30 seconds while pending.",
+        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence; for an image, the still_id – look at it with get_still), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, or replaced by a newer request) or failed (the error). Poll every 15–30 seconds while pending.",
       input: { approval_id: z.string() },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'kollade svaret på en förfrågan'
@@ -399,9 +732,27 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         reason: request.reason,
         sequence_id: request.sequenceId,
         clip_numbers: request.clipNumbers,
-        generation_ids: request.generationIds
+        generation_ids: request.generationIds,
+        ...(request.kind === 'image' && request.image?.assignTo
+          ? {
+              assign_to: {
+                segment_id: request.image.assignTo.segmentId,
+                clip_number: request.image.assignTo.clipNumber,
+                slot: request.image.assignTo.slot
+              }
+            }
+          : {}),
+        ...(request.stillId ? { still_id: request.stillId } : {}),
+        ...(request.notice ? { notice: request.notice } : {})
       }
       if (request.status === 'approved') {
+        if (request.stillId) {
+          const still = await callService<Still>('stills:get', request.stillId).catch(() => undefined)
+          data.still = still
+            ? { still_id: still.id, file: basename(still.path), sequence_id: still.sequenceId ?? null }
+            : { still_id: request.stillId, status: 'deleted' }
+          if (request.image?.assignTo && !request.notice) data.assigned = true
+        }
         if (request.generationIds?.length) {
           data.generations = request.generationIds.map((id) => {
             const g = db.getGeneration(id)

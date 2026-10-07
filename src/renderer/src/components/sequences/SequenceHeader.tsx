@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { Sequence } from '@shared/types'
 import { formatSeconds, formatUsd } from '../../lib/media'
 import OpenFolderButton from '../library/OpenFolderButton'
-import { PlayIcon } from './icons'
+import { GridIcon, PlayIcon, StripIcon } from './icons'
+import type { SequenceViewMode } from './viewMode'
 
 export type ExportState =
   | { status: 'running'; progress: number }
@@ -24,6 +25,8 @@ interface Props {
   exportBlocked?: string
   autoFocusName: boolean
   onAutoFocused: () => void
+  mode: SequenceViewMode
+  onMode: (mode: SequenceViewMode) => void
   onRename: (name: string) => void
   onGenerateAll: () => void
   onStop: () => void
@@ -52,6 +55,8 @@ export default function SequenceHeader({
   exportBlocked,
   autoFocusName,
   onAutoFocused,
+  mode,
+  onMode,
   onRename,
   onGenerateAll,
   onStop,
@@ -67,11 +72,14 @@ export default function SequenceHeader({
   return (
     <div className="drag flex h-12 shrink-0 items-center gap-3 border-b border-line pl-3 pr-4">
       <NameInput name={sequence.name} onRename={onRename} autoFocus={autoFocusName} onAutoFocused={onAutoFocused} />
-      <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted lg:inline">
+      {/* Only on wide windows: the list beside it shows the same, and the actions need the room. */}
+      <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted 2xl:inline">
         {formatSeconds(totalSeconds * 1000)}
         <span className="mx-1.5">·</span>
         {readyCount === count ? `${count} klipp` : `${readyCount} av ${count} klipp klara`}
       </span>
+
+      <ViewToggle mode={mode} onMode={onMode} />
 
       <div className="no-drag ml-auto flex shrink-0 items-center gap-2">
         <OpenFolderButton
@@ -112,7 +120,7 @@ export default function SequenceHeader({
 
         <button onClick={onPreview} disabled={!!previewDisabled} title={previewDisabled ?? 'Spela upp klippen i följd'} className={secondary}>
           <PlayIcon size={11} />
-          Förhandsvisa
+          <span className="hidden xl:inline">Förhandsvisa</span>
         </button>
 
         {exporting ? (
@@ -138,6 +146,50 @@ export default function SequenceHeader({
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+const VIEWS: { id: SequenceViewMode; label: string; title: string; icon: typeof GridIcon }[] = [
+  {
+    id: 'timeline',
+    label: 'Tidslinje',
+    title: 'Klippen i rad med redigeraren, tagningarna och trimningen',
+    icon: StripIcon
+  },
+  {
+    id: 'storyboard',
+    label: 'Storyboard',
+    title: 'Rutor med start- och slutbild, anteckningar och sekvensens stillbilder',
+    icon: GridIcon
+  }
+]
+
+/** "Tidslinje / Storyboard": two ways of looking at the same clips. */
+function ViewToggle({ mode, onMode }: { mode: SequenceViewMode; onMode: (mode: SequenceViewMode) => void }) {
+  return (
+    <div role="tablist" aria-label="Visa sekvensen som" className="no-drag flex shrink-0 items-center rounded-md bg-raised p-0.5">
+      {VIEWS.map((v) => {
+        const Icon = v.icon
+        return (
+          <button
+            key={v.id}
+            type="button"
+            role="tab"
+            aria-selected={mode === v.id}
+            aria-label={v.label}
+            onClick={() => onMode(v.id)}
+            title={`${v.label}: ${v.title.charAt(0).toLowerCase()}${v.title.slice(1)}`}
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-[12px] transition ${
+              mode === v.id ? 'bg-line text-text' : 'text-muted hover:text-text'
+            }`}
+          >
+            <Icon size={12} />
+            {/* Icons only in narrower windows, so the sequence's own actions keep their room. */}
+            <span className="hidden min-[1360px]:inline">{v.label}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -197,7 +249,7 @@ function NameInput({
       spellCheck={false}
       placeholder="Namnlös sekvens"
       title="Byt namn"
-      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised"
+      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md xl:min-w-28 border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised"
     />
   )
 }

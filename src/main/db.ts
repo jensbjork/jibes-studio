@@ -146,7 +146,26 @@ const migrations: string[] = [
     pinned INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
-  );`
+  );`,
+
+  // Phase 7: storyboards. A clip can take its end image from the next clip (end_from_next, mirroring
+  // continue_from_previous) and has free-text notes; stills are the images of a sequence's storyboard
+  // (generated, uploaded or saved frames), kept in Sekvenser/<sequence>/Storyboard/. A still outlives its
+  // sequence (sequence_id set to NULL) when clips or generations elsewhere still use it.
+  `ALTER TABLE segments ADD COLUMN end_from_next INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE segments ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+  CREATE TABLE stills (
+    id TEXT PRIMARY KEY,
+    sequence_id TEXT REFERENCES sequences(id) ON DELETE SET NULL,
+    file_path TEXT NOT NULL,
+    source TEXT NOT NULL,
+    prompt TEXT NOT NULL DEFAULT '',
+    model TEXT,
+    params TEXT NOT NULL DEFAULT '{}',
+    cost REAL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX stills_by_sequence ON stills(sequence_id, created_at);`
 ]
 
 
@@ -395,7 +414,10 @@ function audioPaths(p: Partial<GenerationParams>): unknown[] {
   return p.referenceAudios.map((a: unknown) => (a && typeof a === 'object' ? (a as { path?: unknown }).path : a))
 }
 
-/** The start/end/reference image paths and reference audio paths in a params JSON string. */
+/**
+ * The start/end/reference image paths and reference audio paths in a params JSON string: generation and segment
+ * params, and a still's params (whose reference images are the only paths in it).
+ */
 function paramFilePaths(json: string): string[] {
   try {
     const p = JSON.parse(json) as Partial<GenerationParams> | null
@@ -411,22 +433,25 @@ function paramFilePaths(json: string): string[] {
 
 /**
  * Whether a row records this stored path (letter case ignored, like the disk): a generation, export, asset
- * image or asset audio file, or an image or audio clip in generation or segment params. A row whose file was
- * deleted in Finder still claims its name: a new file given that name would otherwise be taken for the old
- * row's file — deleting that row would take the new file with it, and an old generation or clip whose picture
- * was removed would silently use somebody else's picture on "Använd igen" or a regenerated take.
+ * image, asset audio or still file, or an image or audio clip in generation, segment or still params. A row
+ * whose file was deleted in Finder still claims its name: a new file given that name would otherwise be taken
+ * for the old row's file — deleting that row would take the new file with it, and an old generation or clip
+ * whose picture was removed would silently use somebody else's picture on "Använd igen" or a regenerated take.
+ * `ignoreStillId`: that still's own row doesn't count (is anything else using the still's file?).
  */
-export function isStoredPathRecorded(stored: string): boolean {
+export function isStoredPathRecorded(stored: string, opts: { ignoreStillId?: string } = {}): boolean {
   if (!db || !stored) return false
+  const ignore = opts.ignoreStillId ?? null
   const recorded = db
     .prepare(
       `SELECT 1 FROM generations WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM exports WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM asset_images WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM asset_audio WHERE file_path = @p COLLATE NOCASE
+       UNION ALL SELECT 1 FROM stills WHERE file_path = @p COLLATE NOCASE AND (@i IS NULL OR id != @i)
        LIMIT 1`
     )
-    .get({ p: stored })
+    .get({ p: stored, i: ignore })
   if (recorded) return true
   // Params are JSON: find candidate rows by the path as it is written there, then compare exactly.
   const key = fold(stored)
@@ -434,10 +459,11 @@ export function isStoredPathRecorded(stored: string): boolean {
   const candidates = db
     .prepare(
       `SELECT params FROM generations WHERE instr(studio_fold(params), @n) > 0
-       UNION ALL SELECT params FROM segments WHERE instr(studio_fold(params), @n) > 0`
+       UNION ALL SELECT params FROM segments WHERE instr(studio_fold(params), @n) > 0
+       UNION ALL SELECT params FROM stills WHERE instr(studio_fold(params), @n) > 0 AND (@i IS NULL OR id != @i)`
     )
     .pluck()
-    .all({ n: needle }) as string[]
+    .all({ n: needle, i: ignore }) as string[]
   return candidates.some((json) => paramFilePaths(json).some((p) => fold(p) === key))
 }
 
@@ -458,6 +484,7 @@ export function isStoredPrefixRecorded(folder: string): boolean {
        UNION ALL SELECT 1 FROM exports WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM asset_images WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM asset_audio WHERE instr(studio_fold(file_path), @p) = 1
+       UNION ALL SELECT 1 FROM stills WHERE instr(studio_fold(file_path), @p) = 1
        LIMIT 1`
     )
     .get({ p: prefix })
@@ -466,14 +493,18 @@ export function isStoredPrefixRecorded(folder: string): boolean {
   const candidates = db
     .prepare(
       `SELECT params FROM generations WHERE instr(studio_fold(params), @n) > 0
-       UNION ALL SELECT params FROM segments WHERE instr(studio_fold(params), @n) > 0`
+       UNION ALL SELECT params FROM segments WHERE instr(studio_fold(params), @n) > 0
+       UNION ALL SELECT params FROM stills WHERE instr(studio_fold(params), @n) > 0`
     )
     .pluck()
     .all({ n: needle }) as string[]
   return candidates.some((json) => paramFilePaths(json).some((p) => fold(p).startsWith(prefix)))
 }
 
-/** Every stored path in the library database (files, posters, params images and audio, asset files, exports). */
+/**
+ * Every stored path in the library database (files, posters, params images and audio, asset files, stills,
+ * exports).
+ */
 export function listStoredPaths(): string[] {
   const paths: string[] = []
   mapStoredPaths((p) => {
@@ -483,7 +514,10 @@ export function listStoredPaths(): string[] {
   return paths
 }
 
-/** Applies map to the image and audio paths in a params JSON string; returns undefined when nothing changed. */
+/**
+ * Applies map to the image and audio paths in a params JSON string (generation, segment or still params);
+ * returns undefined when nothing changed.
+ */
 function mapParamsJson(json: string, map: (stored: string) => string): string | undefined {
   let p: GenerationParams
   try {
@@ -516,9 +550,9 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
 
 /**
  * Runs map over every stored path in the library database (generation files, posters and params, segment
- * params, asset images and audio, exports) in one transaction and writes back what changed. `contains`, when
- * given, skips rows that can't hold a matching path. `onGeneration` hears the id of every generation changed.
- * Returns the number of rows changed.
+ * params, asset images and audio, stills and the reference images in their params, exports) in one transaction
+ * and writes back what changed. `contains`, when given, skips rows that can't hold a matching path.
+ * `onGeneration` hears the id of every generation changed. Returns the number of rows changed.
  */
 export function mapStoredPaths(
   map: (stored: string) => string,
@@ -571,7 +605,37 @@ export function mapStoredPaths(
         changed++
       }
     }
+
+    // A still's own file, and the reference images it was made from (its "Skapa igen" sends them again).
+    const stills = conn.prepare('SELECT id, file_path, params FROM stills').all() as {
+      id: string
+      file_path: string
+      params: string
+    }[]
+    const updateStill = conn.prepare('UPDATE stills SET file_path = ?, params = ? WHERE id = ?')
+    for (const r of stills) {
+      if (!hit(r.file_path) && !hit(r.params)) continue
+      const file = hit(r.file_path) ? map(r.file_path) : r.file_path
+      const params = hit(r.params) ? mapParamsJson(r.params, map) : undefined
+      if (file === r.file_path && params === undefined) continue
+      updateStill.run(file, params ?? r.params, r.id)
+      rewrittenStills = true
+      changed++
+    }
   })()
+  return changed
+}
+
+/** Set when a rewrite has changed a still's paths since takeRewrittenStills was last called. */
+let rewrittenStills = false
+
+/**
+ * Whether prefix rewrites (or "Städa upp", relativizing on open) have changed stills' paths since the last call:
+ * the storyboard's stills strip holds their old paths until it is told to fetch them again.
+ */
+export function takeRewrittenStills(): boolean {
+  const changed = rewrittenStills
+  rewrittenStills = false
   return changed
 }
 
@@ -611,7 +675,7 @@ export function takeRewrittenGenerations(): string[] {
 /**
  * Rewrites every stored relative path equal to or under oldRel to the same place under newRel: generations
  * (file_path, thumb_path, params incl. reference audio), segments.params, asset_images.file_path,
- * asset_audio.file_path, exports.file_path.
+ * asset_audio.file_path, stills (file_path, the reference images in params), exports.file_path.
  */
 export function rewriteStoredPrefix(oldRel: string, newRel: string): number {
   const from = cleanRelative(oldRel)

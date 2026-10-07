@@ -2,12 +2,14 @@
 
 A desktop video studio for [Venice.ai](https://venice.ai)'s video models. Studio lets you generate short clips from
 text, a start image or a set of reference photos (and voices), keep a library of **characters**, **environments**,
-**outfits** and **poses** with their reference photos — and what the characters and places sound like — save the
-prompts that work, and chain clips into longer films that continue seamlessly from one clip's last frame into the
-next. Everything lives in a plain folder you choose, with human-readable folder and file names, and your own AI agents
-can work in the app over [MCP](https://modelcontextprotocol.io) — preparing references, prompts and sequences, and
-reviewing what the generations became to write better prompts next time — while every paid generation still waits
-for your approval.
+**outfits** and **poses** with their reference photos — and what the characters and places sound like — and save
+the prompts that work. Clips are chained into longer films that continue seamlessly from one clip's last frame into
+the next, planned as **storyboards** with start and end images that Studio can make for you, and a clip in the
+middle that didn't turn out can be redone so it fits exactly between its neighbours. Everything lives in a plain
+folder you choose, with human-readable folder and file names, and your own AI agents can work in the app over
+[MCP](https://modelcontextprotocol.io) — preparing references, prompts, sequences and storyboards, and reviewing
+what the generations became to write better prompts next time — while every paid generation still waits for your
+approval.
 
 Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 
@@ -36,15 +38,25 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 - **Prompt library** with titles, tags, favourites, a negative prompt and usage counts, and **Lärdomar**
   (learnings): short insights about what works, recorded by you or your agents, with the clips they are based on.
 - **Sequences:** films made of clips. Each clip has its own prompt, references, voices and settings, any number of
-  takes, a selected take and start/end trims. A clip can *continue from the previous one*: its start image is the
-  previous clip's last (trimmed) frame. *Generate missing* renders the clips in order; *Export* cuts the selected
-  takes into one mp4 with ffmpeg.
+  takes, a selected take and start/end trims. A clip can start on the previous clip's last (trimmed) frame
+  (*Startbild från föregående klipp*) and end on the next clip's first frame (*Slutbild från nästa klipp*), both
+  taken out automatically with ffmpeg. *Generate missing* renders the clips in the order their frames allow;
+  *Export* cuts the selected takes into one mp4 with ffmpeg.
+- **Storyboards:** the same sequence as panels (*Tidslinje / Storyboard*): each clip with a start image, an end
+  image and *Vad händer* notes. A slot takes an uploaded or dropped picture, a library photo, a frame picked from
+  any take, a picture made with **Skapa bild…** (Venice's image models, about $0.06, with characters, outfits,
+  places, poses or other stills as references), or automatically the previous clip's last frame / the next clip's
+  first frame. Clips with images are generated image-to-video from them.
+- **Redo a clip between its neighbours** (*Gör om mellan grannarna*): a clip in the middle that didn't turn out is
+  set up to start exactly on the previous clip's last frame and end exactly on the next clip's first frame — both
+  taken out automatically, with live previews — and a new take fits the cut without touching the neighbours.
 - **Your own folder:** a base folder you choose, with Swedish, human-readable folders and file names. Paths in the
   database are stored relative to it, so the library can be moved, switched or tidied up from Settings.
 - **Agent connection (MCP):** an optional Streamable HTTP MCP server (off by default, loopback + Tailscale only,
-  bearer token) through which your own agents read the library, set references, voices and prompts, build sequences,
-  *request* paid generations that you approve or decline in an in-app dialog, and look back at finished clips and
-  exported films (frames, sound, the references used) to review them and record learnings for the next prompt.
+  bearer token) through which your own agents read the library, set references, voices and prompts, build sequences
+  and storyboards, *request* paid generations and pictures that you approve or decline in an in-app dialog, and
+  look back at finished clips and exported films (frames, sound, the references used) to review them and record
+  learnings for the next prompt.
 - **Separate development profile** ("Studio Dev") so development never touches the library the installed app uses.
 
 ## Status
@@ -62,9 +74,9 @@ changes.
 
 - **Node.js** — the version in [`.nvmrc`](.nvmrc) (24); at least 22.12 (`engines` in `package.json`).
 - **ffmpeg** (with `ffprobe`) — `brew install ffmpeg`. Studio looks in `/opt/homebrew/bin`, `/usr/local/bin`,
-  `/usr/bin` and then `PATH`. It is needed for posters, durations, continuation frames, exports, voice and sound
-  clips (measuring them and cutting out the part that is sent) and the frames agents review; generating without
-  voices works without it.
+  `/usr/bin` and then `PATH`. It is needed for posters, durations, the start and end frames clips take from their
+  neighbours (and their previews), saving a frame as a still, exports, voice and sound clips (measuring them and
+  cutting out the part that is sent) and the frames agents review; generating without voices works without it.
 - **A Venice.ai API key** — added under **Inställningar** (Settings). Generations cost money on your Venice account.
 
 ## Quick start
@@ -102,7 +114,8 @@ it. Studio.app uses the real profile (`~/Library/Application Support/Studio/`). 
 ## Where things are stored
 
 **Settings** live in `~/Library/Application Support/Studio/settings.json`: the base folder, the prompt language,
-accepted Venice consents and the agent connection's port. The Venice API key and the agent token are stored
+*Säkert läge för bilder* (image safe mode: Venice blurs adult content in pictures it makes; on by default), accepted
+Venice consents and the agent connection's port. The Venice API key and the agent token are stored
 encrypted with Electron `safeStorage` (macOS Keychain).
 
 **The library** lives in a base folder you choose on first launch (suggested: `~/Movies/Studio`). It can be switched
@@ -117,18 +130,21 @@ every file the library knows about back where it belongs.
 ├── Kläder/<Name>/                          Outfits: photos of the garments + Beskrivning.txt
 ├── Poser/<Name>/                           Poses: photos or sketches of the positions + Beskrivning.txt
 ├── Referensbilder/<YYYY-MM-DD>/            Start, end and reference images and reference audio picked from
-│                                           outside the library, copied here when a generation is submitted
+│                                           outside the library, copied here when a generation is submitted;
+│                                           stills that belong to no sequence (any more)
 ├── Genereringar/<YYYY-MM-DD>/<HH.MM> <prompt>.mp4
 │                                           Generated videos that don't belong to a sequence
 ├── Sekvenser/<Sequence name>/
 │   ├── Tagningar/<YYYY-MM-DD HH.MM> <prompt>.mp4
 │   │                                       Takes of the sequence's clips
+│   ├── Storyboard/                         Stills: pictures made with Skapa bild (<HH.MM> <prompt>.png),
+│   │                                       pictures uploaded into a panel, frames saved from takes
 │   └── <Sequence name> <YYYY-MM-DD HH.MM>.mp4
 │                                           Exported films
 └── .studio/                                Hidden app data:
     ├── studio.db                           the SQLite database
     ├── miniatyrer/                         poster frames (thumbnails)
-    ├── bildrutor/                          extracted frames used to continue clips
+    ├── bildrutor/                          extracted frames used to continue clips or end on the next one
     └── tmp/                                scratch files, cleared when the library is opened
 ```
 
@@ -181,24 +197,50 @@ prompts must not contain tokens.
 
 A **sequence** is an ordered list of clips (*Klipp*). Each clip stores the settings for new takes; every
 generation for it is a **take**, and one take per clip is selected for the cut and can be trimmed at the start and
-end. A clip that **continues from the previous one** is generated image-to-video: when it is generated, the
-previous clip's selected take is cut at its trim point and that last frame (extracted with ffmpeg) becomes the
-start image, so it sends no reference photos or voices of its own. **Generera saknade** (generate missing)
-generates every clip without a finished selected take, in order, waiting for each one so continuation clips get
-their frame. **Exportera** renders the selected, trimmed takes into one H.264/AAC mp4 in the sequence's folder.
+end. A clip that **continues from the previous one** (*Startbild från föregående klipp*) is generated
+image-to-video: when it is generated, the previous clip's selected take is cut at its trim point and that last frame
+(extracted with ffmpeg) becomes the start image, so it sends no reference photos or voices of its own. A clip can
+likewise take its **end image from the next clip** (*Slutbild från nästa klipp*): the next clip's first frame after
+its start trim, sent as the end image to a model that takes one (Seedance's image-to-video models do; turning the
+switch on picks one). **Generera saknade** (generate missing) generates every clip without a finished selected
+take, each after the clips whose frames it needs, waiting for each one; if two clips wait on each other's frames it
+says which switch to turn off before anything is paid for. **Exportera** renders the selected, trimmed takes into
+one H.264/AAC mp4 in the sequence's folder, showing a picture two clips share at a cut only once.
+
+**Storyboard.** *Tidslinje / Storyboard* in the sequence header shows the clips as panels: number, take, start
+image → end image, *Vad händer* notes, the prompt and the price, with *Generera tagning*. Drag panels to reorder
+them and add new ones with *+ Ny ruta*. Put a picture into a slot by dropping or uploading it, picking a library
+photo or a still, *Bildruta från ett klipp* (scrub any finished take of the sequence and save the frame),
+**Skapa bild…** or *Från föregående / nästa klipp*. A clip with a start or end image is generated with the
+image-to-video model of its family: the look comes from the pictures, so its reference photos are dropped (and
+their `@` tokens taken out of the prompt), and the prompt describes what happens between them.
+
+**Skapa bild…** makes a picture with Venice's image models — from a prompt alone, or combining references (the
+first one is the base picture the model edits) — with model, format, resolution and quality to choose, the price on
+the button, *Skapa igen* for another attempt and *Använd som startbild / slutbild*. Every result is saved in the
+sequence's `Storyboard/` folder, and the stills strip under the panels holds them all, together with the pictures
+uploaded or dropped into slots and the frames saved from takes. **Säkert läge för bilder** (Inställningar → Bilder,
+on by default, also switchable in the dialog) lets Venice blur adult content.
+
+**Gör om mellan grannarna.** When one clip in the middle came out badly, this button (on the timeline cards, the
+panels and in the clip editor) sets it to start on the previous clip's last frame and end on the next clip's first
+frame, with an image-to-video model that takes an end image, keeping its prompt, length and sound. The first or
+last clip only gets the one neighbour it has. The editor shows both frames and the price; the neighbours need
+finished selected takes. When the new take is ready, the panel offers *Använd den* — the old take stays selected
+until you choose, and stays among the takes in case you want it back.
 
 ## Connecting your own agent
 
 Studio can run an MCP server so agents such as OpenClaw, Hermes Agent, Claude Desktop or Claude Code can work in
 the app: read the library and see its photos (and hear its voices), choose references, write and validate prompts,
-fill in the Generate form and build sequences. They can also look back: review finished clips and exported films
-frame by frame next to the references they were made from, record reviews, and save *learnings* that every later
-session reads before it writes a prompt. Agents **cannot generate anything on their own** — paid tools only create a
-request that Studio shows you with the prompt, references, voices and price, and nothing is sent to Venice until you
-approve it.
+fill in the Generate form, build sequences and storyboards, and set a clip up to be redone between its neighbours.
+They can also look back: review finished clips and exported films frame by frame next to the references they were
+made from, record reviews, and save *learnings* that every later session reads before it writes a prompt. Agents
+**cannot generate anything on their own** — the paid tools (videos and pictures) only create a request that Studio
+shows you with the prompt, references, voices and price, and nothing is sent to Venice until you approve it.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 39
+Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 46
 tools, the review loop and troubleshooting.
 
 ## Security
@@ -227,10 +269,11 @@ Done:
 5. A prompt editor that checks references; the agent connection (MCP) with approval of paid generations
 6. Voices and soundscapes (`@AudioN`), poses, a clip feed with filters and a table view, ratings, and a review and
    learning loop for agents
+7. Storyboards with start and end images and *Skapa bild…*, redoing a clip between its neighbours
 
 Next:
 
-7. Cost overview, cancelling a running export, transitions (fades) between clips
+8. Cost overview, cancelling a running export, transitions (fades) between clips
 
 Ideas where help is welcome: an English UI (i18n), an automated test suite, signed and notarized builds.
 

@@ -1,48 +1,97 @@
 // Sequences: ordered segments whose selected takes are cut together into one longer video.
-// Each sequence has a folder in Sekvenser/ named after it: its takes live in Tagningar/ inside it and its
-// exports next to that, so the folder is what the user sees of the sequence in Finder.
+// Each sequence has a folder in Sekvenser/ named after it: its takes live in Tagningar/ inside it, its stills
+// (the storyboard's keyframes) in Storyboard/ and its exports next to those, so the folder is what the user sees
+// of the sequence in Finder.
 
 import { randomUUID } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { dirname, extname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { ipcMain, shell } from 'electron'
-import { DEFAULT_PARAMS, imageToVideoVariant, kindOfModelId, paramsForSubmit, supportsAudioInput } from '@shared/models'
-import { blockingContinuationError, blockingPromptError } from '@shared/prompt-refs'
+import {
+  audioForModel,
+  DEFAULT_PARAMS,
+  endImageVariant,
+  imageToVideoVariant,
+  kindOfModelId,
+  paramsForSubmit,
+  pickOption,
+  PREFERRED,
+  supportsAudioInput,
+  supportsEndImage
+} from '@shared/models'
+import {
+  blockingContinuationError,
+  blockingPromptError,
+  findAudioTokens,
+  findImageTokens
+} from '@shared/prompt-refs'
 import type {
   ExportProgress,
   Generation,
   GenerationParams,
+  SegmentFramePreview,
+  SegmentImageSlot,
+  SegmentImageSource,
   SegmentInit,
   SegmentPatch,
   Sequence,
-  SequenceSummary
+  SequenceSummary,
+  Still,
+  VideoModel
 } from '@shared/types'
 import { isAgentCall } from './agent/local-ipc'
 import * as db from './db'
-import { concatClips, extractFrame, probe } from './ffmpeg'
+import { concatClips, extractFrame, extractFrameAtOrAfter, frameStartAtOrAfter, probe } from './ffmpeg'
 import { prepareSubmission, toPublic, type JobManager } from './jobs'
 import {
+  FOLDERS,
   framesDir,
+  fromStoredPath,
   generationsDayDir,
   isInsideRoot,
   libraryOperationSettled,
   movePath,
+  referencesDayDir,
   removeDayFolderIfEmpty,
   renameLibraryFolder,
+  safeName,
   sequenceDir,
   sequenceTakesDir,
-  tmpDir
+  tmpDir,
+  toStoredPath
 } from './paths'
+import { placeFile } from './references'
 import { buildConcatClips, missingTakesMessage, reserveExportPath } from './sequence-export'
 import * as store from './sequence-store'
 import { ensureImagesExist, type VeniceClient } from './venice'
+
+/**
+ * What the sequence service needs from the stills service (stills.ts) to put images into keyframe slots. Both
+ * create a still of the sequence (or hand back the one an identical earlier call made), so the image is in its
+ * Storyboard folder and its stills strip from then on; they announce the new still themselves.
+ */
+export interface StillsAccess {
+  /** Copies an image file from outside Studio into the sequence's Storyboard folder as a still ('upload'). */
+  importFile(path: string, sequenceId: string): Promise<Still>
+  /** Saves the frame of a take at `time` seconds as a still of the sequence ('frame'). */
+  saveFrame(generationId: string, time: number, sequenceId?: string): Promise<Still>
+}
 
 interface Deps {
   jobs: JobManager
   venice: VeniceClient
   notify: (sequenceId: string) => void
   exportProgress: (p: ExportProgress) => void
+  /**
+   * The video model list (cached in main): which end-capable sibling of a model Venice offers, and the options
+   * (duration, resolution …) a clip switched to it keeps. Without it the switch goes by the model ids alone.
+   */
+  models?: () => Promise<VideoModel[]>
+  /** Puts uploaded files and frames into a sequence's stills (setSegmentImage, bridgeSegment). */
+  stills?: StillsAccess
+  /** The stills of a sequence were moved, kept or removed (undefined: possibly any sequence's). */
+  stillsChanged?: (sequenceId?: string) => void
 }
 
 interface SequencePatch {
@@ -112,26 +161,69 @@ async function moveToFreeName(from: string, pick: () => string): Promise<string>
   }
 }
 
+/** How a clip takes its frames from its neighbours, as its position allows. */
+interface ClipLinks {
+  /** Starts on the previous clip's last frame (continue_from_previous, never the first clip). */
+  continuing: boolean
+  /** Ends on the next clip's first frame (end_from_next, never the last clip). */
+  ending: boolean
+}
+
+function linksOf(rows: readonly store.SegmentRow[], index: number): ClipLinks {
+  const row = rows[index]
+  return {
+    continuing: index > 0 && !!row?.continue_from_previous,
+    ending: index >= 0 && index < rows.length - 1 && !!row?.end_from_next
+  }
+}
+
 /**
- * The params a take of the clip is sent with. A continuation always generates with the image-to-video
- * sibling, which takes no reference audio; its start frame is only filled in when the take is generated.
+ * The params a take of the clip is sent with. A clip that takes a frame from a neighbour always generates
+ * with the image-to-video sibling of its model, which takes no reference audio; that frame is only filled in
+ * when the take is generated (until then the slot is empty, not a stale image of its own).
  */
-function takeParams(row: store.SegmentRow, continuing: boolean): GenerationParams {
+function takeParams(row: store.SegmentRow, links: ClipLinks): GenerationParams {
   const params = store.parseParams(row.params)
-  return continuing ? { ...params, model: imageToVideoVariant(params.model), referenceAudios: undefined } : params
+  if (!links.continuing && !links.ending) return params
+  return {
+    ...params,
+    model: imageToVideoVariant(params.model),
+    referenceAudios: undefined,
+    ...(links.continuing ? { startImage: undefined } : {}),
+    ...(links.ending ? { endImage: undefined } : {})
+  }
+}
+
+/** The clip would be sent with an end image (its own or the next clip's frame) that its model can't take. */
+function endImageProblem(params: GenerationParams, links: ClipLinks): string | undefined {
+  if (supportsEndImage(params.model)) return undefined
+  if (links.ending) {
+    return (
+      `Modellen ${params.model} kan inte ta en slutbild. Välj en bild-till-video-modell som kan det ` +
+      '(till exempel Seedance), eller slå av ”Slutbild från nästa klipp”.'
+    )
+  }
+  if (params.endImage && kindOfModelId(params.model) === 'image-to-video') {
+    return `Modellen ${params.model} kan inte ta en slutbild. Välj en modell som kan det, eller ta bort slutbilden.`
+  }
+  return undefined
 }
 
 /**
  * Why a take of the clip can't be sent as it stands (Swedish), or undefined when it can. Checked before
  * "generate all" pays for anything and again right before each take is sent; JobManager.submit checks the
  * prompt's references once more on what actually goes to Venice, and measures the audio clips (whose windows
- * this checks only as far as the clip states them).
+ * this checks only as far as the clip states them). Whether the neighbours have the takes its frames come
+ * from is checked where the frames are taken.
  */
-function clipProblem(params: GenerationParams, continuing: boolean): string | undefined {
+function clipProblem(params: GenerationParams, links: ClipLinks): string | undefined {
   const kind = kindOfModelId(params.model)
   if (!params.prompt.trim()) return 'Skriv en prompt för klippet först.'
+  // Before the prompt's references: an end image the model can't take is a keyframe the user would pay to lose.
+  const end = endImageProblem(params, links)
+  if (end) return end
   // The general message advises switching to reference mode, which a continuation can't do.
-  if (continuing) return blockingContinuationError(params)
+  if (links.continuing) return blockingContinuationError(params)
   if (kind === 'reference-to-video' && !params.referenceImages?.length) {
     // Venice refuses reference audio without a picture, so a clip with only a voice needs one too.
     return params.referenceAudios?.length && supportsAudioInput(params.model)
@@ -144,15 +236,225 @@ function clipProblem(params: GenerationParams, continuing: boolean): string | un
   return blockingPromptError(params)
 }
 
+/** The word in front of an @AudioN inside a reference's brackets ("voice @Audio1", "röst @Audio1"). */
+const AUDIO_WORD_BEFORE = /(^|[(,][ \t]*)(?:voice|sound|röst|ljud)[ \t]+$/iu
+
+/**
+ * A line that explains tokens rather than the shot: "@Image1 – Anna, the woman: identity …",
+ * "- @Image2, @Image3: the room".
+ */
+const LEGEND_LINE =
+  /^\s*(?:[-*•]\s+)?@(?:image|audio)\d+(?:\s*(?:,|&|and|och)\s*@(?:image|audio)\d+)*\s*(?:[–—:=]|-(?!\w))/iu
+
+/** A heading of its own line, like "REFERENCES:" or "Referenser:". */
+const HEADING_LINE = /^\s*[^\s:][^:]{0,38}:\s*$/u
+
+/** One line without its tokens; labels and brackets left empty go with them. */
+function stripLineTokens(line: string): string {
+  const tokens = [...findImageTokens(line), ...findAudioTokens(line)].sort((a, b) => a.start - b.start)
+  if (!tokens.length) return line
+  let out = ''
+  let last = 0
+  for (const t of tokens) {
+    const head = line.slice(last, t.start)
+    // "röst @Audio1" inside a reference's brackets is a label, not running text: the word goes with the token.
+    out += /^@audio/i.test(t.raw) ? head.replace(AUDIO_WORD_BEFORE, '$1') : head
+    last = t.end
+  }
+  out += line.slice(last)
+  // The line keeps its own indentation; what a token at its start leaves in front goes.
+  const indent = /^[ \t]*/.exec(line)![0]
+  return (
+    indent +
+    out
+      // Brackets that held only tokens: "Anna ( , )" → "Anna".
+      .replace(/[ \t]*\((?:[\s,;&]|och|and)*\)/giu, '')
+      // Separators left at the edges of brackets: "(, x" → "(x", "x ,)" → "x)".
+      .replace(/\(\s*[,;]\s*/g, '(')
+      .replace(/\s*[,;]\s*\)/g, ')')
+      .replace(/[ \t]+([,.;:!?])/g, '$1')
+      .replace(/([,;])(?:\s*[,;])+/g, '$1')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/^[ \t,;]+/, '')
+      .replace(/[ \t]+$/, '')
+  )
+}
+
+/**
+ * The text without its @ImageN / @AudioN tokens, for a clip that becomes image-to-video and so sends no
+ * references: "Anna (@Image1, röst @Audio1) wearing Red dress (@Image3) walks" → "Anna wearing Red dress walks".
+ * Lines that only explain tokens ("@Image1 – Anna, the woman …") go, and so does a heading ("REFERENCES:") whose
+ * lines all went. The names stay, so the prompt still says who is who; the look comes from the keyframes.
+ */
+export function withoutReferenceTokens(text: string): string {
+  if (!findImageTokens(text).length && !findAudioTokens(text).length) return text
+  const lines = text.split('\n')
+  const kept: (string | null)[] = lines.map((line) => (LEGEND_LINE.test(line) ? null : stripLineTokens(line)))
+  for (let i = 0; i < lines.length; i++) {
+    if (kept[i] === null || !HEADING_LINE.test(lines[i])) continue
+    // Its section runs to the next blank line or heading.
+    let j = i + 1
+    while (j < lines.length && lines[j].trim() && (kept[j] === null || !HEADING_LINE.test(lines[j]))) j++
+    const block = kept.slice(i + 1, j)
+    if (!block.length || block.some((l) => l !== null)) continue
+    // The heading's whole section was token explanations: it goes too, with the blank line after it.
+    kept[i] = null
+    if (j < lines.length && !lines[j].trim()) kept[j] = null
+  }
+  return kept
+    .filter((l): l is string => l !== null)
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\s*\n/, '')
+    .trimEnd()
+}
+
+/**
+ * The clip's params once it is made from keyframes: generated image-to-video (by a model that takes an end
+ * image when it has one), so its reference images and audio can't be sent: they are dropped, and their tokens
+ * taken out of the prompts so it can be generated as it stands. Duration, resolution and aspect ratio are kept
+ * where the new model offers them (the model list decides, when it can be had); the audio setting too.
+ */
+function asKeyframed(
+  params: GenerationParams,
+  needsEnd: boolean,
+  models: readonly VideoModel[] | undefined
+): GenerationParams {
+  const ids = models?.map((m) => m.id)
+  const model = needsEnd ? endImageVariant(params.model, ids) : imageToVideoVariant(params.model)
+  const negative = params.negativePrompt === undefined ? undefined : withoutReferenceTokens(params.negativePrompt)
+  const next: GenerationParams = {
+    ...params,
+    model,
+    prompt: withoutReferenceTokens(params.prompt),
+    negativePrompt: negative || undefined,
+    referenceImages: undefined,
+    referenceAudios: undefined
+  }
+  return model !== params.model ? fitToModel(next, models) : next
+}
+
+/**
+ * Params just switched to another model, with the options that model offers (the list decides, when it could
+ * be had): the same rule as the Generate form uses when the model changes, so a clip moved to another family
+ * isn't sent with a duration or resolution its new model refuses. Unchanged without the list.
+ */
+function fitToModel(params: GenerationParams, models: readonly VideoModel[] | undefined): GenerationParams {
+  const info = models?.find((m) => m.id === params.model)
+  if (!info) return params
+  return {
+    ...params,
+    duration: pickOption(info.durations, params.duration, PREFERRED.durations) ?? params.duration,
+    resolution: pickOption(info.resolutions, params.resolution, PREFERRED.resolutions),
+    aspectRatio: pickOption(info.aspectRatios, params.aspectRatio, PREFERRED.aspectRatios),
+    audio: audioForModel(info, params.audio)
+  }
+}
+
+/**
+ * The clip's explicit start image when it is generated image-to-video (one in another mode is left-over form
+ * state, never sent).
+ */
+function ownStartImage(params: GenerationParams): string | undefined {
+  return kindOfModelId(params.model) === 'image-to-video' ? params.startImage : undefined
+}
+
+/** A keyframe source that is an image of its own rather than a neighbour's frame. */
+type ExplicitImage = Exclude<SegmentImageSource, { kind: 'previous' } | { kind: 'next' }>
+
+function isExplicitImage(source: SegmentImageSource | null | undefined): source is ExplicitImage {
+  return !!source && source.kind !== 'previous' && source.kind !== 'next'
+}
+
+/**
+ * A picture path held across an await, carried along the stored-path rewrites made since `mark` (a sequence folder
+ * renamed while the model list was fetched, say), so a clip is never written pointing where the file was. With
+ * `slot`, a picture that is gone even so is refused (Swedish) rather than written.
+ */
+function followImage(path: string, mark: number, slot?: SegmentImageSlot): string {
+  const followed = db.followRewrites({ model: '', prompt: '', duration: '', startImage: path }, mark).startImage ?? path
+  if (slot && !existsSync(followed)) throw new Error(`${slotName(slot)} finns inte längre: ${basename(followed)}.`)
+  return followed
+}
+
+/** Image files a keyframe slot takes, as the file dialog offers them. */
+const IMAGE_FILE = /\.(jpe?g|png|webp)$/i
+
+/** How long bridging waits for the model list before it goes by the model ids alone. */
+const MODELS_TIMEOUT_MS = 5000
+
+/** "Startbilden"/"Slutbilden" for messages about a slot. */
+const slotName = (slot: SegmentImageSlot): string => (slot === 'start' ? 'Startbilden' : 'Slutbilden')
+
+/**
+ * The order "generate all" makes the clips that lack a finished selected take: each one after the neighbours
+ * whose frames it takes (a continuation after the previous clip, a clip ending on the next clip's first frame
+ * after that clip), otherwise in the sequence's order; a chain of continuations runs forward, and a clip
+ * between its neighbours waits for both. `order` holds clip indices. `stuck`: clips that can't be made in any
+ * order, because two of them wait on each other (a clip that ends on the next clip, which in turn continues
+ * from it, neither made yet) or on such a pair.
+ */
+export function generationOrder(rows: readonly store.SegmentRow[]): { order: number[]; stuck: number[] } {
+  const ready = rows.map((r) => store.isUsable(store.selectedTake(r)))
+  const waitsFor = (i: number): number[] => {
+    const links = linksOf(rows, i)
+    const deps: number[] = []
+    if (links.continuing && !ready[i - 1]) deps.push(i - 1)
+    if (links.ending && !ready[i + 1]) deps.push(i + 1)
+    return deps
+  }
+  const missing = rows.flatMap((_, i) => (ready[i] ? [] : [i]))
+  const planned = new Set<number>()
+  const order: number[] = []
+  // Each round takes the first clip (in sequence order) that has nothing left to wait for.
+  for (;;) {
+    const next = missing.find((i) => !planned.has(i) && waitsFor(i).every((d) => planned.has(d)))
+    if (next === undefined) break
+    planned.add(next)
+    order.push(next)
+  }
+  return { order, stuck: missing.filter((i) => !planned.has(i)) }
+}
+
+/**
+ * Why the stuck clips (generationOrder) can't be made, in Swedish: the first pair that waits on each other,
+ * and what can be switched off to break it.
+ */
+function waitingMessage(rows: readonly store.SegmentRow[], stuck: readonly number[]): string {
+  const pair = stuck.find((i) => stuck.includes(i + 1) && linksOf(rows, i).ending && linksOf(rows, i + 1).continuing)
+  if (pair === undefined) return 'Klippen väntar på varandras tagningar och kan inte genereras i någon ordning.'
+  const a = pair + 1
+  const b = pair + 2
+  return (
+    `Klipp ${a} och ${b} väntar på varandra: klipp ${a} ska sluta på första bildrutan i klipp ${b}, som ska ` +
+    `börja på sista bildrutan i klipp ${a}, och inget av dem har en tagning än. Slå av ` +
+    `”Slutbild från nästa klipp” för klipp ${a} eller ”Fortsätt från föregående klipp” för klipp ${b}.`
+  )
+}
+
 /** A clip "generate all" would pay for. */
 export interface MissingClip {
   segmentId: string
   /** 1-based position in the sequence, as shown to the user ("Klipp 3"). */
   clip: number
-  /** What its take would be sent with; a continuation's start frame is only extracted when its turn comes. */
+  /**
+   * What its take would be sent with; the start frame of a continuation and the end frame of a clip ending on
+   * the next one are only extracted when its turn comes.
+   */
   params: GenerationParams
   /** Why it can't be generated as it stands (Swedish), e.g. a prompt naming a picture that isn't there. */
   problem?: string
+  /** It and another clip wait on each other's takes (see generationOrder); `problem` names both clips. */
+  waiting?: boolean
+}
+
+/**
+ * A missing clip's problem as one line for a run's error or an agent ("Klipp 3: Skriv en prompt …"); the
+ * message about two clips waiting on each other names its clips itself.
+ */
+export function missingClipProblem(clip: MissingClip): string | undefined {
+  if (!clip.problem) return undefined
+  return clip.waiting ? clip.problem : `Klipp ${clip.clip}: ${clip.problem}`
 }
 
 export class SequenceService {
@@ -255,7 +557,9 @@ export class SequenceService {
 
   /**
    * Deletes the sequence. Its takes become ordinary generations and their videos go back to Genereringar/;
-   * exports are finished films, so they and the folder holding them stay. Only empty folders are removed.
+   * exports are finished films, so they and the folder holding them stay. Its stills go to the Trash, except
+   * those that generations or clips elsewhere still use (the released takes were made from them, say): they
+   * move to Referensbilder/ and stay listed among all stills. Only empty folders are removed.
    */
   async delete(id: string): Promise<void> {
     if (!store.getSequenceRow(id)) return
@@ -263,19 +567,109 @@ export class SequenceService {
     this.runs.delete(id)
     this.folderSyncFailed.delete(id)
     this.exports.get(id)?.abort()
-    const freed = await this.withFiles(async () => {
+    const { takeIds: freed, moved } = await this.withFiles(async () => {
       const row = store.getSequenceRow(id)
-      if (!row) return []
+      if (!row) return { takeIds: [], moved: false }
       const takeIds = store.takeIdsForSegments(store.listSegmentRows(id).map((s) => s.id))
       // Before the rows go: once the FK has nulled segment_id, nothing says these videos were takes here.
       await this.releaseTakes(takeIds)
-      // Segments cascade; takes get segment_id nulled and exports sequence_id nulled by their FKs.
+      // Read in the same step as the delete, after the moves above: still work isn't queued behind this, so a still
+      // recorded for the sequence meanwhile (a frame saved, a picture placed) is released with the others.
+      const stills = store.listStillRows(id)
+      // Segments cascade; takes get segment_id nulled, exports and stills sequence_id nulled by their FKs.
       this.sql().prepare('DELETE FROM sequences WHERE id = ?').run(id)
+      // Once its clips are gone, only uses elsewhere count.
+      const kept = await this.releaseStills(stills)
       if (row.folder && !store.folderInUse(row.folder)) await store.removeFolderIfEmpty(row.folder)
-      return takeIds
+      return { takeIds, moved: kept }
     })
     this.announceGenerations(freed)
     this.deps.notify(id)
+    // Stills that other sequences' clips use moved to Referensbilder, and those clips' paths with them.
+    if (moved) this.announceRewrites()
+    // Its stills are gone, or listed without a sequence now.
+    this.deps.stillsChanged?.(undefined)
+  }
+
+  /**
+   * Stored paths were rewritten below a folder other rows may point into (a still kept in Referensbilder, a sequence
+   * folder renamed): every sequence refetches, since a clip editor open on another sequence would otherwise save
+   * the old path back with its next edit; generations and stills whose paths changed are sent again too.
+   */
+  private announceRewrites(more: readonly string[] = []): void {
+    for (const id of this.sql().prepare('SELECT id FROM sequences').pluck().all() as string[]) this.deps.notify(id)
+    this.announceGenerations([...new Set([...more, ...db.takeRewrittenGenerations()])])
+    if (db.takeRewrittenStills()) this.deps.stillsChanged?.(undefined)
+  }
+
+  /**
+   * The stills of a deleted sequence: one that a generation, a clip or another still still uses moves to
+   * Referensbilder/<today>/ (every row using it follows); the rest go to the Trash with their rows (deleted outright
+   * on a volume without one, as stills' own delete does). Best effort per still: what can't be moved stays where
+   * it is, with its row (so "Städa upp" finds it). Resolves whether any still was moved (stored paths rewritten).
+   * Only in withFiles.
+   */
+  private async releaseStills(stills: store.StillRow[]): Promise<boolean> {
+    // Unused ones go first, round after round: a still only another unused still of the sequence was made
+    // from (as its reference image) is unused too once that one is gone.
+    let remaining = stills
+    const unused: store.StillRow[] = []
+    for (let changed = true; changed; ) {
+      changed = false
+      for (const still of remaining) {
+        if (db.isStoredPathRecorded(still.file_path, { ignoreStillId: still.id })) continue
+        this.sql().prepare('DELETE FROM stills WHERE id = ?').run(still.id)
+        unused.push(still)
+        changed = true
+      }
+      remaining = remaining.filter((s) => !unused.includes(s))
+    }
+    let moved = false
+    for (const still of remaining) {
+      const path = fromStoredPath(still.file_path)
+      if (!isInsideRoot(path) || !existsSync(path)) continue
+      await this.keepStill(path).then(
+        (kept) => {
+          moved ||= kept
+        },
+        (err: unknown) => console.warn(`Could not keep the still ${path}:`, err)
+      )
+    }
+    for (const still of unused) {
+      const path = fromStoredPath(still.file_path)
+      // Only the library's own copies: a path outside it is somebody else's file.
+      if (!isInsideRoot(path) || !existsSync(path)) continue
+      // Its row is gone already: a file left behind would be listed nowhere, and keep the folder from going.
+      await shell
+        .trashItem(path)
+        .catch(() => rm(path, { force: true }))
+        .catch((err: unknown) => console.warn(`Could not remove ${path}:`, err))
+    }
+    return moved
+  }
+
+  /**
+   * Moves a still that is still used into Referensbilder/<today>/ and points every row at the new place. Resolves
+   * whether it moved.
+   */
+  private async keepStill(path: string): Promise<boolean> {
+    // Already where stills of no sequence live.
+    if (toStoredPath(path).startsWith(`${FOLDERS.references}/`)) return false
+    const ext = extname(path)
+    const dest = await placeFile(
+      path,
+      referencesDayDir(new Date()),
+      safeName(basename(path, ext), { fallback: 'Stillbild' }),
+      ext.toLowerCase()
+    )
+    try {
+      this.sql().transaction(() => db.rewriteStoredPrefix(toStoredPath(path), toStoredPath(dest)))()
+    } catch (err) {
+      // Put the file back so every stored path still points at it.
+      await movePath(dest, path).catch((e: unknown) => console.warn(`Could not move ${dest} back to ${path}:`, e))
+      throw err
+    }
+    return true
   }
 
   // ── Segments ───────────────────────────────────────────────────────────────
@@ -293,6 +687,10 @@ export class SequenceService {
   }
 
   async addSegment(sequenceId: string, init: SegmentInit = {}, caller: Caller = {}): Promise<Sequence> {
+    init = init ?? {}
+    // Taking a frame from a neighbour may switch the model: the list says which sibling Venice offers and what
+    // options it has. Fetched before the rows are read, so what is written below is built from what was read.
+    const models = init.endFromNext || init.continueFromPrevious !== false ? await this.modelList() : undefined
     const sequence = store.requireSequenceRow(sequenceId)
     this.refuseWhileRunning(sequenceId, caller)
     const rows = store.listSegmentRows(sequenceId)
@@ -310,8 +708,30 @@ export class SequenceService {
     let params: GenerationParams
     if (source) params = store.sanitizeParams(source.params)
     else if (init.params) params = store.sanitizeParams(init.params)
-    else if (previous) params = { ...store.parseParams(previous.params), prompt: '' }
+    // The previous clip's settings, but not what belongs to its shot: its prompt, and its keyframes (a new
+    // storyboard panel starts with empty slots).
+    else if (previous) {
+      params = { ...store.parseParams(previous.params), prompt: '', startImage: undefined, endImage: undefined }
+    }
     else params = store.sanitizeParams({ ...DEFAULT_PARAMS, ...store.parseDefaults(sequence.defaults) })
+
+    const chosen = params.model
+    const hasNext = index < rows.length
+    if (init.endFromNext && !hasNext) {
+      throw new Error('Ett klipp sist i sekvensen har inget nästa klipp att ta sin slutbild från.')
+    }
+    const ending = hasNext && !!init.endFromNext
+    if (ending) {
+      // The end frame comes from the next clip at generation time, with a model that can take one (and no
+      // references, which image-to-video can't send).
+      params = {
+        ...params,
+        model: endImageVariant(params.model, models?.map((m) => m.id)),
+        endImage: undefined,
+        referenceImages: undefined,
+        referenceAudios: undefined
+      }
+    }
 
     const continuing = !!previous && (init.continueFromPrevious ?? !source)
     if (continuing) {
@@ -327,14 +747,17 @@ export class SequenceService {
         referenceAudios: undefined
       }
     }
+    // A clip moved to another model gets the options that model offers.
+    if (params.model !== chosen) params = fitToModel(params, models)
 
     const id = randomUUID()
     const adopt = source && !source.segmentId
     this.sql().transaction(() => {
       this.sql()
         .prepare(
-          `INSERT INTO segments (id, sequence_id, position, params, continue_from_previous, selected_generation_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO segments (id, sequence_id, position, params, continue_from_previous, end_from_next, notes,
+             selected_generation_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -342,6 +765,8 @@ export class SequenceService {
           index,
           store.serializeParams(params),
           continuing ? 1 : 0,
+          ending ? 1 : 0,
+          store.cleanNotes(init.notes),
           source?.id ?? null,
           Date.now()
         )
@@ -356,11 +781,14 @@ export class SequenceService {
   }
 
   async updateSegment(segmentId: string, patch: SegmentPatch, caller: Caller = {}): Promise<Sequence> {
+    patch = patch ?? {}
+    // Turning a neighbour's frame on may switch the model (see below); fetched before the row is read, so the
+    // write works on what was read.
+    const models = patch.endFromNext || patch.continueFromPrevious ? await this.modelList() : undefined
     const row = store.requireSegmentRow(segmentId)
     this.refuseWhileRunning(row.sequence_id, caller)
     const rows = store.listSegmentRows(row.sequence_id)
     const index = rows.findIndex((r) => r.id === row.id)
-    patch = patch ?? {}
 
     let continuing = !!row.continue_from_previous
     if (patch.continueFromPrevious !== undefined) {
@@ -369,10 +797,27 @@ export class SequenceService {
       }
       continuing = !!patch.continueFromPrevious
     }
+    let ending = !!row.end_from_next
+    if (patch.endFromNext !== undefined) {
+      if (patch.endFromNext && index === rows.length - 1) {
+        throw new Error('Det sista klippet har inget nästa klipp att ta sin slutbild från.')
+      }
+      ending = !!patch.endFromNext
+    }
 
-    const params = patch.params ? store.sanitizeParams(patch.params) : store.parseParams(row.params)
-    // A continuing segment always generates with the image-to-video sibling; keep the stored model honest.
-    if (continuing) params.model = imageToVideoVariant(params.model)
+    let params = patch.params ? store.sanitizeParams(patch.params) : store.parseParams(row.params)
+    const chosen = params.model
+    // A segment that takes a frame from a neighbour always generates with the image-to-video sibling; keep the
+    // stored model honest.
+    if (continuing || ending) params.model = imageToVideoVariant(params.model)
+    // Switching "end from the next clip" on makes the clip a keyframed one, as an end slot that gets the next clip's
+    // frame and "Gör om mellan grannarna" do (asKeyframed): a model that can take an end image, and no references,
+    // which image-to-video can't send (their tokens leave the prompt, so it can be generated as it stands). Later
+    // model choices are the user's own: one that can't take it is reported (clipProblem) rather than overruled.
+    if (ending && !row.end_from_next) params = asKeyframed(params, true, models)
+    // A clip moved to another model gets the options that model offers (when the list was fetched for a switch).
+    if (params.model !== chosen) params = fitToModel(params, models)
+    const notes = patch.notes !== undefined ? store.cleanNotes(patch.notes) : (row.notes ?? '')
 
     let selectedId = row.selected_generation_id
     let adoptId: string | undefined
@@ -385,10 +830,15 @@ export class SequenceService {
     }
 
     const take = selectedId ? db.getGeneration(selectedId) : undefined
+    // Another take selected: a side it was made to meet exactly starts untrimmed (see store.seamTrims).
+    const kept =
+      take && selectedId !== row.selected_generation_id
+        ? store.seamTrims({ ...row, continue_from_previous: continuing ? 1 : 0, end_from_next: ending ? 1 : 0 }, take)
+        : { trimStart: row.trim_start, trimEnd: row.trim_end }
     const editingStartOnly = patch.trimStart !== undefined && patch.trimEnd === undefined
     const { trimStart, trimEnd } = store.clampTrims(
-      patch.trimStart ?? row.trim_start,
-      patch.trimEnd ?? row.trim_end,
+      patch.trimStart ?? kept.trimStart,
+      patch.trimEnd ?? kept.trimEnd,
       take && store.takeLength(take),
       editingStartOnly ? 'start' : 'end'
     )
@@ -396,10 +846,19 @@ export class SequenceService {
     this.sql().transaction(() => {
       this.sql()
         .prepare(
-          `UPDATE segments SET params = ?, continue_from_previous = ?, selected_generation_id = ?,
-             trim_start = ?, trim_end = ? WHERE id = ?`
+          `UPDATE segments SET params = ?, continue_from_previous = ?, end_from_next = ?, notes = ?,
+             selected_generation_id = ?, trim_start = ?, trim_end = ? WHERE id = ?`
         )
-        .run(store.serializeParams(params), continuing ? 1 : 0, selectedId, trimStart, trimEnd, row.id)
+        .run(
+          store.serializeParams(params),
+          continuing ? 1 : 0,
+          ending ? 1 : 0,
+          notes,
+          selectedId,
+          trimStart,
+          trimEnd,
+          row.id
+        )
       if (adoptId) db.updateGeneration(adoptId, { segmentId: row.id })
     })()
 
@@ -438,6 +897,260 @@ export class SequenceService {
     order.splice(target, 0, row.id)
     this.sql().transaction(() => store.renumberSegments(order))()
     return this.changed(row.sequence_id)
+  }
+
+  // ── Keyframes ──────────────────────────────────────────────────────────────
+
+  /**
+   * Puts an image into the clip's start or end slot, or empties it (null). 'previous' / 'next' make the slot
+   * automatic (continue_from_previous / end_from_next); any image makes the slot explicit. A slot that gets
+   * something makes the clip a keyframed one (asKeyframed: image-to-video, references dropped).
+   */
+  async setSegmentImage(
+    segmentId: string,
+    slot: SegmentImageSlot,
+    source: SegmentImageSource | null,
+    caller: Caller = {}
+  ): Promise<Sequence> {
+    if (slot !== 'start' && slot !== 'end') throw new Error('Okänd bildplats: välj start- eller slutbild.')
+    const before = store.requireSegmentRow(segmentId)
+    this.refuseWhileRunning(before.sequence_id, caller)
+    const kind = source ? source.kind : null
+    if (kind === 'previous' && slot !== 'start') {
+      throw new Error('Föregående klipps sista bildruta kan bara bli startbild.')
+    }
+    if (kind === 'next' && slot !== 'end') throw new Error('Nästa klipps första bildruta kan bara bli slutbild.')
+    if (source && kind !== 'previous' && kind !== 'next') {
+      if (!['file', 'asset-image', 'still', 'frame'].includes(kind as string)) throw new Error('Okänd sorts bild.')
+    }
+    // Checked before a file is copied or a frame saved: neither should happen for a slot that can't take it.
+    this.checkAutomaticSlot(before, kind)
+
+    // Renames from here on (the sequence's folder, an asset's) move the picture while it is held below.
+    const mark = db.rewriteMark()
+    // May copy a file or extract a frame (seconds); the row is read again afterwards.
+    const picked = isExplicitImage(source) ? await this.slotImage(before, slot, source) : undefined
+    const models = source ? await this.modelList() : undefined
+
+    const row = store.requireSegmentRow(segmentId)
+    this.refuseWhileRunning(row.sequence_id, caller)
+    this.checkAutomaticSlot(row, kind)
+    const image = picked && followImage(picked, mark, slot)
+    let params = store.parseParams(row.params)
+    let continuing = !!row.continue_from_previous
+    let ending = !!row.end_from_next
+    if (slot === 'start') {
+      params.startImage = image
+      continuing = kind === 'previous'
+    } else {
+      params.endImage = image
+      ending = kind === 'next'
+    }
+    if (source) params = asKeyframed(params, ending || !!params.endImage, models)
+    this.writeKeyframes(row.id, params, continuing, ending)
+    return this.changed(row.sequence_id)
+  }
+
+  /** The automatic slot needs the neighbour it takes its frame from. */
+  private checkAutomaticSlot(row: store.SegmentRow, kind: SegmentImageSource['kind'] | null): void {
+    if (kind !== 'previous' && kind !== 'next') return
+    const rows = store.listSegmentRows(row.sequence_id)
+    const index = rows.findIndex((r) => r.id === row.id)
+    if (kind === 'previous' && index <= 0) {
+      throw new Error('Det första klippet har inget föregående klipp att ta sin startbild från.')
+    }
+    if (kind === 'next' && index >= rows.length - 1) {
+      throw new Error('Det sista klippet har inget nästa klipp att ta sin slutbild från.')
+    }
+  }
+
+  /**
+   * The image file a slot gets for an explicit source: a library photo or a still as it is, a file or a frame
+   * as a new still of the sequence.
+   */
+  private async slotImage(row: store.SegmentRow, slot: SegmentImageSlot, source: ExplicitImage): Promise<string> {
+    let path: string | undefined
+    switch (source.kind) {
+      case 'asset-image': {
+        const id = typeof source.imageId === 'string' ? source.imageId : ''
+        const stored = this.sql().prepare('SELECT file_path FROM asset_images WHERE id = ?').pluck().get(id) as
+          | string
+          | undefined
+        if (!stored) throw new Error('Bilden finns inte längre i biblioteket.')
+        path = fromStoredPath(stored)
+        break
+      }
+      case 'still': {
+        const still = store.getStillRow(source.stillId)
+        if (!still) throw new Error('Stillbilden finns inte längre.')
+        path = fromStoredPath(still.file_path)
+        break
+      }
+      case 'file': {
+        if (typeof source.path !== 'string' || !source.path) throw new Error('Välj en bild.')
+        if (!IMAGE_FILE.test(source.path)) throw new Error('Välj en bild i formatet JPG, PNG eller WebP.')
+        if (!existsSync(source.path) || !statSync(source.path).isFile()) {
+          throw new Error(`Bilden finns inte: ${basename(source.path)}.`)
+        }
+        path = (await this.requireStills().importFile(source.path, row.sequence_id)).path
+        break
+      }
+      case 'frame': {
+        if (typeof source.time !== 'number' || !Number.isFinite(source.time) || source.time < 0) {
+          throw new Error('Ogiltig tidpunkt för bildrutan.')
+        }
+        if (typeof source.generationId !== 'string' || !db.getGeneration(source.generationId)) {
+          throw new Error('Tagningen finns inte längre.')
+        }
+        path = (await this.requireStills().saveFrame(source.generationId, source.time, row.sequence_id)).path
+        break
+      }
+    }
+    if (!path || !existsSync(path)) {
+      throw new Error(`${slotName(slot)} finns inte längre${path ? `: ${basename(path)}` : ''}.`)
+    }
+    return path
+  }
+
+  private requireStills(): StillsAccess {
+    if (!this.deps.stills) throw new Error('Stillbilder kan inte sparas just nu.')
+    return this.deps.stills
+  }
+
+  /** The video model list, or undefined when it can't be had in time (offline, say). Never rejects. */
+  private async modelList(): Promise<VideoModel[] | undefined> {
+    const load = this.deps.models
+    if (!load) return undefined
+    let timer: NodeJS.Timeout | undefined
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), MODELS_TIMEOUT_MS)
+    })
+    try {
+      return await Promise.race([load().catch(() => undefined), timeout])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  private writeKeyframes(segmentId: string, params: GenerationParams, continuing: boolean, ending: boolean): void {
+    this.sql()
+      .prepare('UPDATE segments SET params = ?, continue_from_previous = ?, end_from_next = ? WHERE id = ?')
+      .run(store.serializeParams(params), continuing ? 1 : 0, ending ? 1 : 0, segmentId)
+  }
+
+  /**
+   * "Gör om mellan grannarna": the clip starts on the previous clip's last frame and ends on the next clip's
+   * first frame, with the end-capable image-to-video model of its family, so a new take fits between the
+   * neighbours without touching them. The first clip, which has no previous clip, keeps its own start image,
+   * or gets its current take's first shown frame (saved as a still); the last clip ends where it likes, or on
+   * its own end image. Free: only the clip's settings change.
+   */
+  async bridgeSegment(segmentId: string, caller: Caller = {}): Promise<Sequence> {
+    const before = store.requireSegmentRow(segmentId)
+    this.refuseWhileRunning(before.sequence_id, caller)
+    const beforeRows = store.listSegmentRows(before.sequence_id)
+    const beforeIndex = beforeRows.findIndex((r) => r.id === before.id)
+    if (beforeRows.length < 2) {
+      throw new Error('Klippet har inga grannar att göras om mellan. Lägg till fler klipp i sekvensen först.')
+    }
+    // Renames from here on (the sequence's folder) move the opening frame while it is held below.
+    const mark = db.rewriteMark()
+    // The first clip keeps where it starts: its own keyframe, or the first frame its take shows now.
+    let openingFrame: string | undefined
+    const ownStart = ownStartImage(store.parseParams(before.params))
+    if (beforeIndex === 0 && !(ownStart && existsSync(ownStart))) {
+      const take = store.selectedTake(before)
+      if (store.isUsable(take) && this.deps.stills) {
+        try {
+          // The first frame a clip trimmed there shows, as the export cuts (see frameStartAtOrAfter).
+          const time = await frameStartAtOrAfter(take.filePath, before.trim_start)
+          openingFrame = (await this.deps.stills.saveFrame(take.id, time, before.sequence_id)).path
+        } catch (err) {
+          // The preview then says the clip needs a start image; nothing is paid for without one.
+          console.warn(`Could not keep the opening frame of segment ${before.id}:`, err)
+        }
+      }
+    }
+    const models = await this.modelList()
+
+    // Read again after the awaits: the clip may have moved, and its neighbours with it.
+    const row = store.requireSegmentRow(segmentId)
+    this.refuseWhileRunning(row.sequence_id, caller)
+    const rows = store.listSegmentRows(row.sequence_id)
+    const index = rows.findIndex((r) => r.id === row.id)
+    if (rows.length < 2) {
+      throw new Error('Klippet har inga grannar att göras om mellan. Lägg till fler klipp i sekvensen först.')
+    }
+    const continuing = index > 0
+    const ending = index < rows.length - 1
+    const params = store.parseParams(row.params)
+    const ownEnd = kindOfModelId(params.model) === 'image-to-video' ? params.endImage : undefined
+    const followed = openingFrame && followImage(openingFrame, mark)
+    // One that went missing even so is left out: the preview then says the clip needs a start image.
+    const opening = followed && existsSync(followed) ? followed : undefined
+    const keyframes: GenerationParams = {
+      ...params,
+      startImage: continuing ? undefined : (opening ?? ownStartImage(params)),
+      endImage: ending ? undefined : ownEnd
+    }
+    this.writeKeyframes(row.id, asKeyframed(keyframes, ending || !!keyframes.endImage, models), continuing, ending)
+    return this.changed(row.sequence_id)
+  }
+
+  /**
+   * The start and end images the clip would be generated from right now: the neighbours' frames (extracted
+   * and cached as for a take; free) or its own keyframes, and why it can't be generated as it stands.
+   */
+  async previewSegmentFrames(segmentId: string): Promise<SegmentFramePreview> {
+    // A take that is being moved is briefly missing from its recorded path.
+    await this.filesSettled()
+    const row = store.requireSegmentRow(segmentId)
+    const rows = store.listSegmentRows(row.sequence_id)
+    const index = rows.findIndex((r) => r.id === row.id)
+    const links = linksOf(rows, index)
+    const params = takeParams(row, links)
+    const problems: string[] = []
+    const preview: SegmentFramePreview = { problems }
+    const note = (problem: string | undefined): void => {
+      if (problem && !problems.includes(problem)) problems.push(problem)
+    }
+
+    if (links.continuing) {
+      const previous = rows[index - 1]
+      if (!store.isUsable(store.selectedTake(previous))) note(`Klipp ${index} har ingen färdig vald tagning än.`)
+      else {
+        try {
+          const frame = await this.lastFrameOf(previous, index)
+          preview.start = { path: frame.path, source: 'previous', fromClip: index, time: frame.time }
+        } catch (err) {
+          note(`Startbilden kunde inte tas ut ur klipp ${index}: ${errorText(err)}`)
+        }
+      }
+    } else if (ownStartImage(params)) {
+      preview.start = { path: params.startImage!, source: 'image' }
+      if (!existsSync(params.startImage!)) note(`Startbilden finns inte längre: ${basename(params.startImage!)}.`)
+    }
+
+    if (links.ending) {
+      const next = rows[index + 1]
+      if (!store.isUsable(store.selectedTake(next))) note(`Klipp ${index + 2} har ingen färdig vald tagning än.`)
+      else {
+        try {
+          const frame = await this.firstFrameOf(next, index + 2)
+          preview.end = { path: frame.path, source: 'next', fromClip: index + 2, time: frame.time }
+        } catch (err) {
+          note(`Slutbilden kunde inte tas ut ur klipp ${index + 2}: ${errorText(err)}`)
+        }
+      }
+    } else if (params.endImage && kindOfModelId(params.model) === 'image-to-video') {
+      preview.end = { path: params.endImage, source: 'image' }
+      if (!existsSync(params.endImage)) note(`Slutbilden finns inte längre: ${basename(params.endImage)}.`)
+    }
+
+    // The frames stand in for the slots they fill when the clip's own settings are checked.
+    const startImage = preview.start?.path ?? params.startImage
+    note(clipProblem({ ...params, startImage, endImage: preview.end?.path ?? params.endImage }, links))
+    return preview
   }
 
   /** Queues a new take from the segment editor's button (or an approval, with its guard). */
@@ -479,16 +1192,20 @@ export class SequenceService {
     const row = store.requireSegmentRow(segmentId)
     const rows = store.listSegmentRows(row.sequence_id)
     const index = rows.findIndex((r) => r.id === row.id)
-    const continuing = index > 0 && !!row.continue_from_previous
+    const links = linksOf(rows, index)
     // Synchronously with the reads above: the take is built from exactly what the guard looked at.
     const refused = guard?.(row.id)
     if (refused) throw new Error(refused)
 
-    const params = takeParams(row, continuing)
-    // Before the frame grab and the quote: a clip that can't be sent as it stands costs nothing to refuse.
-    const problem = clipProblem(params, continuing)
+    const params = takeParams(row, links)
+    // Before the frame grabs and the quote: a clip that can't be sent as it stands costs nothing to refuse.
+    const problem = clipProblem(params, links)
     if (problem) throw new Error(problem)
-    if (continuing) params.startImage = await this.continuationFrame(rows[index - 1], index)
+    // Both neighbours are checked before either frame is extracted, so a missing take is reported at once.
+    if (links.continuing) this.requireNeighbourTake(rows[index - 1], index)
+    if (links.ending) this.requireNeighbourTake(rows[index + 1], index + 2)
+    if (links.continuing) params.startImage = (await this.lastFrameOf(rows[index - 1], index)).path
+    if (links.ending) params.endImage = (await this.firstFrameOf(rows[index + 1], index + 2)).path
 
     ensureImagesExist(paramsForSubmit(params))
     // Measures the voice clips before the quote: windows Venice would refuse cost nothing to refuse here.
@@ -543,17 +1260,26 @@ export class SequenceService {
     }
   }
 
-  /**
-   * The previous segment's selected take's last frame (or the frame where its end trim cuts),
-   * extracted once and cached per take and timestamp in the library's hidden frame folder.
-   */
-  private async continuationFrame(previous: store.SegmentRow, previousNumber: number): Promise<string> {
-    const take = store.selectedTake(previous)
-    if (!store.isUsable(take)) throw new Error(`Klipp ${previousNumber} behöver en färdig vald tagning först.`)
+  /** A neighbour a frame is taken from needs a finished selected take. */
+  private requireNeighbourTake(neighbour: store.SegmentRow, number: number): Generation & { filePath: string } {
+    const take = store.selectedTake(neighbour)
+    if (!store.isUsable(take)) throw new Error(`Klipp ${number} behöver en färdig vald tagning först.`)
+    return take
+  }
 
+  /**
+   * The previous segment's selected take's last frame (or the frame where its end trim cuts), extracted once and
+   * cached per take and timestamp in the library's hidden frame folder; `time` is where it is in that take.
+   */
+  private async lastFrameOf(
+    previous: store.SegmentRow,
+    previousNumber: number
+  ): Promise<{ path: string; time?: number }> {
+    const take = this.requireNeighbourTake(previous, previousNumber)
     let at: number | undefined
+    let length = take.videoDuration
     if (previous.trim_end > 0) {
-      const length = take.videoDuration ?? (await probe(take.filePath)).duration
+      length ??= (await probe(take.filePath)).duration
       // Computed exactly like the export's cut point (buildConcatClips), so both end on the same frame.
       at = Math.max(0, length - previous.trim_end)
     }
@@ -561,8 +1287,22 @@ export class SequenceService {
     // reads the trailing "-<ms>" (continuationMismatch), so it must stay last.
     const name = `${take.id}-${at === undefined ? 'last' : `v2-${Math.round(at * 1000)}`}.png`
     const framePath = join(framesDir(), name)
-    if (existsSync(framePath) && statSync(framePath).size > 0) return framePath
-    return extractFrame(take.filePath, framePath, at)
+    const time = at ?? length
+    if (existsSync(framePath) && statSync(framePath).size > 0) return { path: framePath, time }
+    return { path: await extractFrame(take.filePath, framePath, at), time }
+  }
+
+  /**
+   * The next segment's selected take's first shown frame: the first one at or after its start trim, the frame
+   * the export starts that clip on. Cached like lastFrameOf, as `<take id>-first-<ms>.png`, so another take or
+   * start trim gets a frame of its own (the renderer's endMismatch reads that name).
+   */
+  private async firstFrameOf(next: store.SegmentRow, nextNumber: number): Promise<{ path: string; time: number }> {
+    const take = this.requireNeighbourTake(next, nextNumber)
+    const at = Math.max(0, next.trim_start)
+    const framePath = join(framesDir(), `${take.id}-first-${Math.round(at * 1000)}.png`)
+    if (existsSync(framePath) && statSync(framePath).size > 0) return { path: framePath, time: at }
+    return { path: await extractFrameAtOrAfter(take.filePath, framePath, at), time: at }
   }
 
   // ── Take settling ──────────────────────────────────────────────────────────
@@ -825,9 +1565,10 @@ export class SequenceService {
         this.folderSyncFailed.set(row.id, row.name)
         throw err
       }
-      // Every take's path changed; the feed and the sequences showing them hold the old ones.
-      this.announceMoved(store.takeIdsForSegments(store.listSegmentRows(row.id).map((s) => s.id)))
-      this.deps.notify(row.id)
+      // Every take's path changed; the feed and the sequences showing them hold the old ones. So did the paths
+      // of its stills (and of any other still made from them), and of keyframes that clips of other sequences take
+      // from its Storyboard folder: every sequence refetches, or an editor open on one would save the old path back.
+      this.announceRewrites(store.takeIdsForSegments(store.listSegmentRows(row.id).map((s) => s.id)))
     }).catch((err: unknown) => console.warn(`Could not rename the folder of sequence ${sequenceId}:`, err))
   }
 
@@ -844,18 +1585,31 @@ export class SequenceService {
   // ── Generate all ───────────────────────────────────────────────────────────
 
   /**
-   * The clips "generate all" would pay for if it started now, in order: each one without a finished selected
-   * take that isn't already rendering or on its way to Venice, with what its take would be sent with and,
-   * when it can't be sent as it stands, why not. A run doesn't start while any of them has a problem.
+   * The clips "generate all" would pay for if it started now, in the order it would make them (see
+   * generationOrder): each one without a finished selected take that isn't already rendering or on its way to
+   * Venice, with what its take would be sent with and, when it can't be sent as it stands, why not. A run
+   * doesn't start while any of them has a problem.
    */
   missingClips(sequenceId: string): MissingClip[] {
     const rows = store.listSegmentRows(store.requireSequenceRow(sequenceId).id)
-    return rows.flatMap((row, index): MissingClip[] => {
-      if (store.isUsable(store.selectedTake(row)) || this.pendingTake(row) || this.submitting.has(row.id)) return []
-      const continuing = index > 0 && !!row.continue_from_previous
-      const params = takeParams(row, continuing)
-      const problem = clipProblem(params, continuing)
-      return [{ segmentId: row.id, clip: index + 1, params: paramsForSubmit(params), ...(problem ? { problem } : {}) }]
+    const { order, stuck } = generationOrder(rows)
+    const blocked = stuck.length ? waitingMessage(rows, stuck) : undefined
+    return [...order, ...stuck].flatMap((index): MissingClip[] => {
+      const row = rows[index]
+      if (this.pendingTake(row) || this.submitting.has(row.id)) return []
+      const links = linksOf(rows, index)
+      const params = takeParams(row, links)
+      const waiting = stuck.includes(index)
+      const problem = waiting ? blocked : clipProblem(params, links)
+      return [
+        {
+          segmentId: row.id,
+          clip: index + 1,
+          params: paramsForSubmit(params),
+          ...(problem ? { problem } : {}),
+          ...(waiting ? { waiting } : {})
+        }
+      ]
     })
   }
 
@@ -901,7 +1655,7 @@ export class SequenceService {
       if (!run.stopped && store.getSequenceRow(sequenceId)) {
         const blocked = this.missingClips(sequenceId).find((c) => c.problem)
         if (blocked) {
-          run.error = `Klipp ${blocked.clip}: ${blocked.problem}`
+          run.error = missingClipProblem(blocked)
           return
         }
       }
@@ -911,8 +1665,14 @@ export class SequenceService {
         await this.filesSettled()
         if (run.stopped || !store.getSequenceRow(sequenceId)) break
         const rows = store.listSegmentRows(sequenceId)
-        const index = rows.findIndex((r) => !store.isUsable(store.selectedTake(r)))
-        if (index < 0) break
+        // The next clip whose neighbours' frames are there (or will be: their takes come first).
+        const { order, stuck } = generationOrder(rows)
+        if (!order.length) {
+          // Clips changed while the run went on (it checked before it started) so that two wait on each other.
+          if (stuck.length) run.error = waitingMessage(rows, stuck)
+          break
+        }
+        const index = order[0]
         const row = rows[index]
         clip = index + 1
         segmentId = row.id
@@ -1155,6 +1915,13 @@ export function registerSequenceIpc(deps: Deps): SequenceService {
   ipcMain.handle('segments:move', (e, segmentId: string, toIndex: number) =>
     s.moveSegment(segmentId, toIndex, { byAgent: isAgentCall(e) })
   )
+  ipcMain.handle(
+    'segments:setImage',
+    (e, segmentId: string, slot: SegmentImageSlot, source: SegmentImageSource | null) =>
+      s.setSegmentImage(segmentId, slot, source ?? null, { byAgent: isAgentCall(e) })
+  )
+  ipcMain.handle('segments:previewFrames', (_e, segmentId: string) => s.previewSegmentFrames(segmentId))
+  ipcMain.handle('segments:bridge', (e, segmentId: string) => s.bridgeSegment(segmentId, { byAgent: isAgentCall(e) }))
   // The guard argument only ever comes from an approval in this process (see SubmitGuard).
   ipcMain.handle('segments:generate', (_e, segmentId: string, guard?: unknown) =>
     s.generateSegment(segmentId, asGuard(guard))

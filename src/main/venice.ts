@@ -1,7 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
-import { nativeImage } from 'electron'
 import {
   MAX_AUDIO_CLIP_SECONDS,
   MAX_REFERENCE_AUDIO_SECONDS,
@@ -12,6 +10,7 @@ import {
 import { audioToken } from '@shared/prompt-refs'
 import type { GenerationParams, ReferenceAudio, VideoModel, VideoModelType } from '@shared/types'
 import { encodeAudioClip, probeAudio } from './ffmpeg'
+import { decodeImageFile } from './input-image'
 
 const BASE_URL = 'https://api.venice.ai/api/v1'
 
@@ -239,14 +238,18 @@ async function encodeReferenceAudios(clips: readonly ReferenceAudio[]): Promise<
   )
 }
 
-/** Downscales large photos so request bodies stay reasonable, and returns a data URL. */
+/**
+ * Downscales large photos so request bodies stay reasonable, and returns a data URL. Decoded as Studio shows the
+ * picture (decodeImageFile): a phone photo turned upright by its EXIF orientation, since image-to-video takes the
+ * shape of its video from the start image, and a WebP through ffmpeg.
+ */
 async function imageToDataUrl(path: string): Promise<string> {
-  const img = nativeImage.createFromPath(path)
-  if (img.isEmpty()) {
-    // nativeImage can't decode e.g. webp; send the file as-is.
+  const { image: img, bytes } = await decodeImageFile(path)
+  if (!img) {
+    // Nothing here could decode it (a WebP without ffmpeg, say); send the file as-is.
     const ext = extname(path).slice(1).toLowerCase()
     const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`
-    return `data:${mime};base64,${(await readFile(path)).toString('base64')}`
+    return `data:${mime};base64,${bytes.toString('base64')}`
   }
   const { width, height } = img.getSize()
   const maxSide = 2048

@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { kindOfModelId } from '@shared/models'
+import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
 import type {
   ExportSummary,
   Generation,
@@ -44,7 +45,7 @@ import {
 } from '../studio'
 import { READ_ONLY, WRITE, defineTool, priceValue, type LabeledAudio, type LabeledImage, type ToolContext } from './kit'
 import { learningInfo, reviewInfo, takeOf } from './library'
-import { continues, isUsableTake, loadSequence, selectedTake } from './sequences'
+import { continues, endsOnNext, isUsableTake, loadSequence, selectedTake } from './sequences'
 
 // Looking back at results to write better prompts: agents look at finished clips, sequences and exported films
 // (frames, the references they were made from, their sound), record honest reviews, and distil what generalises
@@ -84,7 +85,7 @@ const CLIP_CHECKLIST = [
 
 const CONTINUITY_CHECKLIST = [
   'At every cut: do the same people look the same (face, hair, outfit) on both sides? (continuity-good / continuity-break)',
-  "A clip that continues from the previous one must start exactly where it ended: same position, place, light – compare the last frame before the cut with the first after it.",
+  "A clip that continues from the previous one must start exactly where it ended (and one made to end on the next clip's first frame must end exactly there): same position, place, light – compare the last frame before the cut with the first after it.",
   'Is the order of events readable, without jumps in time of day, weather or location that the story did not ask for?',
   'Review the takes behind a weak clip with review_generation and add_review; save_learning for patterns (e.g. what keeps an outfit stable across clips).'
 ]
@@ -242,10 +243,23 @@ interface FilmClip {
   segment_id: string
   generation_id: string
   continue_from_previous: boolean
+  end_from_next: boolean
   prompt: string
   /** Seconds in the film. */
   start: number
   end: number
+}
+
+/**
+ * Clip `i`'s take was made from the previous clip's last frame as it is now, so the export drops its first frame
+ * (sequence-export's repeatsPreviousFrame; a length not measured yet counts as a match).
+ */
+function repeatsPrevious(sequence: Sequence, i: number): boolean {
+  if (!continues(sequence, i)) return false
+  const take = selectedTake(sequence.segments[i])
+  const previous = sequence.segments[i - 1]
+  const previousTake = selectedTake(previous)
+  return !!take && !!previousTake && startsOnLastFrameOf(take, previousTake, previous.trimEnd)
 }
 
 /** Allowed difference between the film's length and the cut computed from the sequence as it is now. */
@@ -277,14 +291,26 @@ async function filmClips(exp: ExportSummary, length: number): Promise<{ clips?: 
     const takeLength = await videoLength(take.filePath!, take.videoDuration).catch(() => undefined)
     if (takeLength === undefined) return { note: `Clip ${i + 1}'s take could not be read, so the film's cuts are unknown.` }
     const continuing = continues(sequence, i)
-    // The export drops a continuing clip's first frame (it repeats the previous clip's last one); ~1/48 s.
-    const start = continuing ? Math.max(segment.trimStart, 0.02) : segment.trimStart
-    const span = Math.max(0, takeLength - segment.trimEnd - start)
+    const ending = endsOnNext(sequence, i)
+    // The export drops the first frame of a clip whose take was made from the previous clip's last one (it repeats
+    // that picture); ~1/48 s.
+    const start = repeatsPrevious(sequence, i) ? Math.max(segment.trimStart, 0.02) : segment.trimStart
+    // …and the last frame of a clip whose take was made to end on the next clip's first one, unless the next clip
+    // already drops that picture as its own first frame (sequence-export's dropsLastFrame); ~1.5 frames before the end.
+    const next = sequence.segments[i + 1]
+    const nextTake = next && selectedTake(next)
+    const nextDropsFirst = !!next && repeatsPrevious(sequence, i + 1) && !(next.trimStart > 0)
+    const end =
+      ending && nextTake && endsOnFirstFrameOf(take, nextTake, next.trimStart) && !nextDropsFirst
+        ? Math.min(takeLength - segment.trimEnd, takeLength - 0.06)
+        : takeLength - segment.trimEnd
+    const span = Math.max(0, end - start)
     clips.push({
       clip_number: i + 1,
       segment_id: segment.id,
       generation_id: take.id,
       continue_from_previous: continuing,
+      end_from_next: ending,
       prompt: segment.params.prompt,
       start: Math.round(at * 1000) / 1000,
       end: Math.round((at + span) * 1000) / 1000
@@ -326,8 +352,14 @@ function continuityHint(sequence: Sequence, i: number, index: AssetIndex): strin
     const missing = [usable(a) ? undefined : i + 1, usable(b) ? undefined : i + 2].filter(Boolean)
     return `${head} clip ${missing.join(' and ')} has no finished selected take yet, so this cut can't be judged.`
   }
+  if (continues(sequence, i + 1) && endsOnNext(sequence, i)) {
+    return `${head} the clips share the picture at the cut (clip ${i + 2} continues from clip ${i + 1}, which was made to end on clip ${i + 2}'s first frame) – the last frame of clip ${i + 1} and the first frame of clip ${i + 2} should be the same picture, and the motion should carry on.`
+  }
   if (continues(sequence, i + 1)) {
     return `${head} clip ${i + 2} continues from clip ${i + 1}'s last frame – the last frame of clip ${i + 1} and the first frame of clip ${i + 2} should be the same picture (people, position, place, light), and the motion should carry on.`
+  }
+  if (endsOnNext(sequence, i)) {
+    return `${head} clip ${i + 1} was made to end on clip ${i + 2}'s first frame – the last frame of clip ${i + 1} and the first frame of clip ${i + 2} should be the same picture (people, position, place, light), and the motion should carry on across the cut.`
   }
   const shared = [...assetNames(a, index)].filter((n) => assetNames(b, index).has(n))
   return shared.length
@@ -403,7 +435,8 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
               `${caption} – frame ${i + 1} of ${times.length}${i === times.length - 1 && times.length > 1 ? ' (last frame)' : ''}, clip ${seconds(length)} s`
           ))
         )
-        data.frame_times = times.map(seconds)
+        // To the millisecond: a time passed back (save_frame_as_still, get_frames) must give this very frame.
+        data.frame_times = times.map((t) => Math.round(t * 1000) / 1000)
       } catch (err) {
         data.frames_error = errorText(err)
       }
@@ -477,7 +510,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: {
           video_seconds: seconds(length),
-          times: clamped.map(seconds),
+          times: clamped,
           ...(clamped.length < times.length ? { note: 'Times past the end (or repeated) were merged into the last frame.' } : {}),
           frames_returned: images.length
         },
@@ -640,7 +673,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Review a sequence',
       description:
-        "Look at a sequence clip by clip to judge it as a film before (or after) exporting: for every clip its prompt, references, whether it continues from the previous one, and its selected take with rating and review count, plus frames_per_clip frames of that take from its first to its last frame (within the trims), captioned with the time in the take. Ends with continuity hints for every cut: what should match across it. Use review_generation for a closer look at one take and add_review / save_learning for what you find. Free; changes nothing.",
+        "Look at a sequence clip by clip to judge it as a film before (or after) exporting: for every clip its notes, prompt, references, whether it continues from the previous one or ends on the next one's first frame, and its selected take with rating and review count, plus frames_per_clip frames of that take from its first to its last frame (within the trims), captioned with the time in the take. Ends with continuity hints for every cut: what should match across it. Use review_generation for a closer look at one take and add_review / save_learning for what you find. Free; changes nothing.",
       input: {
         sequence_id: z.string(),
         frames_per_clip: z.number().int().min(2).max(6).default(3).describe('Frames per clip, first and last included (2–6). Default 3.')
@@ -662,7 +695,9 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         const info: Record<string, unknown> = {
           clip_number: i + 1,
           segment_id: segment.id,
+          ...(segment.notes?.trim() ? { notes: segment.notes } : {}),
           continue_from_previous: continues(sequence, i),
+          end_from_next: endsOnNext(sequence, i),
           prompt: segment.params.prompt,
           references: referenceSummary(segment.params, index)
         }

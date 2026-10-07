@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { NEEDS_CONSENT, type ApprovalRequest, type GenerationParams } from '@shared/types'
+import { NEEDS_CONSENT, type ApprovalImageRequest, type ApprovalRequest, type GenerationParams } from '@shared/types'
 import { errorText } from './studio'
 
 // Paid generations an agent asked for. Nothing reaches Venice until the user approves the request in Studio;
 // main then submits exactly what the request describes, through the same code paths as the window.
+
+/** What submitting an approved request led to: the generations it started, or the still it made. */
+export type ApprovalOutcome = string[] | { generationIds?: string[]; stillId?: string; notice?: string }
 
 /** How long a request waits for the user before it lapses. */
 export const APPROVAL_TTL_MS = 30 * 60 * 1000
@@ -19,6 +22,7 @@ export interface ApprovalPlan {
   client: string
   note?: string
   params?: GenerationParams
+  image?: ApprovalImageRequest
   sequenceId?: string
   sequenceName?: string
   segmentIds?: string[]
@@ -36,8 +40,8 @@ export interface ApprovalPlan {
   epoch?: number
   /** Throws (in Swedish) when what would be generated is no longer what the user is shown. Run before submitting. */
   verify?: () => void | Promise<void>
-  /** Submits it; resolves with the ids of the generations it started. */
-  execute: () => Promise<string[]>
+  /** Submits it; resolves with the ids of the generations it started (or the still it made). */
+  execute: () => Promise<ApprovalOutcome>
 }
 
 interface Entry {
@@ -95,6 +99,7 @@ export class ApprovalStore {
       note: plan.note?.trim() || undefined,
       kind: plan.kind,
       params: plan.params,
+      image: plan.image,
       sequenceId: plan.sequenceId,
       sequenceName: plan.sequenceName,
       segmentIds: plan.segmentIds,
@@ -143,8 +148,14 @@ export class ApprovalStore {
     entry.executing = true
     try {
       await entry.plan.verify?.()
-      const generationIds = await entry.plan.execute()
-      this.finish(entry, { status: 'approved', generationIds: generationIds.length ? generationIds : undefined })
+      const outcome = await entry.plan.execute()
+      const { generationIds, stillId, notice } = Array.isArray(outcome) ? { generationIds: outcome } : outcome
+      this.finish(entry, {
+        status: 'approved',
+        generationIds: generationIds?.length ? generationIds : undefined,
+        stillId,
+        notice
+      })
     } catch (err) {
       const message = errorText(err)
       // Stays pending: the user accepts the consent in the window and approves again.

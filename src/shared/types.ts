@@ -192,6 +192,11 @@ export interface Settings {
    * between references (en: "Anna (@Image1) wearing …", sv: "Anna (@Image1) i …") and what agents are told.
    */
   promptLanguage: PromptLanguage
+  /**
+   * "Säkert läge för bilder": stills are generated with Venice's `safe_mode`, which blurs adult content. On by
+   * default, like Venice's own default.
+   */
+  imageSafeMode: boolean
 }
 
 export type PromptLanguage = 'en' | 'sv'
@@ -375,16 +380,30 @@ export interface PromptInput {
 
 // ── Sequences ────────────────────────────────────────────────────────────────
 
-/** One shot in a sequence. Each generation for it is a "take"; one take is selected for the cut. */
+/**
+ * One shot in a sequence. Each generation for it is a "take"; one take is selected for the cut. In the
+ * Storyboard view it is a panel: its keyframes (start and end image) and notes next to the take.
+ */
 export interface Segment {
   id: string
   sequenceId: string
   /** 0-based order within the sequence. */
   position: number
-  /** Template for new takes. When continueFromPrevious is set, startImage is filled in at generation time. */
+  /**
+   * Template for new takes. startImage / endImage are the clip's keyframes when it has explicit ones; when
+   * continueFromPrevious / endFromNext is set, that image is filled in from the neighbour at generation time.
+   */
   params: GenerationParams
-  /** Use the previous segment's (trimmed) last frame as this segment's start image. */
+  /** Use the previous segment's (trimmed) last frame as this segment's start image. Never set on the first clip. */
   continueFromPrevious: boolean
+  /**
+   * "Slutbild från nästa klipp": use the next segment's first displayed frame (its selected take at its
+   * trimStart) as this segment's end image. Never set on the last clip. Together with continueFromPrevious the
+   * clip is regenerated "between its neighbours", which stay untouched.
+   */
+  endFromNext: boolean
+  /** "Vad händer": the user's or an agent's free-text notes about the shot (any language). */
+  notes: string
   selectedGenerationId?: string
   /** Seconds cut from the start / end of the selected take in the final cut. */
   trimStart: number
@@ -422,20 +441,123 @@ export interface SequenceSummary {
 export interface SegmentInit {
   /** Insert after this segment; default is at the end. */
   afterSegmentId?: string
-  /** Start from these params; default is the sequence defaults (or the previous segment's params). */
+  /**
+   * Start from these params; default is the sequence defaults (or the previous segment's settings, without its
+   * prompt and keyframes).
+   */
   params?: GenerationParams
   /** Use an existing generation as the first (selected) take; its params seed the segment. */
   fromGenerationId?: string
   continueFromPrevious?: boolean
+  /** Refused for a clip added at the end (it has no next clip). */
+  endFromNext?: boolean
+  notes?: string
 }
 
 export interface SegmentPatch {
   params?: GenerationParams
   continueFromPrevious?: boolean
+  /** Refused for the last clip. Turning it on switches the clip to an image-to-video model that takes an end image. */
+  endFromNext?: boolean
+  notes?: string
   trimStart?: number
   trimEnd?: number
   /** null clears the selection. */
   selectedGenerationId?: string | null
+}
+
+/** A clip's keyframe slots: the image it starts from and the one it ends on. */
+export type SegmentImageSlot = 'start' | 'end'
+
+/** What to put in a keyframe slot (StudioApi.setSegmentImage). */
+export type SegmentImageSource =
+  /** An image file from outside Studio (picked or dropped): copied into the sequence's Storyboard folder as a still. */
+  | { kind: 'file'; path: string }
+  /** A photo of a character, environment, outfit or pose (AssetImage.id), used where it is. */
+  | { kind: 'asset-image'; imageId: string }
+  /** A still of the sequence (generated, uploaded or a saved frame). */
+  | { kind: 'still'; stillId: string }
+  /** The frame of a take at `time` seconds: extracted and saved as a still (source 'frame'). */
+  | { kind: 'frame'; generationId: string; time: number }
+  /** Automatic, start slot only: the previous clip's last frame (sets continueFromPrevious). */
+  | { kind: 'previous' }
+  /** Automatic, end slot only: the next clip's first frame (sets endFromNext). */
+  | { kind: 'next' }
+
+/**
+ * The images a clip would be generated from right now (StudioApi.previewSegmentFrames): automatic frames are
+ * extracted from the neighbours' selected takes (cached, free), explicit keyframes are given as they are.
+ */
+export interface SegmentFramePreview {
+  start?: {
+    /** Absolute: the extracted frame (PNG) or the keyframe image. */
+    path: string
+    source: 'previous' | 'image'
+    /** 1-based number of the clip the frame comes from ('previous'). */
+    fromClip?: number
+    /** Seconds into that clip's selected take where the frame is (where its end trim cuts). */
+    time?: number
+  }
+  end?: {
+    path: string
+    source: 'next' | 'image'
+    /** 1-based number of the clip the frame comes from ('next'). */
+    fromClip?: number
+    /** Seconds into that clip's selected take (its trimStart). */
+    time?: number
+  }
+  /** Why the clip can't be generated as it stands (Swedish), e.g. "Klipp 4 har ingen färdig vald tagning än." */
+  problems: string[]
+}
+
+// ── Images and stills (storyboard keyframes) ─────────────────────────────────
+
+/** A Venice image model: text-to-image (`edit` false) or an edit model that combines reference images (`edit` true). */
+export interface ImageModel {
+  id: string
+  name: string
+  /** Takes reference images (Venice's inpaint/edit models with `combineImages`); false for text-to-image. */
+  edit: boolean
+  /** How many reference images an edit model takes (Venice's maxInputImages, 3 when it doesn't say). */
+  maxInputImages: number
+  aspectRatios: string[]
+  resolutions: string[]
+  qualities: string[]
+  privacy: string
+  offline: boolean
+}
+
+/** What a still is generated from ("Skapa bild…"). */
+export interface StillParams {
+  /** The sequence the still belongs to (it is saved in its Storyboard folder); none: Referensbilder. */
+  sequenceId?: string
+  prompt: string
+  /** Text-to-image models only. */
+  negativePrompt?: string
+  model: string
+  /** Absolute paths, in order; the first is the base image the edit model works from. Empty/none: text-to-image. */
+  referenceImages?: string[]
+  aspectRatio?: string
+  resolution?: string
+  quality?: string
+}
+
+/** An image of a sequence's storyboard: generated, uploaded, or a frame saved from a take. */
+export interface Still {
+  id: string
+  /** Undefined once its sequence is deleted (the still then lives in Referensbilder). */
+  sequenceId?: string
+  /** Absolute. */
+  path: string
+  source: 'generated' | 'upload' | 'frame'
+  /** For generated stills; '' otherwise. */
+  prompt: string
+  model?: string
+  /** How a generated still was made (reference paths absolute). */
+  params: Omit<StillParams, 'prompt' | 'model' | 'sequenceId'>
+  /** USD, for generated stills. */
+  costUsd?: number
+  createdAt: number
 }
 
 export interface ExportProgress {
@@ -495,6 +617,28 @@ export interface AgentActivity {
 
 export type ApprovalStatus = 'pending' | 'approved' | 'declined' | 'expired' | 'failed'
 
+/** One reference picture of an image request, in the order it is sent (the first is the base the model edits). */
+export interface ApprovalImageReference {
+  /** Absolute. */
+  path: string
+  /** What it is, in Swedish: "Anna (foto 2)", "Stillbild: woman on the pier …". */
+  label: string
+  /** A short name for a small tile: "Anna", "Stillbild". */
+  name?: string
+  /** The asset's kind (for the colour of its tile), or 'still' for a still of a sequence. */
+  kind?: AssetKind | 'still'
+}
+
+/** What an image request (kind 'image') asks for: one still for a storyboard, made with Venice's image models. */
+export interface ApprovalImageRequest {
+  /** Exactly what is generated (reference paths absolute, in the order they are sent). */
+  params: StillParams
+  modelName?: string
+  references: ApprovalImageReference[]
+  /** Where the still goes once it is made: a clip's start or end image (clipNumber as it was when asked). */
+  assignTo?: { segmentId: string; slot: SegmentImageSlot; clipNumber: number }
+}
+
 /**
  * A paid generation an agent asked for. Nothing is sent to Venice until the user approves it in Studio; main
  * then submits exactly what is described here (refusing if the clip changed meanwhile).
@@ -508,13 +652,22 @@ export interface ApprovalRequest {
   client: string
   /** The agent's note to the user, e.g. why it wants this generation. */
   note?: string
-  /** generation: the Generate form. segment: one sequence clip. generate-all: every clip still missing a take. */
-  kind: 'generation' | 'segment' | 'generate-all'
+  /**
+   * generation: the Generate form. segment: one sequence clip. generate-all: every clip still missing a take.
+   * image: one still for a storyboard ("Skapa bild").
+   */
+  kind: 'generation' | 'segment' | 'generate-all' | 'image'
   /**
    * What will be generated: the form for 'generation', the clip's settings for 'segment' (a clip continuing
    * from the previous one gets that clip's last frame as its start image when it is generated).
    */
   params?: GenerationParams
+  /** 'image': what will be made. */
+  image?: ApprovalImageRequest
+  /** 'image', once approved: the still it made. */
+  stillId?: string
+  /** Approved, but something after the paid step didn't work out (Swedish), e.g. the clip was gone. */
+  notice?: string
   sequenceId?: string
   sequenceName?: string
   /** 'segment': the clip; 'generate-all': the clips that will be generated, in order. */
@@ -658,6 +811,10 @@ export interface StudioApi {
   testApiKey(): Promise<{ ok: boolean; message: string }>
   ffmpegStatus(): Promise<FfmpegStatus>
   setPromptLanguage(lang: PromptLanguage): Promise<void>
+  /** "Säkert läge för bilder" (Venice blurs adult content in generated stills while it is on). */
+  setImageSafeMode(on: boolean): Promise<void>
+  /** Fires after a setting that several views show changed in one of them (so far "Säkert läge för bilder"). */
+  onSettingsChange(cb: () => void): () => void
 
   // Generation
   listModels(force?: boolean): Promise<VideoModel[]>
@@ -750,6 +907,39 @@ export interface StudioApi {
   /** Fires with the sequence id whenever a sequence, its segments or their takes change. */
   onSequenceChange(cb: (sequenceId: string) => void): () => void
   onExportProgress(cb: (p: ExportProgress) => void): () => void
+
+  // Storyboard: keyframes and "Gör om mellan grannarna"
+  /**
+   * Puts an image in a clip's start or end slot (null empties it). An image switches the clip to the
+   * image-to-video model of its family (one that takes an end image for the end slot); references it had are
+   * dropped, since image-to-video can't take them. 'previous' / 'next' set continueFromPrevious / endFromNext.
+   * Rejects with a Swedish message (the first clip has no previous clip, a file isn't an image, …).
+   */
+  setSegmentImage(segmentId: string, slot: SegmentImageSlot, source: SegmentImageSource | null): Promise<Sequence>
+  /** The start and end images the clip would be generated from right now, with what stands in the way. Free. */
+  previewSegmentFrames(segmentId: string): Promise<SegmentFramePreview>
+  /**
+   * "Gör om mellan grannarna": sets the clip to start on the previous clip's last frame and end on the next
+   * clip's first frame (whichever neighbours it has) with the end-capable image-to-video model of its family,
+   * keeping its prompt, duration and audio. Free: it only configures the clip; generating is generateSegment.
+   */
+  bridgeSegment(segmentId: string): Promise<Sequence>
+
+  // Images and stills
+  /** Venice's text-to-image and edit models. */
+  listImageModels(): Promise<ImageModel[]>
+  /** USD for one still; undefined when the model's pricing doesn't say. */
+  quoteStill(params: StillParams): Promise<number | undefined>
+  /** Generates a still (paid; the UI confirms with the price) and saves it with the sequence. */
+  generateStill(params: StillParams): Promise<Still>
+  /** The sequence's stills, or every still when sequenceId is omitted; newest first. */
+  listStills(sequenceId?: string): Promise<Still[]>
+  /** Moves the still to the Trash (or to Referensbilder while clips or generations still use it). */
+  deleteStill(id: string): Promise<void>
+  /** Saves the frame of a take at `time` seconds as a still (source 'frame'). Free. */
+  saveFrameAsStill(generationId: string, time: number, sequenceId?: string): Promise<Still>
+  /** Fires with the sequence id (undefined: any or all) when stills are added, removed or moved. */
+  onStillsChange(cb: (sequenceId?: string) => void): () => void
 
   // Library folder
   libraryStatus(): Promise<LibraryStatus>
