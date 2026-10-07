@@ -11,7 +11,8 @@ export const LAST_SEQUENCE_KEY = 'sequences:lastOpen'
 export const SELECTED_ASSET_KEYS: Record<AssetKind, string> = {
   character: 'characters:selected',
   environment: 'environments:selected',
-  outfit: 'outfits:selected'
+  outfit: 'outfits:selected',
+  pose: 'poses:selected'
 }
 
 function trimSlash(path: string): string {
@@ -136,10 +137,10 @@ export function followAssetImages<T extends Partial<GenerationParams>>(
 }
 
 /**
- * Pictures from outside the library are copied into Referensbilder when a generation is submitted (`sent` is
- * what was submitted, `stored` what the generation recorded). Returns `current` using those copies instead
- * of the originals, so the form keeps working when the originals are moved or deleted; undefined when no
- * picture was copied.
+ * Pictures and audio clips from outside the library are copied into Referensbilder when a generation is
+ * submitted (`sent` is what was submitted, `stored` what the generation recorded). Returns `current` using those
+ * copies instead of the originals, so the form keeps working when the originals are moved or deleted; undefined
+ * when nothing was copied. Audio clips keep their windows.
  */
 export function withImportedCopies<T extends Partial<GenerationParams>>(
   current: T,
@@ -153,6 +154,7 @@ export function withImportedCopies<T extends Partial<GenerationParams>>(
   pair(sent.startImage, stored.startImage)
   pair(sent.endImage, stored.endImage)
   sent.referenceImages?.forEach((r, i) => pair(r, stored.referenceImages?.[i]))
+  sent.referenceAudios?.forEach((a, i) => pair(a?.path, stored.referenceAudios?.[i]?.path))
   if (!copies.size) return undefined
   let changed = false
   const next = mapParamImages(current, (path) => {
@@ -161,6 +163,12 @@ export function withImportedCopies<T extends Partial<GenerationParams>>(
     changed = true
     return copy
   })
+  if (current.referenceAudios?.some((a) => a?.path && copies.has(a.path))) {
+    changed = true
+    next.referenceAudios = current.referenceAudios.map((a) =>
+      a?.path && copies.has(a.path) ? { ...a, path: copies.get(a.path)! } : a
+    )
+  }
   return changed ? ({ ...current, ...next } as T) : undefined
 }
 
@@ -195,6 +203,7 @@ const LIBRARY_FOLDERS = new Set([
   'Karaktärer',
   'Miljöer',
   'Kläder',
+  'Poser',
   'Referensbilder',
   'Genereringar',
   'Sekvenser',
@@ -259,6 +268,14 @@ export function rememberAfterSwitch(
   try {
     if (snapshot) {
       const next = mapParamImages(snapshot, (p) => remapPath(p, m, imagesById))
+      // Voice and sound clips live in asset folders too: they follow a moved library and are dropped when
+      // the library they belong to is left behind (an old-layout library never had any).
+      if (snapshot.referenceAudios) {
+        next.referenceAudios = snapshot.referenceAudios.flatMap((a) => {
+          const path = a?.path ? remapPath(a.path, m) : undefined
+          return path ? [{ ...a, path }] : []
+        })
+      }
       localStorage.setItem(LAST_PARAMS_KEY, JSON.stringify(next))
     }
     // Selections are ids in the old library's database; a moved library keeps them.

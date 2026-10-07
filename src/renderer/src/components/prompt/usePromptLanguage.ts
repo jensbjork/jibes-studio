@@ -31,7 +31,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function usePromptLanguage(): PromptLanguage {
-  const language = useSyncExternalStore(subscribe, () => current)
+  const language = useSyncExternalStore(subscribe, () => current, () => current)
   useEffect(() => {
     refreshPromptLanguage()
     window.addEventListener('focus', refreshPromptLanguage)

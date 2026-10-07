@@ -1,6 +1,6 @@
 import { useRef, useState, type DragEvent } from 'react'
 import type { Asset, AssetKind } from '@shared/types'
-import { ASSET_COPY } from '../../lib/assets'
+import { ASSET_COPY, assetAudio } from '../../lib/assets'
 import AssetAvatar from './AssetAvatar'
 import { droppedPaths, imageCountLabel, isFileDrag } from './imageUtils'
 
@@ -21,8 +21,12 @@ interface Props {
   onSelect: (id: string) => void
   onCreate: () => void
   creating: boolean
-  adding: Record<string, number>
-  onDropImages: (assetId: string, paths: string[]) => void
+  /** Photos being copied in, per asset id. */
+  addingImages: Record<string, number>
+  /** Sound clips being copied in, per asset id. */
+  addingAudio: Record<string, number>
+  /** Files from Finder dropped on a row: photos and (for kinds that have them) sound clips. */
+  onDropFiles: (assetId: string, paths: string[]) => void
 }
 
 function matches(a: Asset, q: string): boolean {
@@ -40,8 +44,9 @@ export default function AssetList({
   onSelect,
   onCreate,
   creating,
-  adding,
-  onDropImages
+  addingImages,
+  addingAudio,
+  onDropFiles
 }: Props) {
   const copy = ASSET_COPY[kind]
   const q = query.trim().toLocaleLowerCase('sv')
@@ -90,9 +95,10 @@ export default function AssetList({
                   asset={a}
                   outfitName={outfitNames?.get(a.id)}
                   active={a.id === selectedId}
-                  adding={adding[a.id] ?? 0}
+                  addingImages={addingImages[a.id] ?? 0}
+                  addingAudio={addingAudio[a.id] ?? 0}
                   onSelect={() => onSelect(a.id)}
-                  onDropImages={(paths) => onDropImages(a.id, paths)}
+                  onDropFiles={(paths) => onDropFiles(a.id, paths)}
                 />
               </li>
             ))}
@@ -107,13 +113,31 @@ interface ItemProps {
   asset: Asset
   outfitName?: string
   active: boolean
-  adding: number
+  addingImages: number
+  addingAudio: number
   onSelect: () => void
-  onDropImages: (paths: string[]) => void
+  onDropFiles: (paths: string[]) => void
 }
 
-/** One row; also a drop target that adds Finder images to that asset. */
-function AssetListItem({ asset: a, outfitName, active, adding, onSelect, onDropImages }: ItemProps) {
+/** "3 bilder · röst · i Röd klänning": what the asset has, short enough for the list column. */
+function summary(a: Asset, outfitName: string | undefined): string {
+  const parts = [imageCountLabel(a.images.length)]
+  const audio = ASSET_COPY[a.kind].audio
+  if (audio && assetAudio(a).length) parts.push(audio.listLabel)
+  if (outfitName) parts.push(`i ${outfitName}`)
+  return parts.join(' · ')
+}
+
+/** One row; also a drop target that adds Finder images (and sound clips) to that asset. */
+function AssetListItem({
+  asset: a,
+  outfitName,
+  active,
+  addingImages,
+  addingAudio,
+  onSelect,
+  onDropFiles
+}: ItemProps) {
   const [over, setOver] = useState(false)
   const depth = useRef(0)
 
@@ -138,7 +162,7 @@ function AssetListItem({ asset: a, outfitName, active, adding, onSelect, onDropI
     depth.current = 0
     setOver(false)
     const paths = droppedPaths(e)
-    if (paths.length) onDropImages(paths)
+    if (paths.length) onDropFiles(paths)
   }
 
   return (
@@ -158,9 +182,11 @@ function AssetListItem({ asset: a, outfitName, active, adding, onSelect, onDropI
         <div className="truncate text-[11px] text-muted">
           {over
             ? 'Släpp för att lägga till'
-            : adding
+            : addingImages
               ? 'Lägger till bilder…'
-              : `${imageCountLabel(a.images.length)}${outfitName ? ` · i ${outfitName}` : ''}`}
+              : addingAudio
+                ? 'Lägger till ljud…'
+                : summary(a, outfitName)}
         </div>
       </div>
     </button>

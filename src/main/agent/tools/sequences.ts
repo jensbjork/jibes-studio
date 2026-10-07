@@ -17,6 +17,7 @@ import { callService } from '../local-ipc'
 import {
   AssetIndex,
   asGenerated,
+  audioTarget,
   blockingProblem,
   canonical,
   checkOutputOptions,
@@ -32,13 +33,15 @@ import {
   promptIssues,
   q,
   readableRunError,
-  referencePaths,
   requireLibrary,
   requireModel,
+  resolveReferences,
+  takesAudio,
   usableModels,
+  type AudioInfo,
   type ReferenceItem
 } from '../studio'
-import { READ_ONLY, WRITE, defineTool, type LabeledImage, type ToolContext } from './kit'
+import { READ_ONLY, WRITE, defineTool, referenceItem, type LabeledImage, type ToolContext } from './kit'
 
 // Sequences: films made of clips (segments), each with its own prompt and references and any number of takes.
 // These tools go straight to the sequence service; the window follows through its usual change events.
@@ -160,6 +163,14 @@ interface ClipInput {
   audio?: boolean
 }
 
+interface ClipParams {
+  params: GenerationParams
+  /** What was decided on the agent's behalf (Swedish), e.g. a voice left out. */
+  notes: string[]
+  /** Audio asked for that didn't fit the model's limits. */
+  skippedAudio: (AudioInfo & { reason: string })[]
+}
+
 /**
  * The params a clip gets from `base` (its current params, or what a new clip starts from) and the agent's
  * changes, checked the way Studio would generate it. Throws (in Swedish) when the clip couldn't be generated
@@ -171,10 +182,10 @@ async function clipParams(
   continuing: boolean,
   assets: AssetIndex,
   clipNumber: number
-): Promise<GenerationParams> {
+): Promise<ClipParams> {
   if (continuing && input.references?.length) {
     throw new Error(
-      `Klipp ${clipNumber} fortsätter från föregående klipp: det genereras från dess sista bildruta och tar inga referensbilder. Ta bort references eller sätt continue_from_previous till false.`
+      `Klipp ${clipNumber} fortsätter från föregående klipp: det genereras från dess sista bildruta och tar inga referenser. Ta bort references eller sätt continue_from_previous till false.`
     )
   }
   let models: VideoModel[] | undefined
@@ -188,7 +199,7 @@ async function clipParams(
     modelId = modelForMode(await getModels(), modelId, 'reference-to-video')
   } else if (input.references?.length && kindOfModelId(modelId) !== 'reference-to-video') {
     if (input.model) {
-      throw new Error(`Referensbilder används bara i läget reference-to-video, men ${modelId} är ${kindOfModelId(modelId)}.`)
+      throw new Error(`Referenser används bara i läget reference-to-video, men ${modelId} är ${kindOfModelId(modelId)}.`)
     }
     modelId = modelForMode(await getModels(), modelId, 'reference-to-video')
   }
@@ -226,14 +237,24 @@ async function clipParams(
     }
   }
 
+  const notes: string[] = []
+  let skippedAudio: ClipParams['skippedAudio'] = []
   if (continuing) {
     // The start frame comes from the previous clip when the take is generated.
     params.startImage = undefined
     params.endImage = undefined
     params.referenceImages = undefined
+    params.referenceAudios = undefined
   } else if (input.references !== undefined) {
-    const paths = referencePaths(input.references, assets)
-    params.referenceImages = paths.length ? paths : undefined
+    const resolved = resolveReferences(input.references, assets, audioTarget(modelId, models))
+    params.referenceImages = resolved.paths.length ? resolved.paths : undefined
+    params.referenceAudios = resolved.audios.length ? resolved.audios : undefined
+    notes.push(...resolved.notes)
+    skippedAudio = resolved.skippedAudio
+  } else if (params.referenceAudios?.length && !takesAudio(modelId, models)) {
+    // Kept references meet a model that takes no audio: the voices would only be refused at generation.
+    params.referenceAudios = undefined
+    notes.push('Ljudreferenserna togs bort: modellen tar inte emot ljudreferenser.')
   }
   if (kindOfModelId(modelId) === 'reference-to-video') {
     const max = maxReferenceImages(modelId)
@@ -243,21 +264,26 @@ async function clipParams(
 
   const problem = blockingProblem(asGenerated(params, continuing), continuing)
   if (problem) throw new Error(`Klipp ${clipNumber}: ${problem}`)
-  return params
+  return { params, notes, skippedAudio }
+}
+
+/** The extras an agent should hear about after saving a clip. */
+function clipNotes(result: ClipParams): Record<string, unknown> {
+  return {
+    ...(result.skippedAudio.length ? { not_added_audio: result.skippedAudio } : {}),
+    ...(result.notes.length ? { notes: result.notes } : {})
+  }
 }
 
 const clipFields = {
   prompt: z.string().describe("What happens in the clip (see the guide). Tokens must match this clip's own references."),
   negative_prompt: z.string().optional().describe('Empty string clears it.'),
   references: z
-    .array(
-      z.object({
-        asset_id: z.string(),
-        image_ids: z.array(z.string()).optional().describe("Only these photos, in this order. All the asset's photos when left out.")
-      })
-    )
+    .array(referenceItem)
     .optional()
-    .describe("The clip's own reference images, in @Image order (replaces the clip's references). Not allowed on a continuing clip."),
+    .describe(
+      "The clip's own references, like set_references items: photos in @Image order and audio (characters' voices by default, with a model that takes audio) in @Audio order. Replaces the clip's references. Not allowed on a continuing clip."
+    ),
   model: z.string().optional().describe('A model id from list_models. A continuing clip always uses the image-to-video model of that family.'),
   duration: z.string().optional().describe('e.g. "8s".'),
   resolution: z.string().optional(),
@@ -306,7 +332,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Get sequence',
       description:
-        "One sequence with its clips in order. Each clip has its prompt and settings, its own reference images as a token map, whether it continues from the previous clip, validation issues (ready: false means it can't be generated as it is), and its selected take (status, error). With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut.",
+        "One sequence with its clips in order. Each clip has its prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), whether it continues from the previous clip, validation issues (ready: false means it can't be generated as it is), and its selected take (status, error). With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut.",
       input: {
         sequence_id: z.string(),
         include_thumbnails: z.boolean().default(true)
@@ -356,7 +382,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Add clip to sequence',
       description:
-        "Adds a clip to a sequence, at the end or after after_segment_id. Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass no references, otherwise false. A continuing clip starts from the previous clip's last frame: it is image-to-video and takes no references or tokens – describe what happens next. A clip that doesn't continue is a new shot: give it references (its own @Image1… numbering) unless it should reuse the previous clip's. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
+        "Adds a clip to a sequence, at the end or after after_segment_id. Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass no references, otherwise false. A continuing clip starts from the previous clip's last frame: it is image-to-video and takes no references or tokens – describe what happens next. A clip that doesn't continue is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
       input: {
         sequence_id: z.string(),
         after_segment_id: z.string().optional().describe('Insert after this clip; at the end when left out.'),
@@ -382,17 +408,21 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         ? { ...previous.params, prompt: '' }
         : { ...DEFAULT_PARAMS, ...sequence.defaults, prompt: '' }
       const clipNumber = afterIndex + 2
-      const params = await clipParams(base, input, continuing, assets, clipNumber)
+      const result = await clipParams(base, input, continuing, assets, clipNumber)
 
       const before = new Set(sequence.segments.map((s) => s.id))
       const updated = await callService<Sequence>('segments:add', sequence.id, {
         afterSegmentId: previous?.id,
-        params,
+        params: result.params,
         continueFromPrevious: continuing
       })
       const index = updated.segments.findIndex((s) => !before.has(s.id))
       return {
-        data: { ...(index >= 0 ? clipInfo(updated, index, assets) : {}), clip_count: updated.segments.length },
+        data: {
+          ...(index >= 0 ? clipInfo(updated, index, assets) : {}),
+          clip_count: updated.segments.length,
+          ...clipNotes(result)
+        },
         summary: `lade till klipp ${index + 1} i ${q(updated.name)}`
       }
     }
@@ -405,7 +435,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update clip',
       description:
-        "Changes a clip: only the fields you pass change. references replaces the clip's reference images (in @Image order). Switching continue_from_previous off makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model); switching it on drops its references. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
+        "Changes a clip: only the fields you pass change. references replaces the clip's references (photos in @Image order, audio in @Audio order). Switching continue_from_previous off makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model); switching it on drops its references. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
       input: {
         segment_id: z.string(),
         ...clipFields,
@@ -422,7 +452,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         throw new Error('Det första klippet kan inte fortsätta från ett föregående klipp.')
       }
       const continuing = continue_from_previous ?? continues(sequence, index)
-      const params = await clipParams(segment.params, input, continuing, assets, index + 1)
+      const result = await clipParams(segment.params, input, continuing, assets, index + 1)
       // The new params are built on the clip as it was read; whatever the user saved meanwhile would be written
       // over without a word. Compared right before the write (nothing can come in between).
       const row = store.getSegmentRow(segment.id)
@@ -436,12 +466,12 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         )
       }
       const updated = await callService<Sequence>('segments:update', segment.id, {
-        params,
+        params: result.params,
         continueFromPrevious: continuing
       })
       const at = updated.segments.findIndex((s) => s.id === segment.id)
       return {
-        data: at >= 0 ? clipInfo(updated, at, assets) : { segment_id },
+        data: { ...(at >= 0 ? clipInfo(updated, at, assets) : { segment_id }), ...clipNotes(result) },
         summary: `ändrade klipp ${index + 1} i ${q(sequence.name)}`
       }
     }

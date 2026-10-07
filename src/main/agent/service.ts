@@ -26,6 +26,8 @@ const TAILSCALE_CHECK_MS = 30_000
 const ACTIVITY_STATUS_MS = 15_000
 /** A MagicDNS name that couldn't be found is looked up again after this long. */
 const DNS_RETRY_MS = 60_000
+/** The MCP protocol version that introduced audio content in tool results. */
+const AUDIO_CONTENT_SINCE = '2025-03-26'
 
 export interface AgentServiceOptions {
   /** Sends an event to every window. */
@@ -267,6 +269,8 @@ export class AgentService {
       approvals: this.approvals,
       promptLanguage: getPromptLanguage,
       clientName: () => session.name,
+      // Audio content came with protocol 2025-03-26; older clients would reject a result that has it.
+      audioContent: () => !session.protocolVersion || session.protocolVersion >= AUDIO_CONTENT_SINCE,
       // A session that ended (or a server that was stopped) asks the user for nothing more.
       connected: () => !session.closed && !!this.server,
       record: ({ readOnly, ...entry }) => {

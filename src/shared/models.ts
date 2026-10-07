@@ -1,6 +1,6 @@
 // Model-related defaults and helpers shared by the main process and the renderer.
 
-import type { GenerationParams, VideoModel } from './types'
+import type { GenerationParams, ReferenceAudio, VideoModel } from './types'
 
 export type Kind = 'text-to-video' | 'image-to-video' | 'reference-to-video'
 
@@ -36,13 +36,21 @@ export const DEFAULT_PARAMS: GenerationParams = {
 // no kind at all (e.g. runway-gen4-5 is image-to-video), so the id alone would call them text-to-video and
 // the form, the submit and the continuation logic would each disagree about what the model needs.
 const knownKinds = new Map<string, Kind>()
+// Which models take reference audio (VideoModel.audioInput), from the same list: the id says nothing about it.
+const knownAudioInput = new Map<string, boolean>()
 
-/** Records the kinds from a fetched model list. Main and renderer each call this when they get the list. */
-export function rememberModelKinds(models: readonly Pick<VideoModel, 'id' | 'kind'>[]): void {
+/**
+ * Records the kinds (and whether each model takes reference audio) from a fetched model list. Main and
+ * renderer each call this when they get the list.
+ */
+export function rememberModelKinds(
+  models: readonly (Pick<VideoModel, 'id' | 'kind'> & Partial<Pick<VideoModel, 'audioInput'>>)[]
+): void {
   for (const m of models) {
     if (m.kind === 'text-to-video' || m.kind === 'image-to-video' || m.kind === 'reference-to-video') {
       knownKinds.set(m.id, m.kind)
     }
+    if (typeof m.audioInput === 'boolean') knownAudioInput.set(m.id, m.audioInput)
   }
 }
 
@@ -88,15 +96,92 @@ export function maxReferenceImages(modelId: string): number {
   return 9
 }
 
-/** Drops image inputs the model's kind doesn't use, so stale form state isn't sent. */
+// ── Reference audio ───────────────────────────────────────────────────────────
+// Venice takes `reference_audio_urls` with reference-to-video models whose constraints say `audio_input`:
+// clips that steer a voice's timbre, pacing and tone (or a soundscape), never alone, always with at least one
+// reference image. The prompt names them @Audio1, @Audio2 … like the pictures.
+
+/** Venice accepts at most this many seconds of reference audio per generation, all clips together. */
+export const MAX_REFERENCE_AUDIO_SECONDS = 15
+/** The shortest reference audio clip Venice accepts, in seconds. */
+export const MIN_AUDIO_CLIP_SECONDS = 2
+/** The longest reference audio clip Venice accepts, in seconds. */
+export const MAX_AUDIO_CLIP_SECONDS = 15
+/** How much of a clip is sent when nothing else is chosen: room for a second voice within the 15 s. */
+export const DEFAULT_AUDIO_CLIP_SECONDS = 10
+
+/**
+ * Whether a reference window is too short for Venice to take (the prompt check's rule, with a margin for slider
+ * values and sums). Such a clip can never be sent, so it is never added on anyone's behalf: a character's voice
+ * from a recording under 2 s stays out of the form instead of blocking it.
+ */
+export function isAudioClipTooShort(length: number): boolean {
+  return length < MIN_AUDIO_CLIP_SECONDS - 0.005
+}
+
+/** How many reference audio clips a model takes. Seedance takes 3; later clips are not sent. */
+export function maxReferenceAudios(_modelId: string): number {
+  return 3
+}
+
+/**
+ * Whether the model is used with reference audio: a reference-to-video model whose Venice constraints say
+ * `audio_input`. (Some text- and image-to-video models take audio too, as a soundtrack to animate to, which
+ * Studio doesn't offer.) By id it answers from the fetched model list (rememberModelKinds); until that has
+ * arrived, from the families known to take it: Seedance's and MiniMax's reference-to-video models.
+ */
+export function supportsAudioInput(model: Pick<VideoModel, 'id' | 'kind' | 'audioInput'> | string): boolean {
+  if (typeof model !== 'string') return model.kind === 'reference-to-video' && !!model.audioInput
+  if (kindOfModelId(model) !== 'reference-to-video') return false
+  return knownAudioInput.get(model) ?? (model.startsWith('seedance-') || model.startsWith('minimax-'))
+}
+
+/** Reference audio clips from the window, an agent or stored JSON, without malformed entries; undefined when none. */
+export function sanitizeReferenceAudios(input: unknown): ReferenceAudio[] | undefined {
+  if (!Array.isArray(input)) return undefined
+  const out: ReferenceAudio[] = []
+  for (const item of input) {
+    if (!item || typeof item !== 'object') continue
+    const { path, start, length } = item as Partial<Record<keyof ReferenceAudio, unknown>>
+    if (typeof path !== 'string' || !path) continue
+    const clip: ReferenceAudio = { path }
+    if (typeof start === 'number' && Number.isFinite(start) && start >= 0) clip.start = start
+    if (typeof length === 'number' && Number.isFinite(length) && length > 0) clip.length = length
+    out.push(clip)
+  }
+  return out.length ? out : undefined
+}
+
+/**
+ * The part of the file a reference audio clip sends, in seconds: from `start` (default 0) for `length`
+ * (default DEFAULT_AUDIO_CLIP_SECONDS), cut short where the file ends when its duration is known. Not clamped to
+ * Venice's 2–15 s: a window outside it is reported by the prompt checks rather than quietly changed.
+ */
+export function referenceAudioWindow(clip: ReferenceAudio, duration?: number): { start: number; length: number } {
+  const start = typeof clip.start === 'number' && Number.isFinite(clip.start) && clip.start > 0 ? clip.start : 0
+  const known = typeof duration === 'number' && Number.isFinite(duration) ? Math.max(0, duration - start) : undefined
+  const asked =
+    typeof clip.length === 'number' && Number.isFinite(clip.length) && clip.length > 0
+      ? clip.length
+      : Math.min(known ?? DEFAULT_AUDIO_CLIP_SECONDS, DEFAULT_AUDIO_CLIP_SECONDS)
+  return { start, length: known === undefined ? asked : Math.min(asked, known) }
+}
+
+/**
+ * Drops inputs the model doesn't use, so stale form state isn't sent: start and end images outside
+ * image-to-video, reference images outside reference-to-video (and past the model's limit), and reference
+ * audio unless the model takes it (and past its limit).
+ */
 export function paramsForSubmit(params: GenerationParams): GenerationParams {
   const kind = kindOfModelId(params.model)
+  const audios = supportsAudioInput(params.model) ? sanitizeReferenceAudios(params.referenceAudios) : undefined
   return {
     ...params,
     startImage: kind === 'image-to-video' ? params.startImage : undefined,
     endImage: kind === 'image-to-video' ? params.endImage : undefined,
     referenceImages:
-      kind === 'reference-to-video' ? params.referenceImages?.slice(0, maxReferenceImages(params.model)) : undefined
+      kind === 'reference-to-video' ? params.referenceImages?.slice(0, maxReferenceImages(params.model)) : undefined,
+    referenceAudios: audios?.slice(0, maxReferenceAudios(params.model))
   }
 }
 

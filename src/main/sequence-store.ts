@@ -4,10 +4,11 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readdir, rm, rmdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
-import { DEFAULT_PARAMS, durationSeconds } from '@shared/models'
+import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios } from '@shared/models'
 import type { Generation, GenerationParams, Segment, Sequence, SequenceSummary } from '@shared/types'
 import * as db from './db'
 import { toPublic } from './jobs'
+import { attachReviewSummary } from './reviews'
 import {
   dayStamp,
   FOLDERS,
@@ -108,7 +109,10 @@ export function renumberSegments(orderedIds: string[]): void {
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
 
-/** Normalises params coming from the renderer or from JSON, dropping anything malformed. */
+/**
+ * Normalises params coming from the renderer, an agent or JSON, dropping anything malformed. Reference audio
+ * clips keep their windows; whether the model can use them is decided when a take is sent (paramsForSubmit).
+ */
 export function sanitizeParams(input: Partial<GenerationParams> | undefined): GenerationParams {
   const p = input ?? {}
   const refs = Array.isArray(p.referenceImages)
@@ -124,7 +128,8 @@ export function sanitizeParams(input: Partial<GenerationParams> | undefined): Ge
     audio: typeof p.audio === 'boolean' ? p.audio : undefined,
     startImage: str(p.startImage),
     endImage: str(p.endImage),
-    referenceImages: refs?.length ? refs : undefined
+    referenceImages: refs?.length ? refs : undefined,
+    referenceAudios: sanitizeReferenceAudios(p.referenceAudios)
   }
 }
 
@@ -277,6 +282,8 @@ export function loadSequence(id: string, run: RunInfo): Sequence {
     }
     return toSegment(r, takes)
   })
+  // The user's stars and the review count, like the feed shows them (one query for every take).
+  attachReviewSummary(segments.flatMap((s) => s.takes))
 
   return {
     id: row.id,

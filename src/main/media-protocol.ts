@@ -17,7 +17,17 @@ const MIME: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
   '.webp': 'image/webp',
-  '.gif': 'image/gif'
+  '.gif': 'image/gif',
+  // Voices and soundscapes (asset audio clips, reference audio of generations). Chromium sniffs most of these
+  // anyway, but a proper type keeps <audio> from guessing.
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.aif': 'audio/aiff',
+  '.aiff': 'audio/aiff',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg'
 }
 
 /** Must run before the app is ready. */

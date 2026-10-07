@@ -1,20 +1,38 @@
-// @ImageN reference tokens in prompts: finding them, spotting near misses ("@Image 3", "@img3", "@Bild3"…)
-// and checking them against the reference images a generation sends. In reference mode the model is given
-// the pictures in order and the prompt points at them as @Image1, @Image2 …; a token that names the wrong
-// picture, or none, quietly spoils a paid generation. Pure, so the prompt editor (renderer), the guard in
-// front of every submission (main) and the agent tools all apply exactly the same rules.
+// Reference tokens in prompts: @ImageN for the reference images and @AudioN for the reference audio clips
+// (voices, sounds). Finding them, spotting near misses ("@Image 3", "@img3", "@Bild3", "@Ljud1", "@Voice1"…)
+// and checking them against what a generation sends. In reference mode the model is given the pictures and
+// the audio clips in order and the prompt points at them as @Image1, @Image2 … and @Audio1, @Audio2 …; a token
+// that names the wrong one, or none, quietly spoils a paid generation. Pure, so the prompt editor (renderer),
+// the guard in front of every submission (main) and the agent tools all apply exactly the same rules.
 
-import { KINDS, imageToVideoVariant, kindOfModelId, maxReferenceImages, type Kind } from './models'
+import {
+  KINDS,
+  MAX_AUDIO_CLIP_SECONDS,
+  MAX_REFERENCE_AUDIO_SECONDS,
+  MIN_AUDIO_CLIP_SECONDS,
+  imageToVideoVariant,
+  isAudioClipTooShort,
+  kindOfModelId,
+  maxReferenceAudios,
+  maxReferenceImages,
+  referenceAudioWindow,
+  sanitizeReferenceAudios,
+  supportsAudioInput,
+  type Kind
+} from './models'
 import type { GenerationParams } from './types'
 
-/** A canonical reference token: "@Image3", in any letter case ("@image3" counts too). */
+/** A canonical reference token: "@Image3" or "@Audio2", in any letter case ("@image3" counts too). */
 export interface PromptToken {
-  /** N in @ImageN, 1-based. */
+  /** N in @ImageN (or @AudioN), 1-based. */
   index: number
   start: number
   end: number
   raw: string
 }
+
+/** What a token refers to: a reference image (@ImageN) or a reference audio clip (@AudioN). */
+export type ReferenceKind = 'image' | 'audio'
 
 export type PromptIssueCode =
   | 'no-references'
@@ -23,6 +41,18 @@ export type PromptIssueCode =
   | 'malformed'
   | 'unused-reference'
   | 'not-reference-mode'
+  /** @AudioN past the audio clips there are (or none are chosen). */
+  | 'audio-out-of-range'
+  /** @AudioN past what the model takes (error), or clips the model's limit drops (warning). */
+  | 'audio-over-limit'
+  /** Audio named in a mode or with a model that sends none (error), or clips that won't be sent (warning). */
+  | 'audio-not-supported'
+  /** A clip's window is shorter than 2 s or longer than 15 s. */
+  | 'audio-length'
+  /** The clips together are longer than 15 s. */
+  | 'audio-too-long'
+  /** An audio clip the prompt never mentions. */
+  | 'unused-audio'
 
 export interface PromptIssue {
   /** Errors block a submission; warnings are advice. */
@@ -33,6 +63,8 @@ export interface PromptIssue {
   /** The offending text in the prompt the issue was found in, when it is about one place. */
   start?: number
   end?: number
+  /** Set to 'audio' when the issue is about reference audio (an @AudioN token, a clip, a near miss of one). */
+  ref?: 'audio'
 }
 
 /** Something that looks like an attempt at a reference but isn't one the model understands. */
@@ -42,10 +74,12 @@ export interface MalformedToken {
   raw: string
   /** The canonical text to put in its place, when it is clear what was meant ("@Image 3" → "@Image3"). */
   suggestion?: string
+  /** Whether it was meant as a picture (@ImageN) or an audio clip (@AudioN). */
+  ref: ReferenceKind
 }
 
 export interface ValidateOptions {
-  /** The mode of the model the prompt is sent with; only reference mode sends reference images. */
+  /** The mode of the model the prompt is sent with; only reference mode sends reference images and audio. */
   kind: Kind
   /** How many reference images the model takes (maxReferenceImages); later ones are not sent. */
   maxImages: number
@@ -55,6 +89,19 @@ export interface ValidateOptions {
    * as blockingContinuationError) rather than "switch to reference mode".
    */
   continuing?: boolean
+  /**
+   * The reference audio clips in the params, in order (@Audio1 is the first): each one's window length in
+   * seconds, or undefined where it isn't known yet (main measures the files before anything is sent).
+   * Omitted: no audio clips.
+   */
+  audioLengths?: readonly (number | undefined)[]
+  /**
+   * Whether the model takes reference audio (supportsAudioInput). false: @AudioN tokens are errors and the
+   * clips are not sent. Omitted: not known, so tokens are only checked against the clips there are.
+   */
+  audioInput?: boolean
+  /** How many audio clips the model takes (maxReferenceAudios); later ones are not sent. Default 3. */
+  maxAudios?: number
 }
 
 // ── Scanning ──────────────────────────────────────────────────────────────────
@@ -63,19 +110,32 @@ export interface ValidateOptions {
 type MalformedReason = 'typo' | 'no-number' | 'zero' | 'range' | 'hidden' | 'glued'
 
 type Scanned =
-  | { type: 'token'; start: number; end: number; raw: string; index: number }
+  | { type: 'token'; ref: ReferenceKind; start: number; end: number; raw: string; index: number }
   | {
       type: 'malformed'
+      ref: ReferenceKind
       start: number
       end: number
       raw: string
       reason: MalformedReason
       suggestion?: string
-      /** The picture numbers it most likely meant; they count as mentioned for the unused-image advice. */
+      /** The numbers it most likely meant; they count as mentioned for the unused-image/audio advice. */
       meant: number[]
     }
   /** "@Anna": an @-name that is no reference at all; the model just gets the text. */
-  | { type: 'mention'; start: number; end: number; raw: string; name: string }
+  | {
+      type: 'mention'
+      start: number
+      end: number
+      raw: string
+      name: string
+      /** A word for sound ("@Röst", "@voice"), so the advice is about audio references. */
+      audioWord: boolean
+    }
+
+type ScannedToken = Extract<Scanned, { type: 'token' }>
+type ScannedMalformed = Extract<Scanned, { type: 'malformed' }>
+type ScannedReference = ScannedToken | ScannedMalformed
 
 const AT = /[@\uFF20]/
 /** Characters that don't show but break a token apart, e.g. pasted from a web page or a chat. */
@@ -94,6 +154,10 @@ const GLUED_RUN = /^[\p{Script=Latin}\p{N}_]+/u
 const RANGE = /^[-\u2010-\u2015\u2212]([0-9]+)/
 /** How long a range is spelled out in a suggestion. */
 const MAX_RANGE = 20
+
+/** The word the model knows for each kind of reference. Both have five letters, which canonicalText relies on. */
+const REF_WORD: Record<ReferenceKind, string> = { image: 'Image', audio: 'Audio' }
+const CANONICAL_WORD: Record<ReferenceKind, RegExp> = { image: /^image$/i, audio: /^audio$/i }
 
 /** Words that mean "picture" or "reference", which people write instead of "Image". */
 const IMAGE_WORDS = new Set([
@@ -126,6 +190,36 @@ const IMAGE_WORDS = new Set([
   'referensbilden'
 ])
 
+/**
+ * Words for sound, voice or an audio clip, which people write instead of "Audio": with a number after them
+ * ("@Ljud1", "@Voice1", "@Röst1", "@sound1") they are near misses of @AudioN; without one they are only text,
+ * but the advice about them then talks about audio references.
+ */
+const AUDIO_WORDS = new Set([
+  'audio',
+  'audios',
+  'audioclip',
+  'audiofile',
+  'ljud',
+  'ljudet',
+  'ljuden',
+  'ljudklipp',
+  'ljudklippet',
+  'ljudfil',
+  'ljudfilen',
+  'ljudreferens',
+  'voice',
+  'voices',
+  'voiceover',
+  'röst',
+  'rösten',
+  'röster',
+  'sound',
+  'sounds',
+  'music',
+  'musik'
+])
+
 /** Optimal-string-alignment distance (edits incl. swapped neighbours); stops early when clearly far apart. */
 function editDistance(a: string, b: string): number {
   if (Math.abs(a.length - b.length) > 2) return 3
@@ -154,6 +248,34 @@ function isImageWord(word: string, numbered: boolean): boolean {
   const distance = editDistance(word, 'image')
   if (word.length >= 4) return distance <= (numbered ? 2 : 1)
   return numbered && word.length === 3 && distance <= 2
+}
+
+/**
+ * Whether the word after an @ was meant as "Audio" (lower-cased, NFKC). Only with a number after it does a
+ * word for sound count ("@Ljud1", "@Voice2", "@aud1", "@Adio1"): "@Röst" alone is as likely a name. Without a
+ * number only "@Audio" itself is an attempt at a reference. Looser spellings must start like "audio", so
+ * "@Studio1" or "@Radio2" stay text.
+ */
+function isAudioWord(word: string, numbered: boolean): boolean {
+  if (!word) return false
+  if (!numbered) return word === 'audio' || word === 'audios'
+  if (AUDIO_WORDS.has(word)) return true
+  if (word.length >= 3 && 'audio'.startsWith(word)) return true
+  const distance = editDistance(word, 'audio')
+  if (distance <= 1) return word.length >= 4
+  return distance === 2 && word[0] === 'a' && Math.abs(word.length - 5) <= 1
+}
+
+/** What a word after an @ was meant to refer to; images first, so their rules are exactly what they were. */
+function refOf(word: string, numbered: boolean): ReferenceKind | undefined {
+  if (isImageWord(word, numbered)) return 'image'
+  if (isAudioWord(word, numbered)) return 'audio'
+  return undefined
+}
+
+/** Worth looking past a space or dash for a number: "@Image 3", "@audio 1", "@Ljud 2". */
+function mayHaveSeparatedNumber(word: string): boolean {
+  return isImageWord(word, false) || AUDIO_WORDS.has(word) || (word.length >= 4 && editDistance(word, 'audio') <= 1)
 }
 
 /** The code point that ends at `index` ('' at the start). */
@@ -185,17 +307,20 @@ function canonicalNumber(digits: string): string {
   return ascii.replace(/^0+(?=[0-9])/, '')
 }
 
-/** "@Image3". Numbers may come as text, so even an absurdly long one is shown as written. */
-const token = (n: number | string): string => `@Image${n}`
+/** "@Image3" or "@Audio3". Numbers may come as text, so even an absurdly long one is shown as written. */
+const token = (ref: ReferenceKind, n: number | string): string => `@${REF_WORD[ref]}${n}`
 
-/** A canonical token spelled as the model expects: "@image3" → "@Image3". Its raw text is "@", 5 letters, digits. */
-const canonicalText = (t: { raw: string }): string => token(t.raw.slice(6))
+/**
+ * A canonical token spelled as the model expects: "@image3" → "@Image3", "@AUDIO2" → "@Audio2". Its raw text is
+ * "@", the five letters of the word, then the digits.
+ */
+const canonicalText = (t: { raw: string; ref: ReferenceKind }): string => token(t.ref, t.raw.slice(6))
 
 /** "@Image1, @Image2, @Image3" for a written-out range, or undefined when it doesn't make sense. */
-function spelledRange(from: number, to: number): string | undefined {
+function spelledRange(ref: ReferenceKind, from: number, to: number): string | undefined {
   if (from < 1 || to <= from || to - from >= MAX_RANGE) return undefined
   const all: string[] = []
-  for (let n = from; n <= to; n++) all.push(token(n))
+  for (let n = from; n <= to; n++) all.push(token(ref, n))
   return all.join(', ')
 }
 
@@ -229,13 +354,13 @@ function readAt(text: string, start: number): Scanned | undefined {
   }
   const wordEnd = j
   const lower = word.normalize('NFKC').toLowerCase()
-  // Glued to a word in front, like an e-mail address ("info@img.example.com"): only the exact word "image" counts.
+  // Glued to a word in front, like an e-mail address ("info@img.example.com"): only the exact word counts.
   const attached = WORD_CHAR.test(charBefore(text, start))
 
   let digits = readDigits(text, wordEnd)
   let separated = false
-  if (!digits && isImageWord(lower, false)) {
-    // "@Image 3", "@Image-3", "@Image #3": a few separators, then the number.
+  if (!digits && mayHaveSeparatedNumber(lower)) {
+    // "@Image 3", "@Image-3", "@Image #3", "@audio 1": a few separators, then the number.
     let k = wordEnd
     while (k < text.length && k - wordEnd < MAX_SEPARATORS && SEPARATOR.test(text[k])) k++
     const after = k > wordEnd ? readDigits(text, k) : ''
@@ -248,14 +373,15 @@ function readAt(text: string, start: number): Scanned | undefined {
   const digitsEnd = j + digits.length
 
   if (!word) {
-    // "@3": a reference without its word. Times and amounts ("@3pm", "@3:30") are left alone.
+    // "@3": a reference without its word, read as a picture. Times and amounts ("@3pm", "@3:30") are left alone.
     if (!digits || attached) return undefined
     const next = text.slice(digitsEnd, digitsEnd + 2)
     if (GLUED.test(charAt(text, digitsEnd)) || /^[:.,/][0-9]/.test(next)) return undefined
-    return malformedNumber(text, start, digitsEnd, digits, hidden ? 'hidden' : 'typo')
+    return malformedNumber(text, start, digitsEnd, digits, hidden ? 'hidden' : 'typo', 'image')
   }
 
-  if (!isImageWord(lower, !!digits)) {
+  const ref = refOf(lower, !!digits)
+  if (!ref) {
     if (attached) return undefined
     let end = afterAt
     while (end < text.length) {
@@ -263,14 +389,15 @@ function readAt(text: string, start: number): Scanned | undefined {
       if (!WORD_CHAR.test(ch) && !INVISIBLE.test(ch)) break
       end += ch.length
     }
-    return { type: 'mention', start, end, raw: text.slice(start, end), name: word }
+    return { type: 'mention', start, end, raw: text.slice(start, end), name: word, audioWord: AUDIO_WORDS.has(lower) }
   }
 
-  if (attached && lower !== 'image') return undefined
+  if (attached && lower !== REF_WORD[ref].toLowerCase()) return undefined
 
   if (!digits) {
     return {
       type: 'malformed',
+      ref,
       start,
       end: wordEnd,
       raw: text.slice(start, wordEnd),
@@ -280,7 +407,12 @@ function readAt(text: string, start: number): Scanned | undefined {
   }
 
   const canonical =
-    ats === 1 && !fullWidthAt && !hidden && !separated && /^image$/i.test(word) && /^[1-9][0-9]*$/.test(digits)
+    ats === 1 &&
+    !fullWidthAt &&
+    !hidden &&
+    !separated &&
+    CANONICAL_WORD[ref].test(word) &&
+    /^[1-9][0-9]*$/.test(digits)
   const reason: MalformedReason = hidden ? 'hidden' : 'typo'
   const number = canonicalNumber(digits)
   const n = Number(number)
@@ -294,11 +426,12 @@ function readAt(text: string, start: number): Scanned | undefined {
       const to = Number(range[1])
       return {
         type: 'malformed',
+        ref,
         start,
         end: rangeEnd,
         raw: text.slice(start, rangeEnd),
         reason: 'range',
-        suggestion: spelledRange(n, to),
+        suggestion: spelledRange(ref, n, to),
         meant: n >= 1 && to >= n ? numbersIn(n, to) : []
       }
     }
@@ -310,24 +443,32 @@ function readAt(text: string, start: number): Scanned | undefined {
     const end = digitsEnd + glued.length
     return {
       type: 'malformed',
+      ref,
       start,
       end,
       raw: text.slice(start, end),
       reason: n === 0 ? 'zero' : 'glued',
-      suggestion: n === 0 ? undefined : `${token(number)} ${glued}`,
+      suggestion: n === 0 ? undefined : `${token(ref, number)} ${glued}`,
       meant: n === 0 ? [] : [n]
     }
   }
 
-  if (canonical) return { type: 'token', start, end: digitsEnd, raw: text.slice(start, digitsEnd), index: n }
-  return malformedNumber(text, start, digitsEnd, digits, reason)
+  if (canonical) return { type: 'token', ref, start, end: digitsEnd, raw: text.slice(start, digitsEnd), index: n }
+  return malformedNumber(text, start, digitsEnd, digits, reason, ref)
 }
 
-function malformedNumber(text: string, start: number, end: number, digits: string, reason: MalformedReason): Scanned {
+function malformedNumber(
+  text: string,
+  start: number,
+  end: number,
+  digits: string,
+  reason: MalformedReason,
+  ref: ReferenceKind
+): Scanned {
   const number = canonicalNumber(digits)
   const raw = text.slice(start, end)
-  if (number === '0') return { type: 'malformed', start, end, raw, reason: 'zero', meant: [] }
-  return { type: 'malformed', start, end, raw, reason, suggestion: token(number), meant: [Number(number)] }
+  if (number === '0') return { type: 'malformed', ref, start, end, raw, reason: 'zero', meant: [] }
+  return { type: 'malformed', ref, start, end, raw, reason, suggestion: token(ref, number), meant: [Number(number)] }
 }
 
 /** Every @-thing in the prompt, in order and without overlaps. */
@@ -352,33 +493,47 @@ function scan(prompt: string): Scanned[] {
   return out
 }
 
+const isToken = (ref: ReferenceKind) => (s: Scanned): s is ScannedToken => s.type === 'token' && s.ref === ref
+const isMalformed = (ref: ReferenceKind) => (s: Scanned): s is ScannedMalformed =>
+  s.type === 'malformed' && s.ref === ref
+const isReference = (s: Scanned): s is ScannedReference => s.type !== 'mention'
+
 // ── Public helpers ────────────────────────────────────────────────────────────
 
 /** The canonical @ImageN tokens, case-insensitive ("@image3" counts), in order. "@Image10" is image 10. */
 export function findImageTokens(prompt: string): PromptToken[] {
   return scan(prompt).flatMap((s) =>
-    s.type === 'token' ? [{ index: s.index, start: s.start, end: s.end, raw: s.raw }] : []
+    isToken('image')(s) ? [{ index: s.index, start: s.start, end: s.end, raw: s.raw }] : []
+  )
+}
+
+/** The canonical @AudioN tokens, case-insensitive ("@audio2" counts), in order. "@Audio10" is clip 10. */
+export function findAudioTokens(prompt: string): PromptToken[] {
+  return scan(prompt).flatMap((s) =>
+    isToken('audio')(s) ? [{ index: s.index, start: s.start, end: s.end, raw: s.raw }] : []
   )
 }
 
 /**
  * Near misses the model won't read as references: "@Image 3", "@img3", "@Bild3", "@image03", "@Image" without
- * a number, "@Image0", "@Image1-3", "@Image3rd", "@@Image3", or a token broken by an invisible character.
+ * a number, "@Image0", "@Image1-3", "@Image3rd", "@@Image3", or a token broken by an invisible character; and
+ * the same for audio clips: "@audio 1", "@Ljud1", "@Voice1", "@Röst1", "@sound1", "@Audio" … (`ref` says which).
  */
 export function findMalformedTokens(prompt: string): MalformedToken[] {
   return scan(prompt).flatMap((s) =>
     s.type === 'malformed'
-      ? [{ start: s.start, end: s.end, raw: s.raw, ...(s.suggestion ? { suggestion: s.suggestion } : {}) }]
+      ? [{ start: s.start, end: s.end, raw: s.raw, ref: s.ref, ...(s.suggestion ? { suggestion: s.suggestion } : {}) }]
       : []
   )
 }
 
-/** "@image3" → "@Image3". Near misses are left as they are: what they meant is a guess, not a spelling. */
+/** "@image3" → "@Image3", "@audio1" → "@Audio1". Near misses are left as they are: what they meant is a guess. */
 export function canonicalizeTokens(prompt: string): string {
   if (typeof prompt !== 'string') return prompt
   let out = ''
   let last = 0
-  for (const t of findImageTokens(prompt)) {
+  for (const t of scan(prompt)) {
+    if (t.type !== 'token') continue
     out += prompt.slice(last, t.start) + canonicalText(t)
     last = t.end
   }
@@ -391,7 +546,12 @@ export function hasBlockingIssues(issues: readonly PromptIssue[]): boolean {
 
 /** "@Image3". */
 export function imageToken(index: number): string {
-  return token(index)
+  return token('image', index)
+}
+
+/** "@Audio2". */
+export function audioToken(index: number): string {
+  return token('audio', index)
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -402,8 +562,8 @@ function swedishList(items: readonly string[]): string {
   return `${items.slice(0, -1).join(', ')} och ${items[items.length - 1]}`
 }
 
-/** "@Image2", "@Image2 och @Image4", "@Image5–@Image9" for listing picture numbers in a message. */
-function describeNumbers(numbers: readonly number[]): string {
+/** "@Image2", "@Image2 och @Image4", "@Image5–@Image9" for listing numbers in a message. */
+function describeNumbers(numbers: readonly number[], ref: ReferenceKind = 'image'): string {
   const runs: [number, number][] = []
   for (const n of [...new Set(numbers)].sort((a, b) => a - b)) {
     const last = runs.at(-1)
@@ -411,7 +571,7 @@ function describeNumbers(numbers: readonly number[]): string {
     else runs.push([n, n])
   }
   const parts = runs.flatMap(([a, b]) =>
-    a === b ? [token(a)] : b === a + 1 ? [token(a), token(b)] : [`${token(a)}–${token(b)}`]
+    a === b ? [token(ref, a)] : b === a + 1 ? [token(ref, a), token(ref, b)] : [`${token(ref, a)}–${token(ref, b)}`]
   )
   return swedishList(parts)
 }
@@ -422,8 +582,46 @@ function images(n: number): string {
   return n === 1 ? '1 bild' : `${n} bilder`
 }
 
-function malformedMessage(s: Extract<Scanned, { type: 'malformed' }>): string {
+function clips(n: number): string {
+  return `${n} ljudklipp`
+}
+
+/** Margin for window lengths that are sums or slider values (10 + 5 must not count as more than 15). */
+const SECONDS_EPSILON = 0.005
+
+/** "1,5 s", "18 s": rounded to tenths, or finer when that would make it read as `limit` itself. */
+function seconds(value: number, limit?: number): string {
+  let text = ''
+  for (const decimals of [1, 2, 3]) {
+    const f = 10 ** decimals
+    const rounded = Math.round(value * f) / f
+    text = `${String(rounded).replace('.', ',')} s`
+    if (limit === undefined || rounded !== limit) break
+  }
+  return text
+}
+
+function malformedMessage(s: ScannedMalformed): string {
   const raw = quoted(s.raw)
+  if (s.ref === 'audio') {
+    switch (s.reason) {
+      case 'no-number':
+        return /^@audio$/i.test(s.raw)
+          ? `${raw} saknar nummer – skriv t.ex. @Audio1.`
+          : `${raw} är ingen giltig ljudreferens – skriv @Audio följt av ljudklippets nummer, t.ex. @Audio1.`
+      case 'zero':
+        return `${raw} finns inte – ljudklippen numreras från @Audio1.`
+      case 'range':
+        return s.suggestion
+          ? `${raw} läses inte som flera ljudklipp – skriv ut vart och ett: ${s.suggestion}.`
+          : `${raw} läses inte som flera ljudklipp – skriv ut vart och ett, t.ex. @Audio1, @Audio2.`
+      case 'hidden':
+        return `${raw} innehåller ett osynligt tecken (t.ex. från inklistrad text) och känns inte igen – skriv om den som ${s.suggestion}.`
+      case 'glued':
+      case 'typo':
+        return `${raw} är ingen giltig ljudreferens – menade du ${s.suggestion}?`
+    }
+  }
   switch (s.reason) {
     case 'no-number':
       return /^@image$/i.test(s.raw)
@@ -450,16 +648,44 @@ function modeLabel(kind: Kind): string {
 /** Which prompt a message is about: the main prompt, or the negative prompt (prefixed so it is clear). */
 type Field = 'prompt' | 'negative'
 
-function notReferenceModeMessage(kind: Kind, named: readonly Scanned[], field: Field): string {
+/** "@Image1 och ”@img2”", or the first three "med flera" when there are many. */
+function namedList(named: readonly ScannedReference[]): { shown: string; count: number } {
   const names = [...new Set(named.map((s) => (s.type === 'token' ? canonicalText(s) : quoted(s.raw))))]
   const shown = names.length > 4 ? `${names.slice(0, 3).join(', ')} med flera` : swedishList(names)
+  return { shown, count: names.length }
+}
+
+function notReferenceModeMessage(kind: Kind, named: readonly ScannedReference[], field: Field): string {
+  const { shown, count } = namedList(named)
   const subject = field === 'prompt' ? 'Prompten' : 'Den negativa prompten'
   const sends =
     kind === 'image-to-video'
       ? `läget ${modeLabel(kind)} skickar inga referensbilder, bara start- och slutbild`
       : `läget ${modeLabel(kind)} skickar inga bilder`
-  const them = names.length === 1 ? 'hänvisningen' : 'hänvisningarna'
+  const them = count === 1 ? 'hänvisningen' : 'hänvisningarna'
   return `${subject} hänvisar till ${shown}, men ${sends}. Ta bort ${them} eller byt till läget ${modeLabel('reference-to-video')}.`
+}
+
+/** Audio named in text-to-video or image-to-video, which send no audio clips. */
+function audioModeMessage(kind: Kind, named: readonly ScannedReference[], field: Field): string {
+  const { shown, count } = namedList(named)
+  const subject = field === 'prompt' ? 'Prompten' : 'Den negativa prompten'
+  const them = count === 1 ? 'hänvisningen' : 'hänvisningarna'
+  return (
+    `${subject} hänvisar till ${shown}, men läget ${modeLabel(kind)} skickar inga ljudklipp. Ta bort ${them} ` +
+    `eller byt till läget ${modeLabel('reference-to-video')}.`
+  )
+}
+
+/** Audio named with a reference model that takes no reference audio. */
+function audioModelMessage(named: readonly ScannedReference[], field: Field): string {
+  const { shown, count } = namedList(named)
+  const subject = field === 'prompt' ? 'Prompten' : 'Den negativa prompten'
+  const them = count === 1 ? 'hänvisningen' : 'hänvisningarna'
+  return (
+    `${subject} hänvisar till ${shown}, men modellen tar inte emot ljudreferenser. Ta bort ${them} eller ` +
+    `byt till en modell som tar emot ljud (t.ex. Seedance).`
+  )
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -469,8 +695,8 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
   const count = Math.max(0, Math.floor(Number(referenceCount)) || 0)
   const max = Math.max(0, Math.floor(Number(opts.maxImages)) || 0)
   const scanned = scan(text)
-  const tokens = scanned.filter((s): s is Extract<Scanned, { type: 'token' }> => s.type === 'token')
-  const malformed = scanned.filter((s): s is Extract<Scanned, { type: 'malformed' }> => s.type === 'malformed')
+  const tokens = scanned.filter(isToken('image'))
+  const malformed = scanned.filter(isMalformed('image'))
   const prefix = field === 'negative' ? 'Negativ prompt: ' : ''
 
   const general: PromptIssue[] = []
@@ -478,27 +704,59 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
   const advice: PromptIssue[] = []
   const at = (s: { start: number; end: number }): { start: number; end: number } => ({ start: s.start, end: s.end })
 
+  const audioCount = Array.isArray(opts.audioLengths) ? opts.audioLengths.length : 0
+  const maxAudios =
+    opts.maxAudios === undefined ? maxReferenceAudios('') : Math.max(0, Math.floor(Number(opts.maxAudios)) || 0)
+  /** Audio clips that go out with the prompt: only in reference mode, with a model that isn't known to refuse them. */
+  const audioSent = opts.kind === 'reference-to-video' && opts.audioInput !== false ? Math.min(audioCount, maxAudios) : 0
+
   if (opts.kind !== 'reference-to-video') {
-    // No reference images are sent at all, so every token (or attempt at one) names nothing.
-    const named = scanned.filter((s) => s.type !== 'mention')
-    if (named.length) {
-      general.push({
-        severity: 'error',
-        code: 'not-reference-mode',
-        message: opts.continuing
-          ? continuationReferencesMessage(text, field === 'prompt' ? 'prompten' : 'den negativa prompten')
-          : notReferenceModeMessage(opts.kind, named, field),
-        ...at(named[0])
-      })
+    // No reference images or audio are sent at all, so every token (or attempt at one) names nothing.
+    const named = scanned.filter(isReference)
+    const imagesNamed = named.filter((s) => s.ref === 'image')
+    const audioNamed = named.filter((s) => s.ref === 'audio')
+    if (opts.continuing) {
+      if (named.length) {
+        general.push({
+          severity: 'error',
+          code: 'not-reference-mode',
+          message: continuationReferencesMessage(text, field === 'prompt' ? 'prompten' : 'den negativa prompten'),
+          ...at(named[0]),
+          ...(imagesNamed.length ? {} : { ref: 'audio' as const })
+        })
+      }
+    } else {
+      if (imagesNamed.length) {
+        general.push({
+          severity: 'error',
+          code: 'not-reference-mode',
+          message: notReferenceModeMessage(opts.kind, imagesNamed, field),
+          ...at(imagesNamed[0])
+        })
+      }
+      if (audioNamed.length) {
+        general.push({
+          severity: 'error',
+          code: 'audio-not-supported',
+          message: audioModeMessage(opts.kind, audioNamed, field),
+          ...at(audioNamed[0]),
+          ref: 'audio'
+        })
+      }
     }
   } else {
     if (count === 0 && field === 'prompt') {
+      // Venice refuses reference audio on its own, so that is worth saying when audio is all there is.
+      const audioOnly = !tokens.length && audioSent > 0
       general.push({
         severity: 'error',
         code: 'no-references',
         message: tokens.length
           ? `Inga referensbilder är valda – lägg till bilderna som prompten hänvisar till (${swedishList([...new Set(tokens.map(canonicalText))])}).`
-          : 'Lägg till minst en referensbild.'
+          : audioOnly
+            ? 'Ljudreferenser skickas bara tillsammans med minst en referensbild – lägg till en bild, t.ex. på personen vars röst det är.'
+            : 'Lägg till minst en referensbild.',
+        ...(audioOnly ? { ref: 'audio' as const } : {})
       })
     }
     if (count > 0) {
@@ -548,7 +806,7 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
             unused.length === sent && sent > 1 && !tokens.length
               ? 'Ingen av bilderna nämns i prompten – skriv @Image1, @Image2 … där de ska användas, så att modellen vet vad varje bild föreställer.'
               : unused.length === 1
-                ? `${token(unused[0])} nämns inte i prompten, så modellen vet inte vad bilden ska användas till.`
+                ? `${imageToken(unused[0])} nämns inte i prompten, så modellen vet inte vad bilden ska användas till.`
                 : `${describeNumbers(unused)} nämns inte i prompten, så modellen vet inte vad bilderna ska användas till.`
         })
       }
@@ -563,18 +821,23 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
         })
       }
     }
+
+    validateAudio(scanned, text, opts, field, audioCount, maxAudios, { general, placed, advice })
   }
 
   for (const s of scanned) {
     if (s.type !== 'mention') continue
+    const aboutAudio = s.audioWord && opts.kind === 'reference-to-video' && opts.audioInput !== false
     advice.push({
       severity: 'warning',
       code: 'malformed',
-      message:
-        opts.kind === 'reference-to-video'
+      message: aboutAudio
+        ? `${prefix}${quoted(s.raw)} är ingen ljudreferens och skickas som vanlig text – hänvisa till ljudklipp med @Audio och numret, t.ex. @Audio1.`
+        : opts.kind === 'reference-to-video'
           ? `${prefix}${quoted(s.raw)} är ingen bildreferens och skickas som vanlig text – hänvisa till bilder med @Image och numret, t.ex. ”${s.name} (@Image1)”.`
           : `${prefix}${quoted(s.raw)} är ingen bildreferens och skickas som vanlig text.`,
-      ...at(s)
+      ...at(s),
+      ...(aboutAudio ? { ref: 'audio' as const } : {})
     })
   }
 
@@ -583,12 +846,146 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
 }
 
 /**
- * Checks a prompt's references against the reference images the generation has. `referenceCount` is how many
- * are in the form (in order: @Image1 is the first); only the first `opts.maxImages` of them are sent.
- * Errors (blocking): references in a mode that sends no reference images, reference mode without any
- * images, @ImageN past the images there are or past the model's limit, and malformed tokens. Warnings:
- * images the prompt never mentions, images the model's limit drops, and @-names that are no references
- * ("@Anna"). Errors come first, those about one place in prompt order.
+ * The @AudioN checks in reference mode: tokens against the clips there are and the model's limit, near misses,
+ * and (main prompt only) each clip's window, the clips' total length and clips the prompt never mentions.
+ */
+function validateAudio(
+  scanned: readonly Scanned[],
+  text: string,
+  opts: ValidateOptions,
+  field: Field,
+  count: number,
+  max: number,
+  out: { general: PromptIssue[]; placed: PromptIssue[]; advice: PromptIssue[] }
+): void {
+  const tokens = scanned.filter(isToken('audio'))
+  const malformed = scanned.filter(isMalformed('audio'))
+  const prefix = field === 'negative' ? 'Negativ prompt: ' : ''
+  const at = (s: { start: number; end: number }): { start: number; end: number } => ({ start: s.start, end: s.end })
+
+  if (opts.audioInput === false) {
+    // Nothing goes out, so everything that names a clip names nothing; clips that are there are left behind.
+    const named = scanned.filter((s): s is ScannedReference => isReference(s) && s.ref === 'audio')
+    if (named.length) {
+      out.general.push({
+        severity: 'error',
+        code: 'audio-not-supported',
+        message: audioModelMessage(named, field),
+        ...at(named[0]),
+        ref: 'audio'
+      })
+    } else if (field === 'prompt' && count > 0) {
+      out.advice.push({
+        severity: 'warning',
+        code: 'audio-not-supported',
+        message: 'Modellen tar inte emot ljudreferenser – ljudklippen skickas inte.',
+        ref: 'audio'
+      })
+    }
+    return
+  }
+
+  for (const t of tokens) {
+    if (t.index > count) {
+      out.placed.push({
+        severity: 'error',
+        code: 'audio-out-of-range',
+        message: count
+          ? `${prefix}${canonicalText(t)} finns inte – bara ${clips(count)} ${count === 1 ? 'är valt' : 'är valda'}.`
+          : `${prefix}${canonicalText(t)} finns inte – inga ljudklipp är valda.`,
+        ...at(t),
+        ref: 'audio'
+      })
+    } else if (t.index > max) {
+      out.placed.push({
+        severity: 'error',
+        code: 'audio-over-limit',
+        message: `${prefix}${canonicalText(t)} skickas inte – modellen tar max ${clips(max)}.`,
+        ...at(t),
+        ref: 'audio'
+      })
+    }
+  }
+  for (const m of malformed) {
+    out.placed.push({ severity: 'error', code: 'malformed', message: prefix + malformedMessage(m), ...at(m), ref: 'audio' })
+  }
+
+  // The clips themselves are checked once, with the main prompt.
+  if (field !== 'prompt' || count === 0) return
+  const sent = Math.min(count, max)
+
+  // Venice takes 2–15 s per clip and 15 s in all; a window outside that is refused (after a paid upload).
+  const lengths = (opts.audioLengths ?? []).slice(0, sent)
+  let clipTooLong = false
+  let total = 0
+  lengths.forEach((length, i) => {
+    if (typeof length !== 'number' || !Number.isFinite(length)) return
+    total += Math.max(0, length)
+    if (isAudioClipTooShort(length)) {
+      out.general.push({
+        severity: 'error',
+        code: 'audio-length',
+        message: `${audioToken(i + 1)} är bara ${seconds(Math.max(0, length), MIN_AUDIO_CLIP_SECONDS)} – ett ljudklipp måste vara minst ${MIN_AUDIO_CLIP_SECONDS} s.`,
+        ref: 'audio'
+      })
+    } else if (length > MAX_AUDIO_CLIP_SECONDS + SECONDS_EPSILON) {
+      clipTooLong = true
+      out.general.push({
+        severity: 'error',
+        code: 'audio-length',
+        message: `${audioToken(i + 1)} är ${seconds(length, MAX_AUDIO_CLIP_SECONDS)} – ett ljudklipp får vara högst ${MAX_AUDIO_CLIP_SECONDS} s.`,
+        ref: 'audio'
+      })
+    }
+  })
+  // A clip that is too long on its own already says what to shorten; the total follows from it.
+  if (!clipTooLong && total > MAX_REFERENCE_AUDIO_SECONDS + SECONDS_EPSILON) {
+    out.general.push({
+      severity: 'error',
+      code: 'audio-too-long',
+      message: `Ljudreferenserna är ${seconds(total, MAX_REFERENCE_AUDIO_SECONDS)} – max ${MAX_REFERENCE_AUDIO_SECONDS} s totalt.`,
+      ref: 'audio'
+    })
+  }
+
+  const mentioned = new Set([...tokens.map((t) => t.index), ...malformed.flatMap((m) => m.meant)])
+  const unused: number[] = []
+  for (let n = 1; n <= sent; n++) if (!mentioned.has(n)) unused.push(n)
+  if (unused.length && text.trim()) {
+    out.advice.push({
+      severity: 'warning',
+      code: 'unused-audio',
+      message:
+        unused.length === sent && sent > 1 && !tokens.length
+          ? 'Inget av ljudklippen nämns i prompten – skriv @Audio1, @Audio2 … där de ska användas (t.ex. efter personen vars röst det är), så att modellen vet vad varje ljudklipp är.'
+          : unused.length === 1
+            ? `${audioToken(unused[0])} nämns inte i prompten, så modellen vet inte vad ljudklippet ska användas till.`
+            : `${describeNumbers(unused, 'audio')} nämns inte i prompten, så modellen vet inte vad ljudklippen ska användas till.`,
+      ref: 'audio'
+    })
+  }
+  // Clips past the model's limit are dropped when sending; tokens pointing at them are errors above.
+  const dropped: number[] = []
+  for (let n = max + 1; n <= count; n++) if (!mentioned.has(n)) dropped.push(n)
+  if (dropped.length && max > 0) {
+    out.advice.push({
+      severity: 'warning',
+      code: 'audio-over-limit',
+      message: `Modellen tar max ${clips(max)} – ${describeNumbers(dropped, 'audio')} skickas inte.`,
+      ref: 'audio'
+    })
+  }
+}
+
+/**
+ * Checks a prompt's references against what the generation has. `referenceCount` is how many reference
+ * images are in the form (in order: @Image1 is the first); only the first `opts.maxImages` of them are sent.
+ * The audio clips come in `opts` (audioLengths, audioInput, maxAudios).
+ * Errors (blocking): references in a mode that sends no reference images or audio, reference mode without any
+ * images, @ImageN / @AudioN past what there is or past the model's limit, audio with a model that takes none,
+ * malformed tokens, and audio clips outside Venice's 2–15 s each or 15 s in all. Warnings: images or clips the
+ * prompt never mentions, ones the model's limit drops, and @-names that are no references ("@Anna"). Errors come
+ * first, those about one place in prompt order.
  */
 export function validatePromptReferences(prompt: string, referenceCount: number, opts: ValidateOptions): PromptIssue[] {
   return validate(prompt, referenceCount, opts, 'prompt')
@@ -597,7 +994,7 @@ export function validatePromptReferences(prompt: string, referenceCount: number,
 /**
  * The same checks for the negative prompt, errors only and marked as being about it ("Negativ prompt: …");
  * start/end point into the negative prompt. Correct tokens are allowed there but don't count as mentioning
- * an image.
+ * an image or a clip, and the clips' lengths are checked with the main prompt only.
  */
 export function validateNegativePrompt(
   negativePrompt: string,
@@ -607,22 +1004,42 @@ export function validateNegativePrompt(
   return validate(negativePrompt, referenceCount, opts, 'negative').filter((i) => i.severity === 'error')
 }
 
-type PromptParams = Pick<GenerationParams, 'model' | 'prompt' | 'negativePrompt' | 'referenceImages'>
+type PromptParams = Pick<GenerationParams, 'model' | 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios'>
 
 /**
- * Both prompts of a generation checked as it would be sent: the mode and the image limit come from the model,
- * and only reference mode counts its reference images.
+ * What the checks need to know about a generation's params: the mode and the limits come from the model, only
+ * reference mode counts its reference images, and the audio clips count with their windows (a clip without a
+ * set length has one only once main has measured the file). For editors that validate one prompt at a time.
  */
+export function validationContext(
+  params: PromptParams,
+  extra: { continuing?: boolean } = {}
+): { referenceCount: number; options: ValidateOptions } {
+  const kind = kindOfModelId(params.model)
+  const referenceCount = kind === 'reference-to-video' ? (params.referenceImages?.length ?? 0) : 0
+  const audios = kind === 'reference-to-video' ? (sanitizeReferenceAudios(params.referenceAudios) ?? []) : []
+  return {
+    referenceCount,
+    options: {
+      kind,
+      maxImages: maxReferenceImages(params.model),
+      ...(extra.continuing ? { continuing: true } : {}),
+      audioLengths: audios.map((a) => (a.length === undefined ? undefined : referenceAudioWindow(a).length)),
+      audioInput: supportsAudioInput(params.model),
+      maxAudios: maxReferenceAudios(params.model)
+    }
+  }
+}
+
+/** Both prompts of a generation checked as it would be sent (see validationContext). */
 export function validateGenerationParams(params: PromptParams): {
   prompt: PromptIssue[]
   negativePrompt: PromptIssue[]
 } {
-  const kind = kindOfModelId(params.model)
-  const count = kind === 'reference-to-video' ? (params.referenceImages?.length ?? 0) : 0
-  const opts: ValidateOptions = { kind, maxImages: maxReferenceImages(params.model) }
+  const { referenceCount, options } = validationContext(params)
   return {
-    prompt: validatePromptReferences(params.prompt, count, opts),
-    negativePrompt: params.negativePrompt ? validateNegativePrompt(params.negativePrompt, count, opts) : []
+    prompt: validatePromptReferences(params.prompt, referenceCount, options),
+    negativePrompt: params.negativePrompt ? validateNegativePrompt(params.negativePrompt, referenceCount, options) : []
   }
 }
 
@@ -639,26 +1056,26 @@ export function blockingPromptError(params: PromptParams): string | undefined {
   return `${errors[0].message} Prompten har ${more === 1 ? 'ett fel' : `${more} fel`} till.`
 }
 
-/** A continuing clip's text names reference images, which it doesn't send: which ones, and what to do. */
+/** A continuing clip's text names reference images or audio, which it doesn't send: which ones, and what to do. */
 function continuationReferencesMessage(text: string, where: string): string {
-  const named = scan(text).filter((s) => s.type !== 'mention')
-  const names = [...new Set(named.map((s) => (s.type === 'token' ? canonicalText(s) : quoted(s.raw))))]
-  const shown = names.length > 4 ? `${names.slice(0, 3).join(', ')} med flera` : swedishList(names)
+  const named = scan(text).filter(isReference)
+  const { shown } = namedList(named)
+  const sends = named.some((s) => s.ref === 'audio') ? 'inga referensbilder eller ljudklipp' : 'inga referensbilder'
   return (
-    `Klippet fortsätter från sista bildrutan i föregående klipp och skickar inga referensbilder – ta bort ` +
+    `Klippet fortsätter från sista bildrutan i föregående klipp och skickar ${sends} – ta bort ` +
     `${shown} ur ${where}, eller slå av ”Fortsätt från föregående klipp”.`
   )
 }
 
 /**
  * blockingPromptError for a sequence clip that continues from the previous clip: it is generated
- * image-to-video from that clip's last frame and sends no reference images. Its mode is fixed, so references
- * in it are reported with what can be done about them there, rather than "switch to reference mode".
+ * image-to-video from that clip's last frame and sends no reference images or audio. Its mode is fixed, so
+ * references in it are reported with what can be done about them there, rather than "switch to reference mode".
  */
 export function blockingContinuationError(params: PromptParams): string | undefined {
-  const sent = { ...params, model: imageToVideoVariant(params.model) }
+  const sent = { ...params, model: imageToVideoVariant(params.model), referenceAudios: undefined }
   const { prompt, negativePrompt } = validateGenerationParams(sent)
-  const isModeIssue = (i: PromptIssue): boolean => i.code === 'not-reference-mode'
+  const isModeIssue = (i: PromptIssue): boolean => i.code === 'not-reference-mode' || i.code === 'audio-not-supported'
   if (prompt.some(isModeIssue)) return continuationReferencesMessage(sent.prompt, 'prompten')
   if (negativePrompt.some(isModeIssue)) {
     return continuationReferencesMessage(sent.negativePrompt ?? '', 'den negativa prompten')
@@ -666,7 +1083,7 @@ export function blockingContinuationError(params: PromptParams): string | undefi
   return blockingPromptError(sent)
 }
 
-/** The params with the tokens of both prompts in canonical form ("@image3" → "@Image3"). */
+/** The params with the tokens of both prompts in canonical form ("@image3" → "@Image3", "@audio1" → "@Audio1"). */
 export function canonicalizeParams<T extends Pick<GenerationParams, 'prompt' | 'negativePrompt'>>(params: T): T {
   const prompt = canonicalizeTokens(params.prompt)
   const negativePrompt = params.negativePrompt === undefined ? undefined : canonicalizeTokens(params.negativePrompt)

@@ -29,8 +29,9 @@ without them. Add screenshots or a short recording for UI changes.
 - [ ] `npm run check` (typecheck + build) passes.
 - [ ] Tested in the dev profile (`npm run dev`, "Studio Dev"), not against a real library.
 - [ ] Database changes are a new migration appended in `src/main/db.ts`; existing libraries still open.
-- [ ] Every new path that spends Venice credits runs the same `@ImageN` check, and agent requests still need approval in the app.
+- [ ] Every new path that spends Venice credits runs the same `@ImageN` / `@AudioN` check, and agent requests still need approval in the app.
+- [ ] New user-facing capabilities have matching agent tools and guide text in `src/main/agent/` (and docs/AGENTS.md).
 - [ ] Changes to the MCP server or agent tools keep it bound to `127.0.0.1` and the Tailscale interface, behind the bearer token.
 - [ ] UI text is in Swedish and addresses the user as "du"; code comments and docs are in English.
-- [ ] README or `docs/` are updated if behaviour, settings or agent tools changed.
+- [ ] README, `docs/` and `CHANGELOG.md` (*Unreleased*) are updated if behaviour, settings or agent tools changed.
 - [ ] No API keys, tokens, personal names, personal paths or private library content in code, screenshots or logs.

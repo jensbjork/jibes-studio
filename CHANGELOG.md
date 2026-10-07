@@ -8,7 +8,73 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Voices and soundscapes.** Characters get a *Röst* (voice) section and environments a *Ljudmiljö* (soundscape)
+  section in the library: drop or pick MP3, WAV, M4A, AAC, AIFF, FLAC or OGG files (copied into the asset's folder),
+  play them, reorder them, and choose each clip's 2–15 s **reference window** on a timeline. Files without sound or
+  shorter than a second are refused; long recordings get advice to pick their best part.
+- **`@AudioN` references.** With models that take reference audio (`constraints.audio_input`, e.g. Seedance's
+  reference-to-video models), the Generate form and sequence clips send up to 3 audio clips, each window cut out with
+  ffmpeg as mono 44.1 kHz MP3 and sent as `reference_audio_urls`. Adding a character with a voice adds its first
+  voice clip (*Ta med rösten* on the chip). A *Röster och ljud* section in the form shows the clips with players and
+  the 15 s budget. The prompt editor colours, checks and fixes `@Audio1`, `@Audio2` … like `@ImageN`: near misses
+  such as `@Ljud1` or `@Voice1`, tokens past the clips, models without audio input, clips under 2 s or over 15 s,
+  more than 15 s in all, audio without a reference image and unmentioned clips. The same rules guard every paid
+  submission in the main process, which measures each clip before the price is quoted.
+- **Poses** (*Poser*): a new kind of asset — photos or sketches of how people stand relative to each other — with its
+  own folder `Poser/<name>/`, a sidebar entry and a *＋ Pose* reference button. A pose chip applies to chosen
+  characters (all of them by default): `Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)`.
+- **A clip feed for many clips** in Generera: *Kort* (cards) or *Tabell* (a windowed table with sortable columns and
+  keyboard navigation), search, filters (status, model, the asset whose photos or voice were used, rating, unrated
+  or reviewed, time, standalone or in a sequence) shown as removable chips, sorting by newest, oldest, rating, cost
+  or length (the view and the sort are remembered), a summary of the filtered clips, and a detail drawer with the
+  player, highlighted tokens, the references and voices that were sent, the settings and actions. Cards show only a
+  poster until hovered, so hundreds of clips stay fast.
+- **Ratings, notes and reviews**: rate a clip 1–5 stars on its card, in the table or in the drawer, add a note and
+  tags; agents' reviews are listed next to yours.
+- **Lärdomar** (learnings), a tab in Prompter: short insights about prompting, by you or your agents, with a model,
+  tags, pinning and the clips they are based on. An agent's learning that you edit becomes yours, and one you pin
+  can no longer be changed or deleted by agents.
+- **Agent tools for the new features** (13 new, 39 tools in all): assets list their audio clips and the pose kind,
+  `get_asset` can return a voice's reference window as MCP audio, `update_asset_audio` moves a window,
+  `set_references` takes `audio_ids` / `include_voice`, token maps include `@AudioN`, `list_models` says which
+  models take reference audio, and `list_generations` filters, sorts and pages like the clip feed.
+- **A review and learning loop for agents**: `review_generation` (frames next to the reference images, the clip's
+  sound and the voice windows), `get_frames`, `list_exports`, `review_export` (frames at every cut of an exported
+  film), `review_sequence`, `add_review`, `list_reviews`, `delete_review`, `save_learning`, `update_learning`,
+  `list_learnings` and `delete_learning`. The guide explains voices, poses and the loop, and ends with the pinned and
+  most recent learnings, so every new session starts from what earlier ones found out.
+- The approval dialog lists the voices and sounds a request would send, with players, and colours `@AudioN` in the
+  prompt.
+
+### Changed
+
+- The library database is migrated to version 7 (`asset_audio`, `generation_reviews`, `learnings`). From this version
+  `Poser` belongs to the library; an older library whose base folder already holds a folder of your own named
+  *Poser* is not opened until it is renamed. A library that a newer Studio has migrated is no longer opened by an
+  older one (it says to update the app instead). Version 0.1.0 has no such check, so once a library is migrated, don't
+  open it with 0.1.0: renaming or deleting a character there would lose track of its voices.
+- `set_references`: an empty `image_ids` list now means none of the asset's photos (e.g. only its voice); leaving it
+  out still means all of them.
+- `list_generations` returns 20 generations by default (was 10) and takes `offset` for paging.
+- `get_generation` also returns the user's rating and every review; `write_video_prompt` and the `studio://guide`
+  resource include the learnings.
+- `request_generation`, `request_segment_generation` and `request_generate_all` measure their audio clips before the
+  approval request is made, so a voice window that can't be sent is refused at once; Generera does the same before
+  the price quote.
+- Deleting a generation now tells every view (`generation:delete`), so the clip feed drops a take deleted in the
+  sequence editor.
+- `media://` serves audio files with their proper content types.
+- ffmpeg is now also needed for voice and sound clips (measuring them and cutting out the part that is sent) and
+  for the frames agents review; generating without voices still works without it.
+- Contributing: the pull request checklist asks for matching agent tools and guide text for every new user-facing
+  capability, and for a CHANGELOG entry. The development guide shows how to test voices, reviews and the exact
+  request body without spending money.
+
+### Fixed
+
+- Search fields in popovers (asset, outfit, prompt and sequence pickers) get the focus when the popover opens.
 
 ## [0.1.0] - 2026-10-06
 

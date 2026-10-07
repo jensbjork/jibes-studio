@@ -2,12 +2,15 @@
 
 Studio can run a [Model Context Protocol](https://modelcontextprotocol.io) server so that AI agents you run
 yourself — for example OpenClaw, Hermes Agent, Claude Desktop or Claude Code — can work in the app alongside you.
-An agent can read the library and look at its photos, choose reference images, write and validate prompts, fill in
-the Generate form and build sequences. Everything an agent prepares is free.
+An agent can read the library, look at its photos and listen to its voices, choose reference images and voice clips,
+write and validate prompts, fill in the Generate form and build sequences. It can also look back at what the
+generations became — frames of finished clips and exported films next to the references they were made from, and
+their sound — record reviews, and save *learnings* (*Lärdomar*) that every later session reads before it writes a
+prompt. Everything an agent prepares, reviews or records is free.
 
 **An agent can never spend money on its own.** The three paid tools only create an *approval request*. Studio
-shows it to you with the prompt, the reference images and the price, and nothing is sent to Venice until you click
-*Godkänn och generera* (approve and generate).
+shows it to you with the prompt, the reference images, the voices and the price, and nothing is sent to Venice
+until you click *Godkänn och generera* (approve and generate).
 
 - [Enabling the server](#enabling-the-server)
 - [Addresses and token](#addresses-and-token)
@@ -15,6 +18,7 @@ shows it to you with the prompt, the reference images and the price, and nothing
 - [Tools](#tools)
 - [The approval flow](#the-approval-flow)
 - [Prompt-writing guidance](#prompt-writing-guidance)
+- [Reviews and learnings](#reviews-and-learnings)
 - [Troubleshooting](#troubleshooting)
 
 ## Enabling the server
@@ -158,46 +162,78 @@ connect (see [Troubleshooting](#troubleshooting)).
 
 ## Tools
 
-Studio offers 26 tools, one prompt and one resource. Tool errors come back as readable tool errors; their messages
-are in Swedish, like the app's UI. Tools that touch the library fail with an explanation until a library is open,
-and the tools that read or fill the Generate form need the Studio window to be open.
+Studio offers **39 tools** — 19 that read, 17 that write (free) and 3 paid ones that only ask for approval — plus
+one prompt and one resource. Tool errors come back as readable tool errors; their messages are in Swedish, like the
+app's UI. Tools that touch the library fail with an explanation until a library is open, and the tools that read or
+fill the Generate form need the Studio window to be open.
 
-### Read (change nothing)
+| Area | Read | Write | Paid |
+| --- | --- | --- | --- |
+| Guide and library (`tools/library.ts`) | `get_studio_guide`, `list_assets`, `get_asset`, `list_models`, `list_prompts`, `list_generations`, `get_generation` | `create_asset`, `update_asset`, `update_asset_audio`, `save_prompt` | |
+| Generate form (`tools/form.ts`) | `get_workspace`, `validate_prompt` | `set_form`, `set_references`, `open_in_studio` | |
+| Sequences (`tools/sequences.ts`) | `list_sequences`, `get_sequence` | `create_sequence`, `add_segment`, `update_segment`, `delete_segment`, `move_segment` | |
+| Approvals (`tools/paid.ts`) | `get_approval` | | `request_generation`, `request_segment_generation`, `request_generate_all` |
+| Reviews and learnings (`tools/review.ts`) | `review_generation`, `get_frames`, `list_exports`, `review_export`, `review_sequence`, `list_reviews`, `list_learnings` | `add_review`, `delete_review`, `save_learning`, `update_learning`, `delete_learning` | |
+| **Total (39)** | **19** | **17** | **3** |
+
+**Images and sound.** Tools that return media send pictures as MCP image content (JPEG) and sound as MCP **audio
+content** (MP3, mono), each preceded by a text label that says what it is (`Reference @Audio1 = Anna's voice
+(window 0–8 s)`, `t = 2.4 s – frame 3 of 6`). Sound is only sent when asked for — `include_audio` on `get_asset`,
+`review_generation` and `review_export`, or `audio_id` on `get_asset` — because it is large. Audio content arrived
+with MCP protocol version 2025-03-26: Studio reads the version from the client's `initialize` request (and the
+`MCP-Protocol-Version` header), and a client on an older version gets a one-line note that the sound was left out
+instead of content it would reject. Whether an agent can actually listen depends on its client and model; the
+frames, reference images and text work without it.
+
+### Read (19 tools; change nothing)
 
 | Tool | What it does |
 | --- | --- |
-| `get_studio_guide` | How Studio works and how to write video prompts for it. Read once at the start of a session. |
-| `get_workspace` | What the user is looking at (view, open sequence and clip) and the Generate form: mode, model, settings, prompt, reference token map, validation issues, price. |
-| `list_assets` | Characters, environments and outfits with ids, descriptions, photo ids and default outfits; optional `kind` filter. |
-| `get_asset` | One asset with its photos as images (JPEG, at most 768 px), each labelled with its photo number and `image_id`. |
-| `list_models` | Venice's usable video models (optionally one `kind`) with mode, durations, resolutions, aspect ratios, reference image limit, audio and prompt length limit; the default model is marked. |
+| `get_studio_guide` | How Studio works and how to write video prompts for it (voices, poses and the review loop included), ending with the learnings recorded so far. Read once at the start of a session. |
+| `get_workspace` | What the user is looking at (view, open sequence and clip) and the Generate form: mode, model, settings, prompt, reference token maps (`@ImageN` and `@AudioN`), validation issues, price. |
+| `list_assets` | Characters, environments, outfits and poses with ids, descriptions, photo ids, default outfits and — for characters and environments — their audio clips (`audio_id`, role `voice` or `soundscape`, duration, reference window `clip_start` / `clip_length`); optional `kind` and `query` filters. |
+| `get_asset` | One asset with its photos as images (JPEG, at most 768 px; `max_images` 1–12, default 4), each labelled with its photo number and `image_id`; for an outfit, the characters wearing it by default. With `include_audio` (the first clip, or the one named by `audio_id`) also a clip's reference window as MP3 audio, exactly as Venice would get it. |
+| `list_models` | Venice's usable video models (optionally one `kind`) with mode, durations, resolutions, aspect ratios, reference image limit, whether they take reference audio (`audio_input`, `max_reference_audios`), audio and prompt length limit; the default model is marked. |
 | `list_prompts` | The prompt library, favourites first. |
-| `list_generations` | The latest generations (`limit` 1–50, default 10) with status, prompt, settings, price and error. |
-| `get_generation` | One generation with its token map, the clip it is a take of, its poster frame and optionally up to 6 `frames` from the video. |
+| `list_generations` | Generations filtered and sorted like Studio's clip feed (`query`, `status`, `model`, `asset_id`, `min_rating`, `unrated`, `since_days`, `placement`, `has_reviews`, `sort`, `limit` 1–50 default 20, `offset`), each with status, prompt, settings, price, the user's rating, review count and a reference summary, plus totals for the filtered set. |
+| `get_generation` | One generation with its token maps, the clip it is a take of, the user's rating and every review, its poster frame and optionally up to 6 `frames` from the video. |
 | `list_sequences` | Sequences with clip count and the length of the current cut. |
-| `get_sequence` | One sequence with its clips, each clip's token map, continuation flag, validation issues and selected take; poster frames with `include_thumbnails` (default true). |
-| `validate_prompt` | Checks a prompt's `@ImageN` tokens against the form's references or a given set — the same check Studio applies before every paid generation. |
+| `get_sequence` | One sequence with its clips, each clip's token maps, continuation flag, validation issues and selected take; poster frames with `include_thumbnails` (default true). |
+| `validate_prompt` | Checks a prompt's `@ImageN` and `@AudioN` tokens (and the audio windows) against the form's references or a given set — the same check Studio applies before every paid generation. |
 | `get_approval` | The state of an approval request: `pending`, `approved` (with `generation_ids`), `declined`, `expired` or `failed`. |
+| `review_generation` | What a finished generation became: prompt, settings, token maps, price, the user's rating and all reviews, `frames` frames evenly spaced from the first to the last (1–12, default 6; JPEG 512 px wide, captioned "t = 2.4 s"), the reference images (or start and end image) it was made from (`include_references`, default true), and with `include_audio` its sound and the reference voice windows as MP3. Ends with a review checklist and the suggested tags. |
+| `get_frames` | Frames of a generation (`generation_id`) or an exported film (`export_id`) at up to 12 given times (times past the end give the last frame), `width` 256–768 px (default 512). |
+| `list_exports` | Exported films, newest first (optionally of one `sequence_id`; `limit` default 20), with their sequence, file, date, length and whether the file still exists. |
+| `review_export` | A whole exported film: when it still matches its sequence, the clips with their place in the film, `frames_per_clip` frames inside each clip (1–4, default 2) and the last frame before and first frame after every cut (`include_cut_frames`), at most 24 frames; otherwise evenly spread frames and a note why the cuts are unknown. With `include_audio`, up to 30 s of its sound from `audio_start`. |
+| `review_sequence` | A sequence clip by clip: prompt, references, continuation, the selected take's rating and review count, and `frames_per_clip` frames of it (2–6, default 3; first and last frame included, within the trims; at most 30 frames in all), plus continuity hints for every cut. |
+| `list_reviews` | Reviews by the user (author `user`) and agents, most recently changed first (for one generation: the user's first), filtered by `generation_id`, `author`, `tag` or `min_rating`; outside a single generation each comes with that generation's prompt and model. |
+| `list_learnings` | The learnings so far, pinned first, then the most recently changed; filters `query` (every word in the title, insight, model or tags), `model` (that model's plus the general ones), `tag`, `author`; `limit` default 50. Also tells the agent the name its own reviews and learnings are recorded under (`your_name`). |
 
-### Write (free; change the library or the form)
+### Write (17 tools; free, change the library or the form)
 
 | Tool | What it does |
 | --- | --- |
 | `set_form` | Fills in the Generate form (mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, start image) and shows the Generate view. All or nothing: invalid values change nothing. |
-| `set_references` | Sets the form's reference images from assets (all photos or chosen `image_ids`, `replace` or `append`) and returns the token map to write the prompt with. |
+| `set_references` | Sets the form's reference images and audio from assets, in order (`replace` or `append`): all photos or chosen `image_ids` (`[]` for none, e.g. only a voice); with a model that takes reference audio, a character's first voice clip unless `include_voice` is false, an environment's first sound clip with `include_voice: true`, or chosen `audio_ids`. Switches the form to reference-to-video if needed and returns the token maps (`references`, `audio_references`) to write the prompt with. Photos and clips over the model's limits (9 images for Seedance; 3 clips, 15 s of audio in all) are listed in `not_added` / `not_added_audio`, and so is a default voice under 2 s (no model takes it). |
 | `open_in_studio` | Brings the Generate view or a sequence (optionally one clip) to the front. |
-| `create_asset` | Creates a character, environment or outfit with a name and description. Photos can only be added by the user in Studio. |
+| `create_asset` | Creates a character, environment, outfit or pose with a name and description. Photos and audio clips can only be added by the user in Studio. |
 | `update_asset` | Changes an asset's name, description or (characters) default outfit. Renaming also renames its folder. |
+| `update_asset_audio` | Moves or resizes an audio clip's reference window (`clip_start`, `clip_length`); Studio keeps it 2–15 s inside the file and says when it adjusted it. |
 | `save_prompt` | Saves a prompt to the prompt library. |
 | `create_sequence` | Creates an empty sequence with the default settings. |
-| `add_segment` | Adds a clip (prompt, references, model and options, `continue_from_previous`), validated like a generation. |
-| `update_segment` | Changes a clip; only the fields passed change. Existing takes are kept. |
+| `add_segment` | Adds a clip (prompt, references with the same items as `set_references`, model and options, `continue_from_previous`), validated like a generation. A clip that continues from the previous one takes no references, so no voices either. |
+| `update_segment` | Changes a clip; only the fields passed change (`references` replaces its photos and audio). Existing takes are kept. |
 | `delete_segment` | Removes a clip (marked destructive). Its takes are kept as ordinary generations. |
 | `move_segment` | Moves a clip to another position (`to_clip_number`, 1-based). |
+| `add_review` | Records the agent's review of a generation (rating 1–5, up to 12 tags, a note) under its own name; each call adds a new review. |
+| `delete_review` | Deletes one of the agent's own reviews (marked destructive). |
+| `save_learning` | Records a learning: title, insight, optional model (left out: every model), tags and evidence (up to 50 generation ids, which must exist). |
+| `update_learning` | Changes one of the agent's own learnings; only the fields passed change (`model: null` makes it general, `evidence` replaces the list). Not one the user has pinned or edited. |
+| `delete_learning` | Deletes one of the agent's own learnings (marked destructive). Not one the user has pinned or edited. |
 
 While *Generera saknade* runs for a sequence, agents cannot change its clips.
 
-### Paid (create an approval request; nothing is generated until the user approves)
+### Paid (3 tools; create an approval request, nothing is generated until the user approves)
 
 | Tool | What it asks for |
 | --- | --- |
@@ -211,29 +247,37 @@ Each takes an optional `note` (up to 500 characters) that is shown to the user i
 
 | Name | Kind | What it is |
 | --- | --- | --- |
-| `write_video_prompt` | MCP prompt | Starts a prompt-writing task (optional `idea`, optional `segment_id`) with the actual reference token map and the prompt-writing guide. |
-| `studio://guide` | MCP resource (Markdown) | The same guide as `get_studio_guide`. |
+| `write_video_prompt` | MCP prompt | Starts a prompt-writing task (optional `idea`, optional `segment_id`) with the actual reference token maps (photos and voices), the learnings that apply to the model and the prompt-writing guide. |
+| `studio://guide` | MCP resource (Markdown) | The same guide as `get_studio_guide`, with the learnings so far. |
 
 ### What agents cannot do
 
-Agents cannot add or remove photos, delete assets, prompts, generations or sequences, rename sequences, export,
-change settings, switch the library, or approve anything. Every change goes through the same services as the
-window, with the same validation.
+Agents cannot add or remove photos, add, remove or reorder audio clips (only move a clip's reference window),
+delete assets, prompts, generations or sequences, rename sequences, export, change settings, switch the library, or
+approve anything. They cannot set the user's own rating, note or tags, pin learnings, or change or delete reviews
+and learnings written by the user or by other agents; their own reviews can be deleted but not edited. Their own
+learnings stop being theirs to change once the user pins one (it can no longer be updated or deleted by agents) or
+edits it (it becomes the user's). Every change
+goes through the same services as the window, with the same validation.
 
 ## The approval flow
 
 1. The agent prepares the form or a clip and calls a paid tool. Studio validates it first (prompt, start image or
-   references, `@ImageN` tokens); a problem comes back as an error and no request is made.
+   references, `@ImageN` and `@AudioN` tokens); a problem comes back as an error and no request is made. The audio
+   files are also measured (for `request_generate_all`, those of every clip that doesn't continue from the one
+   before), so a window that is under 2 s, past the end of the file or over 15 s in all is refused now rather than
+   after you approve. Each take's audio is measured again right before it is sent, as for every generation.
 2. Studio asks Venice for the price and creates the request. The tool answers at once with
    `{approval_id, status: "pending", price_usd, expires}`. Asking again for exactly the same thing returns the same
    request; a new request for the same clip replaces an older pending one. At most 10 requests can wait at a time.
-3. Studio shows the approval dialog with the prompt, the reference images, the price and the agent's note. If Studio
-   is not in front, its Dock icon bounces once. Pending requests are also listed in the activity drawer.
+3. Studio shows the approval dialog with the prompt (tokens coloured), the reference images, the voices and sounds
+   with their windows and play buttons, the price and the agent's note. If Studio is not in front, its Dock icon
+   bounces once. Pending requests are also listed in the activity drawer.
 4. You approve or decline (optionally with a reason). On approval Studio re-checks that the clips and the image
-   files are still exactly what was shown (the Generate form was captured when the request was made, so later
-   edits to the form don't change it), then submits through the normal generation path. If Venice first needs you
-   to accept a model's terms, the consent dialog appears; accepting it submits the request, and until then the
-   request stays pending.
+   and audio files are still exactly what was shown (the Generate form was captured when the request was made, so
+   later edits to the form don't change it), then submits through the normal generation path. If Venice first
+   needs you to accept a model's terms, the consent dialog appears; accepting it submits the request, and until
+   then the request stays pending.
 5. The agent polls `get_approval` (every 15–30 seconds is plenty) and then follows the result with
    `get_generation` or `get_sequence`.
 
@@ -242,11 +286,46 @@ is switched or the agent connection is switched off.
 
 ## Prompt-writing guidance
 
-The server's `initialize` instructions ask agents to start with `get_studio_guide`. The guide (also available as
-the `studio://guide` resource and through the `write_video_prompt` prompt) explains assets, the three modes,
-`@ImageN` references, sequences and continuation clips, approvals, and how to write prompts for Seedance-class video
-models. Agents are asked to talk to the user in Swedish and to write video prompts in the language chosen under
-**Inställningar → Promptspråk** (English by default).
+The server's `initialize` instructions ask agents to start with `get_studio_guide` and to review what their
+generations became. The guide (also available as the `studio://guide` resource) explains assets, the three modes,
+`@ImageN` and `@AudioN` references, voices and poses, sequences and continuation clips, approvals, the review loop,
+and how to write prompts for Seedance-class video models, and it ends with the learnings recorded so far (the pinned
+ones and the ten most recently changed). The `write_video_prompt` prompt starts from the prompt-writing part of the
+guide, with the clip's actual references and the learnings for its model. Agents are asked to talk to the user in
+Swedish and to write video prompts in the language chosen under **Inställningar → Promptspråk** (English by
+default).
+
+## Reviews and learnings
+
+The point of the review tools is better prompts: an agent looks at what earlier prompts actually produced, writes
+down what it saw, and turns what generalises into *learnings* that every later session reads first. The guide and
+the server instructions ask agents to close the loop after every generation they requested, and whenever you ask
+them to look at earlier clips or films:
+
+1. **Find** — `list_generations` with the clip feed's filters, e.g. the clips you rated highest
+   (`{sort: "rating", min_rating: 4}`), the clips of one character (`asset_id`), or finished clips nobody has
+   reviewed yet (`{status: "completed", has_reviews: false}`); `list_exports` for exported films.
+2. **Look** — `review_generation` returns the frames next to the reference images the clip was made from (and, with
+   `include_audio`, its sound next to the reference voices); `get_frames` looks closer at a moment. For a film,
+   `review_sequence` shows every clip's selected take with hints for each cut, and `review_export` shows an exported
+   film around its cuts.
+3. **Record** — `add_review`: an honest rating, tags from the suggested vocabulary (`prompt-followed`,
+   `prompt-ignored`, `identity-drift`, `wrong-outfit`, `wrong-pose`, `bad-motion`, `good-motion`, `camera-good`,
+   `camera-wrong`, `artifacts`, `voice-match`, `voice-mismatch`, `continuity-good`, `continuity-break`,
+   `lighting-good`, `lighting-wrong`; other tags are allowed) and a specific note that names tokens and moments.
+4. **Distil** — `save_learning` for whatever generalises ("Seedance 2.5: naming the outfit right after the
+   character's tokens keeps it"), with the model and the generation ids it is based on as evidence;
+   `update_learning` when later results refine it, `delete_learning` when they prove it wrong.
+5. **Apply** — the learnings come at the end of `get_studio_guide`, the `studio://guide` resource and the
+   `write_video_prompt` prompt (the pinned ones and the ten most recently changed; the prompt only those for its
+   model and the general ones), and `list_learnings` has them all.
+
+Reviews and learnings are stored in the library's database, so they move with the library and every agent sees the
+same ones. In Studio, reviews appear in the clip's detail drawer next to your own rating, note and tags (you can
+delete any review there), and learnings in **Prompter → Lärdomar**, where you can write your own and pin, edit or
+delete any of them; pinned learnings come first for every agent. Your own rating (author `user`) is what
+`list_generations({min_rating})` and `list_reviews({author: "user"})` read, so rating clips is the clearest way to
+show agents what you like.
 
 ## Troubleshooting
 

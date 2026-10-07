@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { Generation, VideoModel } from '@shared/types'
 import { formatSeconds, formatUsd, mediaUrl } from '../lib/media'
 import type { Navigate } from '../lib/navigation'
+import { isPending, progressOf, reviewCountText } from './feed/feedText'
+import { ExpandIcon, ReviewIcon } from './feed/icons'
+import { pauseOthers } from './feed/playback'
+import StarRating from './feed/StarRating'
 import Popover from './pickers/Popover'
 import SequencePicker, { type AddedToSequence } from './pickers/SequencePicker'
+import { PlayIcon } from './sequences/icons'
 
 interface Props {
   generation: Generation
@@ -14,9 +19,18 @@ interface Props {
   navigate?: Navigate
   /** Receives a locally patched copy, e.g. with segmentId set after "Lägg i sekvens". */
   onChange?: (g: Generation) => void
+  /** Opens the clip in the detail drawer. */
+  onOpen?: (g: Generation) => void
+  /** Sets (or with null clears) the user's star rating. */
+  onRate?: (g: Generation, rating: number | null) => void
+  /** The clip is the one shown in the detail drawer. */
+  selected?: boolean
 }
 
 const action = 'rounded px-1.5 py-0.5 hover:bg-raised hover:text-text'
+
+// Cards far outside the viewport skip layout and painting, so a feed of hundreds of clips scrolls smoothly.
+const offscreenHint: CSSProperties = { contentVisibility: 'auto', containIntrinsicSize: 'auto 320px' }
 
 /** Finds the sequence that owns a segment; only used on click, so a linear scan is fine. */
 async function findSequenceOfSegment(segmentId: string): Promise<string | undefined> {
@@ -27,12 +41,20 @@ async function findSequenceOfSegment(segmentId: string): Promise<string | undefi
   return undefined
 }
 
-export default function GenerationCard({ generation: g, model, onReuse, onDelete, navigate, onChange }: Props) {
-  const pending = g.status === 'queued' || g.status === 'processing'
-  const progress =
-    g.executionDuration && g.averageExecutionTime
-      ? Math.min(0.97, g.executionDuration / g.averageExecutionTime)
-      : undefined
+function GenerationCard({
+  generation: g,
+  model,
+  onReuse,
+  onDelete,
+  navigate,
+  onChange,
+  onOpen,
+  onRate,
+  selected
+}: Props) {
+  const pending = isPending(g)
+  const progress = progressOf(g)
+  const playable = g.status === 'completed' && !!g.filePath
 
   const sequenceButton = useRef<HTMLButtonElement>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -42,6 +64,18 @@ export default function GenerationCard({ generation: g, model, onReuse, onDelete
   // Deleting trashes a paid video and, for a sequence take, can silently clear that clip's selection;
   // so it takes a second click, like deleting a take in the sequence editor.
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+
+  // The <video> element is only mounted while the pointer is over the card (or it plays): a feed of hundreds
+  // of clips then costs hundreds of poster images, not hundreds of video decoders.
+  const [live, setLive] = useState(false)
+  const [autoPlay, setAutoPlay] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const hovered = useRef(false)
+
+  // Started from the poster button (perhaps with the keyboard): the button is gone, so the player takes the focus.
+  useEffect(() => {
+    if (live && autoPlay) videoRef.current?.focus()
+  }, [live, autoPlay])
 
   useEffect(() => {
     if (!confirmingDelete) return
@@ -80,21 +114,79 @@ export default function GenerationCard({ generation: g, model, onReuse, onDelete
     }
   }
 
+  const enter = () => {
+    hovered.current = true
+    if (playable) setLive(true)
+  }
+  const leave = () => {
+    hovered.current = false
+    // A clip that is playing keeps playing; a paused one goes back to its poster.
+    const video = videoRef.current
+    if (!video || video.paused) {
+      setLive(false)
+      setAutoPlay(false)
+    }
+  }
+  const play = () => {
+    setAutoPlay(true)
+    setLive(true)
+  }
+
   const keepActionsVisible = pickerOpen || confirmingDelete
+  // Agents' reviews only: the user's own (stars, or just a note or tags) isn't a "granskning" to read.
+  const otherReviews = g.agentReviewCount
 
   return (
-    <div className="group overflow-hidden rounded-lg border border-line bg-panel">
-      <div className="relative aspect-video bg-black">
-        {g.status === 'completed' && g.filePath && (
-          <video
-            src={mediaUrl(g.filePath)}
-            poster={g.thumbPath ? mediaUrl(g.thumbPath) : undefined}
-            controls
-            loop
-            preload="metadata"
-            className="h-full w-full object-contain"
-          />
-        )}
+    <div
+      data-generation-id={g.id}
+      style={offscreenHint}
+      className={`group overflow-hidden rounded-lg border bg-panel transition-colors ${
+        selected ? 'border-accent/70 ring-1 ring-accent/40' : 'border-line'
+      }`}
+    >
+      <div className="relative aspect-video bg-black" onMouseEnter={enter} onMouseLeave={leave}>
+        {playable &&
+          (live ? (
+            <video
+              ref={videoRef}
+              src={mediaUrl(g.filePath!)}
+              poster={g.thumbPath ? mediaUrl(g.thumbPath) : undefined}
+              controls
+              loop
+              autoPlay={autoPlay}
+              preload="metadata"
+              onPlay={(e) => pauseOthers(e.currentTarget)}
+              // Paused after the pointer left (e.g. with the keyboard): back to the poster.
+              onPause={() => {
+                if (!hovered.current) {
+                  setLive(false)
+                  setAutoPlay(false)
+                }
+              }}
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={play}
+              title="Spela upp"
+              className="group/poster flex h-full w-full items-center justify-center outline-none"
+            >
+              {g.thumbPath && (
+                <img
+                  src={mediaUrl(g.thumbPath)}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  draggable={false}
+                  className="absolute inset-0 h-full w-full object-contain"
+                />
+              )}
+              <span className="relative flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white/90 opacity-0 backdrop-blur transition group-hover:opacity-100 group-focus-visible/poster:opacity-100">
+                <PlayIcon size={16} />
+              </span>
+            </button>
+          ))}
         {pending && (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-muted">
             <span className="animate-pulse">{g.status === 'queued' ? 'I kö…' : 'Genererar…'}</span>
@@ -125,11 +217,56 @@ export default function GenerationCard({ generation: g, model, onReuse, onDelete
             ▤ {openingSequence ? 'Öppnar…' : 'I sekvens'}
           </button>
         )}
+
+        <div className="absolute right-2 top-2 flex items-center gap-1">
+          {otherReviews > 0 && (
+            <button
+              type="button"
+              onClick={() => onOpen?.(g)}
+              title={`${reviewCountText(otherReviews)} – öppna för att läsa`}
+              className="flex h-[22px] items-center gap-1 rounded bg-black/70 px-1.5 text-[10px] text-text backdrop-blur hover:bg-black/90"
+            >
+              <ReviewIcon size={11} />
+              {otherReviews}
+            </button>
+          )}
+          {g.status === 'completed' && onRate && (
+            <div
+              className={`flex h-[22px] items-center rounded bg-black/70 px-1 backdrop-blur transition ${
+                g.rating ? '' : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100'
+              }`}
+            >
+              <StarRating value={g.rating} onChange={(r) => onRate(g, r)} size="sm" />
+            </div>
+          )}
+          {onOpen && (
+            <button
+              type="button"
+              onClick={() => onOpen(g)}
+              title="Visa detaljer"
+              className="flex h-[22px] w-[22px] items-center justify-center rounded bg-black/70 text-text opacity-0 backdrop-blur transition hover:bg-black/90 focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              <ExpandIcon size={11} />
+            </button>
+          )}
+        </div>
       </div>
       <div className="p-3">
-        <p className="mb-2 line-clamp-2 select-text" title={g.prompt}>
-          {g.prompt}
-        </p>
+        {onOpen ? (
+          <button
+            type="button"
+            data-card-open
+            onClick={() => onOpen(g)}
+            title="Visa detaljer"
+            className="mb-2 line-clamp-2 w-full text-left outline-none transition hover:text-white focus-visible:underline"
+          >
+            {g.prompt}
+          </button>
+        ) : (
+          <p className="mb-2 line-clamp-2 select-text" title={g.prompt}>
+            {g.prompt}
+          </p>
+        )}
         <div className="relative flex items-center gap-2 text-[11px] text-muted">
           <span className="truncate" title={g.model}>
             {model?.name ?? g.model}
@@ -144,6 +281,11 @@ export default function GenerationCard({ generation: g, model, onReuse, onDelete
           )}
           <span>·</span>
           <span className="shrink-0">{formatUsd(g.quote)}</span>
+          {(g.params.referenceAudios?.length ?? 0) > 0 && (
+            <span className="shrink-0" title="Med ljudreferens">
+              · ♪
+            </span>
+          )}
           {/* Overlays the metadata on hover so the model name isn't squeezed by invisible buttons. */}
           <div
             className={`absolute inset-y-0 right-0 flex items-center gap-1 bg-linear-to-l from-panel from-75% to-transparent pl-10 transition ${
@@ -227,3 +369,6 @@ export default function GenerationCard({ generation: g, model, onReuse, onDelete
     </div>
   )
 }
+
+/** Memoized: a feed re-renders on every job update, but only the card whose generation changed needs to. */
+export default memo(GenerationCard)

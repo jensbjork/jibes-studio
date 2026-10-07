@@ -1,7 +1,8 @@
 // The base folder (grundmapp): opening it at startup, switching to another folder or moving the library
 // there, converting a phase-2 library (~/Movies/Studio with studio.db, generations/, thumbs/, …) to the
 // new layout, and "Städa upp", which puts every file the library knows about in its proper folder:
-// characters, environments and outfits (assets) in Karaktärer/, Miljöer/ and Kläder/, one folder each.
+// characters, environments, outfits and poses (assets) in Karaktärer/, Miljöer/, Kläder/ and Poser/, one folder
+// each holding the asset's photos and audio clips.
 
 import { randomUUID } from 'node:crypto'
 import {
@@ -90,6 +91,7 @@ const VISIBLE_FOLDERS = [
   FOLDERS.characters,
   FOLDERS.environments,
   FOLDERS.outfits,
+  FOLDERS.poses,
   FOLDERS.references,
   FOLDERS.generations,
   FOLDERS.sequences
@@ -284,10 +286,14 @@ function isPlainName(name: string | null | undefined): name is string {
 
 const lower = (s: string): string => s.normalize('NFC').toLowerCase()
 
+/** "a", "a och b", "a, b och c". */
+function andList(items: string[]): string {
+  return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} och ${items[items.length - 1]}`
+}
+
 /** "”A”", "”A” och ”B”", "”A”, ”B” och ”C”". */
 function quotedList(names: string[]): string {
-  const q = names.map((n) => `”${n}”`)
-  return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} och ${q[q.length - 1]}`
+  return andList(names.map((n) => `”${n}”`))
 }
 
 function conflictMessage(names: string[]): string {
@@ -496,23 +502,35 @@ function missingDatabaseMessage(root: string): string {
         'där det ligger nu.'
 }
 
-/** The folders this version adds next to Karaktärer. */
-const ADDED_ASSET_FOLDERS = [FOLDERS.environments, FOLDERS.outfits]
+/**
+ * The asset folders later versions added next to Karaktärer, with the schema version from which a library
+ * owns each one, and what this version keeps in it.
+ */
+const ADDED_ASSET_FOLDERS: readonly { name: string; since: number; what: string }[] = [
+  { name: FOLDERS.environments, since: db.ASSETS_SCHEMA_VERSION, what: 'miljöer' },
+  { name: FOLDERS.outfits, since: db.ASSETS_SCHEMA_VERSION, what: 'kläder' },
+  { name: FOLDERS.poses, since: db.POSES_SCHEMA_VERSION, what: 'poser' }
+]
 
 /**
- * A library from before environments and outfits whose base folder already holds folders of the user's own
- * called Miljöer or Kläder (the setup screen promised that files already there are left alone): opening it
- * would make them the library's – their paths stored relative, "Flytta" taking them along, submits using
- * their files in place instead of copying them into Referensbilder. Refused, before anything changes, until
- * they have renamed them.
+ * A library from before one of those folders whose base folder already holds a folder of the user's own by
+ * that name, e.g. Miljöer, Kläder or Poser (the setup screen promised that files already there are left
+ * alone): opening it would make it the library's – its paths stored relative, "Flytta" taking it along,
+ * submits using its files in place instead of copying them into Referensbilder. Refused, before anything
+ * changes, until they have renamed it.
  */
 function refuseOwnAssetFolders(root: string): void {
-  const own = ADDED_ASSET_FOLDERS.filter((name) => isOccupied(join(root, name)))
-  if (!own.length || db.schemaVersion(dbFile(root)) >= db.ASSETS_SCHEMA_VERSION) return
+  const occupied = ADDED_ASSET_FOLDERS.filter((f) => isOccupied(join(root, f.name)))
+  if (!occupied.length) return
+  const version = db.schemaVersion(dbFile(root))
+  const own = occupied.filter((f) => version < f.since)
+  if (!own.length) return
+  const one = own.length === 1
+  const where = one ? 'en mapp med det namnet' : 'mappar med de namnen'
   throw new Error(
-    `Biblioteksmappen innehåller redan ${quotedList(own)} med egna filer. Den här versionen av Studio sparar ` +
-      `miljöer och kläder i mappar med de namnen, så döp om ${own.length === 1 ? 'mappen' : 'mapparna'} i ` +
-      'Finder och försök igen.'
+    `Biblioteksmappen innehåller redan ${quotedList(own.map((f) => f.name))} med egna filer. Den här versionen ` +
+      `av Studio sparar ${andList(own.map((f) => f.what))} i ${where}, så döp om ${one ? 'mappen' : 'mapparna'} ` +
+      'i Finder och försök igen.'
   )
 }
 
@@ -569,6 +587,8 @@ async function openLibraryAt(root: string, create = false): Promise<ReorganizeRe
   // Before anything is created in the folder: a configured folder without a database is not a library (a
   // renamed library's old path, say), and an empty one created here would hide the real one.
   if (!create && !hasNewDb(root)) throw new Error(missingDatabaseMessage(root))
+  // A newer Studio's library is refused before this build touches the folder (openDb refuses it too).
+  if (!create && db.isNewerSchema(db.schemaVersion(dbFile(root)))) throw new Error(db.NEWER_LIBRARY_MESSAGE)
   if (!create) refuseOwnAssetFolders(root)
   ensureStructure(root)
   clearTmp(root)
@@ -903,7 +923,7 @@ async function moveLibraryFolders(source: string, target: string): Promise<Moved
   }
 }
 
-/** Every stored path to a file the database tracks itself: videos, posters, asset photos, exports. */
+/** Every stored path to a file the database tracks itself: videos, posters, asset photos and audio, exports. */
 function trackedFilePaths(): string[] {
   return db
     .getDb()
@@ -911,6 +931,7 @@ function trackedFilePaths(): string[] {
       `SELECT file_path FROM generations WHERE file_path IS NOT NULL
        UNION ALL SELECT thumb_path FROM generations WHERE thumb_path IS NOT NULL
        UNION ALL SELECT file_path FROM asset_images
+       UNION ALL SELECT file_path FROM asset_audio
        UNION ALL SELECT file_path FROM exports`
     )
     .pluck()
@@ -1254,8 +1275,8 @@ async function relocate(
 }
 
 /**
- * What owns a folder: an asset (in the folder of its kind: Karaktärer, Miljöer or Kläder) or a sequence (in
- * Sekvenser). Folder names only have to be unique among owners that share a parent folder.
+ * What owns a folder: an asset (in the folder of its kind: Karaktärer, Miljöer, Kläder or Poser) or a sequence
+ * (in Sekvenser). Folder names only have to be unique among owners that share a parent folder.
  */
 type FolderOwner = { table: 'assets'; kind: AssetKind } | { table: 'sequences' }
 
@@ -1354,13 +1375,14 @@ async function writeDescriptionIfMissing(dir: string, description: string): Prom
 const ASSET_LABELS: Readonly<Record<AssetKind, string>> = {
   character: 'Karaktären',
   environment: 'Miljön',
-  outfit: 'Klädseln'
+  outfit: 'Klädseln',
+  pose: 'Posen'
 }
 
 /**
- * Folder, photos and description file of one character, environment or outfit: everything goes into
- * <folder of its kind>/<its folder>/. Returns its folder name; undefined when the row is gone, or of a kind
- * this version doesn't know (a library opened by a newer Studio), whose files are left where they are.
+ * Folder, photos, audio clips and description file of one character, environment, outfit or pose: everything
+ * goes into <folder of its kind>/<its folder>/. Returns its folder name; undefined when the row is gone, or of
+ * a kind this version doesn't know (a library opened by a newer Studio), whose files are left where they are.
  */
 async function tidyAsset(id: string, report: ReorganizeReport): Promise<string | undefined> {
   const conn = db.getDb()
@@ -1393,6 +1415,25 @@ async function tidyAsset(id: string, report: ReorganizeReport): Promise<string |
         renameInPlace: idNamed,
         stillTracked: () => !!imageExists.get(image.id)
       })
+    } catch (err) {
+      report.errors.push(`${basename(abs)}: ${message(err)}`)
+    }
+  }
+
+  // Audio clips keep their own (original) names; generations and clips that send one follow its move.
+  const clips = conn
+    .prepare('SELECT id, file_path FROM asset_audio WHERE asset_id = ? ORDER BY position, created_at')
+    .all(id) as { id: string; file_path: string }[]
+  const clipExists = conn.prepare('SELECT 1 FROM asset_audio WHERE id = ?')
+  for (const clip of clips) {
+    const abs = fromStoredPath(clip.file_path)
+    if (!isInsideRoot(abs)) continue
+    if (!isFile(abs)) {
+      report.missing++
+      continue
+    }
+    try {
+      await relocate(abs, dir, report, { stillTracked: () => !!clipExists.get(clip.id) })
     } catch (err) {
       report.errors.push(`${basename(abs)}: ${message(err)}`)
     }
@@ -1534,8 +1575,8 @@ async function removeEmptyFolders(root: string): Promise<void> {
 }
 
 /**
- * "Städa upp": moves every tracked file to its canonical location, gives characters, environments, outfits
- * and sequences their folders, rewrites stored paths and removes emptied day folders and empty phase-2
+ * "Städa upp": moves every tracked file to its canonical location, gives characters, environments, outfits,
+ * poses and sequences their folders, rewrites stored paths and removes emptied day folders and empty phase-2
  * folders. Idempotent, never overwrites anything; files missing on disk are counted, not errors. Refused
  * while the library is busy.
  */
@@ -1584,6 +1625,7 @@ const REVEAL_FOLDERS: Readonly<Record<Exclude<LibraryFolderTarget, 'root'>, stri
   characters: FOLDERS.characters,
   environments: FOLDERS.environments,
   outfits: FOLDERS.outfits,
+  poses: FOLDERS.poses,
   references: FOLDERS.references,
   generations: FOLDERS.generations,
   sequences: FOLDERS.sequences
@@ -1592,7 +1634,8 @@ const REVEAL_FOLDERS: Readonly<Record<Exclude<LibraryFolderTarget, 'root'>, stri
 const ASSET_TARGETS: ReadonlySet<LibraryFolderTarget> = new Set<LibraryFolderTarget>([
   'characters',
   'environments',
-  'outfits'
+  'outfits',
+  'poses'
 ])
 
 /** Targets arrive over IPC: anything else is refused rather than opening some other folder. */
@@ -1607,7 +1650,7 @@ function isAssetId(id: string): boolean {
 
 /**
  * Opens a library folder in Finder, creating it if needed. With an id: an asset's folder whatever the target
- * (a character, environment or outfit), or a sequence's folder for 'sequences'.
+ * (a character, environment, outfit or pose), or a sequence's folder for 'sequences'.
  */
 export async function revealLibraryFolder(target: LibraryFolderTarget, id?: string): Promise<void> {
   if (!isRevealTarget(target)) throw new Error('Okänd mapp.')

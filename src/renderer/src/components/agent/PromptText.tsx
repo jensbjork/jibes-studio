@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
-import { findImageTokens, findMalformedTokens } from '@shared/prompt-refs'
+import { findAudioTokens, findImageTokens, findMalformedTokens, type PromptToken } from '@shared/prompt-refs'
 import type { AssetKind } from '@shared/types'
 import { KIND_TONE } from '../pickers/assetKinds'
 
-/** What @ImageN (index N-1) shows, for colouring and the tooltip. */
+/** What @ImageN (or @AudioN; index N-1) points at, for colouring and the tooltip. */
 export interface TokenTarget {
   kind?: AssetKind
-  /** "Anna (foto 2)" */
+  /** "Anna (foto 2)", "Anna · röst" */
   label: string
 }
 
@@ -14,6 +14,8 @@ interface Props {
   prompt: string
   /** One entry per reference image that is sent; empty outside reference mode. */
   targets: TokenTarget[]
+  /** One entry per reference audio clip that is sent; empty when the model takes no audio. */
+  audioTargets?: TokenTarget[]
   className?: string
 }
 
@@ -26,13 +28,13 @@ interface Mark {
 const tokenBase = 'rounded px-0.5 font-medium'
 
 /**
- * A prompt, read-only, with its @ImageN tokens coloured like the reference chips: valid ones by the kind of
- * the picture they point at, tokens that point at nothing (or are misspelled) red and underlined.
+ * A prompt, read-only, with its @ImageN and @AudioN tokens coloured like the reference chips: valid ones by the
+ * kind of the asset they point at, tokens that point at nothing (or are misspelled) red and underlined.
  */
-export default function PromptText({ prompt, targets, className = '' }: Props) {
+export default function PromptText({ prompt, targets, audioTargets = [], className = '' }: Props) {
   const marks: Mark[] = []
-  for (const t of findImageTokens(prompt)) {
-    const target = targets[t.index - 1]
+  const mark = (t: PromptToken, list: TokenTarget[], nothing: string): void => {
+    const target = list[t.index - 1]
     const tone = target?.kind ? KIND_TONE[target.kind].text : 'text-text'
     marks.push({
       start: t.start,
@@ -44,7 +46,7 @@ export default function PromptText({ prompt, targets, className = '' }: Props) {
       ) : (
         <span
           key={t.start}
-          title={`${t.raw} pekar inte på någon av bilderna som skickas`}
+          title={`${t.raw} ${nothing}`}
           className={`${tokenBase} text-accent underline decoration-accent decoration-wavy underline-offset-2`}
         >
           {t.raw}
@@ -52,6 +54,8 @@ export default function PromptText({ prompt, targets, className = '' }: Props) {
       )
     })
   }
+  for (const t of findImageTokens(prompt)) mark(t, targets, 'pekar inte på någon av bilderna som skickas')
+  for (const t of findAudioTokens(prompt)) mark(t, audioTargets, 'pekar inte på något av ljudklippen som skickas')
   for (const m of findMalformedTokens(prompt)) {
     if (marks.some((x) => m.start < x.end && x.start < m.end)) continue
     marks.push({

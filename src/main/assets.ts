@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises'
+import { readdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { shell } from 'electron'
-import type { Asset, AssetImage, AssetInput, AssetKind } from '@shared/types'
+import { DEFAULT_AUDIO_CLIP_SECONDS, MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
+import type { Asset, AssetAudio, AssetImage, AssetInput, AssetKind } from '@shared/types'
 import { getDb, isStoredPathRecorded, rewriteStoredPrefix } from './db'
+import { probeAudio } from './ffmpeg'
 import {
   assetsDir,
   folderRecordedInDb,
@@ -22,13 +24,25 @@ import {
 } from './paths'
 import { copyInto, fileErrorReason, placeFile, serialized } from './references'
 
-// Assets: characters (Karaktärer), environments (Miljöer) and outfits (Kläder) — each a name, a description and
-// reference photos. Every asset has a folder <kind folder>/<name>/ with copies of its photos (under their
-// original names) and Beskrivning.txt, so an asset keeps working when the originals are moved or deleted, and
-// the folder reads well in Finder. The database is the source of truth; the folder follows renames and deletes.
-// A character may have a default outfit (assets.default_outfit_id, cleared by the FK when the outfit goes).
+// Assets: characters (Karaktärer), environments (Miljöer), outfits (Kläder) and poses (Poser) — each a name, a
+// description and reference photos. Characters and environments can also have audio clips: a voice ("Röst")
+// or a soundscape ("Ljudmiljö"), of which a window of 2–15 s is sent to Venice as reference audio. Every asset
+// has a folder <kind folder>/<name>/ with copies of its photos and audio (under their original names) and
+// Beskrivning.txt, so an asset keeps working when the originals are moved or deleted, and the folder reads
+// well in Finder. The database is the source of truth; the folder follows renames and deletes. A character may
+// have a default outfit (assets.default_outfit_id, cleared by the FK when the outfit goes).
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp'])
+/** The audio formats an asset accepts (also the file dialog's filter). */
+export const AUDIO_FILE_TYPES: readonly string[] = ['mp3', 'wav', 'm4a', 'aac', 'aiff', 'aif', 'flac', 'ogg']
+const AUDIO_EXTENSIONS = new Set(AUDIO_FILE_TYPES.map((type) => `.${type}`))
+/** The kinds that can have audio clips: a character's voice, an environment's soundscape. */
+const AUDIO_KINDS: ReadonlySet<AssetKind> = new Set<AssetKind>(['character', 'environment'])
+/**
+ * Shorter files are refused on import: nothing usable as a voice or a soundscape fits in them. Long files are
+ * accepted (the reference window picks the part that is sent); the library view points out ones over a minute.
+ */
+const MIN_AUDIO_FILE_SECONDS = 1
 const DESCRIPTION_FILE = 'Beskrivning.txt'
 /**
  * Folder name for a name with nothing usable in it (e.g. "..."). The same for every kind, and the same as
@@ -36,13 +50,15 @@ const DESCRIPTION_FILE = 'Beskrivning.txt'
  */
 const UNNAMED = 'Namnlös'
 const GONE = 'Den finns inte längre i biblioteket.'
+const AUDIO_GONE = 'Ljudet finns inte längre.'
 const nameCollator = new Intl.Collator('sv')
 
 /** The asset in definite form, for messages ("Miljön behöver ett namn."). */
 const THE: Record<AssetKind, string> = {
   character: 'Karaktären',
   environment: 'Miljön',
-  outfit: 'Klädseln'
+  outfit: 'Klädseln',
+  pose: 'Posen'
 }
 
 let notifyChange: () => void = () => {}
@@ -75,7 +91,7 @@ function assetTask<T>(task: () => Promise<T>): Promise<T> {
 
 /** Why the library can't be switched or tidied right now (Swedish), or undefined when no asset work runs. */
 export function assetWorkBusy(): string | undefined {
-  return assetTasks > 0 ? 'Bilderna till en karaktär, miljö eller klädsel sparas just nu.' : undefined
+  return assetTasks > 0 ? 'Bilder eller ljud till en karaktär, miljö, klädsel eller pose sparas just nu.' : undefined
 }
 
 interface AssetRow {
@@ -100,6 +116,20 @@ interface AssetImageRow {
   created_at: number
 }
 
+interface AssetAudioRow {
+  id: string
+  asset_id: string
+  /** Stored form, like asset_images.file_path. */
+  file_path: string
+  position: number
+  /** Seconds, the whole file (probed on import). */
+  duration: number
+  clip_start: number
+  /** NULL: the default window, min(duration, 10). */
+  clip_length: number | null
+  created_at: number
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** IPC input is untyped at runtime; treat anything that isn't a string as empty. */
@@ -116,6 +146,38 @@ function safeId(id: unknown): string {
 function requireKind(value: unknown): AssetKind {
   if (!isAssetKind(value)) throw new Error('Okänd sorts bibliotekspost.')
   return value
+}
+
+/** To the millisecond, rounded down so a window never ends past the file it was clamped into. */
+function toMs(seconds: number): number {
+  return Math.floor(seconds * 1000 + 1e-6) / 1000
+}
+
+/**
+ * The reference window of an audio clip: `length` seconds (default min(duration, 10)) clamped to the 2–15 s
+ * Venice accepts and to the file, starting at `start` moved inside the file so the whole window fits. A file
+ * shorter than 2 s gets all of it: the prompt check then explains that it is too short to send.
+ */
+export function resolveAudioWindow(
+  duration: number,
+  start?: number | null,
+  length?: number | null
+): { clipStart: number; clipLength: number } {
+  const total = Number.isFinite(duration) && duration > 0 ? duration : 0
+  const wanted =
+    typeof length === 'number' && Number.isFinite(length) ? length : Math.min(total, DEFAULT_AUDIO_CLIP_SECONDS)
+  const clipLength = toMs(Math.min(Math.max(wanted, MIN_AUDIO_CLIP_SECONDS), MAX_AUDIO_CLIP_SECONDS, total))
+  const from = typeof start === 'number' && Number.isFinite(start) ? start : 0
+  const clipStart = toMs(Math.min(Math.max(from, 0), Math.max(0, total - clipLength)))
+  return { clipStart, clipLength }
+}
+
+/** A reason from elsewhere as the end of a Swedish sentence: "…: ffmpeg hittades inte." */
+function reasonText(err: unknown): string {
+  const text = fileErrorReason(err)
+    .replace(/^Kunde inte läsa ljudfilen:\s*/u, '')
+    .replace(/[.\s]+$/u, '')
+  return text.charAt(0).toLocaleLowerCase('sv') + text.slice(1)
 }
 
 /** Folder names compare the way macOS file systems do: ignoring case and Unicode normalization. */
@@ -336,12 +398,13 @@ async function renameNamedImages(assetId: string, dir: string, oldName: string, 
 }
 
 /**
- * A photo that generations or sequence clips still use (as start, end or reference image) isn't trashed with
- * its asset: it moves to Referensbilder/<today>/, where submitted pictures from outside the library go, and
- * those rows follow, so "Använd igen" and "Generera alla" keep the picture and the prompt's @ImageN numbers.
- * Call once the photo's asset_images row is gone, so only other rows count. True when it was kept.
+ * A photo or audio clip that generations or sequence clips still use (as start, end or reference image, or
+ * as reference audio) isn't trashed with its asset: it moves to Referensbilder/<today>/, where submitted
+ * pictures from outside the library go, and those rows follow, so "Använd igen" and "Generera alla" keep the
+ * file and the prompt's @ImageN / @AudioN numbers. Call once the file's asset row is gone, so only other rows
+ * count. True when it was kept.
  */
-async function keepUsedPhoto(path: string): Promise<boolean> {
+async function keepUsedFile(path: string, fallback: string): Promise<boolean> {
   const stored = toStoredPath(path)
   if (isAbsolute(stored) || !existsSync(path) || !isStoredPathRecorded(stored)) return false
   const ext = extname(path)
@@ -349,7 +412,7 @@ async function keepUsedPhoto(path: string): Promise<boolean> {
     const dest = await placeFile(
       path,
       referencesDayDir(new Date()),
-      safeName(basename(path, ext), { fallback: 'Referensbild' }),
+      safeName(basename(path, ext), { fallback }),
       ext.toLowerCase()
     )
     try {
@@ -367,7 +430,7 @@ async function keepUsedPhoto(path: string): Promise<boolean> {
 }
 
 /** Removes a deleted asset's folder: to the Trash, or (without a Trash) only the files the app put there. */
-async function trashAssetFolder(dir: string, images: AssetImageRow[]): Promise<void> {
+async function trashAssetFolder(dir: string, files: { file_path: string }[]): Promise<void> {
   if (!existsSync(dir)) return
   try {
     await shell.trashItem(dir)
@@ -376,8 +439,8 @@ async function trashAssetFolder(dir: string, images: AssetImageRow[]): Promise<v
     console.warn(`Could not move ${dir} to the Trash:`, err)
   }
   // Anything the user added to the folder themselves stays, and with it the folder.
-  for (const image of images) {
-    const path = fromStoredPath(image.file_path)
+  for (const file of files) {
+    const path = fromStoredPath(file.file_path)
     if (dirname(path) === dir) await rm(path, { force: true }).catch(() => {})
   }
   await rm(join(dir, DESCRIPTION_FILE), { force: true }).catch(() => {})
@@ -392,6 +455,16 @@ function imageRows(assetId: string): AssetImageRow[] {
     .all(assetId) as AssetImageRow[]
 }
 
+function audioRows(assetId: string): AssetAudioRow[] {
+  return getDb()
+    .prepare('SELECT * FROM asset_audio WHERE asset_id = ? ORDER BY position, created_at')
+    .all(assetId) as AssetAudioRow[]
+}
+
+function findAudioRow(id: string): AssetAudioRow | undefined {
+  return getDb().prepare('SELECT * FROM asset_audio WHERE id = ?').get(id) as AssetAudioRow | undefined
+}
+
 function groupImages(rows: AssetImageRow[]): Map<string, AssetImage[]> {
   const byAsset = new Map<string, AssetImage[]>()
   for (const r of rows) {
@@ -402,13 +475,33 @@ function groupImages(rows: AssetImageRow[]): Map<string, AssetImage[]> {
   return byAsset
 }
 
-function assetFromRow(r: AssetRow, images: AssetImage[]): Asset {
+function audioFromRow(r: AssetAudioRow): AssetAudio {
+  return {
+    id: r.id,
+    path: fromStoredPath(r.file_path),
+    duration: r.duration,
+    ...resolveAudioWindow(r.duration, r.clip_start, r.clip_length)
+  }
+}
+
+function groupAudio(rows: AssetAudioRow[]): Map<string, AssetAudio[]> {
+  const byAsset = new Map<string, AssetAudio[]>()
+  for (const r of rows) {
+    const clips = byAsset.get(r.asset_id) ?? []
+    clips.push(audioFromRow(r))
+    byAsset.set(r.asset_id, clips)
+  }
+  return byAsset
+}
+
+function assetFromRow(r: AssetRow, images: AssetImage[], audio: AssetAudio[]): Asset {
   const asset: Asset = {
     id: r.id,
     kind: r.kind,
     name: r.name,
     description: r.description,
     images,
+    audio,
     createdAt: r.created_at,
     updatedAt: r.updated_at
   }
@@ -431,7 +524,7 @@ function requireAssetRow(id: unknown, kind?: unknown): AssetRow {
 
 function getAsset(id: string): Asset {
   const row = requireAssetRow(id)
-  return assetFromRow(row, groupImages(imageRows(id)).get(id) ?? [])
+  return assetFromRow(row, groupImages(imageRows(id)).get(id) ?? [], audioRows(id).map(audioFromRow))
 }
 
 function orderedImageIds(assetId: string): string[] {
@@ -441,6 +534,24 @@ function orderedImageIds(assetId: string): string[] {
 function writeImagePositions(imageIds: string[]): void {
   const stmt = getDb().prepare('UPDATE asset_images SET position = ? WHERE id = ?')
   imageIds.forEach((id, position) => stmt.run(position, id))
+}
+
+function orderedAudioIds(assetId: string): string[] {
+  return audioRows(assetId).map((r) => r.id)
+}
+
+function writeAudioPositions(audioIds: string[]): void {
+  const stmt = getDb().prepare('UPDATE asset_audio SET position = ? WHERE id = ?')
+  audioIds.forEach((id, position) => stmt.run(position, id))
+}
+
+/** The given ids first (ignoring strangers and repeats), then the rest in their current order. */
+function reordered(current: string[], given: unknown): string[] {
+  const known = new Set(current)
+  const ids = Array.isArray(given) ? given : []
+  const leading = [...new Set(ids.filter((id): id is string => typeof id === 'string' && known.has(id)))]
+  const placed = new Set(leading)
+  return [...leading, ...current.filter((id) => !placed.has(id))]
 }
 
 function touchAsset(id: string, now = Date.now()): void {
@@ -481,9 +592,19 @@ export function listAssets(kind?: unknown): Asset[] {
           .all(only)
       : db.prepare('SELECT * FROM asset_images ORDER BY asset_id, position, created_at').all()) as AssetImageRow[]
   )
+  const audio = groupAudio(
+    (only
+      ? db
+          .prepare(
+            `SELECT c.* FROM asset_audio c JOIN assets a ON a.id = c.asset_id WHERE a.kind = ?
+             ORDER BY c.asset_id, c.position, c.created_at`
+          )
+          .all(only)
+      : db.prepare('SELECT * FROM asset_audio ORDER BY asset_id, position, created_at').all()) as AssetAudioRow[]
+  )
   return rows
     .filter((r) => isAssetKind(r.kind))
-    .map((r) => assetFromRow(r, images.get(r.id) ?? []))
+    .map((r) => assetFromRow(r, images.get(r.id) ?? [], audio.get(r.id) ?? []))
     .sort((a, b) => nameCollator.compare(a.name, b.name) || a.createdAt - b.createdAt)
 }
 
@@ -549,9 +670,10 @@ async function remove(id: unknown): Promise<void> {
   const row = findAssetRow(safeId(id))
   if (!row) return
   const images = imageRows(row.id)
+  const audio = audioRows(row.id)
   const db = getDb()
-  // Image rows go with it (ON DELETE CASCADE); characters wearing a deleted outfit by default lose that
-  // default (ON DELETE SET NULL). Those characters changed too: their updatedAt says so, so a view holding
+  // Image and audio rows go with it (ON DELETE CASCADE); characters wearing a deleted outfit by default lose
+  // that default (ON DELETE SET NULL). Those characters changed too: their updatedAt says so, so a view holding
   // an older copy of one takes the list's version (without the outfit) as the newer.
   db.transaction(() => {
     if (row.kind === 'outfit') {
@@ -560,15 +682,19 @@ async function remove(id: unknown): Promise<void> {
     db.prepare('DELETE FROM assets WHERE id = ?').run(row.id)
   })()
   const dir = isPlainName(row.folder) ? join(assetsDir(row.kind), row.folder) : undefined
-  // Photos still in use move out first; images outside the folder (a character from before folders, or a
-  // move that failed) go one by one.
+  // Photos and audio still in use move out first; files outside the folder (a character from before folders,
+  // or a move that failed) go one by one.
   let kept = false
-  for (const image of images) {
-    const path = fromStoredPath(image.file_path)
-    if (await keepUsedPhoto(path)) kept = true
+  const files = [
+    ...images.map((r) => ({ file_path: r.file_path, fallback: 'Referensbild' })),
+    ...audio.map((r) => ({ file_path: r.file_path, fallback: 'Ljud' }))
+  ]
+  for (const file of files) {
+    const path = fromStoredPath(file.file_path)
+    if (await keepUsedFile(path, file.fallback)) kept = true
     else if (!dir || dirname(path) !== dir) await trashFile(path)
   }
-  if (dir) await trashAssetFolder(dir, images)
+  if (dir) await trashAssetFolder(dir, files)
   if (kept) notifyFilesMoved()
   notifyChange()
 }
@@ -650,7 +776,7 @@ async function removeImage(imageId: unknown): Promise<Asset> {
     touchAsset(row.asset_id)
   })()
   const path = fromStoredPath(row.file_path)
-  if (await keepUsedPhoto(path)) notifyFilesMoved()
+  if (await keepUsedFile(path, 'Referensbild')) notifyFilesMoved()
   else await trashFile(path)
 
   notifyChange()
@@ -662,14 +788,171 @@ function reorderImages(assetId: unknown, imageIds: unknown): Asset {
   const row = requireAssetRow(assetId)
   const changed = db.transaction((): boolean => {
     const current = orderedImageIds(row.id)
-    const known = new Set(current)
-    // Given ids first (ignoring strangers and repeats), then the rest in their existing order.
-    const given = Array.isArray(imageIds) ? imageIds : []
-    const leading = [...new Set(given.filter((id): id is string => typeof id === 'string' && known.has(id)))]
-    const placed = new Set(leading)
-    const order = [...leading, ...current.filter((id) => !placed.has(id))]
+    const order = reordered(current, imageIds)
     if (order.every((id, i) => id === current[i])) return false
     writeImagePositions(order)
+    touchAsset(row.id)
+    return true
+  })()
+
+  if (changed) notifyChange()
+  return getAsset(row.id)
+}
+
+// ── Audio ────────────────────────────────────────────────────────────────────
+
+/** Why this asset can't have audio, or undefined when it can. */
+function noAudioReason(kind: AssetKind): string | undefined {
+  return AUDIO_KINDS.has(kind) ? undefined : 'Bara karaktärer (röst) och miljöer (ljudmiljö) kan ha ljud.'
+}
+
+/** The length of the sound in an audio file, or a Swedish error naming the file. */
+async function audioDuration(src: string): Promise<number> {
+  const name = basename(src)
+  try {
+    if (!(await stat(src)).isFile()) throw Object.assign(new Error('det är en mapp'), { code: 'EISDIR' })
+  } catch (err) {
+    throw new Error(`Kunde inte läsa ${name}: ${reasonText(err)}.`)
+  }
+  let duration: number
+  try {
+    ;({ duration } = await probeAudio(src))
+  } catch (err) {
+    const reason = reasonText(err)
+    if (/inget ljud/u.test(reason)) throw new Error(`Det finns inget ljud i ${name}.`)
+    throw new Error(`Kunde inte läsa ljudet i ${name}: ${reason}.`)
+  }
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error(`Det finns inget ljud i ${name}.`)
+  if (duration < MIN_AUDIO_FILE_SECONDS) throw new Error(`${name} är kortare än en sekund. Välj ett längre ljud.`)
+  return duration
+}
+
+async function addAudio(assetId: unknown, paths: unknown): Promise<Asset> {
+  const row = requireAssetRow(assetId)
+  const refused = noAudioReason(row.kind)
+  if (refused) throw new Error(refused)
+  const sources = [
+    ...new Set((Array.isArray(paths) ? paths : []).filter((p): p is string => typeof p === 'string' && p !== ''))
+  ]
+  const files = sources.filter((p) => AUDIO_EXTENSIONS.has(extname(p).toLowerCase()))
+  if (!files.length) {
+    if (sources.length) throw new Error('Bara ljudfiler i MP3, WAV, M4A, AAC, AIFF, FLAC eller OGG kan läggas till.')
+    return getAsset(row.id)
+  }
+
+  // Every file is probed before anything is copied: one without sound, or too short, refuses the whole
+  // batch with its name, like a failed copy does.
+  const probed: { src: string; duration: number }[] = []
+  for (const src of files) probed.push({ src, duration: await audioDuration(src) })
+
+  // Copy first (under the original names), then insert all rows in one transaction, so a failed copy leaves
+  // nothing half-added.
+  const dir = assetsDir(row.kind, await ensureFolder(row))
+  const copied: { id: string; dest: string; duration: number }[] = []
+  const discardCopies = (): Promise<unknown> =>
+    Promise.all(copied.map((c) => rm(c.dest, { force: true }).catch(() => {})))
+  for (const { src, duration } of probed) {
+    const ext = extname(src)
+    try {
+      const dest = await copyInto(src, dir, safeName(basename(src, ext), { fallback: 'Ljud' }), ext.toLowerCase())
+      copied.push({ id: randomUUID(), dest, duration })
+    } catch (err) {
+      await discardCopies()
+      throw new Error(`Kunde inte kopiera ${basename(src)}: ${fileErrorReason(err)}.`)
+    }
+  }
+
+  const db = getDb()
+  let inserted: boolean
+  try {
+    inserted = db.transaction((): boolean => {
+      if (!findAssetRow(row.id)) return false
+      const last = db
+        .prepare('SELECT MAX(position) FROM asset_audio WHERE asset_id = ?')
+        .pluck()
+        .get(row.id) as number | null
+      let position = (last ?? -1) + 1
+      const now = Date.now()
+      // clip_length NULL: the default window, which follows the file's length.
+      const insert = db.prepare(
+        `INSERT INTO asset_audio (id, asset_id, file_path, position, duration, clip_start, clip_length, created_at)
+         VALUES (?, ?, ?, ?, ?, 0, NULL, ?)`
+      )
+      for (const c of copied) insert.run(c.id, row.id, toStoredPath(c.dest), position++, c.duration, now)
+      touchAsset(row.id, now)
+      return true
+    })()
+  } catch (err) {
+    await discardCopies()
+    throw err
+  }
+  if (!inserted) {
+    await discardCopies()
+    throw new Error(`${THE[row.kind]} finns inte längre.`)
+  }
+
+  notifyChange()
+  return getAsset(row.id)
+}
+
+async function removeAudio(audioId: unknown): Promise<Asset> {
+  const db = getDb()
+  const row = findAudioRow(safeId(audioId))
+  if (!row) throw new Error(AUDIO_GONE)
+  db.transaction(() => {
+    db.prepare('DELETE FROM asset_audio WHERE id = ?').run(row.id)
+    writeAudioPositions(orderedAudioIds(row.asset_id))
+    touchAsset(row.asset_id)
+  })()
+  // A clip that generations or clips still send as reference audio is kept for them (see keepUsedFile).
+  const path = fromStoredPath(row.file_path)
+  if (await keepUsedFile(path, 'Ljud')) notifyFilesMoved()
+  else await trashFile(path)
+
+  notifyChange()
+  return getAsset(row.asset_id)
+}
+
+/** A time in seconds from IPC: a finite number, or a Swedish error. */
+function seconds(value: unknown, what: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Ogiltig ${what}.`)
+  return value
+}
+
+function updateAudio(audioId: unknown, patch: unknown): Asset {
+  const db = getDb()
+  const row = findAudioRow(safeId(audioId))
+  if (!row) throw new Error(AUDIO_GONE)
+  const p = (patch && typeof patch === 'object' ? patch : {}) as { clipStart?: unknown; clipLength?: unknown }
+  const start = p.clipStart === undefined ? row.clip_start : seconds(p.clipStart, 'starttid')
+  // null goes back to the default window (which follows the file's length).
+  const length =
+    p.clipLength === undefined ? row.clip_length : p.clipLength === null ? null : seconds(p.clipLength, 'längd')
+  // Stored clamped, so what the library shows is exactly what is sent. A longer window that would run past
+  // the end of the file moves its start back.
+  const window = resolveAudioWindow(row.duration, start, length)
+  const storedLength = length === null ? null : window.clipLength
+  if (window.clipStart === row.clip_start && storedLength === row.clip_length) return getAsset(row.asset_id)
+  db.transaction(() => {
+    db.prepare('UPDATE asset_audio SET clip_start = ?, clip_length = ? WHERE id = ?').run(
+      window.clipStart,
+      storedLength,
+      row.id
+    )
+    touchAsset(row.asset_id)
+  })()
+  notifyChange()
+  return getAsset(row.asset_id)
+}
+
+function reorderAudio(assetId: unknown, audioIds: unknown): Asset {
+  const db = getDb()
+  const row = requireAssetRow(assetId)
+  const changed = db.transaction((): boolean => {
+    const current = orderedAudioIds(row.id)
+    const order = reordered(current, audioIds)
+    if (order.every((id, i) => id === current[i])) return false
+    writeAudioPositions(order)
     touchAsset(row.id)
     return true
   })()
@@ -706,6 +989,30 @@ export function removeAssetImage(imageId: string): Promise<Asset> {
 /** The given images first, in that order (unknown ids ignored); the rest keep their order after them. */
 export function reorderAssetImages(assetId: string, imageIds: string[]): Promise<Asset> {
   return assetTask(async () => reorderImages(assetId, imageIds))
+}
+
+/**
+ * Copies audio files (MP3, WAV, M4A, AAC, AIFF, FLAC, OGG) into the asset's folder under their own names and
+ * appends them in order, each with the default reference window. Characters and environments only; files
+ * without sound or shorter than a second are refused.
+ */
+export function addAssetAudio(assetId: string, paths: string[]): Promise<Asset> {
+  return assetTask(() => addAudio(assetId, paths))
+}
+
+/** Removes the clip: its copy goes to the Trash, or to Referensbilder/<today>/ while generations still use it. */
+export function removeAssetAudio(audioId: string): Promise<Asset> {
+  return assetTask(() => removeAudio(audioId))
+}
+
+/** Moves or resizes the clip's reference window (clamped to 2–15 s inside the file). */
+export function updateAssetAudio(audioId: string, patch: { clipStart?: number; clipLength?: number }): Promise<Asset> {
+  return assetTask(async () => updateAudio(audioId, patch))
+}
+
+/** The given clips first, in that order (unknown ids ignored); the rest keep their order after them. */
+export function reorderAssetAudio(assetId: string, audioIds: string[]): Promise<Asset> {
+  return assetTask(async () => reorderAudio(assetId, audioIds))
 }
 
 /**

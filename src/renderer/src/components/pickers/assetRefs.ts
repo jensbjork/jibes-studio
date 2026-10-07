@@ -1,8 +1,17 @@
-// How library assets (characters, environments, outfits) map onto a form's reference images, and the edits
-// the pickers and chips make to that list. Pure functions, shared by the params form and the generate view.
+// How library assets (characters, environments, outfits, poses) map onto a form's reference images, and the
+// edits the pickers and chips make to that list – with the prompt's @ImageN and @AudioN tokens following their
+// pictures and clips. Pure functions, shared by the params form and the generate view.
 
-import { findImageTokens, findMalformedTokens } from '@shared/prompt-refs'
-import type { Asset } from '@shared/types'
+import {
+  findAudioTokens,
+  findImageTokens,
+  findMalformedTokens,
+  type PromptToken,
+  type ReferenceKind
+} from '@shared/prompt-refs'
+import { maxReferenceAudios, maxReferenceImages, supportsAudioInput } from '@shared/models'
+import type { Asset, GenerationParams, ReferenceAudio } from '@shared/types'
+import { addAudios, audioSourcesByPath, referenceAudioOf, voiceOf } from './audioRefs'
 import { imageCount } from './text'
 
 /** Image path → the asset the photo belongs to. */
@@ -123,6 +132,35 @@ export function addAsset(
   return { refs: own.refs, note: own.note ? `${own.note} ${skipped}` : skipped }
 }
 
+/**
+ * Adds an asset to a form's references the way the pickers do: its photos (a character's default outfit along),
+ * and – when the model takes reference audio and some of the character's photos made it in – the character's
+ * first voice clip. For adding from outside the form, e.g. "Generera med karaktären" from the library.
+ */
+export function addAssetToForm(
+  current: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'>,
+  asset: Asset,
+  library: readonly Asset[],
+  modelId: string
+): { referenceImages: string[]; referenceAudios?: ReferenceAudio[]; note?: string } {
+  const byId = new Map(library.map((a) => [a.id, a]))
+  const images = addAsset(current.referenceImages ?? [], asset, byId, maxReferenceImages(modelId))
+  const audiosNow = current.referenceAudios ?? []
+  const voice = voiceOf(asset)
+  const present = asset.images.some((img) => images.refs.includes(img.path))
+  const audio =
+    voice && present && supportsAudioInput(modelId)
+      ? addAudios(audiosNow, [referenceAudioOf(voice)], audioSourcesByPath(library), maxReferenceAudios(modelId))
+      : undefined
+  const audios = audio?.audios ?? audiosNow
+  const note = [images.note, audio?.note].filter(Boolean).join(' ')
+  return {
+    referenceImages: images.refs,
+    ...(audios.length ? { referenceAudios: audios } : {}),
+    ...(note ? { note } : {})
+  }
+}
+
 /** The references without the asset's photos. */
 export function removeAsset(refs: readonly string[], asset: Asset): string[] {
   const paths = new Set(asset.images.map((img) => img.path))
@@ -155,10 +193,12 @@ export function swapOutfit(
   }
 }
 
-/** A near miss ("@Image 3", "@img3") whose suggested spelling names one picture. */
-const SINGLE_SUGGESTION = /^@Image(\d+)$/
+/** A near miss ("@Image 3", "@img3", "@Ljud1") whose suggested spelling names one picture or clip. */
+const SINGLE_SUGGESTION = /^@(Image|Audio)(\d+)$/
 /** The number at the end of a near miss, in ASCII or full-width digits. */
 const TRAILING_DIGITS = /[0-9\uFF10-\uFF19]+$/
+/** The word in front of an @AudioN inside a reference's brackets ("voice @Audio1", "röst @Audio1"). */
+const AUDIO_WORD = /^(voice|sound|röst|ljud)[ \t]+/iu
 
 /**
  * `n` written the way `digits` was (leading zeros, full-width digits), so a renumbered near miss stays the
@@ -171,93 +211,140 @@ function digitsLike(digits: string, n: number): string {
   return [...out].map((c) => String.fromCharCode(c.charCodeAt(0) - 0x30 + 0xff10)).join('')
 }
 
+/** One token inside a "(…)" reference: a picture, or a clip with the word in front of it. */
+interface Member {
+  ref: ReferenceKind
+  n: number
+  /** "voice" in "voice @Audio1", kept as written. */
+  word?: string
+}
+
 /** What the remap works through, in prompt order. */
 type Unit =
-  | { type: 'token'; start: number; end: number; raw: string; n: number }
-  | { type: 'group'; start: number; end: number; raw: string; tokens: number[] }
-  /** A near miss naming one picture: its number follows the picture, so its suggested fix stays right. */
-  | { type: 'near-miss'; start: number; end: number; raw: string; n: number }
+  | { type: 'token'; ref: ReferenceKind; start: number; end: number; raw: string; n: number }
+  | { type: 'group'; start: number; end: number; raw: string; members: Member[] }
+  /** A near miss naming one picture or clip: its number follows it, so its suggested fix stays right. */
+  | { type: 'near-miss'; ref: ReferenceKind; start: number; end: number; raw: string; n: number }
+
+type Found = PromptToken & { ref: ReferenceKind }
 
 /**
  * The prompt's references as the shared rules read them (prompt-refs: any letter case, the same boundaries):
- * lone tokens, "(@Image3, @Image4)" groups made only of tokens, and near misses that name one picture.
+ * lone tokens, "(@Image3, @Image4, voice @Audio1)" groups made only of tokens, and near misses that name one
+ * picture or clip.
  */
 function referenceUnits(prompt: string): Unit[] {
-  const tokens = findImageTokens(prompt)
+  const tokens: Found[] = [
+    ...findImageTokens(prompt).map((t) => ({ ...t, ref: 'image' as const })),
+    ...findAudioTokens(prompt).map((t) => ({ ...t, ref: 'audio' as const }))
+  ].sort((a, b) => a.start - b.start)
   const byStart = new Map(tokens.map((t) => [t.start, t]))
+  /** The member starting at `pos`: a token, or "voice @AudioN". */
+  const memberAt = (pos: number): { token: Found; word?: string } | undefined => {
+    const token = byStart.get(pos)
+    if (token) return { token }
+    const word = AUDIO_WORD.exec(prompt.slice(pos))
+    const audio = word ? byStart.get(pos + word[0].length) : undefined
+    return audio?.ref === 'audio' ? { token: audio, word: word![1] } : undefined
+  }
   const units: Unit[] = []
   for (let i = 0; i < tokens.length; i++) {
     const first = tokens[i]
-    const open = /\(\s*$/.exec(prompt.slice(0, first.start))
+    const head = prompt.slice(0, first.start)
+    const open =
+      /\(\s*$/.exec(head) ?? (first.ref === 'audio' ? /\(\s*(voice|sound|röst|ljud)[ \t]+$/iu.exec(head) : null)
     if (open) {
-      const members = [first]
+      const members: { token: Found; word?: string }[] = [{ token: first, word: open[1] }]
       let end = first.end
       for (;;) {
         const comma = /^\s*,\s*/.exec(prompt.slice(end))
-        const next = comma ? byStart.get(end + comma[0].length) : undefined
+        const next = comma ? memberAt(end + comma[0].length) : undefined
         if (!next) break
         members.push(next)
-        end = next.end
+        end = next.token.end
       }
       const close = /^\s*\)/.exec(prompt.slice(end))
       if (close) {
         const start = open.index
         end += close[0].length
-        units.push({ type: 'group', start, end, raw: prompt.slice(start, end), tokens: members.map((t) => t.index) })
+        units.push({
+          type: 'group',
+          start,
+          end,
+          raw: prompt.slice(start, end),
+          members: members.map((m) => ({ ref: m.token.ref, n: m.token.index, ...(m.word ? { word: m.word } : {}) }))
+        })
         i += members.length - 1
         continue
       }
     }
-    units.push({ type: 'token', start: first.start, end: first.end, raw: first.raw, n: first.index })
+    units.push({ type: 'token', ref: first.ref, start: first.start, end: first.end, raw: first.raw, n: first.index })
   }
   for (const m of findMalformedTokens(prompt)) {
     const single = SINGLE_SUGGESTION.exec(m.suggestion ?? '')
-    if (single && TRAILING_DIGITS.test(m.raw)) {
-      units.push({ type: 'near-miss', start: m.start, end: m.end, raw: m.raw, n: Number(single[1]) })
+    const ref: ReferenceKind | undefined = single ? (single[1] === 'Audio' ? 'audio' : 'image') : undefined
+    if (single && ref === m.ref && TRAILING_DIGITS.test(m.raw)) {
+      units.push({ type: 'near-miss', ref, start: m.start, end: m.end, raw: m.raw, n: Number(single[2]) })
     }
   }
   return units.sort((a, b) => a.start - b.start)
 }
 
+/** A reference list before and after a change, for remapping its tokens. */
+export interface ListChange<T> {
+  before: readonly T[]
+  after: readonly T[]
+}
+
 /**
- * The prompt with its @ImageN tokens kept on their pictures after the reference list changed from `before`
- * to `after` (an asset removed with its chip ✕, an outfit swapped): every token gets its picture's new
- * number. A token whose picture left the list goes, and so does a "(…)" left empty; the words around it
+ * The prompt with its @ImageN and @AudioN tokens kept on their pictures and clips after the reference lists
+ * changed (an asset removed with its chip ✕, an outfit swapped, a voice left out): every token gets its new
+ * number. A token whose picture or clip left the list goes, and so does a "(…)" left empty; the words around it
  * stay. With `swap`, a group naming only the old outfits' photos is given to the new outfit instead, name
- * included: "Röd klänning (@Image3)" → "Blå jeans (@Image3, @Image4)". Tokens beyond `before` name no
- * picture and are left as they are. Tokens are found as the shared rules find them, so "@image3" (which
- * the model reads as @Image3) follows its picture too, and a near miss like "@Image 3" keeps naming the
- * picture its suggested fix would.
+ * included: "Röd klänning (@Image3)" → "Blå jeans (@Image3, @Image4)". Tokens beyond `before` name nothing and
+ * are left as they are, as are @AudioN tokens when `audios` is left out. Tokens are found as the shared rules find
+ * them, so "@image3" (which the model reads as @Image3) follows its picture too, and a near miss like "@Image 3"
+ * keeps naming the picture its suggested fix would.
  */
-export function remapPromptImages(
+export function remapPromptReferences(
   prompt: string,
-  before: readonly string[],
-  after: readonly string[],
+  images: ListChange<string>,
+  audios?: ListChange<ReferenceAudio>,
   swap?: { from: readonly Asset[]; to: Asset | null }
 ): string {
-  if (!prompt || sameList(before, after)) return prompt
+  const imagesSame = sameList(images.before, images.after)
+  const audiosSame = !audios || sameList(audios.before.map((a) => a.path), audios.after.map((a) => a.path))
+  if (!prompt || (imagesSame && audiosSame)) return prompt
   const units = referenceUnits(prompt)
   if (!units.length) return prompt
+  const { before, after } = images
   const oldPhotos = new Set(swap?.from.flatMap((o) => o.images.map((img) => img.path)) ?? [])
   const newPhotos = new Set(swap?.to?.images.map((img) => img.path) ?? [])
   const newIndices = after.flatMap((p, i) => (newPhotos.has(p) ? [i + 1] : []))
-  const group = (indices: number[]): string => `(${indices.map((i) => `@Image${i}`).join(', ')})`
-  /** The token's new number; null when its picture is gone, undefined when it named none. */
-  const renumber = (n: number): number | null | undefined => {
+  /** The token's new number; null when its picture or clip is gone, undefined when it named none. */
+  const renumber = (ref: ReferenceKind, n: number): number | null | undefined => {
+    if (ref === 'audio') {
+      const path = audios?.before[n - 1]?.path
+      if (path === undefined) return undefined
+      const i = audios!.after.findIndex((a) => a.path === path)
+      return i === -1 ? null : i + 1
+    }
     const path = before[n - 1]
     if (path === undefined) return undefined
     const i = after.indexOf(path)
     return i === -1 ? null : i + 1
   }
   /** A lone token or near miss's new number, following an old outfit's photo to the new outfit's. */
-  const follow = (n: number): number | null | undefined => {
-    const next = renumber(n)
-    if (next !== null) return next
+  const follow = (ref: ReferenceKind, n: number): number | null | undefined => {
+    const next = renumber(ref, n)
+    if (next !== null || ref === 'audio') return next
     if (!newIndices.length || !oldPhotos.has(before[n - 1])) return null
     // A picture of the old outfit, written by hand: point at the new outfit's photo in the same place.
     const k = [...oldPhotos].indexOf(before[n - 1])
     return newIndices[Math.min(k, newIndices.length - 1)]
   }
+  const tokenText = (m: Member): string =>
+    m.ref === 'audio' ? `${m.word ? `${m.word} ` : ''}@Audio${m.n}` : `@Image${m.n}`
 
   let out = ''
   let last = 0
@@ -278,33 +365,50 @@ export function remapPromptImages(
   for (const unit of units) {
     const { start, end } = unit
     if (unit.type === 'token' || unit.type === 'near-miss') {
-      const n = follow(unit.n)
+      const n = follow(unit.ref, unit.n)
       if (n === undefined || n === unit.n) continue
+      // In running text ("speaks with the voice @Audio2") a word in front is part of the sentence, so it stays.
       if (n === null) drop(start, end)
-      else if (unit.type === 'token') put(start, end, `@Image${n}`)
+      else if (unit.type === 'token') put(start, end, unit.ref === 'audio' ? `@Audio${n}` : `@Image${n}`)
       else put(start, end, unit.raw.replace(TRAILING_DIGITS, (digits) => digitsLike(digits, n)))
       continue
     }
-    const tokens = unit.tokens
-    if (swap?.to && !outfitGiven && newIndices.length && tokens.every((n) => oldPhotos.has(before[n - 1] ?? ''))) {
+    const members = unit.members
+    if (
+      swap?.to &&
+      !outfitGiven &&
+      newIndices.length &&
+      members.every((m) => m.ref === 'image' && oldPhotos.has(before[m.n - 1] ?? ''))
+    ) {
       // The old outfit's reference becomes the new one's; its name in front of it follows.
       outfitGiven = true
       out += prompt.slice(last, start)
       last = start
       const oldName = swap.from.map((o) => `${o.name} `).find((name) => out.endsWith(name))
       if (oldName) out = out.slice(0, -oldName.length) + `${swap.to.name} `
-      put(start, end, group(newIndices))
+      put(start, end, `(${newIndices.map((i) => `@Image${i}`).join(', ')})`)
       continue
     }
-    const renumbered = tokens.map((n) => {
-      const next = renumber(n)
-      return next === undefined ? n : next
-    })
-    const kept = renumbered.filter((n): n is number => n !== null)
+    const renumbered = members.map((m) => ({ member: m, next: renumber(m.ref, m.n) }))
+    const kept = renumbered.flatMap(({ member, next }) =>
+      next === null ? [] : [{ ...member, n: next === undefined ? member.n : next }]
+    )
     if (!kept.length) drop(start, end)
-    else if (kept.length !== tokens.length || kept.some((n, i) => n !== tokens[i])) put(start, end, group(kept))
+    else if (kept.length !== members.length || kept.some((m, i) => m.n !== members[i].n)) {
+      put(start, end, `(${kept.map(tokenText).join(', ')})`)
+    }
   }
   return out + prompt.slice(last)
+}
+
+/** remapPromptReferences for the pictures only. */
+export function remapPromptImages(
+  prompt: string,
+  before: readonly string[],
+  after: readonly string[],
+  swap?: { from: readonly Asset[]; to: Asset | null }
+): string {
+  return remapPromptReferences(prompt, { before, after }, undefined, swap)
 }
 
 export function sameList(a: readonly string[], b: readonly string[]): boolean {

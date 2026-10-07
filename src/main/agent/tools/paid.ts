@@ -5,12 +5,22 @@ import { paramsForSubmit } from '@shared/models'
 import { canonicalizeParams } from '@shared/prompt-refs'
 import type { ApprovalRequest, Generation, GenerationParams, Sequence } from '@shared/types'
 import * as db from '../../db'
+import { prepareSubmission } from '../../jobs'
 import type { MissingClip, SubmitGuard } from '../../sequences'
 import * as store from '../../sequence-store'
 import { ensureImagesExist } from '../../venice'
 import type { ApprovalPlan } from '../approvals'
 import { callService } from '../local-ipc'
-import { asGenerated, blockingProblem, loadModels, localTime, q, readableRunError, requireLibrary } from '../studio'
+import {
+  asGenerated,
+  blockingProblem,
+  errorText,
+  loadModels,
+  localTime,
+  q,
+  readableRunError,
+  requireLibrary
+} from '../studio'
 import { READ_ONLY, defineTool, priceValue, quote, readForm, usd, type ToolContext } from './kit'
 import { continues, isUsableTake, loadClip, loadSequence, selectedTake } from './sequences'
 
@@ -56,7 +66,9 @@ function paramsKey(p: GenerationParams, silent?: SilentModels): string {
     silent?.has(s.model) ? null : (s.audio ?? null),
     s.startImage ?? '',
     s.endImage ?? '',
-    s.referenceImages ?? []
+    s.referenceImages ?? [],
+    // The windows count: moving a voice's window changes what Venice hears.
+    (s.referenceAudios ?? []).map((a) => [a.path, a.start ?? 0, a.length ?? null])
   ])
 }
 
@@ -81,8 +93,8 @@ function storedClipKey(segmentId: string, silent?: SilentModels): string | undef
 }
 
 /**
- * Which files the request's pictures are (device, inode, size, modification time). A path names a place, not a
- * photo: renaming two assets can put another person's photo where the approved one was.
+ * Which files the request's pictures and audio clips are (device, inode, size, modification time). A path names a
+ * place, not a photo: renaming two assets can put another person's photo (or voice) where the approved one was.
  */
 function imageIdentity(params: GenerationParams): string {
   const id = (path: string | undefined): string => {
@@ -94,7 +106,12 @@ function imageIdentity(params: GenerationParams): string {
       return 'missing'
     }
   }
-  return JSON.stringify([id(params.startImage), id(params.endImage), (params.referenceImages ?? []).map(id)])
+  return JSON.stringify([
+    id(params.startImage),
+    id(params.endImage),
+    (params.referenceImages ?? []).map(id),
+    (params.referenceAudios ?? []).map((a) => id(a.path))
+  ])
 }
 
 /**
@@ -139,7 +156,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request generation (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating the current Generate form (as get_workspace shows it). Nothing is generated or paid for until they approve in Studio. The form is checked first (prompt, start image or references, @ImageN tokens); problems come back as an error and no request is made. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. The form is captured now: later changes to it don't change this request. Add a short note for the user (Swedish) saying what this generation is for.",
+        "💰 Asks the user to approve generating the current Generate form (as get_workspace shows it). Nothing is generated or paid for until they approve in Studio. The form is checked first (prompt, start image or references, @ImageN / @AudioN tokens); problems come back as an error and no request is made. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. The form is captured now: later changes to it don't change this request. Add a short note for the user (Swedish) saying what this generation is for.",
       input: { note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.') },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       summary: () => 'vill generera'
@@ -150,10 +167,15 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const mark = db.rewriteMark()
       requireLibrary()
       const state = await readForm(ctx)
-      const params = paramsForSubmit(canonicalizeParams(state.params))
-      const problem = blockingProblem(params)
+      const asked = paramsForSubmit(canonicalizeParams(state.params))
+      const problem = blockingProblem(asked)
       if (problem) throw new Error(`Formuläret kan inte genereras: ${problem}`)
-      ensureImagesExist(params)
+      ensureImagesExist(asked)
+      // Audio clips measured now, as the submit will: a voice that turns out too short, too long or unreadable
+      // is refused here instead of after the user has approved.
+      const params = await prepareSubmission(asked).catch((err: unknown) => {
+        throw new Error(`Formuläret kan inte genereras: ${errorText(err)}`)
+      })
       const images = imageIdentity(params)
       const price = await quote(params)
       const { request, reused } = requestApproval(ctx, epoch, {
@@ -167,7 +189,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         // but they must still be the very files the request was made with.
         verify: () => {
           if (imageIdentity(db.followRewrites(params, mark)) !== images) {
-            throw new Error(`Bilderna i förfrågan ${CHANGED}`)
+            throw new Error(`Bilderna eller ljudklippen i förfrågan ${CHANGED}`)
           }
         },
         execute: async () => [(await callService<Generation>('video:generate', db.followRewrites(params, mark))).id]
@@ -209,7 +231,13 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           `Klipp ${clip} fortsätter från klipp ${index}, som behöver en färdig vald tagning först. Använd request_generate_all för att generera klippen i ordning.`
         )
       }
-      if (!continuing) ensureImagesExist(paramsForSubmit(generated))
+      if (!continuing) {
+        ensureImagesExist(paramsForSubmit(generated))
+        // Its audio clips are measured like the take's submit will, so a bad window is refused before approval.
+        await prepareSubmission(generated).catch((err: unknown) => {
+          throw new Error(`Klipp ${clip}: ${errorText(err)}`)
+        })
+      }
       const [price, silent] = await Promise.all([quote(generated), silentModels()])
       const previousId = continuing ? sequence.segments[index - 1].id : undefined
       const key = clipKey(segment.params, continuing, previousId, silent)
@@ -285,6 +313,14 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         return { id: segmentId, clip: index + 1, params: sequence.segments[index].params, continuing, previousId }
       })
       for (const c of clips) if (!c.continuing) ensureImagesExist(paramsForSubmit(c.params))
+      // Each clip's audio is measured like its take's submit will: a voice that was shortened on disk (or can't
+      // be read) is refused before approval, not after the run has paid for the clips before it.
+      for (const c of clips) {
+        if (c.continuing) continue
+        await prepareSubmission(asGenerated(c.params, false)).catch((err: unknown) => {
+          throw new Error(`Klipp ${c.clip}: ${errorText(err)}`)
+        })
+      }
       const [prices, silent] = await Promise.all([
         Promise.all(clips.map((c) => quote(asGenerated(c.params, c.continuing)))),
         silentModels()

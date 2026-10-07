@@ -6,7 +6,7 @@ IPC surface safely. For how the code is organised, see [ARCHITECTURE.md](ARCHITE
 - [Setup](#setup)
 - [Scripts](#scripts)
 - [Profiles](#profiles)
-- [Testing without spending money](#testing-without-spending-money)
+- [Testing without spending money](#testing-without-spending-money) (test clips, voices, reviews, harnesses)
 - [Typecheck and build](#typecheck-and-build)
 - [Packaging](#packaging)
 - [Database migrations](#database-migrations)
@@ -61,6 +61,10 @@ suggested location of the library. Each library carries its own database inside 
 - **The single-instance lock is per profile.** A second launch of the same profile only brings the running one to
   the front (two instances would poll and download the same paid jobs). That is why `dev:real` needs Studio.app to
   be closed.
+- **`dev:real` migrates the real library.** A build refuses a library whose database is newer than it knows
+  (*Biblioteket har sparats av en nyare version av Studio*), but 0.1.0 predates that check and opens it anyway, then
+  loses track of voices when it renames or deletes an asset. After running a branch with a new migration under
+  `dev:real`, rebuild Studio.app (`npm run app:install`) before opening it again.
 - **`STUDIO_PROFILE_DIR`** gives a throwaway profile: settings and the suggested library live under that folder.
   Use it for anything you want to delete afterwards, e.g. `STUDIO_PROFILE_DIR=/tmp/studio-test npm run dev`.
 - Both Studio and Studio Dev default to agent port 8770. If both have the agent connection on, give one of them
@@ -97,6 +101,29 @@ done
 
 Drop `-f lavfi -i "sine=…"` and `-c:a aac -shortest` for a clip without audio (exports must pad it with silence).
 
+### Test voices and sounds
+
+Voices and soundscapes need audio files, not people. Tones are enough to exercise importing, reference windows,
+the 2–15 s and 15 s-in-all checks and the MP3s that would be sent:
+
+```bash
+mkdir -p /tmp/studio-audio && cd /tmp/studio-audio
+# A 12 s "voice" whose pitch changes every 4 s, so you can hear where a window starts
+ffmpeg -y -f lavfi -i "sine=frequency=220:duration=4" -f lavfi -i "sine=frequency=330:duration=4" \
+  -f lavfi -i "sine=frequency=440:duration=4" -filter_complex "[0][1][2]concat=n=3:v=0:a=1" -ac 1 voice.mp3
+# 4 s of silence, then 8 s of sound: a window starting at 4 s must be loud from its first frame
+ffmpeg -y -f lavfi -i "anullsrc=r=44100:cl=mono:d=4" -f lavfi -i "sine=frequency=300:sample_rate=44100:duration=8" \
+  -filter_complex "[0][1]concat=n=2:v=0:a=1" late-start.wav
+# Files Studio must refuse: shorter than a second, and an .m4a without an audio stream
+ffmpeg -y -f lavfi -i "sine=frequency=500:duration=0.5" short.mp3
+ffmpeg -y -f lavfi -i "testsrc2=size=320x240:rate=24" -t 2 -an -c:v libx264 -pix_fmt yuv420p no-audio.m4a
+```
+
+Add them to characters under *Röst* in a throwaway library (`short.mp3` and `no-audio.m4a` must be refused with
+their names). Two clips with the default 10 s windows add up to 20 s: the form won't take the second one, and
+params that carry both anyway (an agent, a harness) are refused by the prompt check and by `prepareSubmission`
+("Ljudreferenserna är 20 s – max 15 s totalt.") before any call to Venice.
+
 ### Fake generation rows
 
 With the clips in place you can make Studio believe they are finished generations or sequence takes. Do this in a
@@ -123,6 +150,26 @@ SQL
   preview and export then work on the test clips.
 - Only insert `completed` (or `failed`) rows. A `queued`/`processing` row with a `queue_id` would make Studio poll
   Venice for it.
+
+### Fake reviews and learnings
+
+The clip feed's rating filters, the detail drawer and the agents' review tools can be tried on the fake rows above.
+Add a rating by the user, an agent's review and a pinned learning the same way (Studio quit):
+
+```bash
+sqlite3 "$LIB/.studio/studio.db" <<'SQL'
+INSERT INTO generation_reviews (id, generation_id, author, rating, tags, note, created_at, updated_at)
+VALUES ('fake-review-1', 'fake-1', 'user', 4, '["good-motion"]', 'Nice motion.', 1767268800000, 1767268800000),
+       ('fake-review-2', 'fake-1', 'Test agent', 2, '["identity-drift"]', 'The face drifts after t = 3 s.',
+        1767268900000, 1767268900000);
+INSERT INTO learnings (id, title, insight, model, tags, evidence, author, pinned, created_at, updated_at)
+VALUES ('fake-learning-1', 'Test learning', 'Short prompts drift less.', NULL, '["test"]', '["fake-1"]', 'user', 1,
+  1767268800000, 1767268800000);
+SQL
+```
+
+Author `user` is the user's own review (at most one per generation); any other author is an agent. Tags and
+evidence are JSON lists; evidence holds generation ids.
 
 ### Electron-as-Node harnesses
 
@@ -204,6 +251,39 @@ and `complete` return canned answers (for example `retrieve` resolving to
 client (`@modelcontextprotocol/sdk/client/streamableHttp.js`) against `AgentService`/`AgentServer` bound to
 `127.0.0.1` on a free port (`AgentServiceOptions.hosts` overrides the listen addresses for tests).
 
+To check what would actually be sent — the request body with its image and audio data URLs — keep the real
+`VeniceClient` and **replace `fetch`** at the top of the test instead. Answer Venice's paths from canned JSON,
+record the queue body, and throw for anything else, so a mistake can never reach the network:
+
+```ts
+const queued: Record<string, unknown>[] = []
+const realFetch = globalThis.fetch
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+  if (url.startsWith('http://127.0.0.1:')) return realFetch(input, init) // an MCP client talking to the agent server
+  const path = /^https:\/\/api\.venice\.ai\/api\/v1(\/[^?]*)/.exec(url)?.[1]
+  const json = (body: unknown): Response =>
+    new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+  if (path === '/video/quote') return json({ quote: 0.42 })
+  if (path === '/video/queue') {
+    queued.push(JSON.parse(String(init?.body)))
+    return json({ queue_id: `stub-${queued.length}` })
+  }
+  throw new Error(`blocked network call: ${url}`)
+}) as typeof fetch
+```
+
+`prepareSubmission(params)` (`jobs.ts`) then applies the same guard as a real submit — tokens, measured audio
+windows, the 15 s total — and `new VeniceClient(() => 'test-key').queue(await buildRequestBody(prepared))` puts the
+body into `queued`: `reference_audio_urls` holds one `data:audio/mpeg;base64,…` per clip; decode one to a file and
+`ffprobe` it to see the window that would be sent (mono, 44.1 kHz). The stub above leaves out `/models`; save
+Venice's model list once (`GET /models?type=video` needs no key) and serve that file if a test needs it.
+
+The review tools work on the fake rows and test clips above. Whether tool results carry audio depends on the
+protocol version the client asked for in `initialize`: the SDK client asks for the latest and gets MP3 blocks; a
+session initialized with `"protocolVersion": "2024-11-05"` (the `curl` example in [AGENTS.md](AGENTS.md) with that
+version) gets the note that the sound was left out instead.
+
 ### Driving the real UI over CDP
 
 To inspect or script the running renderer, start the dev profile with Chromium's remote debugging port:
@@ -282,9 +362,15 @@ change the schema:
    transaction, together with the `user_version` bump.
 2. Write SQL that works on every earlier state reachable by the previous migrations (SQLite's `ALTER TABLE` is
    limited; renames carry rows and foreign keys along, as migration 6 shows).
-3. If the new column holds **file paths**, store them relative to the base folder and add the column to
-   `mapStoredPaths`, `isStoredPathRecorded` and `isStoredPrefixRecorded` in `db.ts`, or library moves, renames and
-   *Städa upp* will break it.
+3. If the new data holds **file paths**, store them relative to the base folder and teach every place that
+   rewrites or looks for stored paths about it, or library moves, renames and *Städa upp* will break it (migration
+   7 did this for `asset_audio.file_path` and `referenceAudios[].path`):
+   - a new **column**: `mapStoredPaths`, `isStoredPathRecorded` and `isStoredPrefixRecorded` in `db.ts`, and
+     `trackedFilePaths` in `library-root.ts` (and the reorganize/rename code if the files belong to an asset);
+   - a new path **inside `params` JSON**: `mapParamPaths` (behind `toStoredParams` / `fromStoredParams`) in
+     `paths.ts`, and
+     `paramFilePaths`, `mapParamsJson` and `followRewrites` in `db.ts` (and `generationFilePaths` in
+     `shared/generation-filter.ts` if the clip feed should find generations by it).
 4. Update the row types and mappers (`GenerationRow`, `generationFromRow`, `sequence-store.ts` …), the shared types
    if the data reaches the renderer, and the data-model section of [ARCHITECTURE.md](ARCHITECTURE.md#data-model).
 5. **Test on a copy.** Quit Studio (closing folds the WAL into `studio.db`), copy a library's folder into a
@@ -307,19 +393,35 @@ There are no down-migrations: once a newer Studio has migrated a library, older 
    `generation:update` …) so open views refetch. Anything that moves files must respect the library-wide
    operation lock (`libraryOperationSettled`) and, for sequences, the service's file queue.
 5. **Agents** — handlers are recorded automatically, so agent tools can reach the new method with
-   `callService('area:doThing', …)`. If agents must be treated differently, check `isAgentCall(event)`.
+   `callService('area:doThing', …)`. If agents must be treated differently, check `isAgentCall(event)` (as the
+   review and learning handlers do: an agent passes its name as the last argument and may only change what it
+   wrote). A new user-facing capability also needs a tool (see below).
 6. **Check** — `npm run check`, then try it in the dev profile; update [ARCHITECTURE.md](ARCHITECTURE.md#ipc-surface).
 
 ## Adding an agent tool
 
-Tools live in `src/main/agent/tools/` and are registered with `defineTool` (`kit.ts`):
+**Agents keep up with the app**: every capability a user gets also gets matching agent tools and guide text in
+`src/main/agent/`, in the same pull request. Voices and the clip feed show the pattern: voices became `audio` on
+`list_assets` / `get_asset`, `update_asset_audio` and audio items in `set_references`; the clip feed's filters
+became `list_generations`' parameters through the shared `generation-filter.ts`; ratings and learnings became the
+review tools.
+
+Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, `paid.ts`, `review.ts`) and are
+registered with `defineTool` (`kit.ts`):
 
 - Give it a clear English `title` and `description` written for an LLM, a zod `input` schema with `.describe()`d
   fields, honest MCP `annotations` (`READ_ONLY`, `WRITE`, or destructive/open-world hints) and a short Swedish
   `summary` for the activity log.
 - Reach Studio's services through `callService`, never by writing to the database or files directly, so the same
   validation and change notifications apply.
-- Anything that costs money must go through `ApprovalStore` with a `verify` step, as in `tools/paid.ts`. Never add
-  a tool that spends money without the user's approval.
-- Update the guide in `agent/guide.ts` if agents need to know about the tool, and the tool list in
-  [AGENTS.md](AGENTS.md#tools).
+- Share filters and checks with the UI instead of re-implementing them (`shared/prompt-refs.ts`,
+  `shared/generation-filter.ts`, `agent/studio.ts`), so an agent and the user always see the same result.
+- Return pictures as `images` and sound as `audio` (`LabeledImage` / `LabeledAudio`, each with a label that says
+  what it is); `agent/images.ts` and `agent/media.ts` make them from files, frames and ffmpeg output. Only send
+  sound when the agent asks for it (`include_audio`); `defineTool` already replaces it with a note for clients
+  whose protocol version has no audio content.
+- Anything that costs money must go through `ApprovalStore` with a `verify` step, as in `tools/paid.ts`, and should
+  run the same checks the submit will (`prepareSubmission`) before the user is asked. Never add a tool that spends
+  money without the user's approval.
+- Update the guide in `agent/guide.ts` (`studioGuide`, and `serverInstructions` if it changes how agents should
+  work), the tool list and counts in [AGENTS.md](AGENTS.md#tools), and `CHANGELOG.md` under *Unreleased*.
