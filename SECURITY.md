@@ -71,11 +71,12 @@ prepare work but never spend money on its own, and so that nothing outside the u
 - **MagicDNS** names shown in Settings are resolved only through Tailscale's own resolver and must resolve back to
   the same address, so the local network's DNS can't choose where agents are pointed.
 - **Same rules as the UI.** Agent tools call the same services as the window, with the same validation; agents
-  cannot add photos, delete assets, generations or sequences, export, change settings or switch the library.
-- **Paid actions need approval in the app.** Paid tools only create a request. Studio shows it with the prompt,
-  the reference images and the price, and submits only after the user approves. Before submitting, Studio checks
-  that the clips and the image files are still exactly what was shown, and each take is re-checked right before it
-  is sent. Requests expire after 30 minutes and immediately when the token is replaced, the library is switched or
+  cannot add photos, delete assets, generations, sequences or stills, export, change settings or switch the
+  library.
+- **Paid actions need approval in the app.** Paid tools (videos and pictures) only create a request. Studio shows
+  it with the prompt, the reference images and the price, and submits only after the user approves. Before
+  submitting, Studio checks that the clips and the image files are still exactly what was shown, and each take is
+  re-checked right before it is sent. Requests expire after 30 minutes and immediately when the token is replaced, the library is switched or
   the connection is turned off; at most 10 can be pending.
 
 Plain HTTP is used on purpose: loopback traffic never leaves the Mac, and Tailscale traffic is encrypted end to end

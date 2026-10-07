@@ -4,7 +4,15 @@ import { APPROVAL_TTL_MS, pendingApprovals, showApproval, useAgentState } from '
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import { CloseIcon } from '../sequences/icons'
-import { activityText, agentSummary, approvalTitle, expiresText, formatTime, TONE_DOT } from './agentText'
+import {
+  activityText,
+  agentSummary,
+  approvalTitle,
+  approvalVerb,
+  expiresText,
+  formatTime,
+  TONE_DOT
+} from './agentText'
 
 interface Props {
   open: boolean
@@ -180,7 +188,7 @@ function PendingCard({ approval: a, now }: { approval: ApprovalRequest; now: num
   return (
     <div className="rounded-lg border border-accent/40 bg-accent/5 p-3">
       <p className="text-[12px]">
-        <span className="font-medium">{a.client}</span> vill generera {lowerFirst(approvalTitle(a, a.sequenceName))}
+        <span className="font-medium">{a.client}</span> {approvalVerb(a)} {lowerFirst(approvalTitle(a, a.sequenceName))}
       </p>
       <div className="mt-2 flex items-center gap-3 text-[12px]">
         <span className="font-medium tabular-nums">{a.priceUsd !== undefined ? formatUsd(a.priceUsd) : 'Okänt pris'}</span>

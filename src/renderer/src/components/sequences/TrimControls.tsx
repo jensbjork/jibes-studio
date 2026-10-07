@@ -18,6 +18,8 @@ interface Props {
   number: number
   /** The next segment starts from this take's (trimmed) last frame. */
   nextContinues: boolean
+  /** The previous segment ends on this take's first frame after the start trim ("Slutbild från nästa klipp"). */
+  previousEndsHere: boolean
   patchSegment: SequenceStore['patchSegment']
   flushers: FlushRegistry
 }
@@ -31,7 +33,15 @@ const HATCH = 'repeating-linear-gradient(135deg, #00000088 0 4px, #00000044 4px 
  * The selected take with start/end trims. Mount with a key per segment + take. Trims are saved debounced
  * as a trims-only patch; main clamps them, and the clamped values come back through the draft.
  */
-export default function TrimControls({ segment, take, number, nextContinues, patchSegment, flushers }: Props) {
+export default function TrimControls({
+  segment,
+  take,
+  number,
+  nextContinues,
+  previousEndsHere,
+  patchSegment,
+  flushers
+}: Props) {
   const segmentId = segment.id
   const save = useCallback((t: Trims) => patchSegment(segmentId, t), [patchSegment, segmentId])
   const draft = useDraft<Trims>({ trimStart: segment.trimStart, trimEnd: segment.trimEnd }, save)
@@ -184,6 +194,12 @@ export default function TrimControls({ segment, take, number, nextContinues, pat
           </label>
         </div>
 
+        {previousEndsHere && (
+          <p className="text-[11px] leading-relaxed text-muted">
+            Klipp {number - 1} slutar på bildrutan vid {formatLength(trimStart)}. Ändrar du starten behöver klipp{' '}
+            {number - 1} en ny tagning för att övergången ska bli sömlös.
+          </p>
+        )}
         {nextContinues && (
           <p className="text-[11px] leading-relaxed text-muted">
             Klipp {number + 1} fortsätter från bildrutan vid {formatLength(keepEnd)}. Ändrar du slutet behöver klipp{' '}

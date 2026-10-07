@@ -80,8 +80,9 @@ suite yet; changes are verified with the techniques below (contributions of a pr
 ### Ground rules
 
 - **Never trigger real generations while developing.** Don't press *Generera*, *Generera tagning*, *Generera
-  saknade* or approve an agent request in a profile that has a real API key, and never call Venice's
-  `/video/queue` from tests — stub the `VeniceClient` instead.
+  saknade*, *Skapa* in *Skapa bild…* or approve an agent request in a profile that has a real API key, and never
+  call Venice's paid endpoints (`/video/queue`, `/image/generate`, `/image/multi-edit`) from tests — stub the
+  `VeniceClient` or `fetch` instead.
 - **Use a profile without an API key** for UI work. The model list and price quotes work without a key, but
   queueing a generation fails with "Ingen API-nyckel är inställd" before anything is sent.
 - **Work in a throwaway profile and library** (`STUDIO_PROFILE_DIR`), not in `~/Movies/Studio*` or
@@ -196,7 +197,8 @@ the bundle with Electron in Node mode — which also loads the Electron build of
      },
      ipcMain: { handlers, handle: (channel, fn) => handlers.set(channel, fn), on() {}, removeListener() {} },
      safeStorage: { encryptString: (s) => Buffer.from(s), decryptString: (b) => Buffer.from(b).toString() },
-     nativeImage: { createFromPath: () => ({ isEmpty: () => true }) },
+     // Empty: pictures are then sent as the file's bytes (input-image.ts decodes with createFromBuffer).
+     nativeImage: { createFromPath: () => ({ isEmpty: () => true }), createFromBuffer: () => ({ isEmpty: () => true }) },
      shell: { trashItem: async () => {}, showItemInFolder() {}, openExternal: async () => {} },
      BrowserWindow: { getAllWindows: () => [], getFocusedWindow: () => null, fromWebContents: () => null },
      dialog: {},
@@ -269,6 +271,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     queued.push(JSON.parse(String(init?.body)))
     return json({ queue_id: `stub-${queued.length}` })
   }
+  // Stills (images.ts): /image/generate answers with base64 images, /image/multi-edit with the picture's bytes.
+  if (path === '/image/generate') return json({ images: [testPng.toString('base64')] })
+  if (path === '/image/multi-edit') return new Response(testPng, { headers: { 'content-type': 'image/png' } })
   throw new Error(`blocked network call: ${url}`)
 }) as typeof fetch
 ```
@@ -277,7 +282,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 windows, the 15 s total — and `new VeniceClient(() => 'test-key').queue(await buildRequestBody(prepared))` puts the
 body into `queued`: `reference_audio_urls` holds one `data:audio/mpeg;base64,…` per clip; decode one to a file and
 `ffprobe` it to see the window that would be sent (mono, 44.1 kHz). The stub above leaves out `/models`; save
-Venice's model list once (`GET /models?type=video` needs no key) and serve that file if a test needs it.
+Venice's model lists once (`GET /models?type=video`, `?type=image` and `?type=inpaint` need no key) and serve those
+files if a test needs them. `testPng` is any small PNG; `generateStill` then saves it as a still, and the recorded
+bodies show what would be sent (`safe_mode`, the references as data URLs with the base first).
+
+To check frames exactly — the start and end image a clip sends, or which frames an export keeps at each cut — make
+test videos whose every frame has its own colour (or two colour halves, for more than 64 frames), read the frames
+back with `ffmpeg -vf scale=8:8:flags=area -f rawvideo -pix_fmt rgb24 -` and map each colour back to its number.
+Trims come in 0.1 s steps, so test cuts that fall between frames too.
 
 The review tools work on the fake rows and test clips above. Whether tool results carry audio depends on the
 protocol version the client asked for in `initialize`: the SDK client asks for the latest and gets MP3 blocks; a
@@ -406,8 +418,8 @@ There are no down-migrations: once a newer Studio has migrated a library, older 
 became `list_generations`' parameters through the shared `generation-filter.ts`; ratings and learnings became the
 review tools.
 
-Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, `paid.ts`, `review.ts`) and are
-registered with `defineTool` (`kit.ts`):
+Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, `storyboard.ts`, `paid.ts`,
+`review.ts`) and are registered with `defineTool` (`kit.ts`):
 
 - Give it a clear English `title` and `description` written for an LLM, a zod `input` schema with `.describe()`d
   fields, honest MCP `annotations` (`READ_ONLY`, `WRITE`, or destructive/open-world hints) and a short Swedish

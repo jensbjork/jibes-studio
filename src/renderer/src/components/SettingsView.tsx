@@ -72,6 +72,8 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
 
         <PromptLanguageSection language={settings.promptLanguage ?? 'en'} onChanged={onChanged} />
 
+        <ImageSafeModeSection on={settings.imageSafeMode !== false} onChanged={onChanged} />
+
         <AgentSettingsSection />
 
         <LibrarySection />
@@ -131,7 +133,65 @@ function PromptLanguageSection({ language, onChanged }: { language: PromptLangua
   )
 }
 
-/** Shows whether ffmpeg was found; sequences (continuation and export) and thumbnails depend on it. */
+/**
+ * "Säkert läge för bilder": Venice's safe_mode for the stills Studio creates (keyframes and other storyboard
+ * images). On by default, as in Venice; the image dialog shows the same setting.
+ */
+function ImageSafeModeSection({ on, onChanged }: { on: boolean; onChanged: () => void }) {
+  const [value, setValue] = useState(on)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string>()
+  useEffect(() => setValue(on), [on])
+
+  const change = async (next: boolean) => {
+    const before = value
+    setValue(next)
+    setSaving(true)
+    setError(undefined)
+    try {
+      await window.studio.setImageSafeMode(next)
+      onChanged()
+    } catch (e) {
+      setValue(before)
+      setError(ipcErrorMessage(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="mb-8">
+      <h2 className="mb-1 font-medium">Bilder</h2>
+      <p className="mb-3 text-muted">
+        Gäller bilderna du skapar med <span className="text-text">Skapa bild</span> – start- och slutbilder och andra
+        bilder till dina storyboards. Videorna påverkas inte.
+      </p>
+      <label className="flex cursor-pointer items-start gap-2.5">
+        <input
+          type="checkbox"
+          checked={value}
+          disabled={saving}
+          onChange={(e) => void change(e.target.checked)}
+          className="mt-0.5 accent-accent"
+        />
+        <span>
+          <span className="block">Säkert läge för bilder</span>
+          <span className="mt-0.5 block text-[12px] leading-relaxed text-muted">
+            {value
+              ? 'På: Venice suddar ut vuxet innehåll i bilderna. Stäng av det om bilder blir suddiga utan anledning.'
+              : 'Av: Venice suddar inte ut vuxet innehåll i bilderna.'}
+          </span>
+        </span>
+      </label>
+      {error && <p className="mt-2 text-[12px] text-accent">{error}</p>}
+    </section>
+  )
+}
+
+/**
+ * Shows whether ffmpeg was found; sequences (the start and end frames clips take from their neighbours, frames
+ * saved as stills, export) and thumbnails depend on it.
+ */
 function FfmpegSection() {
   const [status, setStatus] = useState<FfmpegStatus>()
   const [checking, setChecking] = useState(false)

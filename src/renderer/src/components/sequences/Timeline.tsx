@@ -1,18 +1,21 @@
 import { Fragment, useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import type { Segment, Sequence } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
-import { LinkIcon, PlusIcon } from './icons'
+import { BridgeIcon, LinkIcon, PlusIcon } from './icons'
 import {
   clipLength,
   continuationMismatch,
+  endMismatch,
   formatLength,
   pendingTake,
   readyTake,
   selectedTake,
   takeProgress
 } from './sequenceUtils'
+import { bridgeDescription } from './storyboard/slots'
 
-const SEGMENT_DRAG_TYPE = 'application/x-studio-segment'
+/** Drag payload of a clip being reordered (its id); shared with the storyboard. */
+export const SEGMENT_DRAG_TYPE = 'application/x-studio-segment'
 
 interface Props {
   sequence: Sequence
@@ -22,10 +25,12 @@ interface Props {
   /** Adds a segment after the given one, or at the end. */
   onAdd: (afterSegmentId?: string) => void
   onMove: (segmentId: string, toIndex: number) => void
+  /** "Gör om mellan grannarna" on a card. */
+  onBridge: (segmentId: string) => void
 }
 
 /** Horizontal strip of clips in cut order: select, insert, and reorder by drag and drop. */
-export default function Timeline({ sequence, selectedId, adding, onSelect, onAdd, onMove }: Props) {
+export default function Timeline({ sequence, selectedId, adding, onSelect, onAdd, onMove, onBridge }: Props) {
   const segments = sequence.segments
   const cards = useRef(new Map<string, HTMLDivElement>())
   const [dragId, setDragId] = useState<string>()
@@ -123,6 +128,8 @@ export default function Timeline({ sequence, selectedId, adding, onSelect, onAdd
               <SegmentCard
                 segment={s}
                 number={i + 1}
+                bridgeTitle={bridgeDescription(i, segments.length)}
+                onBridge={() => onBridge(s.id)}
                 selected={s.id === selectedId}
                 dragging={s.id === dragId}
                 refCallback={(el) => {
@@ -184,19 +191,29 @@ function Joint({
   adding: boolean
   onInsert: () => void
 }) {
+  // The two clips share a frame: this one starts on the previous clip's last frame, or the previous one ends on
+  // this one's first (a clip redone between its neighbours).
   const continues = segment.continueFromPrevious
-  const mismatch = continuationMismatch(segment, previous)
+  const endsHere = previous.endFromNext
+  const linked = continues || endsHere
+  const mismatch = continuationMismatch(segment, previous) || endMismatch(previous, segment)
+  const description = [
+    continues ? `Klipp ${number} fortsätter från sista bildrutan i klipp ${number - 1}.` : '',
+    endsHere ? `Klipp ${number - 1} slutar på första bildrutan i klipp ${number}.` : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
   return (
     <div className="group/joint relative flex w-10 shrink-0 flex-col items-center">
       <div className="relative flex h-[99px] w-full items-center justify-center">
-        {continues && (
+        {linked && (
           <>
             <span className={`absolute inset-x-0 top-1/2 h-px ${mismatch ? 'bg-amber-500/50' : 'bg-muted/50'}`} />
             <span
               title={
                 mismatch
-                  ? `Vald tagning i klipp ${number} gjordes från en annan slutbild än klipp ${number - 1} har nu. Generera en ny tagning för en sömlös övergång.`
-                  : `Klipp ${number} fortsätter från sista bildrutan i klipp ${number - 1}`
+                  ? `${description} Ingen av de valda tagningarna gjordes från den andras bildruta som den ser ut nu – generera en ny tagning för en sömlös övergång.`
+                  : description
               }
               className={`relative flex h-6 w-6 items-center justify-center rounded-full border ${
                 mismatch ? 'border-amber-500/60 bg-[#2a2113] text-amber-400' : 'border-line bg-raised text-text'
@@ -225,6 +242,8 @@ function Joint({
 function SegmentCard({
   segment,
   number,
+  bridgeTitle,
+  onBridge,
   selected,
   dragging,
   refCallback,
@@ -235,6 +254,9 @@ function SegmentCard({
 }: {
   segment: Segment
   number: number
+  /** What "Gör om mellan grannarna" does here; undefined for a clip without neighbours. */
+  bridgeTitle?: string
+  onBridge: () => void
   selected: boolean
   dragging: boolean
   refCallback: (el: HTMLDivElement | null) => void
@@ -260,7 +282,7 @@ function SegmentCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       title="Klicka för att redigera, dra för att flytta"
-      className={`w-44 shrink-0 cursor-pointer overflow-hidden rounded-lg border bg-panel outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
+      className={`group/card w-44 shrink-0 cursor-pointer overflow-hidden rounded-lg border bg-panel outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
         selected ? 'border-accent ring-1 ring-accent/30' : 'border-line hover:border-muted/60'
       } ${dragging ? 'opacity-40' : ''}`}
     >
@@ -273,6 +295,22 @@ function SegmentCard({
           <span className="absolute right-1.5 top-1.5 rounded bg-black/75 px-1.5 py-px text-[10px] text-muted">
             {takes} {takes === 1 ? 'tagning' : 'tagningar'}
           </span>
+        )}
+        {bridgeTitle && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onBridge()
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+            title={`Gör om mellan grannarna: ${bridgeTitle}`}
+            aria-label="Gör om mellan grannarna"
+            className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] text-text opacity-0 transition hover:bg-black focus:opacity-100 group-hover/card:opacity-100"
+          >
+            <BridgeIcon size={11} />
+            Gör om
+          </button>
         )}
       </div>
       <div className="px-2 py-1.5">

@@ -86,6 +86,8 @@ function Workspace() {
   const refreshSettings = () => window.studio.getSettings().then(setSettings)
   useEffect(() => {
     void refreshSettings()
+    // A setting changed elsewhere (safe mode in the image dialog) must not leave Inställningar showing the old one.
+    return window.studio.onSettingsChange(() => void refreshSettings())
   }, [])
 
   // Without a key nothing works, so send first-time users straight to settings.

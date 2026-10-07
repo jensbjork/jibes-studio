@@ -438,6 +438,79 @@ export async function extractFrame(videoPath: string, outPath: string, atSeconds
   return outPath
 }
 
+/**
+ * When the first frame that starts at or after `time` starts, in seconds: the frame an export trimmed at `time`
+ * starts on (extractFrameAtOrAfter), and the one input seeking gives (extractFrames, the frames agents look at).
+ * Asking stills' saveFrame (the frame a paused player shows) for this moment saves that very frame. 0 stays 0;
+ * without a frame rate (the file can't be probed), `time` itself.
+ */
+export async function frameStartAtOrAfter(videoPath: string, time: number): Promise<number> {
+  if (!(time > 0)) return 0
+  const fps = await probe(videoPath).then(
+    (p) => p.fps,
+    () => undefined
+  )
+  if (!fps) return time
+  // The small margin keeps a time that sits exactly on a frame (to rounding) on that frame.
+  return Math.ceil(time * fps - 1e-6) / fps
+}
+
+/** Longest side of a picture decoded with stillToPng: more than any input Venice gets (they are scaled to 2048). */
+const STILL_DECODE_MAX_SIDE = 4096
+const MAX_STILL_PNG_BYTES = 96 * 1024 * 1024
+
+/**
+ * A still picture (WebP, which Electron's nativeImage can't decode, say) decoded by ffmpeg and returned as PNG
+ * bytes, at most STILL_DECODE_MAX_SIDE on its long side (never upscaled); the first frame of an animated one.
+ * Rejects when ffmpeg is missing or can't read it.
+ */
+export async function stillToPng(path: string): Promise<Buffer> {
+  const { ffmpeg } = await binaries()
+  const max = STILL_DECODE_MAX_SIDE
+  const { bytes } = await run(
+    ffmpeg,
+    [
+      '-nostdin', '-hide_banner', '-v', 'error',
+      '-i', resolve(path),
+      '-map', '0:v:0', '-frames:v', '1',
+      // Quoted so the commas inside min() aren't read as filter separators.
+      '-vf', `scale='min(${max},iw)':'min(${max},ih)':force_original_aspect_ratio=decrease`,
+      '-c:v', 'png', '-f', 'image2pipe', 'pipe:1'
+    ],
+    { timeoutMs: IMAGE_TIMEOUT_MS, binaryStdout: { maxBytes: MAX_STILL_PNG_BYTES } }
+  )
+  if (!bytes?.length) throw new Error('Kunde inte läsa bilden.')
+  return bytes
+}
+
+/**
+ * The first frame shown from atSeconds on, as PNG: the first frame whose timestamp is at or after atSeconds.
+ * That is the frame concatClips starts a clip trimmed at atSeconds on (the same `trim` filter on the same
+ * timestamps; -copyts -start_at_zero undo the seek's shift), so a clip generated to end on it meets the next
+ * clip exactly where the cut does. At or before 0 the very first frame; past the end the last one. Returns
+ * outPath.
+ */
+export async function extractFrameAtOrAfter(videoPath: string, outPath: string, atSeconds: number): Promise<string> {
+  const firstFrame = (): Promise<boolean> => writeImage(videoPath, outPath, [], ['-frames:v', '1', '-q:v', '1'])
+  let ok: boolean
+  if (!Number.isFinite(atSeconds) || atSeconds <= 0) {
+    ok = await firstFrame()
+  } else {
+    // Decoding from up to 3 s before keeps the seek fast without depending on where the keyframes are.
+    const from = Math.max(0, atSeconds - 3)
+    ok = await writeImage(
+      videoPath,
+      outPath,
+      ['-ss', secs(from), '-copyts', '-start_at_zero'],
+      ['-vf', `trim=start=${secs(atSeconds)}`, '-frames:v', '1', '-q:v', '1']
+    ).catch(() => false)
+    // Nothing from there on (past the last frame): the last frame is the one showing then.
+    if (!ok) ok = await writeImage(videoPath, outPath, ['-sseof', '-3'], ['-update', '1', '-q:v', '1'])
+  }
+  if (!ok) throw new Error('Kunde inte ta ut en bildruta ur videon.')
+  return outPath
+}
+
 /** JPEG poster ~480px wide, taken ~0.5 s in (or the middle for very short clips). Returns outPath. */
 export async function extractThumbnail(videoPath: string, outPath: string): Promise<string> {
   const duration = await probe(videoPath).then(
@@ -472,6 +545,27 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
+ * The time covered by the frames that `trim=start:end` keeps: from the first frame that starts at or after
+ * `start` to the end of the last one that starts before `end`, on the clip's own frame grid. A clip's sound is
+ * cut to exactly this rather than to start–end. Trims come in 0.1 s steps and a frame lasts 1/24 s, so a cut
+ * usually falls between two frames; cut there, the sound would run up to a frame longer than the picture,
+ * concat starts the next clip after the longer of the two, and over a few cuts the gaps add up until a picture
+ * is shown twice (a stutter right where a clip was made to fit seamlessly). Frame starts are compared with a
+ * thousandth of a frame to spare, since ffmpeg rounds the cut to the stream's time base.
+ */
+export function frameSpan(
+  start: number,
+  end: number,
+  fps: number,
+  duration: number
+): { start: number; end: number; length: number } {
+  const frames = Math.max(1, Math.ceil(duration * fps - 1e-3))
+  const first = Math.min(frames - 1, Math.max(0, Math.ceil(start * fps - 1e-3)))
+  const stop = Math.min(frames, Math.max(first + 1, Math.ceil(end * fps - 1e-3)))
+  return { start: first / fps, end: stop / fps, length: (stop - first) / fps }
+}
+
+/**
  * Renders the clips back to back into one H.264/AAC mp4, normalised to the first clip's size and frame
  * rate. Clips without audio get silence so every cut has a soundtrack.
  */
@@ -503,9 +597,10 @@ export async function concatClips(
     const p = probes[i]
     const start = clamp(clip.start, 0, p.duration)
     const end = clamp(clip.end, start, p.duration)
-    const length = end - start
-    if (length < MIN_CLIP_SECONDS) throw new Error(`Klipp ${i + 1} blir för kort efter trimningen.`)
-    total += length
+    if (end - start < MIN_CLIP_SECONDS) throw new Error(`Klipp ${i + 1} blir för kort efter trimningen.`)
+    // The sound covers exactly the frames the picture keeps (see frameSpan).
+    const span = frameSpan(start, end, p.fps > 0 ? p.fps : fps, p.duration)
+    total += span.length
 
     // fps must come before scale: after scale (ffmpeg 7.1) it can't tell how long the last frame lasts
     // and drops it, which showed up as a missing frame at every cut.
@@ -514,12 +609,12 @@ export async function concatClips(
         `scale=${w}:${h}:force_original_aspect_ratio=decrease:force_divisible_by=2,` +
         `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v${i}]`
     )
-    // Audio is padded to exactly the clip's length so sound stays in sync across cuts.
+    // Audio is padded to exactly the clip's picture so sound stays in sync across cuts.
     graph.push(
       p.hasAudio
-        ? `[${i}:a:0]atrim=start=${secs(start)}:end=${secs(end)},asetpts=PTS-STARTPTS,aresample=48000,` +
-            `aformat=sample_fmts=fltp:channel_layouts=stereo,apad=whole_dur=${secs(length)}[a${i}]`
-        : `anullsrc=r=48000:cl=stereo,atrim=duration=${secs(length)},` +
+        ? `[${i}:a:0]atrim=start=${secs(span.start)}:end=${secs(span.end)},asetpts=PTS-STARTPTS,aresample=48000,` +
+            `aformat=sample_fmts=fltp:channel_layouts=stereo,apad=whole_dur=${secs(span.length)}[a${i}]`
+        : `anullsrc=r=48000:cl=stereo,atrim=duration=${secs(span.length)},` +
             `aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a${i}]`
     )
     pairs.push(`[v${i}][a${i}]`)

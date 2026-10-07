@@ -94,7 +94,8 @@ let stopFeed: (() => void) | undefined
 function notifyNewApproval(a: ApprovalRequest): void {
   if (document.hasFocus() || typeof Notification === 'undefined') return
   try {
-    const note = new Notification(`${a.client} vill generera`, {
+    // An image request makes a still for a storyboard; everything else generates video.
+    const note = new Notification(`${a.client} ${a.kind === 'image' ? 'vill skapa en bild' : 'vill generera'}`, {
       body: 'Öppna Studio för att godkänna eller avböja.',
       silent: false
     })

@@ -159,7 +159,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Studio guide',
       description:
-        "How Studio works and how to write video prompts that work in it. Read this once at the start of a session, before you prepare anything: it explains assets (characters, environments, outfits, poses) and their voices, the three modes, how reference images and audio become @Image1… and @Audio1… tokens in the prompt, sequences and continuation clips, the approval flow for paid generations, a detailed prompt-writing guide for Seedance-class video models, the review loop for learning from results – and ends with the learnings recorded so far (pinned ones and the most recent).",
+        "How Studio works and how to write video prompts that work in it. Read this once at the start of a session, before you prepare anything: it explains assets (characters, environments, outfits, poses) and their voices, the three modes, how reference images and audio become @Image1… and @Audio1… tokens in the prompt, sequences and continuation clips, storyboards with keyframes (start and end images, made with request_image_generation) and replacing a clip between its neighbours, the approval flow for paid generations, a detailed prompt-writing guide for Seedance-class video models, the review loop for learning from results – and ends with the learnings recorded so far (pinned ones and the most recent).",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'läste guiden'

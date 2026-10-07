@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { KINDS, kindOfModelId, paramsForSubmit } from '@shared/models'
 import type {
+  ApprovalImageRequest,
   ApprovalRequest,
   Asset,
   ConsentRequest,
   GenerationParams,
   Segment,
+  SegmentFramePreview,
   Sequence,
   VideoModel
 } from '@shared/types'
@@ -33,12 +35,13 @@ import {
 } from '../pickers/audioRefs'
 import Modal from '../pickers/Modal'
 import { effectiveParams, needsTake, parseConsent, pendingTake } from '../sequences/sequenceUtils'
-import { approvalOutcome, approvalTitle, expiresText } from './agentText'
+import { approvalOutcome, approvalTitle, approvalVerb, expiresText, slotName } from './agentText'
 import PromptText, { type TokenTarget } from './PromptText'
 
 /**
- * Paid generations an agent asks for wait here for the user's OK. Shown above every view; several requests
- * queue up and are shown one at a time. Nothing is sent to Venice until "Godkänn och generera".
+ * Paid generations (videos and pictures) an agent asks for wait here for the user's OK. Shown above every view;
+ * several requests queue up and are shown one at a time. Nothing is sent to Venice until "Godkänn och generera"
+ * ("Godkänn och skapa" for a picture).
  */
 export default function ApprovalDialog() {
   const agent = useAgentState()
@@ -70,7 +73,8 @@ export default function ApprovalDialog() {
   )
 }
 
-type Phase = 'review' | 'declining' | 'submitting' | 'failed'
+/** done: an image request was approved and its picture is made (shown until the user closes the dialog). */
+type Phase = 'review' | 'declining' | 'submitting' | 'failed' | 'done'
 
 interface PanelProps {
   approval: ApprovalRequest
@@ -114,21 +118,52 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const [error, setError] = useState<string>()
   const [consent, setConsent] = useState<ConsentRequest>()
   const [reason, setReason] = useState('')
+  /** The still an approved image request made. */
+  const [madeStill, setMadeStill] = useState<string>()
 
   const expiresAt = a.expiresAt ?? a.createdAt + APPROVAL_TTL_MS
   const pending = a.status === 'pending'
   // Main lapses it at expiresAt; don't offer to approve what it would refuse.
   const expired = pending && now > expiresAt
+  // A still for a storyboard (Venice's image models) rather than a video.
+  const image = a.kind === 'image' ? (a.image ?? null) : undefined
   const clips = useMemo(() => clipsOf(a, sequence), [a, sequence])
+  // The automatic start and end frames of the one clip a 'segment' request generates, as they are right now.
+  const frameClip = a.kind === 'segment' && clips.length === 1 ? clips[0] : undefined
+  const needsFrames = !!frameClip && !!(frameClip.continuesFrom || frameClip.endsAt)
+  const { preview: frames, loading: framesLoading } = useFramePreview(
+    needsFrames ? a.segmentIds?.[0] : undefined,
+    a.sequenceId
+  )
+  // The clip number an image request's picture goes to, as the sequence is now (the request has it as it was).
+  const imageTarget = imageTargetNow(image?.assignTo, sequence)
   const armed = useArmed(
-    JSON.stringify([a.id, a.status, a.priceUsd, clips.map((c) => [c.key, c.title, c.params, c.continuesFrom])])
+    JSON.stringify([
+      a.id,
+      a.status,
+      a.priceUsd,
+      image?.params,
+      imageTarget,
+      clips.map((c) => [c.key, c.title, c.params, c.continuesFrom, c.endsAt]),
+      // A neighbour's other take (or trim) is another frame: the user must see it before it is paid for. While a
+      // new answer is on its way the old frame may be stale, so the request arms again only once it has come.
+      framesLoading,
+      frames?.start?.path,
+      frames?.end?.path
+    ])
   )
   // The first clip that can't be generated, named when the request covers several.
   const blockingClip = clips.find((c) => c.blocking)
   const blocking =
-    blockingClip && clips.length > 1 && blockingClip.title
+    (blockingClip && clips.length > 1 && blockingClip.title
       ? `${blockingClip.title}: ${blockingClip.blocking}`
-      : blockingClip?.blocking
+      : blockingClip?.blocking) ??
+    // What stands in the way of the clip's start and end frames (a neighbour without a finished take …).
+    frames?.problems[0] ??
+    (image === null ? 'Förfrågan saknar uppgifter om bilden' : undefined) ??
+    imageTarget?.problem
+  // The frames shown must be the ones that will be sent: no approving while they are being fetched (again).
+  const framesPending = needsFrames && pending && framesLoading
 
   const fail = (message: string) => {
     const request = parseConsent(message)
@@ -148,6 +183,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     try {
       const result = await resolveApproval(a.id, true)
       if (result.status === 'approved') {
+        // The picture is made by now: show it before moving on, so the user sees what they paid for.
+        const stillId = result.stillId
+        if (image !== undefined && stillId) {
+          setMadeStill(stillId)
+          setPhase('done')
+          return
+        }
         hold(false)
         return
       }
@@ -183,7 +225,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const close = () => {
     if (phase === 'submitting') return
     if (phase === 'declining') return setPhase('review')
-    if (phase === 'failed' || !pending) {
+    if (phase === 'failed' || phase === 'done' || !pending) {
       hold(false)
       setPhase('review')
       return
@@ -231,6 +273,10 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           Avböj
         </button>
       </>
+    ) : phase === 'done' ? (
+      <button onClick={close} className={secondary}>
+        {othersWaiting ? 'Visa nästa förfrågan' : 'Stäng'}
+      </button>
     ) : !pending && phase === 'review' ? (
       // Lapsed or replaced while it was on screen: nothing to approve here; the next one is opened on purpose.
       <button onClick={close} className={secondary}>
@@ -242,7 +288,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           Stäng
         </button>
         {pending && (
-          <button onClick={() => void approve()} disabled={!!blocking || !armed} className={primary}>
+          <button onClick={() => void approve()} disabled={!!blocking || !armed || framesPending} className={primary}>
             Försök igen
           </button>
         )}
@@ -262,19 +308,29 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         </button>
         <button
           onClick={() => void approve()}
-          disabled={phase === 'submitting' || !!blocking || !pending || expired || !armed}
+          disabled={phase === 'submitting' || !!blocking || !pending || expired || !armed || framesPending}
           title={
             blocking
               ? `Kan inte genereras: ${blocking}`
               : expired
                 ? 'Begäran har gått ut – be agenten fråga igen'
-                : !armed
-                  ? 'Läs igenom förfrågan först'
-                  : undefined
+                : framesPending
+                  ? 'Hämtar start- och slutbilden…'
+                  : !armed
+                    ? 'Läs igenom förfrågan först'
+                    : undefined
           }
           className={`flex items-center gap-2 ${primary}`}
         >
-          <span>{phase === 'submitting' ? 'Skickar…' : 'Godkänn och generera'}</span>
+          <span>
+            {phase === 'submitting'
+              ? image !== undefined
+                ? 'Skapar bilden…'
+                : 'Skickar…'
+              : image !== undefined
+                ? 'Godkänn och skapa'
+                : 'Godkänn och generera'}
+          </span>
           {phase !== 'submitting' && a.priceUsd !== undefined && (
             <span className="text-white/80">{formatUsd(a.priceUsd)}</span>
           )}
@@ -283,7 +339,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     )
 
   return (
-    <Modal title={`${a.client} vill generera`} subtitle={subtitle} onClose={close} footer={footer} maxWidth={620}>
+    <Modal
+      title={`${a.client} ${approvalVerb(a)}${image !== undefined ? ' en bild' : ''}`}
+      subtitle={subtitle}
+      onClose={close}
+      footer={footer}
+      maxWidth={620}
+    >
       <div className="space-y-5">
         {error && (
           <p className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[12px] leading-relaxed text-[#ffb3b5] select-text">
@@ -293,6 +355,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         {!pending && phase !== 'failed' && phase !== 'submitting' && (
           <p className="rounded-md border border-line bg-raised px-3 py-2 text-[12px] text-muted">{approvalOutcome(a)}</p>
         )}
+        {phase === 'done' && madeStill && <MadeStill stillId={madeStill} sequenceId={a.sequenceId} />}
 
         {a.note && (
           <div className="rounded-md border border-line bg-raised/60 px-3 py-2.5">
@@ -305,6 +368,16 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           <p className="text-[12px] text-accent">Sekvensen kunde inte läsas: {sequenceError}</p>
         )}
 
+        {image && (
+          <ImageSummary
+            image={image}
+            sequenceName={sequence?.name ?? a.sequenceName}
+            hasSequence={!!a.sequenceId}
+            clipNumber={imageTarget?.clipNumber}
+          />
+        )}
+        {image === null && <p className="text-accent">Förfrågan saknar uppgifter om bilden.</p>}
+
         {clips.map((clip) => (
           <ClipSummary
             key={clip.key}
@@ -313,12 +386,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             photos={photos}
             voices={voices}
             compact={clips.length > 1}
+            frames={clip === frameClip ? frames : undefined}
           />
         ))}
         {a.kind === 'generate-all' && sequence && !clips.length && (
           <p className="text-muted">Alla klipp i sekvensen har redan en färdig tagning.</p>
         )}
-        {a.kind !== 'generation' && !sequence && !sequenceError && !clips.length && (
+        {a.kind !== 'generation' && image === undefined && !sequence && !sequenceError && !clips.length && (
           <p className="text-muted">Läser sekvensen…</p>
         )}
 
@@ -331,9 +405,12 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             {a.priceUsd !== undefined ? formatUsd(a.priceUsd) : 'Okänt pris'}
           </span>
         </div>
+        {phase === 'submitting' && image !== undefined && (
+          <p className="text-[12px] text-muted">Venice skapar bilden – det brukar ta 10–30 sekunder.</p>
+        )}
         {blocking && (
           <p className="text-[12px] text-accent">
-            Kan inte genereras som det ser ut nu: {blocking}. Be {a.client} rätta prompten, eller avböj.
+            Kan inte genereras som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {a.client} rätta det, eller avböj.
           </p>
         )}
       </div>
@@ -363,16 +440,25 @@ interface Clip {
   params: GenerationParams
   /** The start frame comes from the previous clip's end, so there is no start image yet. */
   continuesFrom?: number
+  /** The end frame comes from this (next) clip's first frame ("Slutbild från nästa klipp"). */
+  endsAt?: number
   blocking?: string
   warnings: string[]
 }
 
-function clipOf(key: string, params: GenerationParams, title?: string, continuesFrom?: number): Clip {
+function clipOf(
+  key: string,
+  params: GenerationParams,
+  title?: string,
+  continuesFrom?: number,
+  endsAt?: number
+): Clip {
   return {
     key,
     title,
     params: paramsForSubmit(params),
     continuesFrom,
+    endsAt,
     blocking: blockingPromptIssue(params),
     warnings: promptIssuesOf(params)
       .filter((i) => i.severity === 'warning')
@@ -380,29 +466,43 @@ function clipOf(key: string, params: GenerationParams, title?: string, continues
   }
 }
 
-function segmentClip(segment: Segment, index: number): Clip {
-  const continuing = segment.continueFromPrevious && index > 0
-  return clipOf(segment.id, effectiveParams(segment, index), `Klipp ${index + 1}`, continuing ? index : undefined)
+/** The number of the clip whose first frame the segment ends on, when it takes its end image from the next clip. */
+function endsAtClip(segment: Segment, index: number, count: number): number | undefined {
+  return segment.endFromNext && index < count - 1 ? index + 2 : undefined
 }
 
-/** The clips a request would generate, in order. */
+function segmentClip(segment: Segment, index: number, count: number): Clip {
+  const continuing = segment.continueFromPrevious && index > 0
+  return clipOf(
+    segment.id,
+    effectiveParams(segment, index),
+    `Klipp ${index + 1}`,
+    continuing ? index : undefined,
+    endsAtClip(segment, index, count)
+  )
+}
+
+/** The clips a request would generate, in order (none for an image request). */
 function clipsOf(a: ApprovalRequest, sequence: Sequence | undefined): Clip[] {
+  if (a.kind === 'image') return []
   if (a.kind === 'generation') return a.params ? [clipOf(a.id, a.params)] : []
+  const count = sequence?.segments.length ?? 0
   const indexed = sequence?.segments.map((segment, index) => ({ segment, index })) ?? []
   if (a.kind === 'segment') {
     const hit = indexed.find(({ segment }) => segment.id === a.segmentIds?.[0])
     const number = hit ? hit.index + 1 : a.clipNumbers?.[0]
     const continuesFrom = hit && hit.segment.continueFromPrevious && hit.index > 0 ? hit.index : undefined
+    const endsAt = hit ? endsAtClip(hit.segment, hit.index, count) : undefined
     // Main submits exactly the settings in the request (and refuses if the clip has changed since).
-    if (a.params) return [clipOf(a.id, a.params, number ? `Klipp ${number}` : undefined, continuesFrom)]
-    return hit ? [segmentClip(hit.segment, hit.index)] : []
+    if (a.params) return [clipOf(a.id, a.params, number ? `Klipp ${number}` : undefined, continuesFrom, endsAt)]
+    return hit ? [segmentClip(hit.segment, hit.index, count)] : []
   }
   if (!sequence) return []
   const ids = a.segmentIds
   const chosen = ids?.length
     ? indexed.filter(({ segment }) => ids.includes(segment.id))
     : indexed.filter(({ segment }) => needsTake(segment) && !pendingTake(segment))
-  return chosen.map(({ segment, index }) => segmentClip(segment, index))
+  return chosen.map(({ segment, index }) => segmentClip(segment, index, count))
 }
 
 function ClipSummary({
@@ -410,7 +510,8 @@ function ClipSummary({
   models,
   photos,
   voices,
-  compact
+  compact,
+  frames
 }: {
   clip: Clip
   models: VideoModel[]
@@ -418,6 +519,8 @@ function ClipSummary({
   /** Library audio clips by path, to name the voices and soundscapes that are sent. */
   voices: ReadonlyMap<string, AudioSource>
   compact: boolean
+  /** The automatic start and end frames as they are now (one clip's request). */
+  frames?: SegmentFramePreview
 }) {
   const p = clip.params
   const model = models.find((m) => m.id === p.model)
@@ -491,23 +594,44 @@ function ClipSummary({
 
       {kind === 'image-to-video' && (
         <>
-          <Label className="mt-3">Startbild{p.endImage ? ' och slutbild' : ''}</Label>
-          <div className="flex flex-wrap items-center gap-2">
-            {p.startImage ? (
+          <Label className="mt-3">Startbild{p.endImage || clip.endsAt ? ' och slutbild' : ''}</Label>
+          <div className="flex flex-wrap items-start gap-3">
+            {clip.continuesFrom ? (
+              <AutoFrame
+                badge="Start"
+                preview={!!frames}
+                path={frames?.start?.source === 'previous' ? frames.start.path : undefined}
+                text={`Sista bildrutan från klipp ${clip.continuesFrom}${frameTime(frames?.start?.time)}`}
+              />
+            ) : p.startImage ? (
               <ImageTile path={p.startImage} badge="Start" photo={photos.get(p.startImage)} />
-            ) : clip.continuesFrom ? (
-              <p className="text-[12px] text-muted">Sista bildrutan från klipp {clip.continuesFrom}.</p>
             ) : (
               <p className="text-[12px] text-accent">Ingen startbild.</p>
             )}
-            {p.endImage && <ImageTile path={p.endImage} badge="Slut" photo={photos.get(p.endImage)} />}
+            {clip.endsAt ? (
+              <AutoFrame
+                badge="Slut"
+                preview={!!frames}
+                path={frames?.end?.source === 'next' ? frames.end.path : undefined}
+                text={`Första bildrutan från klipp ${clip.endsAt}${frameTime(frames?.end?.time)}`}
+              />
+            ) : (
+              p.endImage && <ImageTile path={p.endImage} badge="Slut" photo={photos.get(p.endImage)} />
+            )}
           </div>
         </>
       )}
 
-      {(clip.blocking || clip.warnings.length > 0) && (
+      {(clip.blocking || clip.warnings.length > 0 || (frames?.problems.length ?? 0) > 0) && (
         <ul className="mt-3 space-y-1 text-[12px]">
           {clip.blocking && <li className="text-accent">{clip.blocking}</li>}
+          {frames?.problems
+            .filter((problem) => problem !== clip.blocking)
+            .map((problem) => (
+              <li key={problem} className="text-accent">
+                {problem}
+              </li>
+            ))}
           {clip.warnings.map((w) => (
             <li key={w} className="text-amber-300">
               {w}
@@ -523,13 +647,33 @@ function Label({ children, className = '' }: { children: ReactNode; className?: 
   return <p className={`mb-1.5 text-[11px] text-muted ${className}`}>{children}</p>
 }
 
-function ImageTile({ path, badge, photo }: { path: string; badge: string; photo?: Photo }) {
+function ImageTile({
+  path,
+  badge,
+  photo,
+  caption,
+  captionTone,
+  large,
+  title
+}: {
+  path: string
+  badge: string
+  photo?: Photo
+  /** Shown along the bottom instead of the photo's asset name. */
+  caption?: string
+  captionTone?: string
+  /** A bigger, wide tile (frames and stills rather than reference photos). */
+  large?: boolean
+  /** The hover text's name when it says more than the caption. */
+  title?: string
+}) {
   const [missing, setMissing] = useState(false)
-  const name = photo ? `${photo.asset.name} (foto ${photo.number})` : (path.split('/').pop() ?? path)
+  const name =
+    title ?? caption ?? (photo ? `${photo.asset.name} (foto ${photo.number})` : (path.split('/').pop() ?? path))
   return (
     <div
       title={missing ? `Filen saknas: ${path}` : `${badge} · ${name}`}
-      className={`relative h-16 w-16 shrink-0 overflow-hidden rounded bg-raised ${missing ? 'ring-1 ring-accent' : ''}`}
+      className={`relative shrink-0 overflow-hidden rounded bg-raised ${large ? 'h-24 w-40' : 'h-16 w-16'} ${missing ? 'ring-1 ring-accent' : ''}`}
     >
       {missing ? (
         <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
@@ -544,14 +688,193 @@ function ImageTile({ path, badge, photo }: { path: string; badge: string; photo?
         />
       )}
       <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">{badge}</span>
-      {photo && (
+      {caption ? (
         <span
-          className={`absolute inset-x-0 bottom-0 truncate px-1 text-center text-[10px] text-white ${KIND_TONE[photo.asset.kind].caption}`}
+          className={`absolute inset-x-0 bottom-0 truncate px-1 text-center text-[10px] text-white ${captionTone ?? 'bg-black/60'}`}
         >
-          {photo.asset.name}
+          {caption}
         </span>
+      ) : (
+        photo && (
+          <span
+            className={`absolute inset-x-0 bottom-0 truncate px-1 text-center text-[10px] text-white ${KIND_TONE[photo.asset.kind].caption}`}
+          >
+            {photo.asset.name}
+          </span>
+        )
       )}
     </div>
+  )
+}
+
+/** " (0:07,5)": where in the neighbour's take an automatic frame is taken, when main said. */
+function frameTime(seconds: number | undefined): string {
+  if (seconds === undefined || !Number.isFinite(seconds)) return ''
+  const m = Math.floor(seconds / 60)
+  const s = (seconds - m * 60).toFixed(1).replace('.', ',').padStart(4, '0')
+  return ` (${m}:${s})`
+}
+
+/** The picture an approved image request made, as it was saved among the sequence's stills. */
+function MadeStill({ stillId, sequenceId }: { stillId: string; sequenceId?: string }) {
+  const [path, setPath] = useState<string | null>()
+  useEffect(() => {
+    let active = true
+    window.studio.listStills(sequenceId).then(
+      (stills) => active && setPath(stills.find((s) => s.id === stillId)?.path ?? null),
+      () => active && setPath(null)
+    )
+    return () => {
+      active = false
+    }
+  }, [stillId, sequenceId])
+  if (path === undefined) return null
+  if (path === null) {
+    return (
+      <p className="text-[12px] text-muted">
+        {sequenceId ? 'Bilden är sparad bland sekvensens bilder.' : 'Bilden är sparad i Referensbilder.'}
+      </p>
+    )
+  }
+  return (
+    <div>
+      <Label>Den nya bilden</Label>
+      <img
+        src={mediaUrl(path)}
+        draggable={false}
+        className="max-h-72 w-full rounded-md border border-line bg-raised object-contain"
+      />
+    </div>
+  )
+}
+
+/** A start or end frame taken from a neighbouring clip when the take is generated: its preview, or what it is. */
+function AutoFrame({
+  badge,
+  path,
+  text,
+  preview
+}: {
+  badge: string
+  path?: string
+  text: string
+  /** The frame can be previewed (one clip's request); otherwise the neighbour's take is still to be made. */
+  preview: boolean
+}) {
+  if (!preview) return <p className="text-[12px] text-muted">{text}.</p>
+  return (
+    <div className="w-40 space-y-1">
+      {path ? (
+        <ImageTile path={path} badge={badge} caption="Förhandsvisning" large />
+      ) : (
+        <div className="flex h-24 w-40 items-center justify-center rounded border border-dashed border-line px-2 text-center text-[11px] text-muted">
+          Ingen förhandsvisning än
+        </div>
+      )}
+      <p className="text-[11px] leading-snug text-muted">{text}</p>
+    </div>
+  )
+}
+
+/**
+ * Where an image request's picture goes, as the loaded sequence has the clip now: its number, and why the request
+ * no longer applies when the clip is gone or has moved (main refuses it then too). Undefined without a target, or
+ * while the sequence is being read.
+ */
+function imageTargetNow(
+  target: ApprovalImageRequest['assignTo'],
+  sequence: Sequence | undefined
+): { clipNumber?: number; problem?: string } | undefined {
+  if (!target || !sequence) return undefined
+  const index = sequence.segments.findIndex((s) => s.id === target.segmentId)
+  if (index === -1) return { problem: 'Klippet som bilden skulle sättas i finns inte längre' }
+  if (index + 1 !== target.clipNumber) {
+    return {
+      clipNumber: index + 1,
+      problem: `Klippet har flyttats sedan agenten frågade (det var klipp ${target.clipNumber}, nu klipp ${index + 1})`
+    }
+  }
+  return { clipNumber: index + 1 }
+}
+
+/** What an image request makes: prompt, references (the first is the base picture), model, format and target. */
+function ImageSummary({
+  image,
+  sequenceName,
+  hasSequence,
+  clipNumber
+}: {
+  image: ApprovalImageRequest
+  sequenceName?: string
+  /** The picture is saved with a sequence (else among the stills of no sequence, in Referensbilder). */
+  hasSequence: boolean
+  /** The target clip's number as the sequence is now. */
+  clipNumber?: number
+}) {
+  const p = image.params
+  const safeMode = useImageSafeMode()
+  const references = image.references
+  const settings = [
+    image.modelName ?? p.model,
+    references.length ? `bild från ${references.length === 1 ? '1 referens' : `${references.length} referenser`}` : 'bild från text',
+    p.aspectRatio,
+    p.resolution,
+    p.quality ? `kvalitet ${p.quality}` : undefined
+  ].filter(Boolean)
+  const target = image.assignTo
+  const where = sequenceName ? ` i ”${sequenceName}”` : ''
+
+  return (
+    <section>
+      <p className="mb-3 text-[12px] text-muted">{settings.join(' · ')}</p>
+
+      <Label>Prompt</Label>
+      {p.prompt.trim() ? (
+        <p className="max-h-60 overflow-y-auto whitespace-pre-wrap rounded-md border border-line bg-raised px-3 py-2 leading-relaxed select-text">
+          {p.prompt}
+        </p>
+      ) : (
+        <p className="text-accent">Prompten är tom.</p>
+      )}
+
+      {p.negativePrompt && (
+        <>
+          <Label className="mt-3">Negativ prompt</Label>
+          <p className="whitespace-pre-wrap text-muted select-text">{p.negativePrompt}</p>
+        </>
+      )}
+
+      {references.length > 0 && (
+        <>
+          <Label className="mt-3">Referensbilder (den första är grunden som bilden byggs på)</Label>
+          <div className="flex flex-wrap gap-2">
+            {references.map((ref, i) => (
+              <ImageTile
+                key={`${ref.path}:${i}`}
+                path={ref.path}
+                badge={i === 0 ? '1 · grund' : String(i + 1)}
+                caption={ref.name ?? ref.label}
+                title={ref.label}
+                captionTone={ref.kind && ref.kind !== 'still' ? KIND_TONE[ref.kind].caption : undefined}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      <p className="mt-3 text-[12px] leading-relaxed text-muted">
+        {target
+          ? `Bilden sparas bland sekvensens bilder och blir ${slotName(target.slot)} för klipp ${clipNumber ?? target.clipNumber}${where}.`
+          : hasSequence
+            ? `Bilden sparas bland sekvensens bilder${where} i storyboarden.`
+            : 'Bilden hör inte till någon sekvens och sparas i Referensbilder, bland alla bilder.'}
+        {safeMode === undefined
+          ? ''
+          : safeMode
+            ? ' Säkert läge är på: Venice suddar ut vuxet innehåll.'
+            : ' Säkert läge är av: Venice suddar inte ut vuxet innehåll.'}
+      </p>
+    </section>
   )
 }
 
@@ -574,6 +897,66 @@ function AudioRow({ audio }: { audio: FormAudio }) {
 }
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
+
+/** "Säkert läge för bilder" from Settings; undefined until read. */
+function useImageSafeMode(): boolean | undefined {
+  const [on, setOn] = useState<boolean>()
+  useEffect(() => {
+    let active = true
+    const read = () =>
+      window.studio.getSettings().then(
+        (s) => active && setOn(s.imageSafeMode !== false),
+        () => {}
+      )
+    void read()
+    // Switched in Inställningar or the image dialog while the request is on screen.
+    const off = window.studio.onSettingsChange(() => void read())
+    return () => {
+      active = false
+      off()
+    }
+  }, [])
+  return on
+}
+
+/**
+ * The automatic start and end frames of a clip (from its neighbours' selected takes), kept up to date while the
+ * sequence changes. `preview` is undefined while unknown or when there is no clip to preview; `loading` while an
+ * answer is on its way (the first one, or a new one after the sequence changed: until then the frame shown may
+ * be a neighbour's previous take).
+ */
+function useFramePreview(
+  segmentId: string | undefined,
+  sequenceId: string | undefined
+): { preview?: SegmentFramePreview; loading: boolean } {
+  const [state, setState] = useState<{ id?: string; preview?: SegmentFramePreview; loading: boolean }>({
+    loading: false
+  })
+  useEffect(() => {
+    if (!segmentId) return
+    let active = true
+    let seq = 0
+    const load = () => {
+      const mine = ++seq
+      setState((s) => (s.id === segmentId ? { ...s, loading: true } : { id: segmentId, loading: true }))
+      window.studio.previewSegmentFrames(segmentId).then(
+        (preview) => active && mine === seq && setState({ id: segmentId, preview, loading: false }),
+        // Only a preview: the dialog says what the frame is either way.
+        () => active && mine === seq && setState({ id: segmentId, loading: false })
+      )
+    }
+    load()
+    const off = window.studio.onSequenceChange((changed) => {
+      if (!sequenceId || changed === sequenceId) load()
+    })
+    return () => {
+      active = false
+      off()
+    }
+  }, [segmentId, sequenceId])
+  if (!segmentId || state.id !== segmentId) return { loading: !!segmentId }
+  return { preview: state.preview, loading: state.loading }
+}
 
 function useSequence(id: string | undefined): { sequence?: Sequence; error?: string } {
   const [state, setState] = useState<{ id?: string; sequence?: Sequence; error?: string }>({})

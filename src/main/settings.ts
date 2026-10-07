@@ -27,6 +27,11 @@ interface StoredSettings {
   consents?: Record<string, string>
   /** "Promptspråk"; English unless the user picks Swedish. */
   promptLanguage?: PromptLanguage
+  /**
+   * "Säkert läge för bilder": Venice blurs adult content in generated stills. Unset means on, Venice's own
+   * default; only an explicit `false` turns it off.
+   */
+  imageSafeMode?: boolean
   agent?: StoredAgentSettings
 }
 
@@ -130,7 +135,8 @@ export function getSettings(): Settings {
     hasApiKey: !!s.apiKeyEncrypted,
     libraryDir: isLibraryReady() ? libraryRoot() : '',
     devProfile: isDevProfile(),
-    promptLanguage: promptLanguageOf(s)
+    promptLanguage: promptLanguageOf(s),
+    imageSafeMode: s.imageSafeMode !== false
   }
 }
 
@@ -146,6 +152,18 @@ export function setPromptLanguage(lang: unknown): void {
   if (lang !== 'en' && lang !== 'sv') throw new Error('Okänt promptspråk.')
   const s = load()
   s.promptLanguage = lang
+  save(s)
+}
+
+/** Whether stills are generated with Venice's safe mode (adult content blurred); on unless switched off. */
+export function getImageSafeMode(): boolean {
+  return load().imageSafeMode !== false
+}
+
+export function setImageSafeMode(on: unknown): void {
+  if (typeof on !== 'boolean') throw new Error('Ogiltigt värde för säkert läge.')
+  const s = load()
+  s.imageSafeMode = on
   save(s)
 }
 

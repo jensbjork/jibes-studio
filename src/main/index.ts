@@ -12,7 +12,8 @@ import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty } from '.
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
 import { attachReviewSummary, registerReviewIpc } from './reviews'
 import { registerSequenceIpc } from './sequences'
-import { acceptConsent, getApiKey, getSettings, setApiKey, setPromptLanguage } from './settings'
+import { acceptConsent, getApiKey, getSettings, setApiKey, setImageSafeMode, setPromptLanguage } from './settings'
+import { importStillFile, registerStillsIpc, saveFrameAsStill, stillWorkBusy } from './stills'
 import { VeniceClient } from './venice'
 
 // `npm run dev` runs as "Studio Dev": its own settings (API key, chosen base folder) and suggested base folder
@@ -105,7 +106,14 @@ const agent = new AgentService({ broadcast })
  */
 function libraryBusyReason(): string | undefined {
   if (jobs.hasActiveJobs()) return 'Det pågår genereringar. Vänta tills de är klara och försök igen.'
-  return sequencesBusy() ?? assetWorkBusy()
+  return sequencesBusy() ?? assetWorkBusy() ?? stillWorkBusy()
+}
+
+/** The video model list, fetched at most every ten minutes unless forced (GET /models is free). */
+async function loadVideoModels(force = false): Promise<VideoModel[]> {
+  if (!force && modelCache && Date.now() - modelCache.at < 10 * 60_000) return modelCache.models
+  modelCache = { at: Date.now(), models: await venice.listVideoModels() }
+  return modelCache.models
 }
 
 /** Every sequence refetches: image paths in segment params (or take paths) may have been rewritten. */
@@ -129,17 +137,29 @@ function broadcastRewrittenGenerations(more: readonly string[] = []): void {
   for (const g of attachReviewSummary(moved)) broadcast('generation:update', g)
 }
 
+/** Stills whose paths a rewrite changed (a renamed asset folder they were made from, say): every strip refetches. */
+function broadcastRewrittenStills(): void {
+  if (db.isDbOpen() && db.takeRewrittenStills()) broadcast('stills:change')
+}
+
 /** After "Städa upp" files may live elsewhere: views refetch, and moved generations are re-sent to the feed. */
 function broadcastLibraryReorganized(movedGenerationIds: string[]): void {
   broadcast('library:change')
   broadcastAllSequences()
   broadcastRewrittenGenerations(movedGenerationIds)
+  db.takeRewrittenStills()
+  broadcast('stills:change')
 }
 
 function registerIpc(): void {
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:setApiKey', (_e, key: string) => setApiKey(key))
   ipcMain.handle('settings:setPromptLanguage', (_e, lang: unknown) => setPromptLanguage(lang))
+  ipcMain.handle('settings:setImageSafeMode', (_e, on: unknown) => {
+    setImageSafeMode(on)
+    // Inställningar and the image dialogs each show it: the others follow a change made in one of them.
+    broadcast('settings:change')
+  })
   ipcMain.handle('settings:testApiKey', async () => {
     try {
       const balances = await venice.balances()
@@ -153,11 +173,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('ffmpeg:status', () => ffmpegStatus())
 
-  ipcMain.handle('models:list', async (_e, force?: boolean) => {
-    if (!force && modelCache && Date.now() - modelCache.at < 10 * 60_000) return modelCache.models
-    modelCache = { at: Date.now(), models: await venice.listVideoModels() }
-    return modelCache.models
-  })
+  ipcMain.handle('models:list', (_e, force?: boolean) => loadVideoModels(force === true))
 
   ipcMain.handle('video:quote', (_e, params: GenerationParams) => venice.quote(params))
   ipcMain.handle('video:generate', async (_e, params: GenerationParams) => {
@@ -227,6 +243,7 @@ function registerIpc(): void {
     () => {
       broadcastAllSequences()
       broadcastRewrittenGenerations()
+      broadcastRewrittenStills()
     }
   )
   // Reviews and learnings, from the window and from agents; changes go to every window. A review also changes
@@ -241,9 +258,26 @@ function registerIpc(): void {
     jobs,
     venice,
     notify: (sequenceId: string) => broadcast('sequence:change', sequenceId),
-    exportProgress: (p: ExportProgress) => broadcast('export:progress', p)
+    exportProgress: (p: ExportProgress) => broadcast('export:progress', p),
+    models: () => loadVideoModels(),
+    // Keyframe slots that get a file or a frame make a still of the sequence (stills.ts announces it).
+    stills: {
+      importFile: (path, sequenceId) => importStillFile(path, sequenceId),
+      saveFrame: (generationId, time, sequenceId) => saveFrameAsStill(generationId, time, sequenceId)
+    },
+    stillsChanged: (sequenceId) => broadcast('stills:change', sequenceId)
   })
   sequencesBusy = () => sequences.isBusy()
+  // Images and stills for storyboards. A deleted still that clips or generations still use is kept in
+  // Referensbilder, which rewrites their paths: views showing them refetch.
+  registerStillsIpc(
+    (sequenceId) => broadcast('stills:change', sequenceId),
+    () => {
+      broadcastAllSequences()
+      broadcastRewrittenGenerations()
+      broadcastRewrittenStills()
+    }
+  )
 
   registerLibraryRootIpc({
     busy: libraryBusyReason,

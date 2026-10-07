@@ -10,7 +10,8 @@ import { readForm, type ToolContext } from './kit'
 import { learningsForGuide, registerLibraryTools } from './library'
 import { registerPaidTools } from './paid'
 import { registerReviewTools } from './review'
-import { continues, loadClip, registerSequenceTools } from './sequences'
+import { continues, endsOnNext, loadClip, registerSequenceTools } from './sequences'
+import { registerStoryboardTools } from './storyboard'
 
 export type { ToolContext } from './kit'
 
@@ -62,13 +63,26 @@ async function promptContext(ctx: ToolContext, segmentId: string | undefined): P
     if (segmentId) {
       const { sequence, index, segment } = await loadClip(segmentId)
       const continuing = continues(sequence, index)
-      const generated = asGenerated(segment.params, continuing)
+      const ending = endsOnNext(sequence, index)
+      const generated = asGenerated(segment.params, continuing, ending)
       const head = `You are writing the prompt for clip ${index + 1} of the sequence "${sequence.name}" (segment_id ${segment.id}), ${generated.duration}, model ${generated.model}.`
-      if (continuing) {
-        const previous = sequence.segments[index - 1].params.prompt
-        return `${head}\nIt continues from the last frame of clip ${index}, so it is image-to-video: no references and no @ tokens. Clip ${index}'s prompt was:\n"""${previous}"""${await learningLines(generated.model)}`
+      const notes = segment.notes?.trim()
+        ? `\nThe storyboard notes for the shot ("Vad händer"):\n"""${segment.notes.trim()}"""`
+        : ''
+      if (continuing || ending || kindOfModelId(generated.model) === 'image-to-video') {
+        const start = continuing
+          ? `It starts on the last frame of clip ${index}, whose prompt was:\n"""${sequence.segments[index - 1].params.prompt}"""`
+          : generated.startImage
+            ? 'It starts on its own start image (preview_segment_frames shows it).'
+            : 'It has no start image yet.'
+        const end = ending
+          ? `\nIt must end on the first frame of clip ${index + 2}, whose prompt is:\n"""${sequence.segments[index + 1].params.prompt}"""`
+          : generated.endImage
+            ? '\nIt must end on its own end image (preview_segment_frames shows it).'
+            : ''
+        return `${head}\nIt is image-to-video: no references and no @ tokens – the look comes from its start and end pictures; describe the motion and the camera between them. ${start}${end}${notes}${await learningLines(generated.model)}`
       }
-      return `${head}\n${referenceContext(generated, assets, '- none yet (add them with update_segment)')}${await learningLines(generated.model)}`
+      return `${head}\n${referenceContext(generated, assets, '- none yet (add them with update_segment)')}${notes}${await learningLines(generated.model)}`
     }
     const state = await readForm(ctx)
     const mode = kindOfModelId(state.params.model)
@@ -87,6 +101,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
   registerLibraryTools(server, ctx)
   registerFormTools(server, ctx)
   registerSequenceTools(server, ctx)
+  registerStoryboardTools(server, ctx)
   registerPaidTools(server, ctx)
   registerReviewTools(server, ctx)
 
