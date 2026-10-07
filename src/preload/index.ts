@@ -83,10 +83,28 @@ const api: StudioApi = {
   onSequenceChange: (cb) => on<string>('sequence:change', cb),
   onExportProgress: (cb) => on<ExportProgress>('export:progress', cb),
 
-  // Storyboard: keyframes and "Gör om mellan grannarna"
+  // Keyframes and "Gör om mellan grannarna" (sequence clips)
   setSegmentImage: (segmentId, slot, source) => ipcRenderer.invoke('segments:setImage', segmentId, slot, source),
   previewSegmentFrames: (segmentId) => ipcRenderer.invoke('segments:previewFrames', segmentId),
   bridgeSegment: (segmentId) => ipcRenderer.invoke('segments:bridge', segmentId),
+
+  // Storyboards
+  listStoryboards: () => ipcRenderer.invoke('storyboards:list'),
+  getStoryboard: (id) => ipcRenderer.invoke('storyboards:get', id),
+  createStoryboard: (name, aspectRatio) => ipcRenderer.invoke('storyboards:create', name, aspectRatio),
+  updateStoryboard: (id, patch) => ipcRenderer.invoke('storyboards:update', id, patch),
+  deleteStoryboard: (id) => ipcRenderer.invoke('storyboards:delete', id),
+  addBoard: (storyboardId, init) => ipcRenderer.invoke('boards:add', storyboardId, init),
+  updateBoard: (boardId, patch) => ipcRenderer.invoke('boards:update', boardId, patch),
+  moveBoard: (boardId, toIndex) => ipcRenderer.invoke('boards:move', boardId, toIndex),
+  deleteBoard: (boardId) => ipcRenderer.invoke('boards:delete', boardId),
+  updateTransition: (transitionId, patch) => ipcRenderer.invoke('transitions:update', transitionId, patch),
+  generateTransition: (transitionId) => ipcRenderer.invoke('transitions:generate', transitionId),
+  generateStoryboard: (storyboardId) => ipcRenderer.invoke('storyboards:generateAll', storyboardId),
+  stopStoryboard: (storyboardId) => ipcRenderer.invoke('storyboards:stop', storyboardId),
+  exportStoryboard: (storyboardId) => ipcRenderer.invoke('storyboards:export', storyboardId),
+  convertStoryboardToSequence: (storyboardId) => ipcRenderer.invoke('storyboards:toSequence', storyboardId),
+  onStoryboardChange: (cb) => on<string>('storyboard:change', cb),
 
   // Images and stills
   listImageModels: () => ipcRenderer.invoke('images:models'),

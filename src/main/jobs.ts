@@ -22,7 +22,16 @@ import {
 import { describedAssetsFor } from './assets'
 import * as db from './db'
 import { extractThumbnail, ffmpegStatus, probe } from './ffmpeg'
-import { dayStamp, generationsDayDir, promptExcerpt, sequenceTakesDir, thumbsDir, timeStamp, tmpDir } from './paths'
+import {
+  dayStamp,
+  generationsDayDir,
+  promptExcerpt,
+  sequenceKindOf,
+  sequenceTakesDir,
+  thumbsDir,
+  timeStamp,
+  tmpDir
+} from './paths'
 import { importExternalReferences, placeFile } from './references'
 import { getAcceptedConsents, getPromptLanguage } from './settings'
 import {
@@ -136,26 +145,33 @@ export async function prepareSubmission(params: GenerationParams): Promise<Gener
   return measured
 }
 
-/** The folder of the sequence a segment belongs to; undefined if the segment is gone or the sequence has none. */
-function sequenceFolderOf(segmentId: string): string | undefined {
-  const folder = db
+/**
+ * The folder (and kind) of the sequence or storyboard a segment belongs to; undefined if the segment is gone or
+ * it has no folder.
+ */
+function sequenceFolderOf(segmentId: string): { folder: string; kind: string } | undefined {
+  const row = db
     .getDb()
-    .prepare('SELECT s.folder FROM segments seg JOIN sequences s ON s.id = seg.sequence_id WHERE seg.id = ?')
-    .pluck()
-    .get(segmentId) as string | null | undefined
-  return folder || undefined
+    .prepare('SELECT s.folder, s.kind FROM segments seg JOIN sequences s ON s.id = seg.sequence_id WHERE seg.id = ?')
+    .get(segmentId) as { folder: string | null; kind: string } | undefined
+  return row?.folder ? { folder: row.folder, kind: row.kind } : undefined
 }
 
 /**
- * Where a generation's video belongs and what it is called (without ".mp4"): a take goes into its
- * sequence's Tagningar folder as "<YYYY-MM-DD HH.MM> <prompt>", anything else into Genereringar/<day>/ as
- * "<HH.MM> <prompt>". Times are when the generation was submitted.
+ * Where a generation's video belongs and what it is called (without ".mp4"): a take goes into its sequence's
+ * Tagningar folder (a storyboard transition's into the storyboard's Övergångar) as "<YYYY-MM-DD HH.MM> <prompt>",
+ * anything else into Genereringar/<day>/ as "<HH.MM> <prompt>". Times are when the generation was submitted.
  */
 export function videoLocation(g: Pick<Generation, 'createdAt' | 'prompt' | 'segmentId'>): { dir: string; base: string } {
   const created = new Date(g.createdAt)
   const excerpt = promptExcerpt(g.prompt)
-  const folder = g.segmentId ? sequenceFolderOf(g.segmentId) : undefined
-  if (folder) return { dir: sequenceTakesDir(folder), base: `${dayStamp(created)} ${timeStamp(created)} ${excerpt}` }
+  const owner = g.segmentId ? sequenceFolderOf(g.segmentId) : undefined
+  if (owner) {
+    return {
+      dir: sequenceTakesDir(owner.folder, sequenceKindOf(owner.kind)),
+      base: `${dayStamp(created)} ${timeStamp(created)} ${excerpt}`
+    }
+  }
   return { dir: generationsDayDir(created), base: `${timeStamp(created)} ${excerpt}` }
 }
 

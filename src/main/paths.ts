@@ -6,7 +6,7 @@ import { constants, lstatSync, mkdirSync, statSync } from 'node:fs'
 import { copyFile, cp, lstat, mkdir, readdir, rename, rm, rmdir, stat, utimes } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import type { AssetKind, GenerationParams } from '@shared/types'
+import type { AssetKind, GenerationParams, SequenceKind } from '@shared/types'
 import * as db from './db'
 
 /** The folders the user sees in Finder, plus the hidden app data folder. */
@@ -18,6 +18,7 @@ export const FOLDERS = {
   references: 'Referensbilder',
   generations: 'Genereringar',
   sequences: 'Sekvenser',
+  storyboards: 'Storyboards',
   appData: '.studio'
 } as const
 
@@ -51,6 +52,26 @@ export const TAKES_FOLDER = 'Tagningar'
 
 /** Inside a sequence folder: the sequence's stills (keyframes generated, uploaded or saved from takes). */
 export const STORYBOARD_FOLDER = 'Storyboard'
+
+/** Inside a storyboard folder: the takes of its transitions. */
+export const TRANSITIONS_FOLDER = 'Övergångar'
+
+/** Inside a storyboard folder: its stills (board images generated, uploaded or saved from takes). */
+export const BOARD_IMAGES_FOLDER = 'Bilder'
+
+/**
+ * Where a sequence or a storyboard keeps its files: its own folder in `parent` (named after it), its takes in
+ * `takes` and its stills in `stills` inside that, its exports in the folder itself.
+ */
+export const KIND_FOLDERS: Readonly<Record<SequenceKind, { parent: string; takes: string; stills: string }>> = {
+  sequence: { parent: FOLDERS.sequences, takes: TAKES_FOLDER, stills: STORYBOARD_FOLDER },
+  storyboard: { parent: FOLDERS.storyboards, takes: TRANSITIONS_FOLDER, stills: BOARD_IMAGES_FOLDER }
+}
+
+/** The kind a row's `kind` column names; anything this version doesn't know is treated as a plain sequence. */
+export function sequenceKindOf(value: unknown): SequenceKind {
+  return value === 'storyboard' ? 'storyboard' : 'sequence'
+}
 
 export const DB_FILE_NAME = 'studio.db'
 
@@ -369,14 +390,15 @@ export function generationsDayDir(d: Date): string {
   return ensureDir(join(libraryRoot(), FOLDERS.generations, dayStamp(d)))
 }
 
-/** Sekvenser/<folder> */
-export function sequenceDir(folder: string): string {
-  return ensureDir(join(libraryRoot(), FOLDERS.sequences, folderSegment(folder)))
+/** Sekvenser/<folder>, or Storyboards/<folder> for a storyboard */
+export function sequenceDir(folder: string, kind: SequenceKind = 'sequence'): string {
+  return ensureDir(join(libraryRoot(), KIND_FOLDERS[kind].parent, folderSegment(folder)))
 }
 
-/** Sekvenser/<folder>/Tagningar */
-export function sequenceTakesDir(folder: string): string {
-  return ensureDir(join(libraryRoot(), FOLDERS.sequences, folderSegment(folder), TAKES_FOLDER))
+/** Sekvenser/<folder>/Tagningar, or Storyboards/<folder>/Övergångar for a storyboard */
+export function sequenceTakesDir(folder: string, kind: SequenceKind = 'sequence'): string {
+  const layout = KIND_FOLDERS[kind]
+  return ensureDir(join(libraryRoot(), layout.parent, folderSegment(folder), layout.takes))
 }
 
 /** .studio[/...] */

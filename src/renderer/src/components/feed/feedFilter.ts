@@ -56,7 +56,7 @@ export const PERIOD_OPTIONS: { id: PeriodChoice; label: string }[] = [
 
 export const PLACEMENT_OPTIONS: { id: PlacementChoice; label: string }[] = [
   { id: 'standalone', label: 'Fristående' },
-  { id: 'sequence', label: 'I sekvens' }
+  { id: 'sequence', label: 'Tagningar' }
 ]
 
 const DAY = 24 * 60 * 60 * 1000

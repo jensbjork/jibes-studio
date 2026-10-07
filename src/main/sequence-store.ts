@@ -7,20 +7,19 @@ import { join, relative, resolve, sep } from 'node:path'
 import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios } from '@shared/models'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import { isExtractedFirstFrame, isExtractedFrame } from '@shared/seams'
-import type { Generation, GenerationParams, Segment, Sequence, SequenceSummary } from '@shared/types'
+import type { Generation, GenerationParams, Segment, Sequence, SequenceKind, SequenceSummary } from '@shared/types'
 import * as db from './db'
 import { toPublic } from './jobs'
 import { attachReviewSummary } from './reviews'
 import {
   dayStamp,
-  FOLDERS,
   fromStoredParams,
   fromStoredPath,
+  KIND_FOLDERS,
   libraryRoot,
   promptExcerpt,
   safeName,
-  STORYBOARD_FOLDER,
-  TAKES_FOLDER,
+  sequenceKindOf,
   timeStamp,
   toStoredParams,
   toStoredPath
@@ -30,13 +29,18 @@ import {
 export const MIN_REMAINING_SECONDS = 0.2
 
 export const UNTITLED_SEQUENCE = 'Namnlös sekvens'
+export const UNTITLED_STORYBOARD = 'Namnlös storyboard'
 
 export interface SequenceRow {
   id: string
   name: string
   defaults: string
-  /** Name of the sequence's folder in Sekvenser/; null for rows from before folders existed. */
+  /** Name of the folder in Sekvenser/ (Storyboards/ for a storyboard); null for rows from before folders existed. */
   folder: string | null
+  /** 'sequence' or 'storyboard' (see kindOf). */
+  kind: string
+  /** A storyboard's aspect ratio; null for sequences. */
+  aspect_ratio: string | null
   created_at: number
   updated_at: number
 }
@@ -54,6 +58,9 @@ export interface SegmentRow {
   trim_start: number
   trim_end: number
   created_at: number
+  /** A storyboard's transition: the boards it goes from and to (null for sequence clips). */
+  from_board_id?: string | null
+  to_board_id?: string | null
 }
 
 /** A row of the stills table (paths in stored form). */
@@ -84,6 +91,34 @@ export function getSequenceRow(id: string): SequenceRow | undefined {
 export function requireSequenceRow(id: string): SequenceRow {
   const row = typeof id === 'string' ? getSequenceRow(id) : undefined
   if (!row) throw new Error('Sekvensen finns inte längre.')
+  return row
+}
+
+/** Whether the row is a sequence or a storyboard. */
+export function kindOf(row: Pick<SequenceRow, 'kind'>): SequenceKind {
+  return sequenceKindOf(row.kind)
+}
+
+/** Said when a storyboard's id reaches something that only works on sequences. */
+export const IS_STORYBOARD = 'Det här är en storyboard, inte en sekvens. Den finns under Storyboards.'
+/** Said when one of a storyboard's transitions reaches something that only works on sequence clips. */
+export const IS_TRANSITION =
+  'Det här är en övergång i en storyboard, inte ett klipp i en sekvens. Ändra den under Storyboards.'
+/** Said when a sequence's id reaches something that only works on storyboards. */
+export const IS_SEQUENCE = 'Det här är en sekvens, inte en storyboard. Den finns under Sekvenser.'
+
+/** A sequence (not a storyboard): for the handlers and tools of Sekvenser. */
+export function requirePlainSequence(id: string): SequenceRow {
+  const row = requireSequenceRow(id)
+  if (kindOf(row) !== 'sequence') throw new Error(IS_STORYBOARD)
+  return row
+}
+
+/** A clip of a sequence (not a storyboard's transition): for the clip handlers and tools of Sekvenser. */
+export function requirePlainSegment(id: string): SegmentRow {
+  const row = requireSegmentRow(id)
+  const sequence = getSequenceRow(row.sequence_id)
+  if (sequence && kindOf(sequence) !== 'sequence') throw new Error(IS_TRANSITION)
   return row
 }
 
@@ -200,8 +235,9 @@ export function parseDefaults(json: string): Partial<GenerationParams> {
   }
 }
 
-export function cleanSequenceName(name: unknown): string {
-  return (typeof name === 'string' ? name.trim() : '') || UNTITLED_SEQUENCE
+export function cleanSequenceName(name: unknown, kind: SequenceKind = 'sequence'): string {
+  const clean = typeof name === 'string' ? name.trim() : ''
+  return clean || (kind === 'storyboard' ? UNTITLED_STORYBOARD : UNTITLED_SEQUENCE)
 }
 
 // ── Takes ────────────────────────────────────────────────────────────────────
@@ -217,6 +253,34 @@ export function isPending(g: Generation | undefined): boolean {
 /** A completed take whose video is still on disk, i.e. something that can be cut or continued from. */
 export function isUsable(g: Generation | undefined): g is Generation & { filePath: string } {
   return g?.status === 'completed' && !!g.filePath && existsSync(g.filePath)
+}
+
+/**
+ * A storyboard transition's take was made from other pictures than its boards hold now (the row's start and end
+ * image, which syncTransitions keeps equal to the boards'). Never for a sequence clip: it has no boards.
+ */
+export function madeFromEarlierBoards(row: SegmentRow, take: Generation): boolean {
+  if (!row.from_board_id || !row.to_board_id) return false
+  const now = parseParams(row.params)
+  const same = (a: string | undefined, b: string | undefined): boolean => (a && b ? samePath(a, b) : !a && !b)
+  return !same(take.params.startImage, now.startImage) || !same(take.params.endImage, now.endImage)
+}
+
+/**
+ * A storyboard transition left without a selected take (the one it had was deleted) gets its newest finished take
+ * made from the pictures its boards hold now, else its newest finished one: while it has a take to use, it isn't
+ * shown as not generated or paid for again by "Generera saknade". Sequence clips are left as they are. True when
+ * one was selected.
+ */
+export function reselectTransitionTake(segmentId: string): boolean {
+  const row = getSegmentRow(segmentId)
+  if (!row?.from_board_id || !row.to_board_id || row.selected_generation_id) return false
+  const takes = db.listGenerationsForSegments([row.id]).filter((g) => isUsable(g))
+  const take = takes.find((g) => !madeFromEarlierBoards(row, g)) ?? takes[0]
+  if (!take) return false
+  setSelectedTake(row, take)
+  touchSequence(row.sequence_id)
+  return true
 }
 
 /** Length of a take in seconds: measured when known, otherwise what was requested. */
@@ -376,8 +440,11 @@ interface SummaryJoinRow {
   thumb_path: string | null
 }
 
+/** Sequences only: storyboards have their own list (storyboards.ts). */
 export function listSequenceSummaries(): SequenceSummary[] {
-  const sequences = conn().prepare('SELECT * FROM sequences ORDER BY updated_at DESC').all() as SequenceRow[]
+  const sequences = conn()
+    .prepare(`SELECT * FROM sequences WHERE kind = 'sequence' ORDER BY updated_at DESC`)
+    .all() as SequenceRow[]
   const rows = conn()
     .prepare(
       `SELECT s.sequence_id, s.trim_start, s.trim_end,
@@ -446,29 +513,29 @@ export function recordExport(sequenceId: string, path: string): void {
     .run(randomUUID(), sequenceId, toStoredPath(path), Date.now())
 }
 
-/** Sekvenser/ (not created here). */
-export function sequencesRoot(): string {
-  return join(libraryRoot(), FOLDERS.sequences)
+/** Sekvenser/, or Storyboards/ for storyboards (not created here). */
+export function sequencesRoot(kind: SequenceKind = 'sequence'): string {
+  return join(libraryRoot(), KIND_FOLDERS[kind].parent)
 }
 
-/** Sekvenser/<folder> without creating it (paths.sequenceDir creates it). */
-export function folderPath(folder: string): string {
-  return join(sequencesRoot(), folder)
+/** Sekvenser/<folder> (Storyboards/<folder>) without creating it (paths.sequenceDir creates it). */
+export function folderPath(folder: string, kind: SequenceKind = 'sequence'): string {
+  return join(sequencesRoot(kind), folder)
 }
 
-/** Sekvenser/<folder>/Tagningar without creating it (paths.sequenceTakesDir creates it). */
-export function takesPath(folder: string): string {
-  return join(folderPath(folder), TAKES_FOLDER)
+/** Sekvenser/<folder>/Tagningar (Storyboards/<folder>/Övergångar) without creating it (see paths.sequenceTakesDir). */
+export function takesPath(folder: string, kind: SequenceKind = 'sequence'): string {
+  return join(folderPath(folder, kind), KIND_FOLDERS[kind].takes)
 }
 
-/** Sekvenser/<folder>/Storyboard without creating it (stills.ts puts the sequence's stills there). */
-export function storyboardPath(folder: string): string {
-  return join(folderPath(folder), STORYBOARD_FOLDER)
+/** Sekvenser/<folder>/Storyboard (Storyboards/<folder>/Bilder) without creating it: where stills.ts puts stills. */
+export function stillsPath(folder: string, kind: SequenceKind = 'sequence'): string {
+  return join(folderPath(folder, kind), KIND_FOLDERS[kind].stills)
 }
 
-/** What a sequence's folder is called before de-duplication. */
-export function folderBaseName(sequenceName: string): string {
-  return safeName(sequenceName, { fallback: UNTITLED_SEQUENCE })
+/** What a sequence's (or storyboard's) folder is called before de-duplication. */
+export function folderBaseName(sequenceName: string, kind: SequenceKind = 'sequence'): string {
+  return safeName(sequenceName, { fallback: kind === 'storyboard' ? UNTITLED_STORYBOARD : UNTITLED_SEQUENCE })
 }
 
 // macOS volumes are normally case-insensitive and may hand back decomposed å/ä/ö.
@@ -492,18 +559,25 @@ export function isUnder(path: string, dir: string): boolean {
   return foldPath(path).startsWith(d.endsWith(sep) ? d : d + sep)
 }
 
-/** For a path below Sekvenser/, the name of the sequence folder it is in. */
-export function sequenceFolderOfPath(path: string): string | undefined {
-  const root = sequencesRoot()
-  if (!isUnder(path, root)) return undefined
-  return relative(root, path).split(sep)[0] || undefined
+/** For a path below Sekvenser/ (or Storyboards/), the folder of the sequence (or storyboard) it is in. */
+export function sequenceFolderOfPath(path: string): { folder: string; kind: SequenceKind } | undefined {
+  for (const kind of ['sequence', 'storyboard'] as const) {
+    const root = sequencesRoot(kind)
+    if (!isUnder(path, root)) continue
+    const folder = relative(root, path).split(sep)[0]
+    return folder ? { folder, kind } : undefined
+  }
+  return undefined
 }
 
-/** Some sequence uses this folder name (compared the way the disk does). */
-export function folderInUse(folder: string): boolean {
+/** Some sequence (or storyboard, by kind) uses this folder name (compared the way the disk does). */
+export function folderInUse(folder: string, kind: SequenceKind = 'sequence'): boolean {
   const target = fold(folder)
-  const folders = conn().prepare('SELECT folder FROM sequences WHERE folder IS NOT NULL').pluck().all() as string[]
-  return folders.some((f) => fold(f) === target)
+  const folders = conn()
+    .prepare('SELECT folder, kind FROM sequences WHERE folder IS NOT NULL')
+    .all() as { folder: string; kind: string }[]
+  // Sequences and storyboards have folders in different parents, so only those of the same kind collide.
+  return folders.some((f) => sequenceKindOf(f.kind) === kind && fold(f.folder) === target)
 }
 
 /** "base", "base (2)", "base (3)" … : the first one `taken` says no to. */
@@ -514,9 +588,12 @@ export function firstFreeName(base: string, ext: string, taken: (name: string) =
   }
 }
 
-/** A folder name in Sekvenser/ that is neither on disk nor recorded for a sequence whose folder is gone. */
-export function availableFolderName(base: string): string {
-  return firstFreeName(base, '', (name) => existsSync(folderPath(name)) || folderInUse(name))
+/**
+ * A folder name in Sekvenser/ (Storyboards/) that is neither on disk nor recorded for a sequence (storyboard) whose
+ * folder is gone.
+ */
+export function availableFolderName(base: string, kind: SequenceKind = 'sequence'): string {
+  return firstFreeName(base, '', (name) => existsSync(folderPath(name, kind)) || folderInUse(name, kind))
 }
 
 /**
@@ -571,11 +648,14 @@ export async function removeDirIfEmpty(dir: string): Promise<boolean> {
   }
 }
 
-/** Removes a sequence folder's Tagningar/ and Storyboard/ and then the folder itself, each only when empty. */
-export async function removeFolderIfEmpty(folder: string): Promise<void> {
-  const takesGone = await removeDirIfEmpty(takesPath(folder))
-  const storyboardGone = await removeDirIfEmpty(storyboardPath(folder))
-  if (takesGone && storyboardGone) await removeDirIfEmpty(folderPath(folder))
+/**
+ * Removes a sequence folder's Tagningar/ and Storyboard/ (a storyboard's Övergångar/ and Bilder/) and then the folder
+ * itself, each only when empty.
+ */
+export async function removeFolderIfEmpty(folder: string, kind: SequenceKind = 'sequence'): Promise<void> {
+  const takesGone = await removeDirIfEmpty(takesPath(folder, kind))
+  const stillsGone = await removeDirIfEmpty(stillsPath(folder, kind))
+  if (takesGone && stillsGone) await removeDirIfEmpty(folderPath(folder, kind))
 }
 
 // ── Stills ───────────────────────────────────────────────────────────────────

@@ -178,7 +178,7 @@ function Cleanup() {
       <h3 className="mb-1 font-medium">Städa upp</h3>
       <p className="mb-3 text-muted">
         Flyttar filer som hamnat fel till rätt mapp och ger dem beskrivande namn, till exempel efter att en
-        karaktär, miljö, klädsel, pose eller sekvens bytt namn. Inget raderas och inga filer skrivs över.
+        karaktär, miljö, klädsel, pose, sekvens eller storyboard bytt namn. Inget raderas och inga filer skrivs över.
       </p>
       <button onClick={() => void run()} disabled={running} className={secondary}>
         {running ? 'Städar upp…' : 'Städa upp mappstrukturen'}

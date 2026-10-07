@@ -217,7 +217,7 @@ export function describePicture(path: string, index: AssetIndex): PictureInfo {
   }
 }
 
-// ── Stills (the pictures of a sequence's storyboard) ─────────────────────────
+// ── Stills (the pictures of a sequence or a storyboard) ──────────────────────
 
 /** Stills by id and by file path. */
 export class StillIndex {
@@ -231,7 +231,7 @@ export class StillIndex {
     }
   }
 
-  /** Every still in the library: of every sequence, and those that belong to none any more. */
+  /** Every still in the library: of every sequence and storyboard, and those that belong to none any more. */
   static async load(): Promise<StillIndex> {
     requireLibrary()
     return new StillIndex(await callService<Still[]>('stills:list'))

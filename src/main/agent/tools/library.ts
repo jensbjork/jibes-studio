@@ -19,6 +19,7 @@ import { studioGuide } from '../guide'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
 import { clampTime, framesAt, lastFrameTime, referenceAudioBlock, requireVideoFile, spreadTimes, videoLength } from '../media'
+import { boardIndex, isStoryboardId, transitionPair } from '../storyboard-rows'
 import {
   AssetIndex,
   MODES,
@@ -85,13 +86,29 @@ function assetSummary(a: Asset, index: AssetIndex): Record<string, unknown> {
   }
 }
 
-/** Takes of a sequence: which sequence and clip a generation belongs to. */
+/**
+ * Takes: which sequence and clip a generation belongs to – or, for a take of a storyboard's transition, which
+ * storyboard and transition, and the two boards it goes between.
+ */
 export function takeOf(g: Generation): Record<string, unknown> | undefined {
   if (!g.segmentId) return undefined
   const sequence = store.sequenceOfSegment(g.segmentId)
   if (!sequence) return undefined
-  const clip = store.listSegmentRows(sequence.id).findIndex((r) => r.id === g.segmentId) + 1
-  return { sequence_id: sequence.id, sequence_name: sequence.name, segment_id: g.segmentId, clip_number: clip || undefined }
+  const number = store.listSegmentRows(sequence.id).findIndex((r) => r.id === g.segmentId) + 1
+  if (isStoryboardId(sequence.id)) {
+    const pair = transitionPair(g.segmentId)
+    const from = pair?.from ? boardIndex(pair.from) + 1 : 0
+    const to = pair?.to ? boardIndex(pair.to) + 1 : 0
+    return {
+      storyboard_id: sequence.id,
+      storyboard_name: sequence.name,
+      transition_id: g.segmentId,
+      transition_number: number || undefined,
+      ...(from ? { from_board_number: from } : {}),
+      ...(to ? { to_board_number: to } : {})
+    }
+  }
+  return { sequence_id: sequence.id, sequence_name: sequence.name, segment_id: g.segmentId, clip_number: number || undefined }
 }
 
 /** A review as the tools show it. */
@@ -159,7 +176,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Studio guide',
       description:
-        "How Studio works and how to write video prompts that work in it. Read this once at the start of a session, before you prepare anything: it explains assets (characters, environments, outfits, poses) and their voices, the three modes, how reference images and audio become @Image1… and @Audio1… tokens in the prompt, sequences and continuation clips, storyboards with keyframes (start and end images, made with request_image_generation) and replacing a clip between its neighbours, the approval flow for paid generations, a detailed prompt-writing guide for Seedance-class video models, the review loop for learning from results – and ends with the learnings recorded so far (pinned ones and the most recent).",
+        "How Studio works and how to write video prompts that work in it. Read this once at the start of a session, before you prepare anything: it explains assets (characters, environments, outfits, poses) and their voices, the three modes, how reference images and audio become @Image1… and @Audio1… tokens in the prompt, sequences and continuation clips, keyframes, storyboards (milestone pictures made with request_image_generation, with the transitions between them generated as clips) and replacing a clip between its neighbours, the approval flow for paid generations, a detailed prompt-writing guide for Seedance-class video models, the review loop for learning from results – and ends with the learnings recorded so far (pinned ones and the most recent).",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'läste guiden'
@@ -455,7 +472,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'List generations',
       description:
-        "Generations (clips) from the user's feed, filtered and sorted the way Studio's clip feed does it, with paging. Each has its status (queued, processing, completed, failed), prompt, settings, price, the user's rating (1–5) and how many reviews it has, a one-line-per-token summary of its references (\"@Image1 Anna (character) photo 1\", \"@Audio1 Anna (voice)\") and which sequence clip it is a take of. The answer also sums up the filtered set (count, cost, seconds). Use it to find clips to learn from: e.g. the best rated ones (sort \"rating\", min_rating 4), the ones of one character (asset_id), or completed clips nobody has reviewed (status \"completed\", has_reviews false) – then review_generation. get_generation and review_generation look at one.",
+        "Generations (clips) from the user's feed, filtered and sorted the way Studio's clip feed does it, with paging. Each has its status (queued, processing, completed, failed), prompt, settings, price, the user's rating (1–5) and how many reviews it has, a one-line-per-token summary of its references (\"@Image1 Anna (character) photo 1\", \"@Audio1 Anna (voice)\") and which sequence clip or storyboard transition it is a take of. The answer also sums up the filtered set (count, cost, seconds). Use it to find clips to learn from: e.g. the best rated ones (sort \"rating\", min_rating 4), the ones of one character (asset_id), or completed clips nobody has reviewed (status \"completed\", has_reviews false) – then review_generation. get_generation and review_generation look at one.",
       input: {
         query: z.string().optional().describe('Words that must all appear in the prompt (or negative prompt).'),
         status: z.enum(['queued', 'processing', 'completed', 'failed', 'pending']).optional().describe('"pending" = queued or processing.'),
@@ -464,7 +481,10 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
         min_rating: z.number().int().min(1).max(5).optional().describe("The user's rating is at least this many stars."),
         unrated: z.boolean().optional().describe('true: only clips the user has not rated.'),
         since_days: z.number().positive().max(3650).optional().describe('Only the last N days (e.g. 1 = today and yesterday evening, 7, 30).'),
-        placement: z.enum(['standalone', 'sequence']).optional().describe('"standalone": not a take of a sequence clip; "sequence": takes.'),
+        placement: z
+          .enum(['standalone', 'sequence'])
+          .optional()
+          .describe('"standalone": not a take of a sequence clip or storyboard transition; "sequence": takes of either.'),
         has_reviews: z
           .boolean()
           .optional()
@@ -538,7 +558,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Get generation',
       description:
-        "One generation: status, error, timing, price, its settings with the reference token maps (@ImageN and @AudioN), sent_prompt (the prompt exactly as Venice got it, with the descriptions of its referenced assets appended as a References legend – when that differs from the prompt), which sequence clip it is a take of, the user's rating and every review, and – when completed – its poster frame as an image. Ask for `frames` to also get evenly spread frames from the video, captioned with their time (the last one is the clip's final frame, where a continuation clip would start). Poll this after an approval to follow progress. To judge a finished clip properly (frames next to the reference images, its sound), use review_generation.",
+        "One generation: status, error, timing, price, its settings with the reference token maps (@ImageN and @AudioN), sent_prompt (the prompt exactly as Venice got it, with the descriptions of its referenced assets appended as a References legend – when that differs from the prompt), which sequence clip or storyboard transition it is a take of, the user's rating and every review, and – when completed – its poster frame as an image. Ask for `frames` to also get evenly spread frames from the video, captioned with their time (the last one is the clip's final frame, where a continuation clip would start). Poll this after an approval to follow progress. To judge a finished clip properly (frames next to the reference images, its sound), use review_generation.",
       input: {
         generation_id: z.string(),
         include_thumbnail: z.boolean().default(true).describe('Return the poster frame when completed. Default true.'),

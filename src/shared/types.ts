@@ -286,6 +286,7 @@ export type LibraryFolderTarget =
   | 'references'
   | 'generations'
   | 'sequences'
+  | 'storyboards'
 
 export interface FfmpegStatus {
   ok: boolean
@@ -461,8 +462,8 @@ export interface PromptInput {
 // ── Sequences ────────────────────────────────────────────────────────────────
 
 /**
- * One shot in a sequence. Each generation for it is a "take"; one take is selected for the cut. In the
- * Storyboard view it is a panel: its keyframes (start and end image) and notes next to the take.
+ * One shot in a sequence. Each generation for it is a "take"; one take is selected for the cut. It may have
+ * keyframes (start and end image) and notes. A storyboard's transitions are segments too (StoryboardTransition).
  */
 export interface Segment {
   id: string
@@ -590,6 +591,103 @@ export interface SegmentFramePreview {
   problems: string[]
 }
 
+// ── Storyboards: milestone images and the transitions between them ──────────
+// A storyboard is a sequence of kind 'storyboard' (main reuses the sequence machinery: takes, folders, export,
+// approvals), but it is its own workflow with its own view and list: one image per board, and between every two
+// adjacent boards a transition — the clip that goes from the first board's image to the second's.
+
+/** What a row of the sequences table is: a sequence (Sekvenser) or a storyboard (Storyboards). */
+export type SequenceKind = 'sequence' | 'storyboard'
+
+/** The formats a storyboard can have: what the default image-to-video model's pictures are practically made in. */
+export const STORYBOARD_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'] as const
+export const DEFAULT_STORYBOARD_ASPECT_RATIO = '16:9'
+
+/** One milestone of the film: a single image (empty while planning) and a short note of what it shows. */
+export interface StoryboardBoard {
+  id: string
+  /** 0-based order within the storyboard. */
+  position: number
+  /** Absolute. Undefined while the board is empty. */
+  imagePath?: string
+  /** The still the image is, when it is one (generated, uploaded, a saved frame); not for a library photo. */
+  stillId?: string
+  /** "Vad visar bilden?": free text, any language. */
+  note: string
+  /** The image's shape differs noticeably from the storyboard's aspect ratio (a clip takes the image's shape). */
+  aspectMismatch?: boolean
+}
+
+/**
+ * The clip between two adjacent boards: generated image-to-video from the first board's image (`image_url`) to
+ * the second's (`end_image_url`). Its id is the id of the segment behind it, so takes and approvals work as for
+ * sequence clips.
+ */
+export interface StoryboardTransition {
+  /** The segment id. */
+  id: string
+  /** 0-based: transition i goes from board i to board i+1. */
+  position: number
+  fromBoardId: string
+  toBoardId: string
+  /** The template for new takes: prompt ("Vad händer?"), model, duration … and the two board images. */
+  params: GenerationParams
+  selectedGenerationId?: string
+  /** Newest first. */
+  takes: Generation[]
+  /** Both boards have images, so it can be generated (other problems may still stand in the way, see problems). */
+  ready: boolean
+  /** The selected take was made from other images than the boards have now ("gjord med en tidigare bild"). */
+  staleTake?: boolean
+  /** Why it can't be generated as it stands (Swedish), e.g. "Ruta 2 saknar bild."; [] when it can. */
+  problems: string[]
+}
+
+export interface Storyboard {
+  id: string
+  name: string
+  /** The format of the film and of new board images, e.g. "16:9". */
+  aspectRatio: string
+  boards: StoryboardBoard[]
+  /** boards.length − 1 of them (none for fewer than two boards), in order. */
+  transitions: StoryboardTransition[]
+  /** "Generera saknade" is sending the missing transitions to Venice. */
+  running: boolean
+  /** Why the last "Generera saknade" stopped (Swedish, "Övergång 2: …"); cleared when a new run starts. */
+  runError?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface StoryboardSummary {
+  id: string
+  name: string
+  boardCount: number
+  transitionCount: number
+  /** Transitions with a finished selected take. */
+  doneCount: number
+  /** The first board image, if any board has one. */
+  coverPath?: string
+  updatedAt: number
+}
+
+/** What to put on a board (StudioApi.addBoard / updateBoard): a keyframe source without the neighbour frames. */
+export type BoardImageSource = Exclude<SegmentImageSource, { kind: 'previous' } | { kind: 'next' }>
+
+/** A change to a transition (StudioApi.updateTransition); fields left out stay as they are. */
+export interface TransitionPatch {
+  prompt?: string
+  /** '' clears it. */
+  negativePrompt?: string
+  duration?: string
+  resolution?: string
+  audio?: boolean
+  /** Must take an end image (supportsEndImage); the other options are fitted to it. */
+  model?: string
+  /** One of the transition's takes; null clears the selection. */
+  selectedGenerationId?: string | null
+}
+
 // ── Images and stills (storyboard keyframes) ─────────────────────────────────
 
 /** A Venice image model: text-to-image (`edit` false) or an edit model that combines reference images (`edit` true). */
@@ -609,7 +707,10 @@ export interface ImageModel {
 
 /** What a still is generated from ("Skapa bild…"). */
 export interface StillParams {
-  /** The sequence the still belongs to (it is saved in its Storyboard folder); none: Referensbilder. */
+  /**
+   * The sequence (Sekvenser/<namn>/Storyboard/) or storyboard (Storyboards/<namn>/Bilder/) the still belongs to and
+   * is saved with; none: Referensbilder. A storyboard's aspect ratio is the still's default format.
+   */
   sequenceId?: string
   prompt: string
   /** Text-to-image models only. */
@@ -622,10 +723,10 @@ export interface StillParams {
   quality?: string
 }
 
-/** An image of a sequence's storyboard: generated, uploaded, or a frame saved from a take. */
+/** An image of a sequence or a storyboard: generated, uploaded, or a frame saved from a take. */
 export interface Still {
   id: string
-  /** Undefined once its sequence is deleted (the still then lives in Referensbilder). */
+  /** The sequence or storyboard; undefined once it is deleted (the still then lives in Referensbilder). */
   sequenceId?: string
   /** Absolute. */
   path: string
@@ -641,6 +742,7 @@ export interface Still {
 }
 
 export interface ExportProgress {
+  /** The sequence or storyboard being exported. */
   sequenceId: string
   /** 0–1 */
   progress: number
@@ -717,6 +819,8 @@ export interface ApprovalImageRequest {
   references: ApprovalImageReference[]
   /** Where the still goes once it is made: a clip's start or end image (clipNumber as it was when asked). */
   assignTo?: { segmentId: string; slot: SegmentImageSlot; clipNumber: number }
+  /** Or a storyboard's board: the still becomes its image (boardNumber 1-based, as it was when asked). */
+  assignToBoard?: { boardId: string; storyboardId: string; boardNumber: number }
 }
 
 /**
@@ -750,6 +854,11 @@ export interface ApprovalRequest {
   notice?: string
   sequenceId?: string
   sequenceName?: string
+  /**
+   * 'storyboard' when sequenceId is a storyboard: a 'segment' request is then one transition (its segmentIds and
+   * clipNumbers name the transition), 'generate-all' the storyboard's missing transitions. Absent: a sequence.
+   */
+  sequenceKind?: SequenceKind
   /** 'segment': the clip; 'generate-all': the clips that will be generated, in order. */
   segmentIds?: string[]
   /** 1-based clip numbers of segmentIds, as Studio shows them ("Klipp 3"). */
@@ -835,11 +944,13 @@ export interface AgentFormAudioReference {
 
 /** What get_form (and set_form, set_references) answer with. */
 export interface AgentFormState {
-  /** The view Studio shows, e.g. 'generate' or 'sequences'. */
+  /** The view Studio shows, e.g. 'generate', 'sequences' or 'storyboards'. */
   view: string
-  /** The sequence and clip open in the sequence editor, if any. */
+  /** The sequence and clip open in the sequence editor, if any (view 'sequences'). */
   sequenceId?: string
   segmentId?: string
+  /** The storyboard open in Storyboards, if any (view 'storyboards'). */
+  storyboardId?: string
   /** The Generate form. */
   params: GenerationParams
   references: AgentFormReference[]
@@ -904,18 +1015,23 @@ export interface AgentReorderReferencesArgs {
 
 /** open: brings a place in Studio to the front. */
 export interface AgentOpenArgs {
-  view: 'generate' | 'sequences'
+  view: 'generate' | 'sequences' | 'storyboards'
   sequenceId?: string
   segmentId?: string
+  /** For 'storyboards': the storyboard to open. */
+  storyboardId?: string
 }
 
 /** What the window shows after an open command. */
 export interface AgentOpenResult {
-  view: 'generate' | 'sequences'
+  view: 'generate' | 'sequences' | 'storyboards'
   sequenceId?: string
   sequenceName?: string
   /** The clip actually on screen (normally the one asked for). */
   segmentId?: string
+  /** The storyboard on screen (view 'storyboards'). */
+  storyboardId?: string
+  storyboardName?: string
   /** Swedish, when the window couldn't show exactly what was asked for. */
   note?: string
 }
@@ -1002,7 +1118,7 @@ export interface StudioApi {
   /** Fires after any asset or prompt change. */
   onLibraryChange(cb: () => void): () => void
 
-  // Sequences
+  // Sequences (never storyboards: those have their own list below; their ids are refused here with a pointer)
   listSequences(): Promise<SequenceSummary[]>
   getSequence(id: string): Promise<Sequence>
   createSequence(name: string): Promise<Sequence>
@@ -1026,7 +1142,7 @@ export interface StudioApi {
   onSequenceChange(cb: (sequenceId: string) => void): () => void
   onExportProgress(cb: (p: ExportProgress) => void): () => void
 
-  // Storyboard: keyframes and "Gör om mellan grannarna"
+  // Keyframes and "Gör om mellan grannarna" (sequence clips)
   /**
    * Puts an image in a clip's start or end slot (null empties it). An image switches the clip to the
    * image-to-video model of its family (one that takes an end image for the end slot); references it had are
@@ -1042,6 +1158,53 @@ export interface StudioApi {
    * keeping its prompt, duration and audio. Free: it only configures the clip; generating is generateSegment.
    */
   bridgeSegment(segmentId: string): Promise<Sequence>
+
+  // Storyboards: one image per board, a transition between every two adjacent boards
+  /** Most recently changed first. */
+  listStoryboards(): Promise<StoryboardSummary[]>
+  getStoryboard(id: string): Promise<Storyboard>
+  /** Creates it with its folder (Storyboards/<namn>/) and two empty boards. Aspect ratio default 16:9. */
+  createStoryboard(name: string, aspectRatio?: string): Promise<Storyboard>
+  /** A new name renames its folder; a new aspect ratio applies to its transitions and new board images. */
+  updateStoryboard(id: string, patch: { name?: string; aspectRatio?: string }): Promise<Storyboard>
+  /** Its takes become ordinary generations; stills still in use are kept in Referensbilder; exports stay. */
+  deleteStoryboard(id: string): Promise<void>
+  /**
+   * Adds a board (at the end, or after/before the given one), optionally with a note and an image. The
+   * transitions follow: one between every two adjacent boards.
+   */
+  addBoard(
+    storyboardId: string,
+    init?: { afterBoardId?: string; beforeBoardId?: string; note?: string; image?: BoardImageSource }
+  ): Promise<Storyboard>
+  /** A new note and/or image (null empties the board). The two neighbouring transitions get the new image. */
+  updateBoard(boardId: string, patch: { note?: string; image?: BoardImageSource | null }): Promise<Storyboard>
+  /** Moves the board to `toIndex` (0-based). Transitions between boards no longer adjacent are removed. */
+  moveBoard(boardId: string, toIndex: number): Promise<Storyboard>
+  /** Removes the board; its two transitions are replaced by one between its neighbours (takes are kept). */
+  deleteBoard(boardId: string): Promise<Storyboard>
+  updateTransition(transitionId: string, patch: TransitionPatch): Promise<Storyboard>
+  /** Queues a new take of the transition (paid; the UI confirms with the price). */
+  generateTransition(transitionId: string): Promise<Generation>
+  /**
+   * "Generera saknade": sends every transition without a finished selected take (and none on its way) to Venice,
+   * one after another without waiting for them to render. Resolves once started; progress arrives via
+   * onStoryboardChange and errors via Storyboard.runError.
+   */
+  generateStoryboard(storyboardId: string): Promise<void>
+  stopStoryboard(storyboardId: string): Promise<void>
+  /**
+   * Renders the selected takes in order into Storyboards/<namn>/; resolves with the film's path. Progress comes
+   * through onExportProgress with sequenceId = the storyboard's id.
+   */
+  exportStoryboard(storyboardId: string): Promise<string>
+  /**
+   * "Gör om till sekvens": a new sequence "<namn> (sekvens)" with one clip per transition, each with a copy of
+   * the transition's selected take selected. The storyboard stays as it is.
+   */
+  convertStoryboardToSequence(storyboardId: string): Promise<{ sequenceId: string }>
+  /** Fires with the storyboard id whenever a storyboard, its boards, transitions or their takes change. */
+  onStoryboardChange(cb: (storyboardId: string) => void): () => void
 
   // Images and stills
   /** Venice's text-to-image and edit models. */
@@ -1072,8 +1235,8 @@ export interface StudioApi {
   /** "Städa upp": moves every file the library knows about to its proper folder. */
   reorganizeLibrary(): Promise<ReorganizeReport>
   /**
-   * Opens the folder in Finder (created if needed). With an id: that sequence's folder for 'sequences', and
-   * for any other target an asset's own folder (whatever its kind).
+   * Opens the folder in Finder (created if needed). With an id: that sequence's folder for 'sequences', that
+   * storyboard's for 'storyboards', and for any other target an asset's own folder (whatever its kind).
    */
   revealLibraryFolder(target: LibraryFolderTarget, id?: string): Promise<void>
 

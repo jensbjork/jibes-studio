@@ -5,6 +5,7 @@ import { ASSET_VIEW } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { findTakeOwner, openTakeOwner, takeOwnerLabel, type TakeOwner } from '../../lib/takes'
 import { KIND_TONE } from '../pickers/assetKinds'
 import Popover from '../pickers/Popover'
 import SequencePicker, { type AddedToSequence } from '../pickers/SequencePicker'
@@ -376,7 +377,7 @@ function Actions({
         {!isPending(g) && (
           <span className="ml-auto">
             <ConfirmButton
-              question={g.segmentId ? 'Ingår i en sekvens – radera?' : 'Radera videon?'}
+              question={g.segmentId ? 'Används som tagning – radera?' : 'Radera videon?'}
               onConfirm={() => onDelete(g)}
               title="Flyttar videon till papperskorgen"
               className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-accent"
@@ -548,10 +549,7 @@ function Settings({ g, modelName, navigate }: { g: Generation; modelName?: strin
   rows.push(['Skapad', new Date(g.createdAt).toLocaleString('sv-SE', { dateStyle: 'medium', timeStyle: 'short' })])
   if (g.completedAt && g.status === 'completed') rows.push(['Tog', formatSeconds(g.completedAt - g.createdAt)])
   if (g.segmentId) {
-    rows.push([
-      'Sekvens',
-      navigate ? <OpenSequenceLink segmentId={g.segmentId} navigate={navigate} /> : 'Tagning i en sekvens'
-    ])
+    rows.push(['Tagning i', <TakeOwnerLink key={g.segmentId} segmentId={g.segmentId} navigate={navigate} />])
   }
   if (g.filePath) {
     rows.push([
@@ -576,28 +574,36 @@ function Settings({ g, modelName, navigate }: { g: Generation; modelName?: strin
   )
 }
 
-function OpenSequenceLink({ segmentId, navigate }: { segmentId: string; navigate: Navigate }) {
-  const [busy, setBusy] = useState(false)
-  const open = async () => {
-    setBusy(true)
-    try {
-      for (const summary of await window.studio.listSequences()) {
-        const sequence = await window.studio.getSequence(summary.id)
-        if (sequence.segments.some((s) => s.id === segmentId)) {
-          navigate('sequences', { type: 'open-sequence', sequenceId: sequence.id, segmentId })
-          return
-        }
+/** The sequence clip or storyboard transition a take belongs to, named, and opened on click. */
+function TakeOwnerLink({ segmentId, navigate }: { segmentId: string; navigate?: Navigate }) {
+  // undefined while looking, null when it can't be found (the take's clip or transition is gone).
+  const [owner, setOwner] = useState<TakeOwner | null>()
+  useEffect(() => {
+    let current = true
+    setOwner(undefined)
+    findTakeOwner(segmentId).then(
+      (found) => current && setOwner(found ?? null),
+      (e: unknown) => {
+        // Only a label and a shortcut; the take is still reachable from the sidebar.
+        console.warn('Kunde inte hitta var tagningen hör hemma', e)
+        if (current) setOwner(null)
       }
-    } catch (e) {
-      // Only a shortcut; the sequence is still reachable from the sidebar.
-      console.warn('Kunde inte hitta sekvensen för tagningen', e)
-    } finally {
-      setBusy(false)
+    )
+    return () => {
+      current = false
     }
-  }
+  }, [segmentId])
+  if (owner === undefined) return <span className="text-muted">…</span>
+  if (owner === null) return <span className="text-muted">En sekvens eller storyboard</span>
+  if (!navigate) return <span>{takeOwnerLabel(owner)}</span>
   return (
-    <button type="button" onClick={() => void open()} disabled={busy} className="text-text underline-offset-2 hover:underline">
-      {busy ? 'Öppnar…' : 'Tagning i en sekvens – öppna'}
+    <button
+      type="button"
+      onClick={() => openTakeOwner(owner, segmentId, navigate)}
+      title={owner.kind === 'storyboard' ? 'Öppna storyboarden' : 'Öppna sekvensen'}
+      className="text-left text-text underline-offset-2 hover:underline"
+    >
+      {takeOwnerLabel(owner)}
     </button>
   )
 }

@@ -8,7 +8,7 @@ import ConsentDialog from '../ConsentDialog'
 import ParamsForm from '../ParamsForm'
 import { clipBlocked } from './clipChecks'
 import ConfirmButton from './ConfirmButton'
-import { CloseIcon, PlayIcon } from './icons'
+import { PlayIcon } from './icons'
 import KeyframeBox from './KeyframeBox'
 import NotesField from './NotesField'
 import { clipKey, continues, parseConsent, readyTake, stableJson, takePromptsFor } from './sequenceUtils'
@@ -37,10 +37,6 @@ interface Props {
   onBridge: (segmentId: string) => Promise<void>
   /** "Gör om mellan grannarna" just configured this clip; the frames box says what to do next. */
   justBridged?: boolean
-  /** Shows the clip's notes ("Vad händer"); the storyboard has them on its panels already. */
-  showNotes?: boolean
-  /** Shown as a close button in the header (the storyboard's editor column). */
-  onClose?: () => void
 }
 
 const smallButton =
@@ -66,9 +62,7 @@ export default function SegmentEditor({
   navigate,
   onPreviewFrom,
   onBridge,
-  justBridged = false,
-  showNotes = true,
-  onClose
+  justBridged = false
 }: Props) {
   const { mutate, patchSegment, addTake } = store
   const segmentId = segment.id
@@ -236,15 +230,10 @@ export default function SegmentEditor({
             >
               Radera
             </ConfirmButton>
-            {onClose && (
-              <button onClick={onClose} title="Stäng redigeraren" aria-label="Stäng redigeraren" className={smallButton}>
-                <CloseIcon size={11} />
-              </button>
-            )}
           </div>
         </div>
 
-        {showNotes && <NotesField segment={segment} store={store} flushers={flushers} className="mb-4" />}
+        <NotesField segment={segment} store={store} flushers={flushers} className="mb-4" />
 
         <KeyframeBox
           sequence={sequence}

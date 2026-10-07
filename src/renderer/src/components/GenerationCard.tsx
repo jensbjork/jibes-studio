@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } fr
 import type { Generation, VideoModel } from '@shared/types'
 import { formatSeconds, formatUsd, mediaUrl } from '../lib/media'
 import type { Navigate } from '../lib/navigation'
+import { findTakeOwner, openTakeOwner } from '../lib/takes'
 import { isPending, progressOf, reviewCountText } from './feed/feedText'
 import { ExpandIcon, ReviewIcon } from './feed/icons'
 import { pauseOthers } from './feed/playback'
@@ -15,7 +16,7 @@ interface Props {
   model?: VideoModel
   onReuse: (g: Generation) => void
   onDelete: (g: Generation) => void
-  /** Enables "Öppna" after adding to a sequence and opening the sequence from the badge. */
+  /** Enables "Öppna" after adding to a sequence and opening the take's sequence or storyboard from the badge. */
   navigate?: Navigate
   /** Receives a locally patched copy, e.g. with segmentId set after "Lägg i sekvens". */
   onChange?: (g: Generation) => void
@@ -31,15 +32,6 @@ const action = 'rounded px-1.5 py-0.5 hover:bg-raised hover:text-text'
 
 // Cards far outside the viewport skip layout and painting, so a feed of hundreds of clips scrolls smoothly.
 const offscreenHint: CSSProperties = { contentVisibility: 'auto', containIntrinsicSize: 'auto 320px' }
-
-/** Finds the sequence that owns a segment; only used on click, so a linear scan is fine. */
-async function findSequenceOfSegment(segmentId: string): Promise<string | undefined> {
-  for (const summary of await window.studio.listSequences()) {
-    const sequence = await window.studio.getSequence(summary.id)
-    if (sequence.segments.some((s) => s.id === segmentId)) return sequence.id
-  }
-  return undefined
-}
 
 function GenerationCard({
   generation: g,
@@ -99,16 +91,17 @@ function GenerationCard({
 
   const openSequence = (sequenceId: string) => navigate?.('sequences', { type: 'open-sequence', sequenceId })
 
-  const openOwningSequence = async () => {
-    if (!g.segmentId || openingSequence) return
+  // A take of a sequence clip or of a storyboard transition: looked up on click (a linear scan is fine there).
+  const openOwner = async () => {
+    if (!g.segmentId || openingSequence || !navigate) return
     if (added?.segmentId === g.segmentId) return openSequence(added.sequenceId)
     setOpeningSequence(true)
     try {
-      const id = await findSequenceOfSegment(g.segmentId)
-      if (id) openSequence(id)
+      const owner = await findTakeOwner(g.segmentId)
+      if (owner) openTakeOwner(owner, g.segmentId, navigate)
     } catch (e) {
-      // The badge is only a shortcut; if the lookup fails the sequence is still reachable from the sidebar.
-      console.warn('Kunde inte hitta sekvensen för tagningen', e)
+      // The badge is only a shortcut; if the lookup fails the take is still reachable from the sidebar.
+      console.warn('Kunde inte hitta var tagningen hör hemma', e)
     } finally {
       setOpeningSequence(false)
     }
@@ -209,12 +202,16 @@ function GenerationCard({
         )}
         {g.segmentId && (
           <button
-            onClick={navigate ? openOwningSequence : undefined}
+            onClick={navigate ? () => void openOwner() : undefined}
             disabled={!navigate || openingSequence}
-            title={navigate ? 'Tagning i en sekvens – klicka för att öppna sekvensen' : 'Tagning i en sekvens'}
+            title={
+              navigate
+                ? 'Tagning i en sekvens eller storyboard – klicka för att öppna den'
+                : 'Tagning i en sekvens eller storyboard'
+            }
             className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-text backdrop-blur transition enabled:hover:bg-black/90 disabled:cursor-default"
           >
-            ▤ {openingSequence ? 'Öppnar…' : 'I sekvens'}
+            ▤ {openingSequence ? 'Öppnar…' : 'Tagning'}
           </button>
         )}
 
@@ -294,7 +291,7 @@ function GenerationCard({
           >
             {confirmingDelete ? (
               <>
-                <span className="whitespace-nowrap">{g.segmentId ? 'Ingår i en sekvens – radera?' : 'Radera videon?'}</span>
+                <span className="whitespace-nowrap">{g.segmentId ? 'Används som tagning – radera?' : 'Radera videon?'}</span>
                 <button
                   autoFocus
                   onClick={() => {

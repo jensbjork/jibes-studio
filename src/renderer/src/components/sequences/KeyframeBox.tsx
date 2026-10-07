@@ -3,8 +3,7 @@ import { endImageVariant, supportsEndImage } from '@shared/models'
 import type { Segment, Sequence, VideoModel } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { BridgeIcon } from './icons'
-import { continuationMismatch, endMismatch, formatFrameTime, readyTake } from './sequenceUtils'
-import { bridgeDescription } from './storyboard/slots'
+import { bridgeDescription, continuationMismatch, endMismatch, formatFrameTime, readyTake } from './sequenceUtils'
 import { hasAutomaticFrames, useFramePreview } from './useFramePreview'
 
 interface Props {

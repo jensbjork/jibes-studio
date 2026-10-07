@@ -19,6 +19,24 @@ const smallButton =
 /** Tab order of the library picker: who is in the picture comes first. */
 const FIRST_KIND: AssetKind = 'character'
 
+/** Whose stills the picker offers: a sequence's, a storyboard's, or (undefined) every saved picture. */
+export type StillsOwner = 'sequence' | 'storyboard'
+
+/** The stills picker's wording for each owner. */
+const STILLS_COPY: Record<StillsOwner | 'all', { name: string; title: string; gone: string }> = {
+  sequence: {
+    name: 'Sekvensens bilder',
+    title: 'Bilder och bildrutor i sekvensen',
+    gone: 'Bilden finns inte bland sekvensens bilder längre.'
+  },
+  storyboard: {
+    name: 'Storyboardbilder',
+    title: 'Bilder och bildrutor i storyboarden',
+    gone: 'Bilden finns inte bland storyboardens bilder längre.'
+  },
+  all: { name: 'Sparade bilder', title: 'Sparade bilder', gone: 'Bilden finns inte bland de sparade bilderna längre.' }
+}
+
 interface Props {
   /** Absolute paths, in the order they are sent: the first is the base the others are combined into. */
   value: string[]
@@ -27,10 +45,12 @@ interface Props {
   max: number
   /** Every library asset (all kinds), for the picker and the name captions. */
   assets: Asset[]
-  /** The stills that can be picked (the sequence's, newest first). */
+  /** The stills that can be picked (the sequence's or storyboard's, newest first). */
   stills: Still[]
-  /** Whether the stills are the sequence's own (wording of the picker). */
-  stillsOfSequence: boolean
+  /** Whose the stills are (wording of the picker); undefined: every saved picture. */
+  stillsOf?: StillsOwner
+  /** Captions that name a picture by its role, e.g. "Föregående" for the previous board's image; win over others. */
+  pathLabels?: Record<string, string>
   /** The clip's own reference images, offered with one click (a keyframe usually shows the same people). */
   clipReferences?: string[]
   clipNumber?: number
@@ -58,7 +78,8 @@ export default function ReferenceImages({
   max,
   assets,
   stills,
-  stillsOfSequence,
+  stillsOf,
+  pathLabels,
   clipReferences = [],
   clipNumber,
   onNote,
@@ -76,6 +97,7 @@ export default function ReferenceImages({
   const byPath = useMemo(() => assetsByPath(assets), [assets])
   const stillByPath = useMemo(() => new Map(stills.map((s) => [s.path, s])), [stills])
   const stillById = useMemo(() => new Map(stills.map((s) => [s.id, s])), [stills])
+  const copy = STILLS_COPY[stillsOf ?? 'all']
 
   /** Adds images after the ones there (duplicates skipped), as many as the model takes. */
   const add = (paths: string[]) => {
@@ -133,7 +155,7 @@ export default function ReferenceImages({
     if (stillId) {
       const still = stillById.get(stillId)
       if (still) add([still.path])
-      else onNote('Bilden finns inte bland sekvensens bilder längre.')
+      else onNote(copy.gone)
       return
     }
     add(Array.from(e.dataTransfer.files).map((f) => window.studio.pathForFile(f)))
@@ -168,9 +190,9 @@ export default function ReferenceImages({
             ref={stillsButton}
             onClick={() => setPicker((p) => (p === 'stills' ? null : 'stills'))}
             className={`${smallButton} ${picker === 'stills' ? 'bg-raised text-text' : ''}`}
-            title={stillsOfSequence ? 'Bilder och bildrutor i sekvensen' : 'Sparade bilder'}
+            title={copy.title}
           >
-            {stillsOfSequence ? 'Sekvensens bilder' : 'Sparade bilder'}
+            {copy.name}
           </button>
           <button onClick={() => void pickFiles()} className={smallButton} title="Välj bildfiler på datorn">
             Från fil…
@@ -198,20 +220,26 @@ export default function ReferenceImages({
           const still = stillByPath.get(path)
           const notSent = i >= max
           const name = path.split('/').pop() ?? path
-          const caption = asset
-            ? { text: asset.name, className: KIND_TONE[asset.kind].caption }
+          const role = pathLabels?.[path]
+          const caption = role
+            ? { text: role, className: 'bg-black/70' }
+            : asset
+              ? { text: asset.name, className: KIND_TONE[asset.kind].caption }
+              : still
+                ? { text: still.source === 'frame' ? 'Bildruta' : 'Bild', className: 'bg-black/70' }
+                : undefined
+          const described = asset
+            ? `${asset.name} (${ASSET_COPY[asset.kind].singular}) · ${name}`
             : still
-              ? { text: still.source === 'frame' ? 'Bildruta' : 'Bild', className: 'bg-black/70' }
-              : undefined
+              ? `${stillSourceLabel(still)}${still.prompt ? ` · ${still.prompt}` : ''}`
+              : name
           const title = notSent
             ? `Skickas inte – modellen tar högst ${max} bilder`
             : missing.has(path)
               ? `Filen saknas: ${path}`
-              : asset
-                ? `${asset.name} (${ASSET_COPY[asset.kind].singular}) · ${name}`
-                : still
-                  ? `${stillSourceLabel(still)}${still.prompt ? ` · ${still.prompt}` : ''}`
-                  : name
+              : role
+                ? `${role} · ${described}`
+                : described
           return (
             <div
               key={path}
@@ -340,10 +368,10 @@ export default function ReferenceImages({
         align="end"
         width={360}
         maxHeight={420}
-        label={stillsOfSequence ? 'Sekvensens bilder' : 'Sparade bilder'}
+        label={copy.name}
       >
         <div className="border-b border-line px-3 py-2.5">
-          <p className="font-medium">{stillsOfSequence ? 'Sekvensens bilder' : 'Sparade bilder'}</p>
+          <p className="font-medium">{copy.name}</p>
           <p className="mt-0.5 text-[11px] text-muted">Klicka för att lägga till eller ta bort en bild.</p>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">

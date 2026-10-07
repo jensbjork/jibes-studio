@@ -1,7 +1,9 @@
 // Sequences: ordered segments whose selected takes are cut together into one longer video.
 // Each sequence has a folder in Sekvenser/ named after it: its takes live in Tagningar/ inside it, its stills
-// (the storyboard's keyframes) in Storyboard/ and its exports next to those, so the folder is what the user sees
-// of the sequence in Finder.
+// (its keyframes) in Storyboard/ and its exports next to those, so the folder is what the user sees of the sequence
+// in Finder. A storyboard (storyboards.ts) is a row of kind 'storyboard' that this service also runs: its
+// transitions are segments, generated, taken, kept in folders (Storyboards/<namn>/Övergångar/ and Bilder/) and
+// exported here, but the Sekvenser handlers refuse it.
 
 import { randomUUID } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
@@ -38,6 +40,7 @@ import type {
   SegmentInit,
   SegmentPatch,
   Sequence,
+  SequenceKind,
   SequenceSummary,
   Still,
   VideoModel
@@ -47,6 +50,7 @@ import * as db from './db'
 import { concatClips, extractFrame, extractFrameAtOrAfter, frameStartAtOrAfter, probe } from './ffmpeg'
 import { composeSubmission, prepareSubmission, toPublic, type JobManager } from './jobs'
 import {
+  copyPathVerified,
   FOLDERS,
   framesDir,
   fromStoredPath,
@@ -60,11 +64,18 @@ import {
   safeName,
   sequenceDir,
   sequenceTakesDir,
+  thumbsDir,
   tmpDir,
   toStoredPath
 } from './paths'
 import { placeFile } from './references'
-import { buildConcatClips, missingTakesMessage, reserveExportPath } from './sequence-export'
+import {
+  buildConcatClips,
+  buildStoryboardClips,
+  missingTakesMessage,
+  missingTransitionsMessage,
+  reserveExportPath
+} from './sequence-export'
 import * as store from './sequence-store'
 import { ensureImagesExist, type VeniceClient } from './venice'
 
@@ -104,8 +115,9 @@ interface SequencePatch {
 /**
  * What a take the user approved through an agent may be: called with the clip right before its take is sent, on the
  * very database state the take is built from, so nothing written afterwards can change what is paid for.
- * Returns why it must not be sent (Swedish), or undefined. Only the agent connection passes one, in this
- * process (a window's IPC call can't carry a function).
+ * Returns why it must not be sent (Swedish), or undefined. Only in-process callers pass one (a window's IPC call
+ * can't carry a function): the agent connection for an approval, and storyboards for every take of a transition
+ * (both of its boards must still have a picture).
  */
 export type SubmitGuard = (segmentId: string) => string | undefined
 
@@ -130,6 +142,11 @@ interface Run {
 
 /** Thrown inside a run when the user pressed stop before the next take was submitted. */
 class RunStopped extends Error {}
+
+/** The submit was called off by its `cancelled` callback before anything was paid for (see generateSegment). */
+export function isCancelledSubmit(err: unknown): boolean {
+  return err instanceof RunStopped
+}
 
 /** How often a run re-checks a take it is waiting for (stop pressed, take deleted). */
 const WATCH_INTERVAL_MS = 3000
@@ -525,42 +542,70 @@ export class SequenceService {
 
   /** Creates the sequence together with its folder, Sekvenser/<name>/Tagningar. */
   async create(name: string): Promise<Sequence> {
-    const clean = store.cleanSequenceName(name)
+    return this.get(await this.createRow(name))
+  }
+
+  /**
+   * Writes a new sequence or storyboard row together with its folder (Sekvenser/<name>/Tagningar, or
+   * Storyboards/<name>/Övergångar) and announces it; resolves its id. `inTransaction` runs in the same transaction
+   * as the insert (a storyboard's first boards and transitions), so nobody ever sees it half made.
+   */
+  async createRow(
+    name: string,
+    opts: {
+      kind?: SequenceKind
+      defaults?: Partial<GenerationParams>
+      aspectRatio?: string
+      inTransaction?: (id: string) => void
+    } = {}
+  ): Promise<string> {
+    const kind = opts.kind ?? 'sequence'
+    const clean = store.cleanSequenceName(name, kind)
     const id = await this.withFiles(async () => {
       const id = randomUUID()
       const now = Date.now()
-      const folder = store.availableFolderName(store.folderBaseName(clean))
+      const folder = store.availableFolderName(store.folderBaseName(clean, kind), kind)
       try {
-        sequenceTakesDir(folder)
+        sequenceTakesDir(folder, kind)
       } catch (err) {
-        throw new Error(`Kunde inte skapa mappen för sekvensen: ${errorText(err)}`)
+        throw new Error(
+          `Kunde inte skapa mappen för ${kind === 'storyboard' ? 'storyboarden' : 'sekvensen'}: ${errorText(err)}`
+        )
       }
       const { model, duration, resolution, aspectRatio, audio } = DEFAULT_PARAMS
+      const defaults = opts.defaults ?? { model, duration, resolution, aspectRatio, audio }
       try {
-        this.sql()
-          .prepare(
-            'INSERT INTO sequences (id, name, defaults, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-          )
-          .run(
-            id,
-            clean,
-            JSON.stringify(store.pickDefaults({ model, duration, resolution, aspectRatio, audio })),
-            folder,
-            now,
-            now
-          )
+        this.sql().transaction(() => {
+          this.sql()
+            .prepare(
+              `INSERT INTO sequences (id, name, defaults, folder, kind, aspect_ratio, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+              id,
+              clean,
+              JSON.stringify(store.pickDefaults(defaults)),
+              folder,
+              kind,
+              opts.aspectRatio ?? null,
+              now,
+              now
+            )
+          opts.inTransaction?.(id)
+        })()
       } catch (err) {
-        await store.removeFolderIfEmpty(folder)
+        await store.removeFolderIfEmpty(folder, kind)
         throw err
       }
       return id
     })
-    return this.changed(id)
+    this.changed(id)
+    return id
   }
 
   async update(id: string, patch: SequencePatch): Promise<Sequence> {
     const row = store.requireSequenceRow(id)
-    const name = patch?.name !== undefined ? store.cleanSequenceName(patch.name) : row.name
+    const name = patch?.name !== undefined ? store.cleanSequenceName(patch.name, store.kindOf(row)) : row.name
     const defaults = patch?.defaults
       ? { ...store.parseDefaults(row.defaults), ...store.pickDefaults(patch.defaults) }
       : store.parseDefaults(row.defaults)
@@ -587,17 +632,19 @@ export class SequenceService {
     const { takeIds: freed, moved } = await this.withFiles(async () => {
       const row = store.getSequenceRow(id)
       if (!row) return { takeIds: [], moved: false }
+      const kind = store.kindOf(row)
       const takeIds = store.takeIdsForSegments(store.listSegmentRows(id).map((s) => s.id))
       // Before the rows go: once the FK has nulled segment_id, nothing says these videos were takes here.
       await this.releaseTakes(takeIds)
       // Read in the same step as the delete, after the moves above: still work isn't queued behind this, so a still
       // recorded for the sequence meanwhile (a frame saved, a picture placed) is released with the others.
       const stills = store.listStillRows(id)
-      // Segments cascade; takes get segment_id nulled, exports and stills sequence_id nulled by their FKs.
+      // Segments (and a storyboard's boards) cascade; takes get segment_id nulled, exports and stills sequence_id
+      // nulled by their FKs.
       this.sql().prepare('DELETE FROM sequences WHERE id = ?').run(id)
       // Once its clips are gone, only uses elsewhere count.
       const kept = await this.releaseStills(stills)
-      if (row.folder && !store.folderInUse(row.folder)) await store.removeFolderIfEmpty(row.folder)
+      if (row.folder && !store.folderInUse(row.folder, kind)) await store.removeFolderIfEmpty(row.folder, kind)
       return { takeIds, moved: kept }
     })
     this.announceGenerations(freed)
@@ -725,8 +772,8 @@ export class SequenceService {
     let params: GenerationParams
     if (source) params = store.sanitizeParams(source.params)
     else if (init.params) params = store.sanitizeParams(init.params)
-    // The previous clip's settings, but not what belongs to its shot: its prompt, and its keyframes (a new
-    // storyboard panel starts with empty slots).
+    // The previous clip's settings, but not what belongs to its shot: its prompt, and its keyframes (a new clip
+    // starts without a start or end image).
     else if (previous) {
       params = { ...store.parseParams(previous.params), prompt: '', startImage: undefined, endImage: undefined }
     }
@@ -1182,15 +1229,19 @@ export class SequenceService {
     return preview
   }
 
-  /** Queues a new take from the segment editor's button (or an approval, with its guard). */
-  generateSegment(segmentId: string, guard?: SubmitGuard): Promise<Generation> {
+  /**
+   * Queues a new take from the segment editor's button (or an approval, with its guard). `cancelled` (in-process
+   * callers only, e.g. a storyboard's "Generera saknade") lets the caller call it off until right before Venice is
+   * paid; the promise then rejects with isCancelledSubmit.
+   */
+  generateSegment(segmentId: string, guard?: SubmitGuard, cancelled?: () => boolean): Promise<Generation> {
     // E.g. "generate all" is uploading this very clip; a second submit would pay for it twice.
     if (this.submitting.has(segmentId)) {
       return Promise.reject(
         new Error('En tagning för klippet skickas redan till Venice. Vänta tills den syns bland tagningarna.')
       )
     }
-    return this.submit(segmentId, undefined, guard)
+    return this.submit(segmentId, typeof cancelled === 'function' ? cancelled : undefined, guard)
   }
 
   /** Starts a submit and records it in `submitting` until Venice has answered (or it failed). */
@@ -1341,11 +1392,21 @@ export class SequenceService {
 
   // ── Take settling ──────────────────────────────────────────────────────────
 
-  /** Selects a freshly completed take unless the segment already has a usable or pending one. */
+  /**
+   * Selects a freshly completed take unless the segment already has a usable or pending one. A storyboard
+   * transition's selected take made from earlier pictures than its boards hold now gives way to one made from them:
+   * generating it again ("Igen") is how such a transition is brought up to date.
+   */
   private autoSelect(row: store.SegmentRow, take: Generation): boolean {
     if (!store.isUsable(take)) return false
     const current = store.selectedTake(row)
-    if (current?.id === take.id || store.isUsable(current) || store.isPending(current)) return false
+    if (current?.id === take.id || store.isPending(current)) return false
+    if (
+      store.isUsable(current) &&
+      !(store.madeFromEarlierBoards(row, current) && !store.madeFromEarlierBoards(row, take))
+    ) {
+      return false
+    }
     store.setSelectedTake(row, take)
     store.touchSequence(row.sequence_id)
     return true
@@ -1432,6 +1493,114 @@ export class SequenceService {
     return this.fileQueue
   }
 
+  // ── For storyboards (storyboards.ts) ───────────────────────────────────────
+
+  /** Resolves once the file work queued so far (takes moving into or out of folders) is done. */
+  whenFilesSettled(): Promise<void> {
+    return this.filesSettled()
+  }
+
+  /** A take of the segment is being sent to Venice right now (a second one would be paid for twice). */
+  isSubmitting(segmentId: string): boolean {
+    return this.submitting.has(segmentId)
+  }
+
+  /** A take of the segment is on its way to Venice or still rendering, so it isn't missing. */
+  takeInFlight(segmentId: string): boolean {
+    if (this.submitting.has(segmentId)) return true
+    const row = store.getSegmentRow(segmentId)
+    return !!row && !!this.pendingTake(row)
+  }
+
+  /**
+   * Takes whose segments were just deleted (a storyboard's transitions between boards no longer adjacent): their
+   * videos go back to Genereringar/ like the takes of a deleted clip, and the feed hears about them. Never rejects.
+   */
+  async freeTakes(ids: readonly string[]): Promise<void> {
+    if (!ids.length) return
+    try {
+      await this.withFiles(() => this.releaseTakes([...ids]))
+    } catch (err) {
+      console.warn('Could not move freed takes out of their folder:', err)
+    }
+    this.announceGenerations([...ids])
+  }
+
+  /**
+   * A finished take copied as a take of another segment, with a video and poster of its own in that segment's
+   * folder, and selected there (trims as `trimStart`; the end untrimmed): "Gör om till sekvens" gives the new
+   * sequence's clips the storyboard's takes without taking them from the storyboard, so either can be changed or
+   * deleted without the other. The copy is no new purchase, so it carries no price (the feed would count it
+   * twice). Resolves the copy's id.
+   */
+  async copyTake(takeId: string, segmentId: string, trimStart = 0): Promise<string> {
+    const id = await this.withFiles(async () => {
+      const take = db.getGeneration(takeId)
+      if (!take || !store.isUsable(take)) throw new Error('Tagningen har ingen färdig video att kopiera.')
+      const sequence = store.sequenceOfSegment(segmentId)
+      const folder = sequence && this.ensureFolder(sequence.id)
+      if (!sequence || !folder) throw new Error('Klippet finns inte längre.')
+      const dir = sequenceTakesDir(folder, store.kindOf(sequence))
+      const ext = extname(take.filePath).toLowerCase() || '.mp4'
+      const id = randomUUID()
+      let video: string | undefined
+      let poster: string | undefined
+      try {
+        video = await this.copyToFreeName(take.filePath, () =>
+          join(dir, store.availableFileName(dir, store.takeFileBase(take), ext))
+        )
+        if (take.thumbPath && existsSync(take.thumbPath)) {
+          const to = join(thumbsDir(), `${id}${extname(take.thumbPath).toLowerCase() || '.jpg'}`)
+          // Best effort: a missing poster is made again by the backfill.
+          poster = await copyPathVerified(take.thumbPath, to).then(
+            () => to,
+            () => undefined
+          )
+        }
+        this.sql().transaction(() => {
+          db.insertGeneration({
+            ...take,
+            id,
+            queueId: undefined,
+            downloadUrl: undefined,
+            error: undefined,
+            quote: undefined,
+            filePath: video,
+            thumbPath: poster,
+            segmentId
+          })
+          const row = store.requireSegmentRow(segmentId)
+          this.sql()
+            .prepare('UPDATE segments SET selected_generation_id = ?, trim_start = ?, trim_end = 0 WHERE id = ?')
+            .run(id, store.clampTrims(trimStart, 0, store.takeLength(take), 'end').trimStart, row.id)
+        })()
+      } catch (err) {
+        // Nothing records the copies: they would only be clutter.
+        for (const file of [video, poster]) if (file) await rm(file, { force: true }).catch(() => {})
+        throw err
+      }
+      return id
+    })
+    this.announceGenerations([id])
+    const sequenceId = store.getSegmentRow(segmentId)?.sequence_id
+    if (sequenceId) this.deps.notify(sequenceId)
+    return id
+  }
+
+  /** Copies `from` to the path `pick` returns, picking again when another writer takes that name meanwhile. */
+  private async copyToFreeName(from: string, pick: () => string): Promise<string> {
+    for (let attempt = 1; ; attempt++) {
+      const to = pick()
+      try {
+        await copyPathVerified(from, to)
+        return to
+      } catch (err) {
+        if (attempt < PLACE_ATTEMPTS && nameTaken(err, to)) continue
+        throw err
+      }
+    }
+  }
+
   /**
    * Moves a generation's video to the folder and base name `target` picks, under a free name, and records
    * the new path. Videos outside the library are the owner's own files and stay where they are, as does one
@@ -1465,18 +1634,23 @@ export class SequenceService {
     return to
   }
 
-  /** Moves a take's video into its sequence's Tagningar/ (giving a sequence from before folders one). */
+  /**
+   * Moves a take's video into its sequence's Tagningar/ (a transition's into its storyboard's Övergångar/), giving a
+   * sequence from before folders one.
+   */
   private moveIntoSequence(id: string): Promise<string | undefined> {
     return this.relocate(id, (g) => {
       const sequence = g.segmentId ? store.sequenceOfSegment(g.segmentId) : undefined
       const folder = sequence && this.ensureFolder(sequence.id)
-      return folder ? { dir: sequenceTakesDir(folder), base: store.takeFileBase(g) } : undefined
+      return folder && sequence
+        ? { dir: sequenceTakesDir(folder, store.kindOf(sequence)), base: store.takeFileBase(g) }
+        : undefined
     })
   }
 
   /**
-   * Moves a video that lies in Sekvenser/ back to Genereringar/<day>/. If the sequence folder it left
-   * belongs to no sequence any more (deleted meanwhile), that folder is removed once empty.
+   * Moves a video that lies in Sekvenser/ (or Storyboards/) back to Genereringar/<day>/. If the folder it left
+   * belongs to no sequence (storyboard) any more (deleted meanwhile), that folder is removed once empty.
    */
   private async moveOutOfSequences(id: string): Promise<string | undefined> {
     const before = db.getGeneration(id)?.filePath
@@ -1486,7 +1660,7 @@ export class SequenceService {
       dir: generationsDayDir(new Date(g.createdAt)),
       base: store.freeFileBase(g)
     }))
-    if (moved && !store.folderInUse(left)) await store.removeFolderIfEmpty(left)
+    if (moved && !store.folderInUse(left.folder, left.kind)) await store.removeFolderIfEmpty(left.folder, left.kind)
     return moved
   }
 
@@ -1522,7 +1696,8 @@ export class SequenceService {
     if (!g.filePath) return undefined
     if (!g.segmentId) return store.sequenceFolderOfPath(g.filePath) ? 'out' : undefined
     const sequence = store.sequenceOfSegment(g.segmentId)
-    if (!sequence?.folder || store.isUnder(g.filePath, store.takesPath(sequence.folder))) return undefined
+    if (!sequence?.folder) return undefined
+    if (store.isUnder(g.filePath, store.takesPath(sequence.folder, store.kindOf(sequence)))) return undefined
     return 'in'
   }
 
@@ -1543,8 +1718,9 @@ export class SequenceService {
     const row = store.getSequenceRow(sequenceId)
     if (!row) return undefined
     if (row.folder) return row.folder
-    const folder = store.availableFolderName(store.folderBaseName(row.name))
-    sequenceTakesDir(folder)
+    const kind = store.kindOf(row)
+    const folder = store.availableFolderName(store.folderBaseName(row.name, kind), kind)
+    sequenceTakesDir(folder, kind)
     store.setSequenceFolder(row.id, folder)
     return folder
   }
@@ -1581,18 +1757,19 @@ export class SequenceService {
     return this.withFiles(async () => {
       if (!this.folderOutdated(sequenceId, retryFailed) || this.folderBusy(sequenceId)) return
       const row = store.requireSequenceRow(sequenceId)
+      const kind = store.kindOf(row)
       try {
         if (!row.folder) {
           this.ensureFolder(row.id)
         } else {
-          const name = store.availableFolderName(store.folderBaseName(row.name))
+          const name = store.availableFolderName(store.folderBaseName(row.name, kind), kind)
           // The new name is recorded in the same transaction as the rewritten paths, so the row, the paths
           // and the disk can't disagree (the folder is renamed back if that transaction fails).
-          await renameLibraryFolder(store.folderPath(row.folder), store.folderPath(name), () =>
+          await renameLibraryFolder(store.folderPath(row.folder, kind), store.folderPath(name, kind), () =>
             store.setSequenceFolder(row.id, name)
           )
           // A folder removed in Finder comes back empty under the new name.
-          sequenceTakesDir(name)
+          sequenceTakesDir(name, kind)
         }
         this.folderSyncFailed.delete(row.id)
       } catch (err) {
@@ -1831,11 +2008,15 @@ export class SequenceService {
   /**
    * Renders the cut into the scratch folder and then moves it into the sequence's folder as
    * "<Sekvensnamn> <YYYY-MM-DD HH.MM>.mp4", so Finder never shows a half-written film and a folder rename
-   * meanwhile can't pull the target away. Resolves with the film's path.
+   * meanwhile can't pull the target away. Resolves with the film's path. A storyboard is exported the same way
+   * into Storyboards/<namn>/, with its own dedupe (buildStoryboardClips: each later transition's first frame,
+   * which repeats the board the previous one ended on).
    */
   async export(sequenceId: string): Promise<string> {
-    store.requireSequenceRow(sequenceId)
-    if (this.exports.has(sequenceId)) throw new Error('Sekvensen exporteras redan.')
+    const storyboard = store.kindOf(store.requireSequenceRow(sequenceId)) === 'storyboard'
+    if (this.exports.has(sequenceId)) {
+      throw new Error(storyboard ? 'Storyboarden exporteras redan.' : 'Sekvensen exporteras redan.')
+    }
     const controller = new AbortController()
     this.exports.set(sequenceId, controller)
     const startedAt = new Date()
@@ -1847,14 +2028,23 @@ export class SequenceService {
       // A take that is being moved is briefly missing from its recorded path.
       await this.filesSettled()
       const rows = store.listSegmentRows(store.requireSequenceRow(sequenceId).id)
-      if (!rows.length) throw new Error('Sekvensen har inga klipp att exportera.')
+      if (!rows.length) {
+        throw new Error(
+          storyboard
+            ? 'Storyboarden har inga övergångar att exportera än. Lägg till minst två rutor med bilder.'
+            : 'Sekvensen har inga klipp att exportera.'
+        )
+      }
       const takes = rows.map((r) => store.selectedTake(r))
       const missing = takes.flatMap((t, i) => (store.isUsable(t) ? [] : [i + 1]))
-      if (missing.length) throw new Error(missingTakesMessage(missing))
+      if (missing.length) {
+        throw new Error(storyboard ? missingTransitionsMessage(missing) : missingTakesMessage(missing))
+      }
 
       started = true
       emit({ progress: 0 })
-      const clips = await buildConcatClips(rows, takes.filter(store.isUsable))
+      const usable = takes.filter(store.isUsable)
+      const clips = storyboard ? await buildStoryboardClips(rows, usable) : await buildConcatClips(rows, usable)
       rendered = join(tmpDir(), `export-${randomUUID()}.mp4`)
       let lastStep = 0
       await concatClips(clips, rendered, {
@@ -1892,8 +2082,9 @@ export class SequenceService {
     if (signal.aborted) throw new Error('Exporten avbröts.')
     const folder = this.ensureFolder(sequenceId)
     if (!folder) throw new Error('Sekvensen finns inte längre.')
-    const dir = sequenceDir(folder)
-    const name = store.requireSequenceRow(sequenceId).name
+    const row = store.requireSequenceRow(sequenceId)
+    const dir = sequenceDir(folder, store.kindOf(row))
+    const name = row.name
     for (let attempt = 1; ; attempt++) {
       const target = reserveExportPath(dir, name, at)
       try {
@@ -1932,42 +2123,56 @@ export class SequenceService {
  */
 export function registerSequenceIpc(deps: Deps): SequenceService {
   const s = new SequenceService(deps)
+  // Sekvenser's handlers work on sequences only: a storyboard's id (or one of its transitions) is refused with a
+  // pointer to Storyboards, whose own handlers (storyboards.ts) keep its boards and transitions in step. Shared
+  // internals take either: a take of a transition is a take of its segment ('segments:generate', with an approval's
+  // guard), and the read-only 'segments:previewFrames' and 'sequences:missingClips' describe either.
+  const sequence = (id: string): string => store.requirePlainSequence(id).id
+  const clip = (id: string): string => store.requirePlainSegment(id).id
 
   ipcMain.handle('sequences:list', () => s.list())
-  ipcMain.handle('sequences:get', (_e, id: string) => s.get(id))
+  ipcMain.handle('sequences:get', (_e, id: string) => s.get(sequence(id)))
   ipcMain.handle('sequences:create', (_e, name: string) => s.create(name))
-  ipcMain.handle('sequences:update', (_e, id: string, patch: SequencePatch) => s.update(id, patch ?? {}))
-  ipcMain.handle('sequences:delete', (_e, id: string) => s.delete(id))
+  ipcMain.handle('sequences:update', (_e, id: string, patch: SequencePatch) => s.update(sequence(id), patch ?? {}))
+  ipcMain.handle('sequences:delete', (_e, id: string) => {
+    // A storyboard deleted here would leave its runner and boards behind; nothing at all is refused silently.
+    if (store.getSequenceRow(id)) sequence(id)
+    return s.delete(id)
+  })
 
   ipcMain.handle('segments:add', (e, sequenceId: string, init?: SegmentInit) =>
-    s.addSegment(sequenceId, init ?? {}, { byAgent: isAgentCall(e) })
+    s.addSegment(sequence(sequenceId), init ?? {}, { byAgent: isAgentCall(e) })
   )
   ipcMain.handle('segments:update', (e, segmentId: string, patch: SegmentPatch) =>
-    s.updateSegment(segmentId, patch, { byAgent: isAgentCall(e) })
+    s.updateSegment(clip(segmentId), patch, { byAgent: isAgentCall(e) })
   )
-  ipcMain.handle('segments:delete', (e, segmentId: string) => s.deleteSegment(segmentId, { byAgent: isAgentCall(e) }))
+  ipcMain.handle('segments:delete', (e, segmentId: string) =>
+    s.deleteSegment(clip(segmentId), { byAgent: isAgentCall(e) })
+  )
   ipcMain.handle('segments:move', (e, segmentId: string, toIndex: number) =>
-    s.moveSegment(segmentId, toIndex, { byAgent: isAgentCall(e) })
+    s.moveSegment(clip(segmentId), toIndex, { byAgent: isAgentCall(e) })
   )
   ipcMain.handle(
     'segments:setImage',
     (e, segmentId: string, slot: SegmentImageSlot, source: SegmentImageSource | null) =>
-      s.setSegmentImage(segmentId, slot, source ?? null, { byAgent: isAgentCall(e) })
+      s.setSegmentImage(clip(segmentId), slot, source ?? null, { byAgent: isAgentCall(e) })
   )
   ipcMain.handle('segments:previewFrames', (_e, segmentId: string) => s.previewSegmentFrames(segmentId))
-  ipcMain.handle('segments:bridge', (e, segmentId: string) => s.bridgeSegment(segmentId, { byAgent: isAgentCall(e) }))
+  ipcMain.handle('segments:bridge', (e, segmentId: string) =>
+    s.bridgeSegment(clip(segmentId), { byAgent: isAgentCall(e) })
+  )
   // The guard argument only ever comes from an approval in this process (see SubmitGuard).
   ipcMain.handle('segments:generate', (_e, segmentId: string, guard?: unknown) =>
     s.generateSegment(segmentId, asGuard(guard))
   )
 
   ipcMain.handle('sequences:generateAll', (_e, sequenceId: string, guard?: unknown) =>
-    s.startGenerateAll(sequenceId, asGuard(guard))
+    s.startGenerateAll(sequence(sequenceId), asGuard(guard))
   )
   // Read-only; the agent connection asks it what a "generate all" approval would pay for.
   ipcMain.handle('sequences:missingClips', (_e, sequenceId: string) => s.missingClips(sequenceId))
   ipcMain.handle('sequences:stopGenerateAll', (_e, sequenceId: string) => s.stopGenerateAll(sequenceId))
-  ipcMain.handle('sequences:export', (_e, sequenceId: string) => s.export(sequenceId))
+  ipcMain.handle('sequences:export', (_e, sequenceId: string) => s.export(sequence(sequenceId)))
 
   return s
 }

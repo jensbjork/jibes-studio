@@ -141,6 +141,21 @@ export function endMismatch(segment: Segment, next: Segment | undefined): boolea
   return !seamMade(segment, take, next, nextTake)
 }
 
+/**
+ * What "Gör om mellan grannarna" will do for the clip at `index` of `count`, or undefined when it has no neighbour
+ * to work between (a sequence of one clip). Shared by the timeline cards and the editor's keyframe box.
+ */
+export function bridgeDescription(index: number, count: number): string | undefined {
+  const before = index > 0
+  const after = index < count - 1
+  if (before && after) {
+    return `Gör om klippet så att det börjar exakt där klipp ${index} slutar och slutar exakt där klipp ${index + 2} börjar. Grannarna rörs inte, och den gamla tagningen finns kvar.`
+  }
+  if (before) return `Gör om klippet så att det börjar exakt där klipp ${index} slutar. Den gamla tagningen finns kvar.`
+  if (after) return `Gör om klippet så att det slutar exakt där klipp ${index + 2} börjar. Den gamla tagningen finns kvar.`
+  return undefined
+}
+
 /** Applies a patch to the local copy the same way the main process will, for instant feedback. */
 export function patchSegmentLocally(sequence: Sequence, segmentId: string, patch: SegmentPatch): Sequence {
   return {

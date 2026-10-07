@@ -21,8 +21,8 @@ function cachedQuote(p: GenerationParams): Promise<number> {
 }
 
 /**
- * USD price of one take with the params (from the same cache as the totals, since a storyboard shows a price on
- * every panel and they mostly share their settings); undefined while loading or if the quote fails.
+ * USD price of one take with the params, from the same cache as the totals (a view that prices every clip
+ * separately mostly repeats the same settings); undefined while loading or if the quote fails.
  */
 export function useClipQuote(params: GenerationParams | undefined): number | undefined {
   const [quote, setQuote] = useState<number>()

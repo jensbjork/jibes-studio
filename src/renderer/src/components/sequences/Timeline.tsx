@@ -3,6 +3,7 @@ import type { Segment, Sequence } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { BridgeIcon, LinkIcon, PlusIcon } from './icons'
 import {
+  bridgeDescription,
   clipLength,
   continuationMismatch,
   endMismatch,
@@ -12,10 +13,9 @@ import {
   selectedTake,
   takeProgress
 } from './sequenceUtils'
-import { bridgeDescription } from './storyboard/slots'
 
-/** Drag payload of a clip being reordered (its id); shared with the storyboard. */
-export const SEGMENT_DRAG_TYPE = 'application/x-studio-segment'
+/** Drag payload of a clip being reordered (its id). */
+const SEGMENT_DRAG_TYPE = 'application/x-studio-segment'
 
 interface Props {
   sequence: Sequence
