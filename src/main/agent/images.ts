@@ -9,6 +9,24 @@ export interface ImageBlock {
   mimeType: string
 }
 
+/** An MCP audio content block. */
+export interface AudioBlock {
+  type: 'audio'
+  /** Base64. */
+  data: string
+  mimeType: string
+}
+
+/** A JPEG ffmpeg made (a frame from a video) as image content, as it is. */
+export function jpegBlock(jpeg: Buffer): ImageBlock {
+  return { type: 'image', data: jpeg.toString('base64'), mimeType: 'image/jpeg' }
+}
+
+/** An MP3 ffmpeg made (a voice's reference window, a clip's soundtrack) as audio content. */
+export function mp3Block(mp3: Buffer): AudioBlock {
+  return { type: 'audio', data: mp3.toString('base64'), mimeType: 'audio/mpeg' }
+}
+
 /** Longest side of the pictures agents get: enough for a vision model to judge faces, clothes and places. */
 export const AGENT_IMAGE_MAX_SIDE = 768
 

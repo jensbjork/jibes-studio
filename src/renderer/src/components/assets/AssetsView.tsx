@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
-import type { Asset, AssetKind } from '@shared/types'
-import { ASSET_COPY } from '../../lib/assets'
+import { MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
+import type { Asset, AssetAudio, AssetKind } from '@shared/types'
+import { ASSET_COPY, assetAudio, hasAudio } from '../../lib/assets'
 import { ipcErrorMessage, useAssetsState } from '../../lib/hooks'
 import { SELECTED_ASSET_KEYS } from '../../lib/library'
 import type { Intent, Navigate } from '../../lib/navigation'
 import AssetEditor from './AssetEditor'
 import AssetIcon from './AssetIcon'
 import AssetList from './AssetList'
-import { isFileDrag, skippedMessage, splitImagePaths } from './imageUtils'
+import { LONG_AUDIO_SECONDS, clipFileName, formatDuration } from './audioUtils'
+import { isFileDrag, sortFiles, sortedFilesNotice } from './imageUtils'
 
 interface Notice {
   id: number
@@ -68,6 +70,30 @@ function pruneOverlay(overlay: Record<string, Overlaid>, listed: Asset[]): Recor
   return Object.keys(next).length === Object.keys(overlay).length ? overlay : next
 }
 
+/** Files being copied into the library, per asset id. */
+type Adding = Record<string, number>
+
+function bumpAdding(adding: Adding, assetId: string, delta: number): Adding {
+  const n = (adding[assetId] ?? 0) + delta
+  const next = { ...adding }
+  if (n > 0) next[assetId] = n
+  else delete next[assetId]
+  return next
+}
+
+/** Advice for clips much longer than what is sent, so the user knows to pick the part that counts. */
+function longClipsNotice(clips: AssetAudio[], section: string): string | undefined {
+  if (!clips.length) return undefined
+  const what =
+    clips.length === 1
+      ? `”${clipFileName(clips[0].path)}” är ${formatDuration(clips[0].duration)} lång`
+      : `${clips.length} av ljudfilerna är längre än ${formatDuration(LONG_AUDIO_SECONDS)}`
+  return (
+    `${what}. Bara ett utdrag på ${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} s skickas till Venice – välj ` +
+    `den bästa delen under ${section}.`
+  )
+}
+
 function uniqueNewName(assets: Asset[], base: string): string {
   const taken = new Set(assets.map((a) => a.name.toLocaleLowerCase('sv')))
   if (!taken.has(base.toLocaleLowerCase('sv'))) return base
@@ -83,7 +109,7 @@ interface Props {
   navigate: Navigate
 }
 
-/** Karaktärer, Miljöer or Kläder: the list of one kind of asset and an editor for the selected one. */
+/** Karaktärer, Miljöer, Kläder or Poser: the list of one kind of asset and an editor for the selected one. */
 export default function AssetsView({ kind, intent, onIntentHandled, navigate }: Props) {
   const copy = ASSET_COPY[kind]
   // Every kind in one request: characters need the outfits, and outfits show who wears them.
@@ -95,7 +121,8 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
   const [selectedId, setSelectedId] = useState<string | undefined>(() => loadSelected(kind))
   const [createdId, setCreatedId] = useState<string>()
   const [creating, setCreating] = useState(false)
-  const [adding, setAdding] = useState<Record<string, number>>({})
+  const [addingImages, setAddingImages] = useState<Adding>({})
+  const [addingAudio, setAddingAudio] = useState<Adding>({})
   const [query, setQuery] = useState('')
   const [notice, setNotice] = useState<Notice>()
 
@@ -145,7 +172,9 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
     return () => clearTimeout(t)
   }, [notice])
 
-  const notify = (text: string, tone: Notice['tone'] = 'error') => setNotice({ id: Date.now(), tone, text })
+  // Advice never pushes an error off the screen before it has been read; it times out on its own.
+  const notify = (text: string, tone: Notice['tone'] = 'error') =>
+    setNotice((current) => (current?.tone === 'error' && tone === 'info' ? current : { id: Date.now(), tone, text }))
 
   const updated = (a: Asset) => setOverlay((o) => ({ ...o, [a.id]: { asset: a, receivedAt: Date.now() } }))
 
@@ -180,26 +209,42 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
     setCreatedId(undefined)
   }
 
-  const addImages = async (assetId: string, paths: string[]) => {
-    const { images, skipped } = splitImagePaths(paths)
-    if (skipped) notify(skippedMessage(skipped, images.length), images.length ? 'info' : 'error')
-    if (!images.length) return
-    const bump = (delta: number) =>
-      setAdding((a) => {
-        const n = (a[assetId] ?? 0) + delta
-        const next = { ...a }
-        if (n > 0) next[assetId] = n
-        else delete next[assetId]
-        return next
-      })
-    bump(images.length)
+  const addImages = async (assetId: string, images: string[]) => {
+    setAddingImages((a) => bumpAdding(a, assetId, images.length))
     try {
       updated(await window.studio.addAssetImages(assetId, images))
     } catch (e) {
       notify(ipcErrorMessage(e))
     } finally {
-      bump(-images.length)
+      setAddingImages((a) => bumpAdding(a, assetId, -images.length))
     }
+  }
+
+  const addAudio = async (assetId: string, paths: string[]) => {
+    const before = new Set(assetAudio(assets.find((a) => a.id === assetId) ?? { audio: [] }).map((c) => c.id))
+    setAddingAudio((a) => bumpAdding(a, assetId, paths.length))
+    try {
+      const asset = await window.studio.addAssetAudio(assetId, paths)
+      updated(asset)
+      const long = assetAudio(asset).filter((c) => !before.has(c.id) && c.duration > LONG_AUDIO_SECONDS)
+      const advice = longClipsNotice(long, copy.audio?.title ?? 'ljudet')
+      if (advice) notify(advice, 'info')
+    } catch (e) {
+      notify(ipcErrorMessage(e))
+    } finally {
+      setAddingAudio((a) => bumpAdding(a, assetId, -paths.length))
+    }
+  }
+
+  /** Files dropped or picked for an asset: photos to its images, sound to its clips (kinds that have them). */
+  const addFiles = (assetId: string, paths: string[]) => {
+    const withAudio = hasAudio(kind)
+    const files = sortFiles(paths, withAudio)
+    const taken = files.images.length + files.audio.length
+    const notice = sortedFilesNotice(files, withAudio)
+    if (notice) notify(notice, taken ? 'info' : 'error')
+    if (files.images.length) void addImages(assetId, files.images)
+    if (files.audio.length) void addAudio(assetId, files.audio)
   }
 
   // Dropping files outside a drop target would otherwise navigate the window to the file.
@@ -222,10 +267,11 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
         onSelect={select}
         onCreate={create}
         creating={creating}
-        adding={adding}
-        onDropImages={(id, paths) => {
+        addingImages={addingImages}
+        addingAudio={addingAudio}
+        onDropFiles={(id, paths) => {
           select(id)
-          void addImages(id, paths)
+          addFiles(id, paths)
         }}
       />
 
@@ -238,10 +284,11 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
             outfitsLoaded={loaded}
             wearers={wearers}
             autoFocusName={selected.id === createdId}
-            adding={adding[selected.id] ?? 0}
+            addingImages={addingImages[selected.id] ?? 0}
+            addingAudio={addingAudio[selected.id] ?? 0}
             navigate={navigate}
             onUpdated={updated}
-            onAddImages={(paths) => void addImages(selected.id, paths)}
+            onAddFiles={(paths) => addFiles(selected.id, paths)}
             onDelete={() => remove(selected.id)}
             onError={notify}
           />

@@ -29,6 +29,11 @@ export class AgentSession {
   closed = false
   mcp: McpServer | undefined
   transport: StreamableHTTPServerTransport | undefined
+  /**
+   * The MCP protocol version the client speaks (from its initialize request, then the mcp-protocol-version
+   * header it sends with every later request); undefined until known.
+   */
+  protocolVersion: string | undefined
 
   constructor(
     /** Where the client connects from. */
@@ -103,6 +108,13 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 function isInitialize(body: unknown): boolean {
   return Array.isArray(body) ? body.some((m) => isInitializeRequest(m)) : isInitializeRequest(body)
+}
+
+/** The protocol version an initialize request asks for. */
+function requestedVersion(body: unknown): string | undefined {
+  const message = (Array.isArray(body) ? body : [body]).find((m) => isInitializeRequest(m))
+  const version = message && isInitializeRequest(message) ? message.params.protocolVersion : undefined
+  return typeof version === 'string' && version ? version : undefined
 }
 
 export class AgentServer {
@@ -250,11 +262,14 @@ export class AgentServer {
     } else if (req.method === 'POST' && isInitialize(body)) {
       const name = req.headers['x-studio-agent-name']
       session = await this.start(normalizeAddress(peer), typeof name === 'string' ? name.trim().slice(0, 60) : undefined)
+      session.protocolVersion = requestedVersion(body)
     } else {
       return rpcError(res, 400, -32000, 'Bad Request: No valid session ID provided')
     }
 
     session.lastSeen = Date.now()
+    const version = req.headers['mcp-protocol-version']
+    if (typeof version === 'string' && version) session.protocolVersion = version
     await session.transport!.handleRequest(req, res, body)
     if (!sessionId && !session.id) {
       // The initialize was refused; nothing refers to this session.

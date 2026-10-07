@@ -88,10 +88,10 @@ Optional, but please use one when a change clearly belongs to an area. Pick the 
 
 | Scope | Area | Mainly |
 | --- | --- | --- |
-| `generate` | The Generate view and the job queue | `GenerateView.tsx`, `ParamsForm.tsx`, `jobs.ts`, `venice.ts` |
-| `prompt` | The prompt editor and `@ImageN` reference checks | `components/prompt/`, `shared/prompt-refs.ts` |
-| `library` | Characters, environments and outfits, and the prompt library | `components/assets/`, `components/prompts/`, `library.ts` |
-| `assets` | Reference images and asset folders on disk | `assets.ts`, `references.ts` |
+| `generate` | The Generate view, the clip feed and the job queue | `GenerateView.tsx`, `ParamsForm.tsx`, `components/feed/`, `jobs.ts`, `venice.ts` |
+| `prompt` | The prompt editor and `@ImageN` / `@AudioN` reference checks | `components/prompt/`, `shared/prompt-refs.ts` |
+| `library` | Characters, environments, outfits and poses, the prompt library, reviews and learnings | `components/assets/`, `components/prompts/`, `library.ts`, `reviews.ts` |
+| `assets` | Reference images, audio clips and asset folders on disk | `assets.ts`, `references.ts` |
 | `sequences` | Sequences, clips, takes, trims and preview | `components/sequences/`, `sequences.ts`, `sequence-store.ts` |
 | `export` | ffmpeg export of sequences | `sequence-export.ts`, `ffmpeg.ts` |
 | `agent` | Agent connection: approvals, activity, the agent guide | `agent/approvals.ts`, `agent/guide.ts`, `components/agent/` |
@@ -167,7 +167,9 @@ request focused. Before asking for review, check that:
       `src/main/db.ts`, tested on a copy of a library (see
       [DEVELOPMENT.md](docs/DEVELOPMENT.md#database-migrations)).
 - [ ] **Money stays guarded**: every new path that sends a generation goes through `JobManager.submit` (and its
-      `@ImageN` check), and anything an agent triggers that costs money still needs approval in the app.
+      `@ImageN` / `@AudioN` check), and anything an agent triggers that costs money still needs approval in the app.
+- [ ] **Agents keep up**: a new user-facing capability gets matching agent tools and guide text in
+      `src/main/agent/` (and a row in [docs/AGENTS.md](docs/AGENTS.md)).
 - [ ] **The agent connection stays local**: changes to the MCP server keep it bound to `127.0.0.1` and the
       Tailscale interface, behind the bearer token, off by default.
 

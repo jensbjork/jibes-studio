@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { ReferenceKind } from '@shared/prompt-refs'
 import { ASSET_COPY } from '../../lib/assets'
 import { mediaUrl } from '../../lib/media'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
+import AudioPlayButton from '../pickers/AudioPlayButton'
 import { KIND_TONE } from '../pickers/assetKinds'
-import { formatImageRefs, promptList } from '../pickers/text'
+import { audioLabel, audioLabelParts, windowLabel } from '../pickers/audioRefs'
+import { formatAudioRefs, formatImageRefs, promptList } from '../pickers/text'
 import { placeBeside } from './textareaDom'
 import { fileName, isDisabled, type MenuItem, type MenuSection } from './promptText'
 
@@ -21,8 +24,10 @@ interface Props {
   onChoose: (item: MenuItem) => void
   /** What follows the "@", for the empty state. */
   query: string
-  /** Picking a picture for a wrong token rather than completing a new one. */
+  /** Picking a picture (or clip) for a wrong token rather than completing a new one. */
   replacing: boolean
+  /** Only pictures or only clips are offered. */
+  only?: ReferenceKind
   /** No reference images yet: the empty state explains where they come from. */
   noReferences: boolean
 }
@@ -35,8 +40,8 @@ export function optionId(menuId: string, index: number): string {
 }
 
 /**
- * The "@" autocomplete next to the caret: the references (each asset, then its pictures) and library assets
- * that can be added. Keyboard handling lives in the editor, which keeps the focus; the mouse works too.
+ * The "@" autocomplete next to the caret: the references (each asset, then its pictures and clips) and library
+ * assets that can be added. Keyboard handling lives in the editor, which keeps the focus; the mouse works too.
  */
 export default function TokenMenu({
   id,
@@ -47,6 +52,7 @@ export default function TokenMenu({
   onChoose,
   query,
   replacing,
+  only,
   noReferences
 }: Props) {
   const optionRefs = useRef<(HTMLElement | null)[]>([])
@@ -67,15 +73,23 @@ export default function TokenMenu({
       onMouseDown={(e) => e.preventDefault()}
     >
       {replacing && (
-        <p className="border-b border-line px-3 py-2 text-[11px] text-muted">Välj bilden som hänvisningen ska peka på</p>
+        <p className="border-b border-line px-3 py-2 text-[11px] text-muted">
+          {only === 'audio' ? 'Välj ljudklippet som hänvisningen ska peka på' : 'Välj bilden som hänvisningen ska peka på'}
+        </p>
       )}
-      <div id={id} role="listbox" aria-label="Hänvisa till en bild" className="min-h-0 flex-1 overflow-y-auto p-1">
+      <div
+        id={id}
+        role="listbox"
+        aria-label={only === 'audio' ? 'Hänvisa till ett ljudklipp' : 'Hänvisa till en bild eller ett ljudklipp'}
+        className="min-h-0 flex-1 overflow-y-auto p-1"
+      >
         {empty ? (
           <div className="px-3 py-4 text-center text-[12px] text-muted">
             {query ? <p>Inget heter ”@{query}”.</p> : <p>Inget att hänvisa till än.</p>}
             {noReferences && (
               <p className="mt-1 text-[11px]">
-                Lägg till bilder med ＋ Karaktär, ＋ Miljö eller ＋ Kläder ovanför – de får nummer @Image1, @Image2 …
+                Lägg till bilder med ＋ Karaktär, ＋ Miljö, ＋ Kläder eller ＋ Pose ovanför – de får nummer @Image1,
+                @Image2 … och röster @Audio1 …
               </p>
             )}
           </div>
@@ -138,7 +152,9 @@ function Option({ id, item, active, refCallback, onHover, onChoose }: OptionProp
       onClick={() => !disabled && onChoose()}
       className={`flex cursor-default items-center gap-2 rounded-md px-2 py-1 ${
         disabled ? 'opacity-45' : active ? 'bg-raised' : ''
-      } ${item.type === 'image' && item.reference.asset ? 'pl-4' : ''}`}
+      } ${
+        (item.type === 'image' && item.reference.asset) || (item.type === 'audio' && item.audio.source) ? 'pl-4' : ''
+      }`}
     >
       <OptionContent item={item} />
     </div>
@@ -147,7 +163,7 @@ function Option({ id, item, active, refCallback, onHover, onChoose }: OptionProp
 
 function OptionContent({ item }: { item: MenuItem }) {
   if (item.type === 'group') {
-    const { asset, indices, outfits } = item.group
+    const { asset, indices, outfits, audios, people } = item.group
     const tone = KIND_TONE[asset.kind]
     return (
       <>
@@ -156,10 +172,30 @@ function OptionContent({ item }: { item: MenuItem }) {
           <span className="block truncate font-medium">{asset.name}</span>
           <span className="block truncate text-[11px] text-muted">
             {ASSET_COPY[asset.kind].singular}
+            {audios?.length ? (asset.kind === 'character' ? ' · med röst' : ' · med ljud') : ''}
             {outfits?.length ? ` · bär ${promptList(outfits.map((o) => o.name), 'sv')}` : ''}
+            {asset.kind === 'pose' && people?.length ? ` · ${promptList(people.map((p) => p.name), 'sv')}` : ''}
           </span>
         </span>
-        <span className={`shrink-0 text-[11px] ${tone.text}`}>{formatImageRefs(indices)}</span>
+        <span className={`shrink-0 text-[11px] ${tone.text}`}>
+          {formatImageRefs(indices)}
+          {audios?.length ? `, ${formatAudioRefs(audios)}` : ''}
+        </span>
+      </>
+    )
+  }
+  if (item.type === 'audio') {
+    const a = item.audio
+    const kind = a.source?.asset.kind
+    const { name, detail } = audioLabelParts(a)
+    return (
+      <>
+        <AudioPlayButton path={a.path} start={a.start} length={a.length} label={audioLabel(a)} className="h-6 w-6" />
+        <span className={`shrink-0 font-medium ${kind ? KIND_TONE[kind].text : 'text-text'}`}>@Audio{a.index}</span>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
+          {name} · {detail} · {windowLabel(a)}
+        </span>
+        {!a.sent && <span className="shrink-0 text-[11px] text-accent">skickas inte</span>}
       </>
     )
   }

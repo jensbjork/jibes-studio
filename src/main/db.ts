@@ -107,7 +107,46 @@ const migrations: string[] = [
   CREATE INDEX asset_images_by_asset ON asset_images(asset_id, position);
   ALTER TABLE assets ADD COLUMN kind TEXT NOT NULL DEFAULT 'character';
   ALTER TABLE assets ADD COLUMN default_outfit_id TEXT REFERENCES assets(id) ON DELETE SET NULL;
-  CREATE INDEX assets_by_kind ON assets(kind);`
+  CREATE INDEX assets_by_kind ON assets(kind);`,
+
+  // Phase 6: audio clips on assets (a character's voice, an environment's soundscape), the user's and agents'
+  // reviews of generations, and the learnings agents distil from them. Poses are a new asset kind, which needs
+  // no schema change (assets.kind is free text) but owns the Poser folder from this version on.
+  `CREATE TABLE asset_audio (
+    id TEXT PRIMARY KEY,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    duration REAL NOT NULL,
+    clip_start REAL NOT NULL DEFAULT 0,
+    clip_length REAL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX asset_audio_by_asset ON asset_audio(asset_id, position);
+  CREATE TABLE generation_reviews (
+    id TEXT PRIMARY KEY,
+    generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
+    author TEXT NOT NULL,
+    rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+    tags TEXT NOT NULL DEFAULT '[]',
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX generation_reviews_by_generation ON generation_reviews(generation_id);
+  CREATE UNIQUE INDEX generation_reviews_user ON generation_reviews(generation_id) WHERE author = 'user';
+  CREATE TABLE learnings (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    insight TEXT NOT NULL,
+    model TEXT,
+    tags TEXT NOT NULL DEFAULT '[]',
+    evidence TEXT NOT NULL DEFAULT '[]',
+    author TEXT NOT NULL,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );`
 ]
 
 
@@ -116,6 +155,22 @@ const migrations: string[] = [
  * the base folder are the library's own folders.
  */
 export const ASSETS_SCHEMA_VERSION = 6
+
+/** The user_version from which a library has poses (and asset audio): from then on Poser is its own folder. */
+export const POSES_SCHEMA_VERSION = 7
+
+/**
+ * Why this build doesn't open a library whose database a newer Studio has migrated: it doesn't know the newer
+ * tables, and its own upkeep (renaming or moving asset folders, deleting assets) would leave their paths behind or
+ * trash files they still use.
+ */
+export const NEWER_LIBRARY_MESSAGE =
+  'Biblioteket har sparats av en nyare version av Studio. Uppdatera appen för att öppna det.'
+
+/** Whether a database at this schema version comes from a newer Studio than this build. */
+export function isNewerSchema(version: number): boolean {
+  return version > migrations.length
+}
 
 /** The schema version of a library database, read without migrating it. */
 export function schemaVersion(file: string): number {
@@ -153,6 +208,7 @@ export function openDb(file: string, opts: { create?: boolean } = {}): void {
     conn.pragma('journal_mode = WAL')
     conn.pragma('foreign_keys = ON')
     const version = conn.pragma('user_version', { simple: true }) as number
+    if (isNewerSchema(version)) throw new Error(NEWER_LIBRARY_MESSAGE)
     for (let i = version; i < migrations.length; i++) {
       conn.transaction(() => {
         conn.exec(migrations[i])
@@ -224,7 +280,10 @@ export function generationFromRow(r: GenerationRow): StoredGeneration {
     completedAt: r.completed_at ?? undefined,
     segmentId: r.segment_id ?? undefined,
     thumbPath: r.thumb_path ? fromStoredPath(r.thumb_path) : undefined,
-    videoDuration: r.video_duration ?? undefined
+    videoDuration: r.video_duration ?? undefined,
+    // Filled in by reviews.attachReviewSummary where the feed needs them (generations:list, updates).
+    reviewCount: 0,
+    agentReviewCount: 0
   }
 }
 
@@ -330,24 +389,32 @@ export function listGenerationsForSegments(segmentIds: string[]): StoredGenerati
 
 // ── Stored path maintenance ──────────────────────────────────────────────────
 
-/** The start/end/reference image paths in a params JSON string. */
-function paramImagePaths(json: string): string[] {
+/** The reference audio paths of params (entries that aren't { path } objects give undefined). */
+function audioPaths(p: Partial<GenerationParams>): unknown[] {
+  if (!Array.isArray(p.referenceAudios)) return []
+  return p.referenceAudios.map((a: unknown) => (a && typeof a === 'object' ? (a as { path?: unknown }).path : a))
+}
+
+/** The start/end/reference image paths and reference audio paths in a params JSON string. */
+function paramFilePaths(json: string): string[] {
   try {
     const p = JSON.parse(json) as Partial<GenerationParams> | null
     if (!p || typeof p !== 'object') return []
     const refs = Array.isArray(p.referenceImages) ? p.referenceImages : []
-    return [p.startImage, p.endImage, ...refs].filter((v): v is string => typeof v === 'string' && v !== '')
+    return [p.startImage, p.endImage, ...refs, ...audioPaths(p)].filter(
+      (v): v is string => typeof v === 'string' && v !== ''
+    )
   } catch {
     return []
   }
 }
 
 /**
- * Whether a row records this stored path (letter case ignored, like the disk): a generation, export or
- * asset image file, or an image in generation or segment params. A row whose file was deleted in Finder
- * still claims its name: a new file given that name would otherwise be taken for the old row's file —
- * deleting that row would take the new file with it, and an old generation or clip whose picture was
- * removed would silently use somebody else's picture on "Använd igen" or a regenerated take.
+ * Whether a row records this stored path (letter case ignored, like the disk): a generation, export, asset
+ * image or asset audio file, or an image or audio clip in generation or segment params. A row whose file was
+ * deleted in Finder still claims its name: a new file given that name would otherwise be taken for the old
+ * row's file — deleting that row would take the new file with it, and an old generation or clip whose picture
+ * was removed would silently use somebody else's picture on "Använd igen" or a regenerated take.
  */
 export function isStoredPathRecorded(stored: string): boolean {
   if (!db || !stored) return false
@@ -356,6 +423,7 @@ export function isStoredPathRecorded(stored: string): boolean {
       `SELECT 1 FROM generations WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM exports WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM asset_images WHERE file_path = @p COLLATE NOCASE
+       UNION ALL SELECT 1 FROM asset_audio WHERE file_path = @p COLLATE NOCASE
        LIMIT 1`
     )
     .get({ p: stored })
@@ -370,7 +438,7 @@ export function isStoredPathRecorded(stored: string): boolean {
     )
     .pluck()
     .all({ n: needle }) as string[]
-  return candidates.some((json) => paramImagePaths(json).some((p) => fold(p) === key))
+  return candidates.some((json) => paramFilePaths(json).some((p) => fold(p) === key))
 }
 
 /**
@@ -389,6 +457,7 @@ export function isStoredPrefixRecorded(folder: string): boolean {
       `SELECT 1 FROM generations WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM exports WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM asset_images WHERE instr(studio_fold(file_path), @p) = 1
+       UNION ALL SELECT 1 FROM asset_audio WHERE instr(studio_fold(file_path), @p) = 1
        LIMIT 1`
     )
     .get({ p: prefix })
@@ -401,10 +470,10 @@ export function isStoredPrefixRecorded(folder: string): boolean {
     )
     .pluck()
     .all({ n: needle }) as string[]
-  return candidates.some((json) => paramImagePaths(json).some((p) => fold(p).startsWith(prefix)))
+  return candidates.some((json) => paramFilePaths(json).some((p) => fold(p).startsWith(prefix)))
 }
 
-/** Every stored path in the library database (files, posters, params images, asset images, exports). */
+/** Every stored path in the library database (files, posters, params images and audio, asset files, exports). */
 export function listStoredPaths(): string[] {
   const paths: string[] = []
   mapStoredPaths((p) => {
@@ -414,7 +483,7 @@ export function listStoredPaths(): string[] {
   return paths
 }
 
-/** Applies map to the image paths in a params JSON string; returns undefined when nothing changed. */
+/** Applies map to the image and audio paths in a params JSON string; returns undefined when nothing changed. */
 function mapParamsJson(json: string, map: (stored: string) => string): string | undefined {
   let p: GenerationParams
   try {
@@ -434,15 +503,28 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
   if ('startImage' in out) out.startImage = one(out.startImage) as string | undefined
   if ('endImage' in out) out.endImage = one(out.endImage) as string | undefined
   if (Array.isArray(out.referenceImages)) out.referenceImages = out.referenceImages.map(one) as string[]
+  if (Array.isArray(out.referenceAudios)) {
+    out.referenceAudios = out.referenceAudios.map((a: unknown) => {
+      if (!a || typeof a !== 'object') return a
+      const path = (a as { path?: unknown }).path
+      const next = one(path)
+      return next === path ? a : { ...a, path: next }
+    }) as GenerationParams['referenceAudios']
+  }
   return changed ? JSON.stringify(out) : undefined
 }
 
 /**
  * Runs map over every stored path in the library database (generation files, posters and params, segment
- * params, asset images, exports) in one transaction and writes back what changed. `contains`, when
- * given, skips rows that can't hold a matching path. Returns the number of rows changed.
+ * params, asset images and audio, exports) in one transaction and writes back what changed. `contains`, when
+ * given, skips rows that can't hold a matching path. `onGeneration` hears the id of every generation changed.
+ * Returns the number of rows changed.
  */
-export function mapStoredPaths(map: (stored: string) => string, contains?: string): number {
+export function mapStoredPaths(
+  map: (stored: string) => string,
+  contains?: string,
+  onGeneration?: (id: string) => void
+): number {
   const conn = getDb()
   const like = contains === undefined ? undefined : JSON.stringify(contains).slice(1, -1)
   const hit = (v: string | null): boolean => !!v && (like === undefined || v.includes(contains!) || v.includes(like))
@@ -464,6 +546,7 @@ export function mapStoredPaths(map: (stored: string) => string, contains?: strin
       const params = hit(r.params) ? mapParamsJson(r.params, map) : undefined
       if (file === r.file_path && thumb === r.thumb_path && params === undefined) continue
       updateGeneration.run(file, thumb, params ?? r.params, r.id)
+      onGeneration?.(r.id)
       changed++
     }
 
@@ -477,7 +560,7 @@ export function mapStoredPaths(map: (stored: string) => string, contains?: strin
       changed++
     }
 
-    for (const table of ['asset_images', 'exports']) {
+    for (const table of ['asset_images', 'asset_audio', 'exports']) {
       const rows = conn.prepare(`SELECT id, file_path FROM ${table}`).all() as { id: string; file_path: string }[]
       const update = conn.prepare(`UPDATE ${table} SET file_path = ? WHERE id = ?`)
       for (const r of rows) {
@@ -510,16 +593,36 @@ const rewriteLog: { seq: number; from: string; to: string }[] = []
 let rewriteSeq = 0
 const REWRITE_LOG_SIZE = 500
 
+/** Generations whose stored paths a prefix rewrite changed and that the windows haven't been sent again. */
+const rewrittenGenerations = new Set<string>()
+
+/**
+ * The generations prefix rewrites have changed since the last call (their file, poster, or the image and audio
+ * paths in their params), for the windows to be sent again: an asset renamed by an agent while the clip feed is
+ * open would otherwise leave the feed filtering by, showing and reusing the old paths. An id whose rewrite was
+ * rolled back is harmless: the row is merely sent as it is.
+ */
+export function takeRewrittenGenerations(): string[] {
+  const ids = [...rewrittenGenerations]
+  rewrittenGenerations.clear()
+  return ids
+}
+
 /**
  * Rewrites every stored relative path equal to or under oldRel to the same place under newRel: generations
- * (file_path, thumb_path, params), segments.params, asset_images.file_path, exports.file_path.
+ * (file_path, thumb_path, params incl. reference audio), segments.params, asset_images.file_path,
+ * asset_audio.file_path, exports.file_path.
  */
 export function rewriteStoredPrefix(oldRel: string, newRel: string): number {
   const from = cleanRelative(oldRel)
   const to = cleanRelative(newRel)
   if (!from || !to || isAbsolute(from) || isAbsolute(to)) throw new Error('Ogiltig sökväg i biblioteket.')
   if (from === to) return 0
-  const changed = mapStoredPaths((stored) => rebasePrefix(stored, from, to), from)
+  const changed = mapStoredPaths(
+    (stored) => rebasePrefix(stored, from, to),
+    from,
+    (id) => rewrittenGenerations.add(id)
+  )
   rewriteLog.push({ seq: ++rewriteSeq, from, to })
   if (rewriteLog.length > REWRITE_LOG_SIZE) rewriteLog.shift()
   return changed
@@ -532,8 +635,9 @@ export function rewriteMark(): number {
 
 /**
  * Params held in memory across a long await (a submit uploading its pictures) miss the rewrites done
- * meanwhile, e.g. an asset renamed and its folder with it. Image paths whose file is gone are carried
- * along the rewrites made since `mark`, when that leads to an existing file; anything else stays as it is.
+ * meanwhile, e.g. an asset renamed and its folder with it. Image and audio paths whose file is gone are
+ * carried along the rewrites made since `mark`, when that leads to an existing file; anything else stays as
+ * it is.
  */
 export function followRewrites(params: GenerationParams, mark: number): GenerationParams {
   const since = rewriteLog.filter((r) => r.seq > mark)
@@ -547,12 +651,18 @@ export function followRewrites(params: GenerationParams, mark: number): Generati
     const next = fromStoredPath(moved)
     return existsSync(next) ? next : path
   }
-  return {
+  const result: GenerationParams = {
     ...params,
     startImage: follow(params.startImage),
     endImage: follow(params.endImage),
     referenceImages: params.referenceImages?.map((r) => follow(r) ?? r)
   }
+  if (Array.isArray(params.referenceAudios)) {
+    result.referenceAudios = params.referenceAudios.map((a) =>
+      a && typeof a === 'object' && typeof a.path === 'string' ? { ...a, path: follow(a.path) ?? a.path } : a
+    )
+  }
+  return result
 }
 
 /**

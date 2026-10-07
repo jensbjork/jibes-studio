@@ -1,10 +1,16 @@
 import { useMemo, type RefObject } from 'react'
 import type { Kind } from '@shared/models'
-import { validateNegativePrompt, type PromptIssue } from '@shared/prompt-refs'
+import { validateNegativePrompt, type PromptIssue, type ValidateOptions } from '@shared/prompt-refs'
 import PromptIssueList from './PromptIssueList'
 import { applyEdits, diffEdit, removeRanges, type TextRange } from './promptText'
 import { issueViews, type FixAction } from './quickFixes'
 import { replaceRange } from './textareaDom'
+
+/** What the text is checked against: prompt-refs validationContext of the form's params. */
+export interface PromptChecks {
+  referenceCount: number
+  options: ValidateOptions
+}
 
 interface Props {
   id: string
@@ -13,51 +19,46 @@ interface Props {
   /** The negative prompt's textarea, so fixes can be undone with ⌘Z and problems can be selected. */
   textareaRef: RefObject<HTMLTextAreaElement | null>
   kind: Kind
-  /** Reference images in the form (0 outside reference mode). */
-  referenceCount: number
-  maxImages: number
-  /** A sequence clip continuing from the previous one (see ValidateOptions.continuing). */
-  continuing?: boolean
+  checks: PromptChecks
   onSwitchToReference?: () => void
+  /** Switches to a reference model that takes audio (named `audioModelName`). */
+  onUseAudioModel?: () => void
+  audioModelName?: string
 }
 
-/** The errors in the negative prompt's @ImageN references (they block generating too), with fixes. */
-export function negativePromptIssues(
-  value: string,
-  referenceCount: number,
-  kind: Kind,
-  maxImages: number,
-  continuing = false
-): PromptIssue[] {
-  return value ? validateNegativePrompt(value, referenceCount, { kind, maxImages, continuing }) : []
+/** The errors in the negative prompt's @ImageN and @AudioN references (they block generating too). */
+export function negativePromptIssues(value: string, checks: PromptChecks): PromptIssue[] {
+  return value ? validateNegativePrompt(value, checks.referenceCount, checks.options) : []
 }
 
-/** Problems with @ImageN in the negative prompt, under its field. Same rules and fixes as the prompt. */
+/** Problems with @ImageN and @AudioN in the negative prompt, under its field. Same rules and fixes as the prompt. */
 export default function NegativePromptIssues({
   id,
   value,
   onChange,
   textareaRef,
   kind,
-  referenceCount,
-  maxImages,
-  continuing = false,
-  onSwitchToReference
+  checks,
+  onSwitchToReference,
+  onUseAudioModel,
+  audioModelName
 }: Props) {
+  const checksKey = JSON.stringify(checks)
   const views = useMemo(
     () =>
       issueViews({
         prompt: value,
-        issues: negativePromptIssues(value, referenceCount, kind, maxImages, continuing),
+        issues: negativePromptIssues(value, checks),
         references: [],
         groups: [],
         kind,
         language: 'en',
         canSwitchToReference: !!onSwitchToReference,
         canAddReferences: false,
+        audioModelName: onUseAudioModel ? audioModelName : undefined,
         adviseUnused: false
       }),
-    [value, referenceCount, kind, maxImages, continuing, !!onSwitchToReference]
+    [value, checksKey, kind, !!onSwitchToReference, onUseAudioModel ? audioModelName : undefined]
   )
 
   const setValue = (next: string): void => {
@@ -80,6 +81,7 @@ export default function NegativePromptIssues({
     else if (action.type === 'remove') setValue(removeRanges(value, action.ranges))
     else if (action.type === 'choose') reveal(action.range)
     else if (action.type === 'switch-to-reference') onSwitchToReference?.()
+    else if (action.type === 'use-audio-model') onUseAudioModel?.()
   }
 
   return <PromptIssueList id={id} issues={views} onFix={fix} onReveal={reveal} />

@@ -32,14 +32,30 @@ const api: StudioApi = {
   listGenerations: () => ipcRenderer.invoke('generations:list'),
   deleteGeneration: (id) => ipcRenderer.invoke('generations:delete', id),
   onGenerationUpdate: (cb) => on<Generation>('generation:update', cb),
+  onGenerationDelete: (cb) => on<string>('generation:delete', cb),
 
-  // Assets (characters, environments, outfits)
+  // Reviews and learnings
+  listReviews: (generationId) => ipcRenderer.invoke('reviews:list', generationId),
+  setUserReview: (generationId, input) => ipcRenderer.invoke('reviews:setUser', generationId, input),
+  deleteReview: (reviewId) => ipcRenderer.invoke('reviews:delete', reviewId),
+  listLearnings: () => ipcRenderer.invoke('learnings:list'),
+  saveLearning: (input) => ipcRenderer.invoke('learnings:save', input),
+  deleteLearning: (id) => ipcRenderer.invoke('learnings:delete', id),
+  listExports: () => ipcRenderer.invoke('exports:list'),
+  onReviewChange: (cb) => on<string>('review:change', cb),
+  onLearningsChange: (cb) => on<void>('learnings:change', () => cb()),
+
+  // Assets (characters, environments, outfits, poses)
   listAssets: (kind) => ipcRenderer.invoke('assets:list', kind),
   saveAsset: (input) => ipcRenderer.invoke('assets:save', input),
   deleteAsset: (id) => ipcRenderer.invoke('assets:delete', id),
   addAssetImages: (assetId, paths) => ipcRenderer.invoke('assets:addImages', assetId, paths),
   removeAssetImage: (imageId) => ipcRenderer.invoke('assets:removeImage', imageId),
   reorderAssetImages: (assetId, imageIds) => ipcRenderer.invoke('assets:reorderImages', assetId, imageIds),
+  addAssetAudio: (assetId, paths) => ipcRenderer.invoke('assets:addAudio', assetId, paths),
+  removeAssetAudio: (audioId) => ipcRenderer.invoke('assets:removeAudio', audioId),
+  updateAssetAudio: (audioId, patch) => ipcRenderer.invoke('assets:updateAudio', audioId, patch),
+  reorderAssetAudio: (assetId, audioIds) => ipcRenderer.invoke('assets:reorderAudio', assetId, audioIds),
 
   // Prompt library
   listPrompts: () => ipcRenderer.invoke('prompts:list'),
@@ -92,6 +108,7 @@ const api: StudioApi = {
   // Files
   revealFile: (path) => ipcRenderer.invoke('file:reveal', path),
   pickImages: (multiple) => ipcRenderer.invoke('file:pickImages', multiple),
+  pickAudio: (multiple) => ipcRenderer.invoke('file:pickAudio', multiple),
   pathForFile: (file) => webUtils.getPathForFile(file)
 }
 

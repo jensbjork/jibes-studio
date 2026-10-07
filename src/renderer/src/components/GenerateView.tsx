@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { DEFAULT_MODEL, maxReferenceImages } from '@shared/models'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { DEFAULT_MODEL } from '@shared/models'
 import { NEEDS_CONSENT, type ConsentRequest, type Generation, type GenerationParams } from '@shared/types'
 import { ASSET_COPY } from '../lib/assets'
 import { getGenerateParams, useGenerateParams } from '../lib/generateStore'
@@ -14,10 +14,11 @@ import {
 import { formatUsd } from '../lib/media'
 import type { Intent, Navigate } from '../lib/navigation'
 import ConsentDialog from './ConsentDialog'
-import GenerationCard from './GenerationCard'
+import ClipFeed from './feed/ClipFeed'
+import { useGenerations } from './feed/useGenerations'
 import OpenFolderButton from './library/OpenFolderButton'
 import ParamsForm, { missingInput, modelForKind, unavailableModel } from './ParamsForm'
-import { addAsset } from './pickers/assetRefs'
+import { addAssetToForm } from './pickers/assetRefs'
 import { stableJson } from './sequences/sequenceUtils'
 
 interface Props {
@@ -28,7 +29,8 @@ interface Props {
 
 export default function GenerateView({ intent, onIntentHandled, navigate }: Props) {
   const { models, error: modelsError } = useModels()
-  const [generations, setGenerations] = useState<Generation[]>([])
+  // Every generation, live (jobs and reviews), for the clip feed on the right.
+  const feed = useGenerations()
   // The form lives in an app-level store (remembered across views and restarts; an agent may fill it too).
   const [params, setParams] = useGenerateParams()
   const [submitting, setSubmitting] = useState(false)
@@ -44,19 +46,6 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
   // A wrong @ImageN would send the wrong picture (or none) in a paid generation, so missingInput blocks on it
   // with the words main would refuse it with.
   const missing = missingInput(params) ?? unavailableModel(model)
-
-  useEffect(() => {
-    void window.studio.listGenerations().then(setGenerations)
-    return window.studio.onGenerationUpdate((g) =>
-      setGenerations((list) => {
-        const i = list.findIndex((x) => x.id === g.id)
-        if (i === -1) return [g, ...list]
-        const next = list.slice()
-        next[i] = g
-        return next
-      })
-    )
-  }, [])
 
   useEffect(() => {
     if (!folderError) return
@@ -109,10 +98,10 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
         const current = getGenerateParams()
         const modelId =
           modelForKind(models, current.model, 'reference-to-video') ?? DEFAULT_MODEL['reference-to-video']
-        const max = maxReferenceImages(modelId)
-        const byId = new Map(library.map((a) => [a.id, a]))
-        const { refs, note } = addAsset(current.referenceImages ?? [], asset, byId, max)
-        setParams((p) => ({ ...p, model: modelId, referenceImages: refs }))
+        // Like the pickers: the photos, a character's default outfit and, when the model takes reference audio,
+        // the character's first voice clip.
+        const { referenceImages, referenceAudios, note } = addAssetToForm(current, asset, library, modelId)
+        setParams((p) => ({ ...p, model: modelId, referenceImages, referenceAudios }))
         if (!asset.images.length) {
           setNotice(
             `${asset.name} har inga bilder än – lägg till referensfoton under ${ASSET_COPY[asset.kind].plural}.`
@@ -141,7 +130,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
     const sent = params
     try {
       const g = await window.studio.generate(sent)
-      setGenerations((list) => (list.some((x) => x.id === g.id) ? list : [g, ...list]))
+      feed.upsert(g)
       // Outside pictures were copied into Referensbilder; the form uses the copies from now on.
       setParams((p) => withImportedCopies(p, params, g.params) ?? p)
     } catch (e) {
@@ -167,12 +156,8 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
     await submit()
   }
 
-  const reuse = (g: Generation) => setParams({ ...g.params })
-  const remove = async (g: Generation) => {
-    await window.studio.deleteGeneration(g.id)
-    setGenerations((list) => list.filter((x) => x.id !== g.id))
-  }
-  const patch = (g: Generation) => setGenerations((list) => list.map((x) => (x.id === g.id ? g : x)))
+  // Stable, so the feed's memoized cards don't re-render for it.
+  const reuse = useCallback((g: Generation) => setParams({ ...g.params }), [setParams])
 
   return (
     <div className="flex h-full">
@@ -224,43 +209,29 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
 
       {/* Feed */}
       <section className="flex min-w-0 flex-1 flex-col">
-        <div className="drag flex h-12 shrink-0 items-center gap-3 px-6 text-muted">
-          <span className="min-w-0 flex-1 truncate">
-            {generations.length ? `${generations.length} genereringar` : ''}
-          </span>
-          {folderError && (
-            <span className="no-drag min-w-0 truncate text-[12px] text-accent select-text" title={folderError}>
-              {folderError}
-            </span>
-          )}
-          <OpenFolderButton
-            target="generations"
-            title="Öppna mappen Genereringar i Finder"
-            onError={setFolderError}
-            className="no-drag rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
-          />
-        </div>
-        <div className="flex-1 overflow-y-auto px-6 pb-6">
-          {generations.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-muted">
-              Dina videor hamnar här. Börja med en prompt till vänster.
-            </div>
-          ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
-              {generations.map((g) => (
-                <GenerationCard
-                  key={g.id}
-                  generation={g}
-                  model={models.find((m) => m.id === g.model)}
-                  onReuse={reuse}
-                  onDelete={remove}
-                  navigate={navigate}
-                  onChange={patch}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        <ClipFeed
+          feed={feed}
+          models={models}
+          navigate={navigate}
+          onReuse={reuse}
+          emptyText="Dina videor hamnar här. Börja med en prompt till vänster."
+          trailing={
+            <>
+              {folderError && (
+                <span className="no-drag min-w-0 max-w-64 truncate text-[12px] text-accent select-text" title={folderError}>
+                  {folderError}
+                </span>
+              )}
+              <OpenFolderButton
+                target="generations"
+                title="Öppna mappen Genereringar i Finder"
+                onError={setFolderError}
+                compact
+                className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
+              />
+            </>
+          }
+        />
       </section>
     </div>
   )

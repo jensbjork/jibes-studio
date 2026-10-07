@@ -14,17 +14,19 @@ export const FOLDERS = {
   characters: 'Karaktärer',
   environments: 'Miljöer',
   outfits: 'Kläder',
+  poses: 'Poser',
   references: 'Referensbilder',
   generations: 'Genereringar',
   sequences: 'Sekvenser',
   appData: '.studio'
 } as const
 
-/** The folder each kind of asset (character, environment, outfit) keeps its own folders in. */
+/** The folder each kind of asset (character, environment, outfit, pose) keeps its own folders in. */
 export const ASSET_FOLDERS: Readonly<Record<AssetKind, string>> = {
   character: FOLDERS.characters,
   environment: FOLDERS.environments,
-  outfit: FOLDERS.outfits
+  outfit: FOLDERS.outfits,
+  pose: FOLDERS.poses
 }
 
 /** A kind this version of Studio knows (the database may come from a newer one). */
@@ -197,7 +199,8 @@ export function fromStoredPath(stored: string): string {
   return join(libraryRoot(), stored)
 }
 
-function mapImagePaths(p: GenerationParams, map: (path: string) => string): GenerationParams {
+/** Applies map to every file path in params: the start, end and reference images and the reference audio. */
+function mapParamPaths(p: GenerationParams, map: (path: string) => string): GenerationParams {
   if (!p || typeof p !== 'object') return p
   const out: GenerationParams = { ...p }
   if (typeof out.startImage === 'string' && out.startImage) out.startImage = map(out.startImage)
@@ -205,16 +208,21 @@ function mapImagePaths(p: GenerationParams, map: (path: string) => string): Gene
   if (Array.isArray(out.referenceImages)) {
     out.referenceImages = out.referenceImages.map((r) => (typeof r === 'string' && r ? map(r) : r))
   }
+  if (Array.isArray(out.referenceAudios)) {
+    out.referenceAudios = out.referenceAudios.map((a) =>
+      a && typeof a === 'object' && typeof a.path === 'string' && a.path ? { ...a, path: map(a.path) } : a
+    )
+  }
   return out
 }
 
-/** Converts startImage/endImage/referenceImages to the stored form. */
+/** Converts startImage/endImage/referenceImages and the referenceAudios' paths to the stored form. */
 export function toStoredParams(p: GenerationParams): GenerationParams {
-  return mapImagePaths(p, toStoredPath)
+  return mapParamPaths(p, toStoredPath)
 }
 
 export function fromStoredParams(p: GenerationParams): GenerationParams {
-  return mapImagePaths(p, fromStoredPath)
+  return mapParamPaths(p, fromStoredPath)
 }
 
 // ── Names ────────────────────────────────────────────────────────────────────
@@ -341,7 +349,7 @@ function folderSegment(name: string): string {
   return name
 }
 
-/** Karaktärer, Miljöer or Kläder by kind [/<folder>] */
+/** Karaktärer, Miljöer, Kläder or Poser by kind [/<folder>] */
 export function assetsDir(kind: AssetKind, folder?: string): string {
   if (!isAssetKind(kind)) throw new Error('Okänd sorts bibliotekspost.')
   const base = join(libraryRoot(), ASSET_FOLDERS[kind])

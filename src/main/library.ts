@@ -3,20 +3,24 @@ import { ipcMain } from 'electron'
 import { titleFromBody } from '@shared/prompts'
 import type { AssetInput, PromptInput, SavedPrompt } from '@shared/types'
 import {
+  addAssetAudio,
   addAssetImages,
   deleteAsset,
   listAssets,
+  removeAssetAudio,
   removeAssetImage,
+  reorderAssetAudio,
   reorderAssetImages,
   saveAsset,
-  setAssetListeners
+  setAssetListeners,
+  updateAssetAudio
 } from './assets'
 import { getDb } from './db'
 
-export { assetFolderPath, assetWorkBusy } from './assets'
+export { assetFolderPath, assetWorkBusy, AUDIO_FILE_TYPES } from './assets'
 
-// The library the user builds up themselves: assets (characters, environments, outfits — see assets.ts) and the
-// prompt library.
+// The library the user builds up themselves: assets (characters, environments, outfits and poses, with their
+// photos and audio clips — see assets.ts) and the prompt library.
 
 let notifyChange: () => void = () => {}
 
@@ -149,8 +153,8 @@ function markPromptUsed(id: string): void {
 // ── IPC ──────────────────────────────────────────────────────────────────────
 
 /**
- * Registers the asset and prompt handlers; notify fires after every change, filesMoved after asset images
- * moved (stored image paths in segment and generation params were rewritten with them).
+ * Registers the asset and prompt handlers; notify fires after every change, filesMoved after asset photos or
+ * audio moved (stored paths in segment and generation params were rewritten with them).
  */
 export function registerLibraryIpc(notify: () => void, filesMoved: () => void = () => {}): void {
   notifyChange = notify
@@ -163,6 +167,14 @@ export function registerLibraryIpc(notify: () => void, filesMoved: () => void = 
   ipcMain.handle('assets:removeImage', (_e, imageId: string) => removeAssetImage(imageId))
   ipcMain.handle('assets:reorderImages', (_e, assetId: string, imageIds: string[]) =>
     reorderAssetImages(assetId, imageIds)
+  )
+  ipcMain.handle('assets:addAudio', (_e, assetId: string, paths: string[]) => addAssetAudio(assetId, paths))
+  ipcMain.handle('assets:removeAudio', (_e, audioId: string) => removeAssetAudio(audioId))
+  ipcMain.handle('assets:updateAudio', (_e, audioId: string, patch: { clipStart?: number; clipLength?: number }) =>
+    updateAssetAudio(audioId, patch)
+  )
+  ipcMain.handle('assets:reorderAudio', (_e, assetId: string, audioIds: string[]) =>
+    reorderAssetAudio(assetId, audioIds)
   )
 
   ipcMain.handle('prompts:list', () => listPrompts())

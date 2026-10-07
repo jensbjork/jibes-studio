@@ -1,36 +1,50 @@
 # Studio
 
 A desktop video studio for [Venice.ai](https://venice.ai)'s video models. Studio lets you generate short clips from
-text, a start image or a set of reference photos, keep a library of **characters**, **environments** and **outfits**
-with their reference photos, save the prompts that work, and chain clips into longer films that continue seamlessly
-from one clip's last frame into the next. Everything lives in a plain folder you choose, with human-readable folder
-and file names, and your own AI agents can work in the app over [MCP](https://modelcontextprotocol.io) — preparing
-references, prompts and sequences — while every paid generation still waits for your approval.
+text, a start image or a set of reference photos (and voices), keep a library of **characters**, **environments**,
+**outfits** and **poses** with their reference photos — and what the characters and places sound like — save the
+prompts that work, and chain clips into longer films that continue seamlessly from one clip's last frame into the
+next. Everything lives in a plain folder you choose, with human-readable folder and file names, and your own AI agents
+can work in the app over [MCP](https://modelcontextprotocol.io) — preparing references, prompts and sequences, and
+reviewing what the generations became to write better prompts next time — while every paid generation still waits
+for your approval.
 
 Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 
 ## Features
 
 - **Generate** with Venice's video models in three modes: text-to-video, image-to-video (start and optional end
-  image) and reference-to-video (up to 9 reference photos for Seedance). Price quote before you generate, a live
-  feed of queued, rendering and finished videos, *Använd igen* ("use again") to reload a generation's settings.
-- **A reference-aware prompt editor.** In reference mode the prompt points at the photos as `@Image1`, `@Image2` …;
-  the editor colours each token like the asset it points at, shows the photo on hover, offers an `@` menu, flags
-  wrong or malformed tokens with one-click fixes, and blocks generation while a reference is wrong. The same check
-  runs again in the main process before anything is sent to Venice.
-- **Library of characters, environments and outfits** (*Karaktärer*, *Miljöer*, *Kläder*): a name, a description and
-  ordered reference photos, each in its own folder. A character can have a default outfit that comes along
-  automatically.
-- **Prompt library** with titles, tags, favourites, a negative prompt and usage counts.
-- **Sequences:** films made of clips. Each clip has its own prompt, references and settings, any number of takes, a
-  selected take and start/end trims. A clip can *continue from the previous one*: its start image is the previous
-  clip's last (trimmed) frame. *Generate missing* renders the clips in order; *Export* cuts the selected takes into
-  one mp4 with ffmpeg.
+  image) and reference-to-video (up to 9 reference photos for Seedance, plus up to 3 voice or sound clips with the
+  models that take reference audio). Price quote before you generate, *Använd igen* ("use again") to reload a
+  generation's settings.
+- **A live clip feed built for many clips.** Queued, rendering and finished videos as big cards or a compact table
+  (*Kort* / *Tabell*, with keyboard navigation), search in the prompts, filters (status, model, the asset whose
+  photos or voice were used, rating, unrated or reviewed, time, standalone or in a sequence), sorting (newest,
+  oldest, rating, cost, length) and a summary of the filtered clips. A detail drawer shows the player, the prompt
+  with its tokens, the references and voices that were sent, the settings, and your own rating (1–5 stars), note
+  and tags next to the agents' reviews.
+- **A reference-aware prompt editor.** In reference mode the prompt points at the photos as `@Image1`, `@Image2` …
+  and at the voice and sound clips as `@Audio1`, `@Audio2` …; the editor colours each token like the asset it points
+  at, shows the photo on hover and plays the voice, offers an `@` menu, flags wrong or malformed tokens with one-click
+  fixes, and blocks generation while a reference is wrong. The same check runs again in the main process before
+  anything is sent to Venice.
+- **Library of characters, environments, outfits and poses** (*Karaktärer*, *Miljöer*, *Kläder*, *Poser*): a name, a
+  description and ordered reference photos, each in its own folder. A character can have a default outfit that comes
+  along automatically, and **a voice** (*Röst*); an environment can have **a soundscape** (*Ljudmiljö*). Each audio
+  clip has a 2–15 s reference window, the part that is sent, which you pick on a timeline. A **pose** is a photo or
+  sketch of how people stand relative to each other, applied to the characters in the shot.
+- **Prompt library** with titles, tags, favourites, a negative prompt and usage counts, and **Lärdomar**
+  (learnings): short insights about what works, recorded by you or your agents, with the clips they are based on.
+- **Sequences:** films made of clips. Each clip has its own prompt, references, voices and settings, any number of
+  takes, a selected take and start/end trims. A clip can *continue from the previous one*: its start image is the
+  previous clip's last (trimmed) frame. *Generate missing* renders the clips in order; *Export* cuts the selected
+  takes into one mp4 with ffmpeg.
 - **Your own folder:** a base folder you choose, with Swedish, human-readable folders and file names. Paths in the
   database are stored relative to it, so the library can be moved, switched or tidied up from Settings.
 - **Agent connection (MCP):** an optional Streamable HTTP MCP server (off by default, loopback + Tailscale only,
-  bearer token) through which your own agents read the library, set references and prompts, build sequences and
-  *request* paid generations that you approve or decline in an in-app dialog.
+  bearer token) through which your own agents read the library, set references, voices and prompts, build sequences,
+  *request* paid generations that you approve or decline in an in-app dialog, and look back at finished clips and
+  exported films (frames, sound, the references used) to review them and record learnings for the next prompt.
 - **Separate development profile** ("Studio Dev") so development never touches the library the installed app uses.
 
 ## Status
@@ -48,8 +62,9 @@ changes.
 
 - **Node.js** — the version in [`.nvmrc`](.nvmrc) (24); at least 22.12 (`engines` in `package.json`).
 - **ffmpeg** (with `ffprobe`) — `brew install ffmpeg`. Studio looks in `/opt/homebrew/bin`, `/usr/local/bin`,
-  `/usr/bin` and then `PATH`. It is needed for posters, durations, continuation frames and exports; generating
-  works without it.
+  `/usr/bin` and then `PATH`. It is needed for posters, durations, continuation frames, exports, voice and sound
+  clips (measuring them and cutting out the part that is sent) and the frames agents review; generating without
+  voices works without it.
 - **A Venice.ai API key** — added under **Inställningar** (Settings). Generations cost money on your Venice account.
 
 ## Quick start
@@ -96,11 +111,13 @@ every file the library knows about back where it belongs.
 
 ```
 <base folder>/
-├── Karaktärer/<Name>/                      Characters: reference photos (original file names) + Beskrivning.txt
-├── Miljöer/<Name>/                         Environments: photos of the place + Beskrivning.txt
+├── Karaktärer/<Name>/                      Characters: reference photos and voice clips (original file names)
+│                                           + Beskrivning.txt
+├── Miljöer/<Name>/                         Environments: photos of the place, soundscape clips + Beskrivning.txt
 ├── Kläder/<Name>/                          Outfits: photos of the garments + Beskrivning.txt
-├── Referensbilder/<YYYY-MM-DD>/            Start, end and reference images picked from outside the library,
-│                                           copied here when a generation is submitted
+├── Poser/<Name>/                           Poses: photos or sketches of the positions + Beskrivning.txt
+├── Referensbilder/<YYYY-MM-DD>/            Start, end and reference images and reference audio picked from
+│                                           outside the library, copied here when a generation is submitted
 ├── Genereringar/<YYYY-MM-DD>/<HH.MM> <prompt>.mp4
 │                                           Generated videos that don't belong to a sequence
 ├── Sekvenser/<Sequence name>/
@@ -120,29 +137,45 @@ the whole library can be moved by moving its folders. Files of your own elsewher
 alone. A library from an earlier layout (`studio.db`, `generations/`, `thumbs/` … directly in the folder) is
 converted to this layout when it is opened.
 
-## Prompts and `@ImageN` references
+## Prompts, `@ImageN` and `@AudioN` references
 
 In **reference mode** the model receives the reference images in order, and the prompt refers to them as
-`@Image1`, `@Image2` … in that order. Picking a character, environment or outfit adds its photos to the reference
-images, and a label for each asset inserts the right tokens, for example:
+`@Image1`, `@Image2` … in that order. Picking a character, environment, outfit or pose adds its photos to the
+reference images, and a label for each asset inserts the right tokens, for example:
 
 ```
 Anna (@Image1, @Image2) wearing Red dress (@Image3) walks along the beach promenade (@Image4) …
 ```
 
 The connecting word follows **Inställningar → Promptspråk** (prompt language): `wearing` in English (the default;
-the models understand English best) or `i` in Swedish. In the prompt editor:
+the models understand English best) or `i` in Swedish.
 
-- each `@ImageN` is coloured like the asset it points at; hover to see the photo; wrong references turn red;
+**Voices and sounds.** With a model that takes reference audio (Seedance's reference-to-video models among them),
+adding a character that has a voice also adds its first voice clip (*Ta med rösten* on the chip turns it off; an
+environment's soundscape comes along with *Ta med ljudmiljön*), and the prompt refers to the clips as `@Audio1`,
+`@Audio2` … in order: `Anna (@Image1, @Image2, voice @Audio1) says …`, `the harbour (@Image4, sound @Audio2)`
+(`röst` and `ljud` in Swedish). Venice uses the clips as a guide to timbre, tone and pacing, not as an exact clone.
+At most 3 clips, each 2–15 s, 15 s in all, and only together with at least one reference image; Studio cuts each
+clip's window out of the file and sends it as mono MP3. A voice from a recording shorter than 2 s can't be sent, so
+it doesn't come along (a note says so).
+
+**Poses.** A pose chip applies to the characters you choose (all of them by default):
+`Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)` (`… och … i posen …` in Swedish).
+
+In the prompt editor:
+
+- each `@ImageN` and `@AudioN` is coloured like the asset it points at; hover to see the photo or play the voice;
+  wrong references turn red;
 - typing `@` opens a menu with the selected photos and *Lägg till från biblioteket* (add from the library);
-- the list under the editor shows every reference with its token, marks photos the prompt never mentions and
-  offers quick fixes such as *Byt till @Image3* (change to @Image3) or *Ta bort @Image7* (remove @Image7);
+- the list under the editor shows every reference with its token, marks photos and clips the prompt never mentions
+  and offers quick fixes such as *Byt till @Image3* (change to @Image3), *Ta bort @Image7* (remove @Image7) or
+  *Ta bort @Audio2* when the voices add up to more than 15 s;
 - **Generera** is disabled while a reference is wrong, and says why.
 
 The rules live in [`src/shared/prompt-refs.ts`](src/shared/prompt-refs.ts) and are applied by the editor, by the
 main process before every paid submission (including *Generate missing* and agent requests) and by the agent
-tools, so a mistyped `@Image9` is never sent to Venice. Text-to-video and image-to-video prompts must not contain
-tokens.
+tools, so a mistyped `@Image9` or a 20 s voice clip is never sent to Venice. Text-to-video and image-to-video
+prompts must not contain tokens.
 
 ## Sequences
 
@@ -150,20 +183,23 @@ A **sequence** is an ordered list of clips (*Klipp*). Each clip stores the setti
 generation for it is a **take**, and one take per clip is selected for the cut and can be trimmed at the start and
 end. A clip that **continues from the previous one** is generated image-to-video: when it is generated, the
 previous clip's selected take is cut at its trim point and that last frame (extracted with ffmpeg) becomes the
-start image. **Generera saknade** (generate missing) generates every clip without a finished selected take, in
-order, waiting for each one so continuation clips get their frame. **Exportera** renders the selected, trimmed
-takes into one H.264/AAC mp4 in the sequence's folder.
+start image, so it sends no reference photos or voices of its own. **Generera saknade** (generate missing)
+generates every clip without a finished selected take, in order, waiting for each one so continuation clips get
+their frame. **Exportera** renders the selected, trimmed takes into one H.264/AAC mp4 in the sequence's folder.
 
 ## Connecting your own agent
 
 Studio can run an MCP server so agents such as OpenClaw, Hermes Agent, Claude Desktop or Claude Code can work in
-the app: read the library and see its photos, choose references, write and validate prompts, fill in the Generate
-form and build sequences. Agents **cannot generate anything on their own** — paid tools only create a request that
-Studio shows you with the prompt, references and price, and nothing is sent to Venice until you approve it.
+the app: read the library and see its photos (and hear its voices), choose references, write and validate prompts,
+fill in the Generate form and build sequences. They can also look back: review finished clips and exported films
+frame by frame next to the references they were made from, record reviews, and save *learnings* that every later
+session reads before it writes a prompt. Agents **cannot generate anything on their own** — paid tools only create a
+request that Studio shows you with the prompt, references, voices and price, and nothing is sent to Venice until you
+approve it.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full tool list and
-troubleshooting.
+Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 39
+tools, the review loop and troubleshooting.
 
 ## Security
 
@@ -189,10 +225,12 @@ Done:
 3. Sequences: chaining clips through the last frame, timeline, export with ffmpeg
 4. Environments and outfits, a default outfit per character
 5. A prompt editor that checks references; the agent connection (MCP) with approval of paid generations
+6. Voices and soundscapes (`@AudioN`), poses, a clip feed with filters and a table view, ratings, and a review and
+   learning loop for agents
 
 Next:
 
-6. Cost overview, cancelling a running export, transitions (fades) between clips
+7. Cost overview, cancelling a running export, transitions (fades) between clips
 
 Ideas where help is welcome: an English UI (i18n), an automated test suite, signed and notarized builds.
 

@@ -1,6 +1,6 @@
-// Reference material: start/end/reference images picked from outside the library are copied into
-// Referensbilder/<day>/ when a generation is submitted, so the generation (and its "use again") keeps working
-// after the originals are moved or deleted, and the user finds the material next to the output.
+// Reference material: start/end/reference images and reference audio clips picked from outside the library are
+// copied into Referensbilder/<day>/ when a generation is submitted, so the generation (and its "use again")
+// keeps working after the originals are moved or deleted, and the user finds the material next to the output.
 // Also the file-placement helpers the other media modules share: everything that lands in a visible folder
 // is written to the library's scratch folder first and then moved into place under a free name.
 
@@ -129,8 +129,10 @@ async function findIdentical(dir: string, size: number, hash: string): Promise<s
 
 // ── Import ───────────────────────────────────────────────────────────────────
 
-/** The library copy of one outside image: an identical file already in today's folder, or a new copy. */
-async function importImage(src: string, dir: string): Promise<string> {
+type Material = 'image' | 'audio'
+
+/** The library copy of one outside file: an identical file already in today's folder, or a new copy. */
+async function importFile(src: string, dir: string, material: Material): Promise<string> {
   const name = basename(src)
   try {
     const info = await stat(src)
@@ -138,44 +140,61 @@ async function importImage(src: string, dir: string): Promise<string> {
     const existing = await findIdentical(dir, info.size, await fileHash(src, info))
     if (existing) return existing
     const ext = extname(src)
-    const copy = await copyInto(src, dir, safeName(basename(src, ext), { fallback: 'Referensbild' }), ext.toLowerCase())
+    const fallback = material === 'audio' ? 'Referensljud' : 'Referensbild'
+    const copy = await copyInto(src, dir, safeName(basename(src, ext), { fallback }), ext.toLowerCase())
     // The copy has the same content; remember that so the next lookup doesn't read it again.
     const cached = hashCache.get(src)
     const copied = await stat(copy).catch(() => undefined)
     if (cached && copied) hashCache.set(copy, { size: copied.size, mtimeMs: copied.mtimeMs, hash: cached.hash })
     return copy
   } catch (err) {
-    throw new Error(`Kunde inte kopiera bilden ${name} till biblioteket: ${fileErrorReason(err)}.`)
+    const what = material === 'audio' ? 'ljudfilen' : 'bilden'
+    throw new Error(`Kunde inte kopiera ${what} ${name} till biblioteket: ${fileErrorReason(err)}.`)
   }
 }
 
-function imagePaths(params: GenerationParams): string[] {
-  return [params.startImage, params.endImage, ...(params.referenceImages ?? [])].filter(
-    (p): p is string => typeof p === 'string' && p !== ''
+/** Every file the params send, with what it is (for the wording when it can't be copied). */
+function referencedFiles(params: GenerationParams): { path: string; material: Material }[] {
+  const images = [params.startImage, params.endImage, ...(params.referenceImages ?? [])].map((path) => ({
+    path,
+    material: 'image' as const
+  }))
+  const audio = (params.referenceAudios ?? []).map((clip) => ({ path: clip?.path, material: 'audio' as const }))
+  return [...images, ...audio].filter(
+    (f): f is { path: string; material: Material } => typeof f.path === 'string' && f.path !== ''
   )
 }
 
 const importing = serialized()
 
 /**
- * Copies every start/end/reference image that lies outside the library into Referensbilder/<today>/ (keeping
- * its original name, made unique) and returns params pointing at the copies. Images already in the library
- * (photos of characters, environments and outfits, earlier references, continuation frames) are left as they
- * are, and an image whose exact content is already in today's folder is reused instead of copied again.
+ * Copies every start/end/reference image and reference audio clip that lies outside the library into
+ * Referensbilder/<today>/ (keeping its original name, made unique) and returns params pointing at the copies
+ * (each audio clip keeps its window). Files already in the library (photos and voice clips of characters,
+ * environments, outfits and poses, earlier references, continuation frames) are left as they are, and a file
+ * whose exact content is already in today's folder is reused instead of copied again.
  */
-export function importExternalImages(params: GenerationParams): Promise<GenerationParams> {
-  const external = [...new Set(imagePaths(params).filter((p) => isAbsolute(p) && !isInsideRoot(p)))]
-  if (!external.length) return Promise.resolve(params)
-  // One import at a time, so the same picture used by two submits at once is copied only once.
+export function importExternalReferences(params: GenerationParams): Promise<GenerationParams> {
+  const external = new Map<string, Material>()
+  for (const f of referencedFiles(params)) {
+    if (isAbsolute(f.path) && !isInsideRoot(f.path) && !external.has(f.path)) external.set(f.path, f.material)
+  }
+  if (!external.size) return Promise.resolve(params)
+  // One import at a time, so the same file used by two submits at once is copied only once.
   return importing(async () => {
     const dir = referencesDayDir(new Date())
     const copies = new Map<string, string>()
-    for (const src of external) copies.set(src, await importImage(src, dir))
+    for (const [src, material] of external) copies.set(src, await importFile(src, dir, material))
     const local = (p: string): string => copies.get(p) ?? p
     const result: GenerationParams = { ...params }
     if (params.startImage) result.startImage = local(params.startImage)
     if (params.endImage) result.endImage = local(params.endImage)
     if (params.referenceImages) result.referenceImages = params.referenceImages.map(local)
+    if (params.referenceAudios) {
+      result.referenceAudios = params.referenceAudios.map((clip) =>
+        clip?.path ? { ...clip, path: local(clip.path) } : clip
+      )
+    }
     return result
   })
 }

@@ -5,22 +5,18 @@ import { ASSET_COPY } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import ImagePreview from './ImagePreview'
-import { imageIssues, type Size } from './imageUtils'
+import { imageIssues, insertIndex, type DropTarget, type Size } from './imageUtils'
 
 /** In-app drags carry this type, so they can't be mistaken for files dropped from Finder. */
 const DRAG_TYPE = 'application/x-studio-asset-image'
 const MAX_REFERENCES = maxReferenceImages(DEFAULT_MODEL['reference-to-video'])
 
-// Places are mostly photographed wide; people and clothes upright.
+// Places, and poses with people side by side, are mostly photographed wide; people and clothes upright.
 const LAYOUT: Record<AssetKind, { grid: string; tile: string }> = {
   character: { grid: 'grid-cols-[repeat(auto-fill,minmax(140px,1fr))]', tile: 'aspect-[3/4]' },
   environment: { grid: 'grid-cols-[repeat(auto-fill,minmax(190px,1fr))]', tile: 'aspect-[4/3]' },
-  outfit: { grid: 'grid-cols-[repeat(auto-fill,minmax(140px,1fr))]', tile: 'aspect-[3/4]' }
-}
-
-interface DropTarget {
-  id: string
-  after: boolean
+  outfit: { grid: 'grid-cols-[repeat(auto-fill,minmax(140px,1fr))]', tile: 'aspect-[3/4]' },
+  pose: { grid: 'grid-cols-[repeat(auto-fill,minmax(190px,1fr))]', tile: 'aspect-[4/3]' }
 }
 
 interface Props {
@@ -32,17 +28,6 @@ interface Props {
   onAdd: (paths: string[]) => void
   onUpdated: (a: Asset) => void
   onError: (message: string) => void
-}
-
-/** Where the dragged image lands, as an index in the list without it; undefined when nothing would move. */
-function insertIndex(ids: string[], dragged: string | undefined, target: DropTarget | undefined): number | undefined {
-  if (!dragged || !target) return undefined
-  const from = ids.indexOf(dragged)
-  const over = ids.indexOf(target.id)
-  if (from === -1 || over === -1) return undefined
-  const to = over + (target.after ? 1 : 0)
-  const adjusted = to > from ? to - 1 : to
-  return adjusted === from ? undefined : adjusted
 }
 
 /** Reference photo grid: add, remove, reorder (drag or "Sätt som omslag") and size warnings. */
