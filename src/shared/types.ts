@@ -43,6 +43,14 @@ export interface GenerationParams {
    * (start/length) of each file is sent.
    */
   referenceAudios?: ReferenceAudio[]
+  /**
+   * "Ta med beskrivningar": the descriptions of the assets whose photos and audio clips are sent are appended to
+   * the prompt as a References legend when it is sent (src/shared/prompt-compose.ts). On unless false, also for
+   * params from before it existed. The legend is never written into `prompt` itself.
+   */
+  includeDescriptions?: boolean
+  /** Assets (ids) whose description is left out of the legend, each switched off in the editor on its own. */
+  excludedDescriptionAssetIds?: string[]
 }
 
 /** One reference audio clip of a generation: the part of the file from `start` that lasts `length` seconds. */
@@ -64,7 +72,14 @@ export interface Generation {
   id: string
   createdAt: number
   model: string
+  /** The user's prompt (canonical tokens), as params.prompt: what "Använd igen" puts back in the editor. */
   prompt: string
+  /**
+   * The prompt exactly as it was sent to Venice: `prompt` with the References legend of the referenced assets'
+   * descriptions appended (equal to `prompt` when nothing was appended). Undefined for generations made before
+   * prompts were composed.
+   */
+  sentPrompt?: string
   params: GenerationParams
   status: GenerationStatus
   queueId?: string
@@ -351,6 +366,71 @@ export interface AssetInput {
    * when updating.
    */
   defaultOutfitId?: string | null
+}
+
+// ── Composed prompts: asset descriptions appended as a References legend ────
+// See src/shared/prompt-compose.ts (composePrompt), which re-exports these.
+
+/** An asset as the prompt composer reads it: what it is called, its description and the files that are its own. */
+export interface DescribedAsset {
+  id: string
+  kind: AssetKind
+  name: string
+  /** Free text; an empty (or blank) description adds nothing. */
+  description: string
+  /** Absolute paths of its photos (AssetImage.path). */
+  imagePaths: string[]
+  /** Absolute paths of its audio clips (AssetAudio.path). */
+  audioPaths: string[]
+}
+
+export interface ComposeOptions {
+  /** The prompt language (Settings.promptLanguage): the legend's heading and words ("References:" / "Referenser:"). */
+  language: 'en' | 'sv'
+  /** false: no legend at all (GenerationParams.includeDescriptions). */
+  include: boolean
+  /** Assets whose description is left out (GenerationParams.excludedDescriptionAssetIds). */
+  excludedAssetIds?: string[]
+  /**
+   * The model's prompt limit (VideoModel.promptCharacterLimit): descriptions are shortened so the composed prompt
+   * fits, or the legend is dropped when not even names and tokens fit. Omitted: no limit.
+   */
+  characterLimit?: number
+  /** The same as characterLimit, under the VideoModel field's name; characterLimit wins when both are given. */
+  promptCharacterLimit?: number
+}
+
+/** One asset's line in the legend: "- Anna (@Image1, @Image2; voice @Audio1): <description>". */
+export interface DescriptionEntry {
+  assetId: string
+  kind: AssetKind
+  /** The name as the legend writes it. */
+  name: string
+  /** Its @ImageN tokens in reference order, then its @AudioN tokens. */
+  tokens: string[]
+  /**
+   * The description as the legend writes it: whitespace collapsed, shortened (ending in "…") when the model's
+   * limit asked for it, '' when not even its first word fitted.
+   */
+  description: string
+  /** Its description was shortened (or left out) to fit the model's limit. */
+  shortened?: boolean
+}
+
+export interface ComposedPrompt {
+  /** What is sent: the user's prompt (trailing whitespace trimmed) followed by the legend; just the prompt without one. */
+  prompt: string
+  /** "\n\nReferences:\n- …", or '' when nothing is appended. */
+  legend: string
+  /**
+   * The described assets among the sent references, ordered by their first token. Also listed when the legend
+   * was dropped (`dropped`) or the prompt is blank (nothing is appended to a blank prompt).
+   */
+  entries: DescriptionEntry[]
+  /** Descriptions were shortened (or some left out) so the prompt fits the model's limit. */
+  truncated: boolean
+  /** The legend was left out entirely: not even the names and tokens fit within the model's limit. */
+  dropped: boolean
 }
 
 // ── Prompt library ───────────────────────────────────────────────────────────
@@ -683,10 +763,23 @@ export interface ApprovalRequest {
   reason?: string
   /** The generations it started once approved ('generate-all' starts them one by one, so it has none). */
   generationIds?: string[]
+  /**
+   * 'generation' and 'segment': the prompt exactly as it will be sent – params.prompt with the References legend
+   * of the referenced assets' descriptions appended (ComposedPrompt.prompt) – when something is appended. The
+   * request lapses when it changes before the user approves (a description edited meanwhile).
+   */
+  composedPrompt?: string
+  /** The appended legend alone (ComposedPrompt.legend), so the dialog can set it apart from the user's prompt. */
+  descriptionLegend?: string
+  /**
+   * 'generate-all': each clip's appended legend when the request was made (segment id → ComposedPrompt.legend, ''
+   * for none). The request lapses when one changes, so the dialog compares them with the legends composed now.
+   */
+  clipLegends?: Record<string, string>
 }
 
 /** Commands main sends to the window's agent bridge (see StudioApi.onAgentCommand). */
-export type AgentFormCommand = 'get_form' | 'set_form' | 'set_references' | 'open'
+export type AgentFormCommand = 'get_form' | 'set_form' | 'set_references' | 'reorder_references' | 'open'
 
 export interface AgentCommand {
   id: string
@@ -696,13 +789,16 @@ export interface AgentCommand {
    */
   deadline?: number
   command: AgentFormCommand
-  /** get_form: none. set_form: AgentSetFormArgs. set_references: AgentSetReferencesArgs. open: AgentOpenArgs. */
+  /**
+   * get_form: none. set_form: AgentSetFormArgs. set_references: AgentSetReferencesArgs. reorder_references:
+   * AgentReorderReferencesArgs. open: AgentOpenArgs.
+   */
   args: unknown
 }
 
 export interface AgentCommandReply {
   ok: boolean
-  /** get_form, set_form and set_references: AgentFormState. open: AgentOpenResult. */
+  /** get_form, set_form, set_references and reorder_references: AgentFormState. open: AgentOpenResult. */
   result?: unknown
   /** Swedish. */
   error?: string
@@ -747,6 +843,12 @@ export interface AgentFormState {
   /** The Generate form. */
   params: GenerationParams
   references: AgentFormReference[]
+  /**
+   * Reference images in the form past the model's limit ("skickas inte" in the strip): not in `params` (which is
+   * what a generation sends) and without a token, with their 1-based place in the form's list, so an agent can
+   * see them and move one forward with reorder_references.
+   */
+  unsentReferences?: (Omit<AgentFormReference, 'token'> & { position: number })[]
   /** The reference audio clips (params.referenceAudios with their tokens and assets). */
   audioReferences?: AgentFormAudioReference[]
   issues: PromptIssue[]
@@ -770,6 +872,10 @@ export interface AgentSetFormArgs {
   negative_prompt?: string
   /** Absolute path of the start image (main resolved the agent's asset photo). */
   start_image?: string
+  /** GenerationParams.includeDescriptions ("Ta med beskrivningar"). */
+  include_descriptions?: boolean
+  /** GenerationParams.excludedDescriptionAssetIds; [] switches every description back on. */
+  excluded_description_asset_ids?: string[]
 }
 
 /** set_references: photo paths (main resolved the agent's asset ids), in order. */
@@ -782,6 +888,18 @@ export interface AgentSetReferencesArgs {
   audios?: ReferenceAudio[]
   /** replace: these become the reference images. append: added after the ones there (duplicates skipped). */
   mode: 'replace' | 'append'
+}
+
+/**
+ * reorder_references: the form's reference images and/or audio clips in a new order, each named by its token in
+ * the current numbering ("@Image3", "@Audio2") or by its absolute path (main resolved the agent's ids and sends
+ * paths, so a form the user changed meanwhile still gets the pictures named, or refuses if one is gone). Named ones
+ * come first, the rest keep their order after them; the window applies it with reorderReferences
+ * (src/shared/prompt-remap.ts), so the prompt's and the negative prompt's tokens follow, in one change of the form.
+ */
+export interface AgentReorderReferencesArgs {
+  images?: string[]
+  audios?: string[]
 }
 
 /** open: brings a place in Studio to the front. */

@@ -10,6 +10,37 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Descriptions in the prompt.** The descriptions of the characters, places, outfits and poses whose photos or
+  voices a generation sends are appended to its prompt automatically when it is sent, as a *References* legend
+  with each asset's tokens (`- Anna (@Image1, @Image2; voice @Audio1): …`; `Referenser:` and `röst` with the
+  Swedish prompt language). It is composed at send time from the descriptions as they are in the library then, so
+  an edited description applies to the next generation, and it is never written into the prompt you edit (*Använd
+  igen* can't add it twice). The box **Läggs till i prompten** under the prompt, in Generera and in the clip
+  editor, lists the entries live with the asset, its tokens and an excerpt, a switch per asset, *Ta med
+  beskrivningar* to switch them all off, *Ändra beskrivning* to open the asset, and the composed length against the
+  model's prompt limit; descriptions that would make the prompt too long are shortened at word boundaries
+  (*förkortad*), and if not even the names fit, none are appended. Sequence takes, *Generera saknade* and approved
+  agent requests compose the same way; continuation and keyframe clips send no references and get no legend.
+- **Skickad prompt** in the clip feed's detail drawer: the prompt exactly as Venice got it, the legend set apart,
+  with a *Kopiera* button, shown when it differs from the prompt you wrote.
+- **Reorder references by drag and drop.** Drag a reference thumbnail, or a voice or sound chip, to another place
+  (an insertion marker shows where; every badge shows the number it will get), or focus it and press ⌥← / ⌥→. Its
+  `@ImageN` / `@AudioN` changes, and every token in the prompt and the negative prompt is renumbered in the same
+  step so it keeps pointing at the same picture or clip: [A, B, C] with `@Image1 hugs @Image3`, C dragged to the
+  front, gives [C, A, B] with `@Image2 hugs @Image1`. A picture past the model's limit dragged forward is sent
+  instead of the last one, shown live while you drag. Works in Generera and in the sequence clip editor. The tokens
+  also follow when an agent reorders a clip's references while you type in its prompt, when *Ångra* brings back text
+  an agent replaced, and when *Använd prompt* brings back an earlier take's prompt; near misses such as
+  `@Image1-2` or `@Image3rd` keep naming the same pictures in their suggested fixes.
+- **Agent tools for descriptions and reordering** (1 new, 47 tools in all): `reorder_references` reorders the
+  form's or a clip's references by token, photo or clip id or asset id and renumbers the prompt's tokens.
+  `get_workspace`, `validate_prompt` and `get_sequence` return `composed_prompt` and `description_entries`;
+  `set_form`, `add_segment`, `update_segment` and `validate_prompt` take `include_descriptions` and
+  `excluded_description_asset_ids`; `get_generation` and `review_generation` return `sent_prompt`; `get_workspace`
+  lists the pictures past the model's limit (`not_sent`). The approval dialog shows the legend a request appends,
+  set apart under the prompt, and a request lapses when a description it appends changes before you approve (the
+  dialog says so first, for *Generera saknade* too); an approved request sends exactly the prompt you approved. The
+  guide says not to repeat the descriptions in the prompt, but to write the action, camera and mood.
 - **Storyboards.** *Tidslinje / Storyboard* in a sequence (remembered per sequence; a new sequence can start as a
   storyboard): one panel per clip with its take, a start image → end image, *Vad händer* notes, the prompt, the
   price and *Generera tagning*; drag panels to reorder, *+ Ny ruta* between or after them. A slot takes an uploaded
@@ -82,6 +113,14 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- The library database is migrated to version 9: `generations.sent_prompt` keeps the prompt as it was sent (with
+  the descriptions legend); `prompt` stays the text you wrote.
+- Reference images past the model's limit are marked *skickas inte* in the reference strip instead of getting an
+  `@ImageN` that would not be sent; the strip only lights up as a drop target for drags that carry files, and only
+  while there is room (files dropped never push out pictures already there); a thumbnail's ✕ can be reached with
+  the keyboard.
+- `set_references` (agents): its description says that replacing the references doesn't renumber the prompt and
+  points to `reorder_references`, which does.
 - The library database is migrated to version 8 (`end_from_next` and `notes` on clips, `stills`). Stills follow
   sequence renames, library moves and *Städa upp*; deleting a sequence keeps the stills other clips or generations
   still use (in `Referensbilder`) and moves the rest to the Trash.

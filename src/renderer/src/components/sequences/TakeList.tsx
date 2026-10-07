@@ -1,7 +1,7 @@
 import type { Generation, Segment, VideoModel } from '@shared/types'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
 import ConfirmButton from './ConfirmButton'
-import { formatLength, formatTakeTime, isPending, takeDuration, takeProgress } from './sequenceUtils'
+import { formatLength, formatTakeTime, isPending, takeDuration, takeProgress, takePromptsFor } from './sequenceUtils'
 
 interface Props {
   segment: Segment
@@ -45,7 +45,9 @@ export default function TakeList({ segment, number, models, currentPrompt, onSel
               take={take}
               selected={take.id === segment.selectedGenerationId}
               modelName={models.find((m) => m.id === take.model)?.name ?? take.model}
-              promptChanged={take.params.prompt.trim() !== currentPrompt.trim()}
+              // Read with the clip's references now: a take whose prompt differs only by a reorder's renumbering
+              // has nothing to bring back.
+              promptChanged={takePromptsFor(take.params, segment.params).prompt.trim() !== currentPrompt.trim()}
               onSelect={() => onSelect(take)}
               onDelete={() => onDelete(take)}
               onUsePrompt={() => onUsePrompt(take)}

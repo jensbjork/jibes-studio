@@ -15,6 +15,13 @@ import {
   type Kind
 } from '@shared/models'
 import {
+  composePrompt,
+  describedAssets,
+  includesDescriptions,
+  promptLimitOf,
+  rememberPromptLimits
+} from '@shared/prompt-compose'
+import {
   blockingContinuationError,
   blockingPromptError,
   canonicalizeTokens,
@@ -31,7 +38,9 @@ import {
   type Still,
   type VideoModel
 } from '@shared/types'
+import { composeSubmission } from '../jobs'
 import { isLibraryReady } from '../paths'
+import { getPromptLanguage } from '../settings'
 import { callService } from './local-ipc'
 
 // What the agent tools share: the library check, looking up assets with their photos and audio clips, the token
@@ -150,6 +159,11 @@ export class AssetIndex {
 
   photo(path: string | undefined): PhotoRef | undefined {
     return path ? this.byPath.get(pathKey(path)) : undefined
+  }
+
+  /** A photo of any asset by its image_id; undefined when there is none. */
+  image(imageId: string): (PhotoRef & { path: string }) | undefined {
+    return this.byImageId.get(imageId)
   }
 
   /** A photo of any asset by its image_id. */
@@ -525,12 +539,40 @@ export function assetPhotoPath(assetId: string, imageId: string | undefined, ind
 
 // ── Models ───────────────────────────────────────────────────────────────────
 
-/** Venice's video models (cached in main for ten minutes). */
+/**
+ * Venice's video models (cached in main for ten minutes). Their prompt limits are remembered on the way, as a
+ * submit does it, so the prompt an agent is shown (and an approval holds on to) is composed within the same limit
+ * as the one that is sent.
+ */
 export async function loadModels(): Promise<VideoModel[]> {
+  let models: VideoModel[]
   try {
-    return await callService<VideoModel[]>('models:list')
+    models = await callService<VideoModel[]>('models:list')
   } catch (err) {
     throw new Error(`Kunde inte hämta modellerna från Venice: ${errorText(err)}`)
+  }
+  rememberPromptLimits(models)
+  return models
+}
+
+/** How long a read tool waits for the model list before it answers without it. */
+const MODELS_TIMEOUT_MS = 5000
+
+/**
+ * The model list, or undefined when Venice can't be reached in time (the shared helpers decide on their own then,
+ * and the prompt is composed within the limit main last remembered). Read tools like get_workspace wait for it,
+ * so a stalled connection must not hold them up until the agent's client gives up, as paid requests and submits
+ * also only wait so long for it.
+ */
+export async function modelsIfAvailable(): Promise<VideoModel[] | undefined> {
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), MODELS_TIMEOUT_MS)
+  })
+  try {
+    return await Promise.race([loadModels().catch(() => undefined), timeout])
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -763,6 +805,75 @@ export function paramsInfo(p: GenerationParams, index: AssetIndex): Record<strin
       : {}),
     ...(mode === 'image-to-video' && p.startImage ? { start_image: describePicture(p.startImage, index) } : {}),
     ...(mode === 'image-to-video' && p.endImage ? { end_image: describePicture(p.endImage, index) } : {})
+  }
+}
+
+// ── Descriptions in the prompt (the References legend) ───────────────────────
+
+/** A legend entry as the tools show it: the asset, its tokens, the text that is appended and whether it is. */
+export interface DescriptionEntryInfo {
+  asset_id: string
+  asset_name: string
+  kind: AssetKind
+  tokens: string[]
+  description: string
+  /** false: switched off for these params (excluded_description_asset_ids, or include_descriptions false). */
+  included: boolean
+  /**
+   * In composed_prompt right now. False when switched off, and also for one switched on when nothing is appended:
+   * the prompt is empty, or the descriptions don't fit within the model's limit (see descriptions_note).
+   */
+  sent: boolean
+  /** Shortened (ending in "…") to fit the model's prompt_character_limit. */
+  shortened?: boolean
+}
+
+/**
+ * The prompt the params would send and the descriptions that go along with it, as get_workspace, validate_prompt,
+ * get_sequence and reorder_references report it: `composed_prompt` (what Venice gets: the prompt plus the
+ * References legend, composed by main's own composeSubmission – the descriptions as the database has them now,
+ * the params' switches, the prompt language, the model's prompt limit), `description_entries` (every referenced
+ * asset that has a description, with whether it is switched on and whether it is in composed_prompt now), the
+ * switches, and the composed length against the model's limit (with a note when the descriptions had to be
+ * shortened or left out to fit, or a blank prompt gets none). Needs an open library.
+ */
+export function descriptionInfo(params: GenerationParams, index: AssetIndex): Record<string, unknown> {
+  const sent = composeSubmission(params)
+  // Every described reference, switched on or off, so an agent sees what it could turn back on (in full: the
+  // length limit only shortens what is actually sent).
+  const all = composePrompt(params, describedAssets(index.assets), { language: getPromptLanguage(), include: true })
+  const appended = new Map(sent.entries.map((e) => [e.assetId, e]))
+  const excluded = params.excludedDescriptionAssetIds ?? []
+  const limit = promptLimitOf(params.model)
+  const entries: DescriptionEntryInfo[] = all.entries.map((e) => {
+    const used = appended.get(e.assetId)
+    return {
+      asset_id: e.assetId,
+      asset_name: e.name,
+      kind: e.kind,
+      tokens: e.tokens,
+      description: (used ?? e).description,
+      included: !!used,
+      // composePrompt lists every entry also when it appends none (an empty prompt, a legend that doesn't fit).
+      sent: !!used && !!sent.legend,
+      ...(used?.shortened ? { shortened: true } : {})
+    }
+  })
+  const note = sent.dropped
+    ? "The descriptions don't fit within the model's prompt_character_limit, so none are appended. Shorten the prompt to make room for them."
+    : sent.truncated
+      ? "Some descriptions were shortened to fit the model's prompt_character_limit."
+      : sent.entries.length && !sent.legend
+        ? 'Nothing is appended to an empty prompt; the descriptions come along once there is one.'
+        : undefined
+  return {
+    composed_prompt: sent.prompt,
+    description_entries: entries,
+    include_descriptions: includesDescriptions(params),
+    ...(excluded.length ? { excluded_description_asset_ids: excluded } : {}),
+    composed_characters: sent.prompt.length,
+    ...(limit ? { prompt_character_limit: limit } : {}),
+    ...(note ? { descriptions_note: note } : {})
   }
 }
 

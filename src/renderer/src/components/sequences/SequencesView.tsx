@@ -430,7 +430,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     store.refresh()
   }
 
-  const reusePrompt = (take: Generation) => editorHandle.current?.applyPrompt(take.params.prompt, take.params.negativePrompt)
+  const reusePrompt = (take: Generation) => editorHandle.current?.applyPrompt(take.params)
 
   /**
    * "Gör om mellan grannarna": main sets the clip to start on the previous clip's last frame and end on the next

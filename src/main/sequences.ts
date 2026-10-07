@@ -20,6 +20,7 @@ import {
   supportsAudioInput,
   supportsEndImage
 } from '@shared/models'
+import { knowsPromptLimit, rememberPromptLimits } from '@shared/prompt-compose'
 import {
   blockingContinuationError,
   blockingPromptError,
@@ -27,6 +28,7 @@ import {
   findImageTokens
 } from '@shared/prompt-refs'
 import type {
+  ComposedPrompt,
   ExportProgress,
   Generation,
   GenerationParams,
@@ -43,7 +45,7 @@ import type {
 import { isAgentCall } from './agent/local-ipc'
 import * as db from './db'
 import { concatClips, extractFrame, extractFrameAtOrAfter, frameStartAtOrAfter, probe } from './ffmpeg'
-import { prepareSubmission, toPublic, type JobManager } from './jobs'
+import { composeSubmission, prepareSubmission, toPublic, type JobManager } from './jobs'
 import {
   FOLDERS,
   framesDir,
@@ -192,6 +194,21 @@ function takeParams(row: store.SegmentRow, links: ClipLinks): GenerationParams {
     ...(links.continuing ? { startImage: undefined } : {}),
     ...(links.ending ? { endImage: undefined } : {})
   }
+}
+
+/**
+ * The prompt a take of the clip would be sent with right now (composeSubmission): its prompt with the References
+ * legend of the descriptions of the assets it references, as the library has them now and as the clip's switches
+ * (includeDescriptions, excludedDescriptionAssetIds) say. A clip that takes a frame from a neighbour is generated
+ * image-to-video and sends no references, so it gets no legend; neither does one with keyframes of its own. For
+ * showing it (an agent's get_sequence) and for an approval to compare with what the user was shown. `characterLimit`:
+ * the model's prompt limit, when the caller has the model list (default: the one remembered from it).
+ */
+export function composeClipPrompt(segmentId: string, opts: { characterLimit?: number } = {}): ComposedPrompt {
+  const row = store.requireSegmentRow(segmentId)
+  const rows = store.listSegmentRows(row.sequence_id)
+  const links = linksOf(rows, rows.findIndex((r) => r.id === row.id))
+  return composeSubmission(takeParams(row, links), opts)
 }
 
 /** The clip would be sent with an end image (its own or the next clip's frame) that its model can't take. */
@@ -1017,6 +1034,18 @@ export class SequenceService {
     return this.deps.stills
   }
 
+  /**
+   * Remembers the models' prompt limits from the model list (cached in main) unless the clip's model is known
+   * already, so a take's prompt is composed within its model's limit (composeSubmission). Never rejects; offline
+   * the take is composed without a limit.
+   */
+  private async learnPromptLimits(segmentId: string): Promise<void> {
+    const row = store.getSegmentRow(segmentId)
+    if (!row || knowsPromptLimit(store.parseParams(row.params).model)) return
+    const models = await this.modelList()
+    if (models) rememberPromptLimits(models)
+  }
+
   /** The video model list, or undefined when it can't be had in time (offline, say). Never rejects. */
   private async modelList(): Promise<VideoModel[] | undefined> {
     const load = this.deps.models
@@ -1187,6 +1216,8 @@ export class SequenceService {
    * SubmitGuard.
    */
   private async submitTake(segmentId: string, cancelled?: () => boolean, guard?: SubmitGuard): Promise<Generation> {
+    // The prompt is composed with the reads below, within its model's limit: known before anything is read.
+    await this.learnPromptLimits(segmentId)
     // A take that is being moved is briefly missing from its recorded path; don't mistake that for a gap.
     await this.filesSettled()
     const row = store.requireSegmentRow(segmentId)
@@ -1201,6 +1232,9 @@ export class SequenceService {
     // Before the frame grabs and the quote: a clip that can't be sent as it stands costs nothing to refuse.
     const problem = clipProblem(params, links)
     if (problem) throw new Error(problem)
+    // The descriptions appended to its prompt are read here too, with the clip and the guard: a description edited
+    // while the frames are taken and the pictures uploaded doesn't change what the take sends.
+    const sentPrompt = composeSubmission(params).prompt
     // Both neighbours are checked before either frame is extracted, so a missing take is reported at once.
     if (links.continuing) this.requireNeighbourTake(rows[index - 1], index)
     if (links.ending) this.requireNeighbourTake(rows[index + 1], index + 2)
@@ -1214,7 +1248,7 @@ export class SequenceService {
     const quote = await this.deps.venice.quote(p).catch(() => undefined)
     if (cancelled?.()) throw new RunStopped()
     // Consent errors (NEEDS_CONSENT…) propagate unchanged so the renderer can ask and retry.
-    const generation = await this.deps.jobs.submit(p, { quote, segmentId: row.id })
+    const generation = await this.deps.jobs.submit(p, { quote, segmentId: row.id, sentPrompt })
     this.useImportedCopies(row.id, p, generation.params)
     if (store.getSequenceRow(row.sequence_id)) {
       store.touchSequence(row.sequence_id)

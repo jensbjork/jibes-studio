@@ -13,6 +13,7 @@ import {
 } from 'react'
 import { maxReferenceAudios, type Kind } from '@shared/models'
 import { validatePromptReferences, type ReferenceKind, type ValidateOptions } from '@shared/prompt-refs'
+import { remapPromptReferences } from '@shared/prompt-remap'
 import type { Asset, PromptLanguage } from '@shared/types'
 import { KIND_TONE, OWN_IMAGE_TOKEN } from '../pickers/assetKinds'
 import type { FormAudio } from '../pickers/audioRefs'
@@ -117,6 +118,18 @@ interface MenuState {
 /** How long "Ångra" is offered after the prompt was replaced from outside while the user was typing. */
 const REPLACED_UNDO_MS = 30_000
 
+/** The reference pictures and clips (paths, in @ImageN / @AudioN order) a text was written against. */
+interface ShownLists {
+  images: string[]
+  audios: string[]
+}
+
+/** Text replaced from outside, with the lists it was written against (undefined outside reference mode). */
+interface ReplacedText {
+  text: string
+  lists?: ShownLists
+}
+
 /** "\r\n" (from an agent or a stored prompt) as the textarea has it: every offset is worked out on the text. */
 function normalizeBreaks(text: string): string {
   return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text
@@ -191,13 +204,37 @@ export default function PromptEditor({
    * The text replaced from outside while the user was typing in the field, for one "Ångra". It stays offered
    * for a while even if they go on typing: the first keys after the switch are usually typed without noticing it.
    */
-  const [replaced, setReplaced] = useState<string>()
+  const [replaced, setReplaced] = useState<ReplacedText>()
   const focused = useRef(false)
   useEffect(() => {
     if (replaced === undefined) return
     const t = setTimeout(() => setReplaced(undefined), REPLACED_UNDO_MS)
     return () => clearTimeout(t)
   }, [replaced])
+  // The lists as last shown, which the text in the field was written against. An outside change can move the
+  // references and renumber the prompt in one go (an agent's reorder_references), so the text "Ångra" brings
+  // back must be renumbered to the lists as they are then, or its tokens would name other pictures.
+  const reference = kind === 'reference-to-video'
+  const lists = useMemo<ShownLists | undefined>(
+    () => (reference ? { images: references.map((r) => r.path), audios: audios.map((a) => a.path) } : undefined),
+    [reference, references, audios]
+  )
+  const shownLists = useRef(lists)
+  useLayoutEffect(() => {
+    shownLists.current = lists
+  })
+  /** What "Ångra" puts back: the replaced text, its tokens following their pictures and clips to the lists now. */
+  const restored = useMemo(() => {
+    if (!replaced) return undefined
+    const was = replaced.lists
+    if (!was || !lists) return replaced.text
+    const clips = (paths: readonly string[]) => paths.map((path) => ({ path }))
+    return remapPromptReferences(
+      replaced.text,
+      { before: was.images, after: lists.images },
+      { before: clips(was.audios), after: clips(lists.audios) }
+    )
+  }, [replaced, lists])
 
   const commit = (next: string): void => {
     setText(next)
@@ -214,7 +251,6 @@ export default function PromptEditor({
   }
 
   // ── Checks and highlighting ──────────────────────────────────────────────────
-  const reference = kind === 'reference-to-video'
   // The checks arrive as a fresh object with every render of the form; their content decides.
   const checksKey = JSON.stringify(checks)
   const issues = useMemo(
@@ -325,8 +361,9 @@ export default function PromptEditor({
     const next = normalizeBreaks(value)
     if (!echo && next !== text) {
       // Replaced from outside (an agent's set_form, "Använd igen"). The menu's offsets belonged to the old text,
-      // and what the user was typing is gone from the undo history, so it is kept for one "Ångra".
-      if (focused.current && text.trim()) setReplaced(text)
+      // and what the user was typing is gone from the undo history, so it is kept for one "Ångra" – with the
+      // lists it was written against, which the same change may have reordered.
+      if (focused.current && text.trim()) setReplaced({ text, lists: shownLists.current })
       setText(next)
       setMenu(undefined)
       dismissed.current = null
@@ -685,13 +722,13 @@ export default function PromptEditor({
         />
       </div>
 
-      {replaced !== undefined && replaced !== text && (
+      {restored !== undefined && restored !== text && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted">
           <span className="min-w-0 truncate">Prompten ersattes medan du skrev (av agenten eller Studio).</span>
           <button
             onClick={() => {
               setReplaced(undefined)
-              setValueUndoable(replaced)
+              setValueUndoable(restored)
             }}
             className="ml-auto shrink-0 text-text hover:underline"
           >

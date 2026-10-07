@@ -1,5 +1,6 @@
 import { useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { DEFAULT_PARAMS, sanitizeReferenceAudios } from '@shared/models'
+import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import type { Asset, AssetAudio, GenerationParams } from '@shared/types'
 import { clipsById, followLibraryAudio } from '../components/pickers/audioRefs'
 import { LAST_PARAMS_KEY } from './library'
@@ -21,7 +22,9 @@ function loadRemembered(): GenerationParams {
     const audios = sanitizeReferenceAudios(params.referenceAudios)
     if (audios) params.referenceAudios = audios
     else delete params.referenceAudios
-    return params
+    // The description switches as the form writes them (defaults left out), never malformed ones from storage.
+    const { includeDescriptions: _include, excludedDescriptionAssetIds: _excluded, ...rest } = params
+    return { ...rest, ...sanitizeDescriptionFlags(params) }
   } catch {
     return { ...DEFAULT_PARAMS }
   }

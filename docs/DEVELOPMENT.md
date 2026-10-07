@@ -286,6 +286,13 @@ Venice's model lists once (`GET /models?type=video`, `?type=image` and `?type=in
 files if a test needs them. `testPng` is any small PNG; `generateStill` then saves it as a still, and the recorded
 bodies show what would be sent (`safe_mode`, the references as data URLs with the base first).
 
+The prompt in a body built that way is the user's own. The References legend of the assets' descriptions is
+appended by `JobManager.submit` (through `composeSubmission`, which reads the descriptions from the open library),
+so submit through a `JobManager` to see the prompt exactly as it is sent, or call `composeSubmission(prepared)`
+yourself. The job manager needs the models' prompt limits for that: pass a model loader as its second argument
+(`new JobManager(venice, async () => models)`, as `index.ts` passes its cached list), or serve `/models` — without
+either it composes without a limit.
+
 To check frames exactly — the start and end image a clip sends, or which frames an export keeps at each cut — make
 test videos whose every frame has its own colour (or two colour halves, for more than 64 frames), read the frames
 back with `ffmpeg -vf scale=8:8:flags=area -f rawvideo -pix_fmt rgb24 -` and map each colour back to its number.
@@ -427,7 +434,9 @@ Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, 
 - Reach Studio's services through `callService`, never by writing to the database or files directly, so the same
   validation and change notifications apply.
 - Share filters and checks with the UI instead of re-implementing them (`shared/prompt-refs.ts`,
-  `shared/generation-filter.ts`, `agent/studio.ts`), so an agent and the user always see the same result.
+  `shared/generation-filter.ts`, `shared/prompt-compose.ts`, `shared/prompt-remap.ts`, `agent/studio.ts`), so an
+  agent and the user always see the same result — a prompt an agent is shown is composed by main's
+  `composeSubmission`, exactly as it will be sent.
 - Return pictures as `images` and sound as `audio` (`LabeledImage` / `LabeledAudio`, each with a label that says
   what it is); `agent/images.ts` and `agent/media.ts` make them from files, frames and ffmpeg output. Only send
   sound when the agent asks for it (`include_audio`); `defineTool` already replaces it with a note for clients
