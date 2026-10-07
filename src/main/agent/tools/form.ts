@@ -28,10 +28,12 @@ import type {
   GenerationParams,
   ReferenceAudio,
   Sequence,
+  Storyboard,
   VideoModel
 } from '@shared/types'
 import * as store from '../../sequence-store'
 import { callService } from '../local-ipc'
+import { isStoryboardId } from '../storyboard-rows'
 import {
   inOrder,
   movedSummary,
@@ -191,7 +193,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get workspace',
       description:
-        "What the user is looking at in Studio right now (the view, and the sequence and clip open in the sequence editor) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included) and whether it is in composed_prompt now (sent); include_descriptions and excluded_description_asset_ids are the form's switches, changed with set_form). Start here to see what the user is working on.",
+        "What the user is looking at in Studio right now (the view, and the sequence and clip open in the sequence editor or the storyboard open in Storyboards) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included) and whether it is in composed_prompt now (sent); include_descriptions and excluded_description_asset_ids are the form's switches, changed with set_form). Start here to see what the user is working on.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'tittade på arbetsytan'
@@ -205,6 +207,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           view: state.view,
           sequence_id: state.sequenceId,
           segment_id: state.segmentId,
+          storyboard_id: state.storyboardId,
           form: await formInfo(state, index, true)
         }
       }
@@ -587,16 +590,18 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Open in Studio',
       description:
-        "Brings a place in Studio to the front so the user sees it: the Generate view, or a sequence (optionally with one clip selected). Use it when you want the user to look at something you prepared.",
+        "Brings a place in Studio to the front so the user sees it: the Generate view, a sequence (optionally with one clip selected) or a storyboard. Use it when you want the user to look at something you prepared.",
       input: {
-        view: z.enum(['generate', 'sequence']),
+        view: z.enum(['generate', 'sequence', 'storyboard']),
         sequence_id: z.string().optional().describe('For view "sequence".'),
-        segment_id: z.string().optional().describe('For view "sequence": the clip to select (its sequence is found automatically).')
+        segment_id: z.string().optional().describe('For view "sequence": the clip to select (its sequence is found automatically).'),
+        storyboard_id: z.string().optional().describe('For view "storyboard": the storyboard to open.')
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: ({ view }) => (view === 'generate' ? 'visade Generera' : 'visade en sekvens')
+      summary: ({ view }) =>
+        view === 'generate' ? 'visade Generera' : view === 'storyboard' ? 'visade en storyboard' : 'visade en sekvens'
     },
-    async ({ view, sequence_id, segment_id }) => {
+    async ({ view, sequence_id, segment_id, storyboard_id }) => {
       requireLibrary()
       if (view === 'generate') {
         const args: AgentOpenArgs = { view: 'generate' }
@@ -610,6 +615,26 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         if (!row) throw new Error('Klippet finns inte längre.')
         if (sequenceId && sequenceId !== row.sequence_id) throw new Error('Klippet hör inte till den sekvensen.')
         sequenceId = row.sequence_id
+      }
+      // A storyboard named as a sequence (or a transition as a clip) is opened where it lives: in Storyboards.
+      const storyboardId = view === 'storyboard' ? (storyboard_id ?? sequenceId) : isStoryboardId(sequenceId) ? sequenceId : undefined
+      if (view === 'storyboard' || storyboardId) {
+        if (!storyboardId) throw new Error('Ange storyboard_id för att visa en storyboard.')
+        if (!isStoryboardId(storyboardId)) {
+          throw new Error(
+            store.getSequenceRow(storyboardId)
+              ? 'Det här är en sekvens, inte en storyboard. Visa den med view "sequence".'
+              : 'Storyboarden finns inte längre.'
+          )
+        }
+        const storyboard = await callService<Storyboard>('storyboards:get', storyboardId)
+        const args: AgentOpenArgs = { view: 'storyboards', storyboardId }
+        const shown: Partial<AgentOpenResult> = (await ctx.bridge.send<AgentOpenResult | undefined>('open', args)) ?? {}
+        ctx.bridge.showWindow()
+        return {
+          data: { shown: 'storyboard', storyboard_id: storyboardId, ...(shown.note ? { note: shown.note } : {}) },
+          summary: `visade storyboarden ${q(storyboard.name)}`
+        }
       }
       if (!sequenceId) throw new Error('Ange sequence_id eller segment_id för att visa en sekvens.')
       const sequence = await callService<Sequence>('sequences:get', sequenceId)

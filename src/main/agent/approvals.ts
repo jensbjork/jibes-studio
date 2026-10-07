@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { NEEDS_CONSENT, type ApprovalImageRequest, type ApprovalRequest, type GenerationParams } from '@shared/types'
+import {
+  NEEDS_CONSENT,
+  type ApprovalImageRequest,
+  type ApprovalRequest,
+  type GenerationParams,
+  type SequenceKind
+} from '@shared/types'
 import { errorText } from './studio'
 
 // Paid generations an agent asked for. Nothing reaches Venice until the user approves the request in Studio;
@@ -36,6 +42,8 @@ export interface ApprovalPlan {
   clipLegends?: Record<string, string>
   image?: ApprovalImageRequest
   sequenceId?: string
+  /** 'storyboard' when sequenceId is a storyboard (a 'segment' request is then one of its transitions). */
+  sequenceKind?: SequenceKind
   sequenceName?: string
   segmentIds?: string[]
   clipNumbers?: number[]
@@ -124,6 +132,7 @@ export class ApprovalStore {
       ...(plan.clipLegends ? { clipLegends: plan.clipLegends } : {}),
       image: plan.image,
       sequenceId: plan.sequenceId,
+      ...(plan.sequenceKind ? { sequenceKind: plan.sequenceKind } : {}),
       sequenceName: plan.sequenceName,
       segmentIds: plan.segmentIds,
       clipNumbers: plan.clipNumbers,

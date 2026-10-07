@@ -14,7 +14,9 @@ import type {
   SegmentImageSlot,
   Sequence,
   Still,
-  StillParams
+  StillParams,
+  Storyboard,
+  StoryboardTransition
 } from '@shared/types'
 import * as db from '../../db'
 import { composeSubmission, prepareSubmission } from '../../jobs'
@@ -23,8 +25,10 @@ import * as store from '../../sequence-store'
 import { getImageSafeMode } from '../../settings'
 import { planStill } from '../../stills'
 import { ensureImagesExist } from '../../venice'
+import { type MissingTransition } from '../../storyboards'
 import type { ApprovalPlan } from '../approvals'
 import { callService } from '../local-ipc'
+import { boardImagePath, boardIndex, isStoryboardId, storyboardOfBoard, transitionPair } from '../storyboard-rows'
 import {
   AssetIndex,
   StillIndex,
@@ -39,6 +43,16 @@ import {
 } from '../studio'
 import { READ_ONLY, defineTool, priceValue, quote, readForm, usd, type ToolContext } from './kit'
 import { assertNotRunning, continues, endsOnNext, isUsableTake, loadClip, loadSequence, selectedTake } from './sequences'
+import {
+  assertStoryboardIdle,
+  loadBoard,
+  loadStoryboard,
+  loadTransition,
+  missingImagesText,
+  transitionDone,
+  transitionLabel,
+  transitionProblems
+} from './storyboards'
 
 // The paid tools never spend money themselves: each one checks the request, asks Venice for the price and
 // creates an approval request that the user answers in Studio. Only their OK submits it (see approvals.ts).
@@ -244,7 +258,7 @@ function pendingAnswer(request: ApprovalRequest, reused: boolean): Record<string
   }
 }
 
-// ── Images (stills for storyboards) ──────────────────────────────────────────
+// ── Images (stills: board pictures and keyframes) ───────────────────────────
 
 /** The reference pictures an image request asks for, in the order they are sent: stills, photos, asset covers. */
 async function imageReferences(input: {
@@ -283,7 +297,11 @@ async function imageReferences(input: {
     if (!cover) throw new Error(`${q(asset.name)} har inga bilder än. Användaren behöver lägga till bilder i Studio först.`)
     refs.push({ path: cover.path, label: `${asset.name} (foto 1)`, name: asset.name, kind: asset.kind })
   }
-  // The same picture twice adds nothing but cost.
+  return dedupeReferences(refs)
+}
+
+/** The references without repeats (the first place a picture has wins): the same picture twice adds nothing but cost. */
+function dedupeReferences(refs: readonly ApprovalImageReference[]): ApprovalImageReference[] {
   const seen = new Set<string>()
   return refs.filter((r) => {
     const key = r.path.normalize('NFC')
@@ -291,6 +309,11 @@ async function imageReferences(input: {
     seen.add(key)
     return true
   })
+}
+
+function excerptOf(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
 }
 
 /** Reference paths carried along the renames made since `mark` (an asset renamed while the request waited). */
@@ -305,6 +328,89 @@ function referenceIdentity(paths: readonly string[] | undefined): string {
 }
 
 const SLOT_WORD: Record<SegmentImageSlot, string> = { start: 'startbild', end: 'slutbild' }
+
+// ── Storyboards: transitions and board pictures ──────────────────────────────
+
+/** A path carried along the renames made since `mark` (a storyboard renamed, "Städa upp"). */
+function followPath(path: string | undefined, mark: number): string | undefined {
+  if (!path) return path
+  return db.followRewrites({ model: '', prompt: '', duration: '', startImage: path }, mark).startImage
+}
+
+/**
+ * A transition as the user approves it: the two boards it goes between, what is sent (both board pictures as
+ * start and end image, prompt, model, options), which files the pictures are, and the prompt as sent.
+ */
+interface PinnedTransition {
+  id: string
+  storyboardId: string
+  fromBoardId: string
+  toBoardId: string
+  params: GenerationParams
+  key: string
+  identity: string
+  sent: string
+}
+
+function pinTransition(storyboard: Storyboard, t: StoryboardTransition, silent: SilentModels): PinnedTransition {
+  return {
+    id: t.id,
+    storyboardId: storyboard.id,
+    fromBoardId: t.fromBoardId,
+    toBoardId: t.toBoardId,
+    params: t.params,
+    key: paramsKey(t.params, silent),
+    // A path names a place, not a picture: the board pictures must stay the very files the user was shown.
+    identity: imageIdentity(t.params),
+    sent: sentPromptOf(t.params).prompt
+  }
+}
+
+/**
+ * Why the transition as the database has it right now is not the one the user approved, or undefined. Read
+ * synchronously, so it can also run as the submit guard, on the very row the take is built from.
+ */
+function transitionChanged(pin: PinnedTransition, mark: number, silent: SilentModels): string | undefined {
+  const row = store.getSegmentRow(pin.id)
+  if (!row || row.sequence_id !== pin.storyboardId) {
+    return 'Övergången finns inte längre (rutorna har flyttats eller tagits bort), så förfrågan gäller inte längre. Be agenten fråga igen om det fortfarande ska genereras.'
+  }
+  const pair = transitionPair(pin.id)
+  if (pair?.from !== pin.fromBoardId || pair?.to !== pin.toBoardId || row.continue_from_previous || row.end_from_next) {
+    return `Övergången går mellan andra rutor nu och ${CHANGED}`
+  }
+  const stored = store.parseParams(row.params)
+  if (imageIdentity(stored) !== pin.identity) return `Bilderna i rutorna ${CHANGED}`
+  if (paramsKey(stored, silent) !== paramsKey(db.followRewrites(pin.params, mark), silent)) return `Övergången ${CHANGED}`
+  if (sentPromptOf(stored).prompt !== pin.sent) return SENT_PROMPT_CHANGED
+  return undefined
+}
+
+/**
+ * The transitions "Generera saknade" would pay for right now, as the storyboard service itself decides it: no
+ * finished selected take, and none rendering or on its way to Venice. The run reads the same list as it goes.
+ */
+function transitionsToGenerate(storyboardId: string): Promise<MissingTransition[]> {
+  return callService<MissingTransition[]>('storyboards:missing', storyboardId)
+}
+
+/**
+ * Throws (in Swedish) unless the transition can be generated as it is: both boards have pictures, the storyboard
+ * service sees no problem, and the params pass the same checks as every generation.
+ */
+function checkTransition(storyboard: Storyboard, index: number): void {
+  const t = storyboard.transitions[index]
+  const label = transitionLabel(storyboard, index)
+  const what = label.charAt(0).toUpperCase() + label.slice(1)
+  if (!t.ready) {
+    throw new Error(
+      `${what} kan inte genereras än: ${missingImagesText(storyboard, t)}. Lägg in bilderna först (request_image_generation med assign_to: {board_id}, eller update_board med image).`
+    )
+  }
+  const problem = transitionProblems(t)[0]
+  if (problem) throw new Error(`${what}: ${problem}`)
+  ensureImagesExist(paramsForSubmit(t.params))
+}
 
 export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
@@ -585,23 +691,185 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
     server,
     ctx,
+    'request_transition_generation',
+    {
+      title: 'Request a storyboard transition (paid, needs approval)',
+      description:
+        "💰 Asks the user to approve generating a new take of one storyboard transition: the clip from one board's picture (its start image) to the next board's picture (its end image), with the transition's prompt, model, duration, resolution and audio. Nothing is generated or paid for until they approve in Studio; the dialog shows both pictures, the prompt and the price. Both boards need pictures and the prompt must be written (get_storyboard: ready). Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval, then get_storyboard / review_generation. If a board's picture or the transition changes (or the boards are moved apart) before the user approves, the request lapses. A newer request for the same transition replaces a pending older one. The new take becomes the transition's selected take when it has none that is usable; otherwise pick it with update_transition({selected_take_id}).",
+      input: {
+        transition_id: z.string(),
+        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      summary: () => 'vill generera en övergång'
+    },
+    async ({ transition_id, note }) => {
+      const epoch = ctx.approvals.epoch()
+      const mark = db.rewriteMark()
+      const { storyboard, index, transition } = await loadTransition(transition_id)
+      // The take would be refused (or paid for twice) while the storyboard's own run is making transitions.
+      assertStoryboardIdle(storyboard)
+      checkTransition(storyboard, index)
+      const params = transition.params
+      const [price, silent] = await Promise.all([quote(params), silentModels()])
+      const pin = pinTransition(storyboard, transition, silent)
+      const sent = sentPromptOf(params)
+      // What the dialog shows: the two board pictures as start and end image, the prompt and the settings.
+      const shown = paramsForSubmit(params)
+      const label = transitionLabel(storyboard, index)
+      const guard: SubmitGuard = (id) => (id === transition.id ? transitionChanged(pin, mark, silent) : 'Fel övergång.')
+      const { request, reused } = requestApproval(ctx, epoch, {
+        kind: 'segment',
+        client: ctx.clientName(),
+        note,
+        params: shown,
+        paramsNow: () => db.followRewrites(shown, mark),
+        ...composedFields(sent),
+        sequenceId: storyboard.id,
+        sequenceKind: 'storyboard',
+        sequenceName: storyboard.name,
+        segmentIds: [transition.id],
+        clipNumbers: [index + 1],
+        priceUsd: price,
+        fingerprint: `transition:${transition.id}:${pin.key}:${pin.identity}:${pin.fromBoardId}:${pin.toBoardId}`,
+        // The same target as a clip's request: a newer request for the transition replaces a pending older one.
+        target: `segment:${transition.id}`,
+        verify: () => {
+          const problem = transitionChanged(pin, mark, silent)
+          if (problem) throw new Error(problem)
+        },
+        // Checked again on the row the take is built from, right before it is sent.
+        execute: async () => [(await callService<Generation>('transitions:generate', transition.id, guard)).id]
+      })
+      return {
+        data: { ...pendingAnswer(request, reused), transition_number: index + 1 },
+        approvalId: request.id,
+        summary: `vill generera ${label} i ${q(storyboard.name)} (${usd(price)}) – väntar på ditt OK`
+      }
+    }
+  )
+
+  defineTool(
+    server,
+    ctx,
+    'request_generate_storyboard',
+    {
+      title: "Request generating a storyboard's missing transitions (paid, needs approval)",
+      description:
+        "💰 Asks the user to approve generating every transition of a storyboard that has no finished selected take (\"Generera saknade\"). Each transition only needs its two boards' pictures, so they are independent of each other. Every one of them must be ready – both boards with pictures, a prompt – or the request is refused naming the transition (generate the ready ones one by one with request_transition_generation instead). Transitions already rendering are not paid again. price_usd is the sum. Returns immediately with {approval_id, status: \"pending\", price_usd, transition_numbers}; follow it with get_approval, then get_storyboard. If a board's picture or one of the transitions changes before the user approves, the request lapses.",
+      input: {
+        storyboard_id: z.string(),
+        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      summary: () => 'vill generera saknade övergångar'
+    },
+    async ({ storyboard_id, note }) => {
+      const epoch = ctx.approvals.epoch()
+      const mark = db.rewriteMark()
+      const storyboard = await loadStoryboard(storyboard_id)
+      if (storyboard.running) throw new Error('”Generera saknade” pågår redan för storyboarden.')
+      if (!storyboard.transitions.length) {
+        throw new Error('Storyboarden har inga övergångar än: den behöver minst två rutor (add_board).')
+      }
+      const missing = (await transitionsToGenerate(storyboard.id)).map(({ transitionId }) => {
+        const index = storyboard.transitions.findIndex((t) => t.id === transitionId)
+        if (index < 0) throw new Error('Storyboarden ändrades just nu. Försök igen.')
+        return { transition: storyboard.transitions[index], index }
+      })
+      if (!missing.length) {
+        throw new Error(
+          'Alla övergångar har redan en färdig vald tagning (eller håller på att genereras) – det finns inget att generera.'
+        )
+      }
+      // The run refuses to start for the same reasons, so they are better heard now than after the user's OK.
+      for (const { index } of missing) checkTransition(storyboard, index)
+      const [prices, silent] = await Promise.all([
+        Promise.all(missing.map(({ transition }) => quote(transition.params))),
+        silentModels()
+      ])
+      const price = prices.every((p) => p !== undefined) ? prices.reduce<number>((sum, p) => sum + (p ?? 0), 0) : undefined
+      const pins = new Map(missing.map(({ transition }) => [transition.id, pinTransition(storyboard, transition, silent)]))
+      const numbers = missing.map(({ index }) => index + 1)
+      const ids = missing.map(({ transition }) => transition.id)
+      // The run reads the storyboard as it goes; this keeps it to the transitions, and the settings, the user approved.
+      const guard: SubmitGuard = (segmentId) => {
+        const pin = pins.get(segmentId)
+        if (!pin) {
+          return 'Övergången ingick inte i agentens förfrågan som du godkände, så den genererades inte. Granska den och tryck ”Generera saknade” om den ska genereras.'
+        }
+        const changed = transitionChanged(pin, mark, silent)
+        return changed
+          ? `Övergången ändrades efter att du godkände agentens förfrågan, så den genererades inte (${changed.replace(/\.$/, '')}). Granska den och tryck ”Generera saknade” om den ska genereras.`
+          : undefined
+      }
+      const { request, reused } = requestApproval(ctx, epoch, {
+        kind: 'generate-all',
+        client: ctx.clientName(),
+        note,
+        sequenceId: storyboard.id,
+        sequenceKind: 'storyboard',
+        sequenceName: storyboard.name,
+        segmentIds: ids,
+        clipNumbers: numbers,
+        priceUsd: price,
+        fingerprint: `storyboard-all:${storyboard.id}:${[...pins.values()].map((p) => `${p.id}:${p.key}:${p.identity}`).join(';')}`,
+        target: `all:${storyboard.id}`,
+        verify: async () => {
+          const now = await callService<Storyboard>('storyboards:get', storyboard.id)
+          if (now.running) throw new Error('”Generera saknade” pågår redan för storyboarden.')
+          const still = (await transitionsToGenerate(storyboard.id)).map((m) => m.transitionId)
+          if (still.join(';') !== ids.join(';')) {
+            throw new Error(`Övergångarna som saknar en tagning ${CHANGED}`)
+          }
+          for (const pin of pins.values()) {
+            const problem = transitionChanged(pin, mark, silent)
+            if (problem) throw new Error(problem)
+          }
+        },
+        execute: async () => {
+          await callService('storyboards:generateAll', storyboard.id, guard)
+          return []
+        }
+      })
+      return {
+        data: { ...pendingAnswer(request, reused), transition_numbers: numbers },
+        approvalId: request.id,
+        summary: `vill generera ${numbers.length === 1 ? '1 övergång' : `${numbers.length} övergångar`} i ${q(storyboard.name)} (${usd(price)}) – väntar på ditt OK`
+      }
+    }
+  )
+
+  defineTool(
+    server,
+    ctx,
     'request_image_generation',
     {
       title: 'Request an image (paid, needs approval)',
       description:
-        "💰 Asks the user to approve making one still picture with Venice's image models – typically a keyframe (start or end image) for a storyboard clip. Cheap (about $0.06 with the default Seedream models) but paid, so nothing is generated until the user approves in Studio. With references it combines them into a new picture (an edit model, at most max_input_images – see list_image_models); without, it makes the picture from the prompt alone (a text-to-image model). References are sent in this order: reference_still_ids, reference_image_ids (library photos), then reference_asset_ids (each asset's cover photo); the first one is the base picture the model edits, so put the picture whose composition should be kept first. Write the prompt in English as one still frame: who and what, composition and framing, place, light, style; refer to references as \"image 1\", \"image 2\" … in that order, never with @ tokens. Left out: the default model for the case, the sequence's aspect ratio (the clip's when assign_to is given), 1K and the model's default quality. The request is checked first (model, number of references, files, options) and priced; problems come back as an error. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval, which gives the still_id once approved. Every result is saved as a still of the sequence (without sequence_id and assign_to: a still of no sequence, in Referensbilder); assign_to also makes it the start or end image of that clip (which switches the clip to image-to-video). Not while \"Generera saknade\" runs for the clip's sequence; if the clip is moved, or its slot starts or stops taking a neighbour's frame, before the user approves, the request lapses.",
+        "💰 Asks the user to approve making one still picture with Venice's image models – typically a storyboard board's picture (a milestone of the film) or a sequence clip's start or end image. Cheap (about $0.06 with the default Seedream models) but paid, so nothing is generated until the user approves in Studio. With references it combines them into a new picture (an edit model, at most max_input_images – see list_image_models); without, it makes the picture from the prompt alone (a text-to-image model). References are sent in this order: the previous board's picture (previous_board_as_reference), reference_still_ids, reference_image_ids (library photos), then reference_asset_ids (each asset's cover photo); the first one is the base picture the model edits, so put the picture whose composition should be kept first. Write the prompt in English as one still frame: who and what, composition and framing, place, light, style; refer to references as \"image 1\", \"image 2\" … in that order, never with @ tokens. Left out: the default model for the case, the storyboard's or sequence's aspect ratio (the clip's with assign_to a clip), 1K and the model's default quality. The request is checked first (model, number of references, files, options) and priced; problems come back as an error. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval, which gives the still_id once approved. Every result is saved as a still of its storyboard or sequence (with neither: in Referensbilder). assign_to: {board_id} also makes it that board's picture (replacing the one it has); assign_to: {segment_id, slot} makes it a sequence clip's start or end image (which switches the clip to image-to-video). Not while \"Generera saknade\" runs for that storyboard or sequence; if the board or clip is moved, removed or gets another picture (or the clip's slot starts or stops taking a neighbour's frame) before the user approves, the request lapses.",
       input: {
         prompt: z.string().min(1).max(4000).describe('English: one still frame – subject and moment, framing, place, light, style.'),
+        storyboard_id: z
+          .string()
+          .optional()
+          .describe("The storyboard whose stills get the picture; default the assign_to board's storyboard."),
         sequence_id: z
           .string()
           .optional()
-          .describe("The sequence whose storyboard gets the still; default the assign_to clip's sequence."),
+          .describe("The sequence whose stills get the picture; default the assign_to clip's sequence."),
         model: z.string().optional().describe('An image model id from list_image_models; default Seedream.'),
+        previous_board_as_reference: z
+          .boolean()
+          .optional()
+          .describe(
+            "With assign_to: {board_id}: send the previous board's picture as the first reference (the base picture), for visual continuity between milestones."
+          ),
         reference_still_ids: z
           .array(z.string())
           .max(10)
           .optional()
-          .describe('Stills (list_stills), e.g. an earlier keyframe.'),
+          .describe('Stills (list_stills), e.g. an earlier board picture or keyframe.'),
         reference_image_ids: z
           .array(z.string())
           .max(10)
@@ -617,12 +885,17 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         quality: z.string().optional().describe("Only for models with qualities."),
         negative_prompt: z.string().max(1500).optional().describe('Text-to-image models only.'),
         assign_to: z
-          .object({
-            segment_id: z.string(),
-            slot: z.enum(['start', 'end']).describe('The clip\'s start image or its end image.')
-          })
+          .union([
+            z.object({ board_id: z.string().describe('A board of a storyboard (get_storyboard).') }).strict(),
+            z
+              .object({
+                segment_id: z.string(),
+                slot: z.enum(['start', 'end']).describe('The clip\'s start image or its end image.')
+              })
+              .strict()
+          ])
           .optional()
-          .describe('Also put the still into this clip once it is made.'),
+          .describe("Also put the still into this board (its picture) or this sequence clip's slot once it is made."),
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -632,16 +905,53 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const epoch = ctx.approvals.epoch()
       const mark = db.rewriteMark()
       requireLibrary()
-      const target = input.assign_to ? await loadClip(input.assign_to.segment_id) : undefined
-      if (target && input.sequence_id && target.sequence.id !== input.sequence_id) {
+      if (input.storyboard_id && input.sequence_id) throw new Error('Ange storyboard_id eller sequence_id, inte båda.')
+      const boardAsked = input.assign_to && 'board_id' in input.assign_to ? input.assign_to.board_id : undefined
+      const slotAsked = input.assign_to && 'segment_id' in input.assign_to ? input.assign_to : undefined
+      if (input.previous_board_as_reference && !boardAsked) {
+        throw new Error('previous_board_as_reference gäller bara tillsammans med assign_to: {board_id}.')
+      }
+      // A storyboard's id given as sequence_id is taken as meant.
+      const ownerId = input.storyboard_id ?? input.sequence_id
+      const ownerIsStoryboard = !!input.storyboard_id || (!!ownerId && isStoryboardId(ownerId))
+      const board = boardAsked ? await loadBoard(boardAsked) : undefined
+      const target = slotAsked ? await loadClip(slotAsked.segment_id) : undefined
+      if (board && ownerId && ownerId !== board.storyboard.id) {
+        throw new Error('Rutan i assign_to hör till en annan storyboard. Ange rutans egen storyboard, eller ingen.')
+      }
+      if (target && ownerId && target.sequence.id !== ownerId) {
         throw new Error('assign_to hör till en annan sekvens än sequence_id. Ange klippets egen sekvens, eller ingen.')
       }
-      // The picture is put into the clip after it is paid for, which "Generera saknade" would refuse meanwhile.
+      // The picture is put in after it is paid for, which "Generera saknade" would refuse meanwhile.
       if (target) assertNotRunning(target.sequence)
-      const sequence = target?.sequence ?? (input.sequence_id ? await loadSequence(input.sequence_id) : undefined)
-      const references = await imageReferences(input)
+      if (board) assertStoryboardIdle(board.storyboard)
+      const storyboard =
+        board?.storyboard ?? (ownerId && ownerIsStoryboard && !target ? await loadStoryboard(ownerId) : undefined)
+      const sequence =
+        target?.sequence ?? (ownerId && !ownerIsStoryboard ? await loadSequence(ownerId) : undefined)
+
+      // The previous board's picture first: the base picture the model keeps the composition and look of.
+      const previous: ApprovalImageReference[] = []
+      if (board && input.previous_board_as_reference) {
+        if (board.index === 0) throw new Error('Ruta 1 har ingen föregående ruta att använda som referens.')
+        const before = board.storyboard.boards[board.index - 1]
+        if (!before.imagePath) {
+          throw new Error(
+            `Ruta ${board.index} har ingen bild än, så den kan inte bli referens. Skapa den först, eller låt bli previous_board_as_reference.`
+          )
+        }
+        const [stills, assets] = await Promise.all([StillIndex.load(), AssetIndex.load()])
+        const photo = assets.photo(before.imagePath)
+        previous.push({
+          path: before.imagePath,
+          label: `Ruta ${board.index} (föregående bild)${before.note.trim() ? `: ${excerptOf(before.note, 50)}` : ''}`,
+          name: `Ruta ${board.index}`,
+          kind: photo ? photo.asset.kind : stills.atPath(before.imagePath) ? 'still' : undefined
+        })
+      }
+      const references = dedupeReferences([...previous, ...(await imageReferences(input))])
       const asked: StillParams = {
-        sequenceId: sequence?.id,
+        sequenceId: storyboard?.id ?? sequence?.id,
         prompt: input.prompt.replace(/\r\n?/g, '\n').trim(),
         model: input.model ?? '',
         negativePrompt: input.negative_prompt?.trim() || undefined,
@@ -652,21 +962,27 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       }
       // Checked and filled in exactly as the window's dialog does it (model, references, options, price).
       let plan = await planStill(asked)
-      // A keyframe should have its clip's format (image-to-video takes the format from the start image); the
-      // sequence's is the default, so only a clip of another format needs it asked for.
-      const clipRatio = target?.segment.params.aspectRatio
-      const clipFormatDiffers = !!clipRatio && plan.params.aspectRatio !== clipRatio
-      if (!asked.aspectRatio && clipFormatDiffers && plan.model.aspectRatios.includes(clipRatio)) {
-        plan = await planStill({ ...asked, aspectRatio: clipRatio })
+      const notes = [...plan.notes]
+      // A board's picture should have its storyboard's format (a transition takes its format from its pictures), and
+      // a keyframe its clip's (image-to-video takes the format from the start image).
+      const wantedRatio = storyboard?.aspectRatio ?? target?.segment.params.aspectRatio
+      if (!asked.aspectRatio && wantedRatio && plan.params.aspectRatio !== wantedRatio) {
+        if (plan.model.aspectRatios.includes(wantedRatio)) {
+          plan = await planStill({ ...asked, aspectRatio: wantedRatio })
+          notes.splice(0, notes.length, ...plan.notes)
+        } else if (storyboard) {
+          notes.push(
+            `${plan.model.name} kan inte göra bildformatet ${wantedRatio}, så bilden blir ${plan.params.aspectRatio ?? 'modellens standardformat'} – ett annat format än storyboardens.`
+          )
+        }
       }
       const params = plan.params
-      const assignTo = target && input.assign_to
-        ? { segmentId: target.segment.id, slot: input.assign_to.slot, clipNumber: target.index + 1 }
+      const assignTo = target && slotAsked
+        ? { segmentId: target.segment.id, slot: slotAsked.slot, clipNumber: target.index + 1 }
         : undefined
       // Whether the slot takes a neighbour's frame now: the picture replaces it (see the notes below).
       const slotWasAutomatic =
         !!assignTo && !!target && (assignTo.slot === 'start' ? continues : endsOnNext)(target.sequence, target.index)
-      const notes = [...plan.notes]
       // A picture replaces an automatic frame from a neighbour; better said now than discovered later.
       if (assignTo?.slot === 'start' && target && continues(target.sequence, target.index)) {
         notes.push(
@@ -683,24 +999,67 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           `Klipp ${target.index + 1} använder i dag referenser. Med bilden genereras det bild-till-video: referenserna tas bort och prompten behöver beskriva rörelsen utan @-referenser (update_segment).`
         )
       }
+      // The board as the user is shown it ("ruta N"), and the picture it has now, which the new one replaces.
+      const boardShown = board
+        ? { id: board.board.id, number: board.index + 1, imagePath: board.board.imagePath }
+        : undefined
+      if (boardShown?.imagePath) {
+        notes.push(
+          `Ruta ${boardShown.number} har redan en bild; den nya ersätter den (den gamla finns kvar bland storyboardens bilder).`
+        )
+      }
+      const assignToBoard =
+        boardShown && storyboard
+          ? { boardId: boardShown.id, storyboardId: storyboard.id, boardNumber: boardShown.number }
+          : undefined
       const identity = referenceIdentity(params.referenceImages)
+      const owner = storyboard ?? sequence
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'image',
         client: ctx.clientName(),
         note: input.note,
-        image: { params, modelName: plan.model.name, references, assignTo },
-        sequenceId: sequence?.id,
-        sequenceName: sequence?.name,
+        image: { params, modelName: plan.model.name, references, assignTo, ...(assignToBoard ? { assignToBoard } : {}) },
+        sequenceId: owner?.id,
+        ...(storyboard ? { sequenceKind: 'storyboard' as const } : {}),
+        sequenceName: owner?.name,
         segmentIds: assignTo ? [assignTo.segmentId] : undefined,
         clipNumbers: assignTo ? [assignTo.clipNumber] : undefined,
         priceUsd: plan.priceUsd,
-        fingerprint: `image:${JSON.stringify([params, assignTo?.segmentId, assignTo?.slot])}`,
-        // A newer picture for the same slot replaces one still waiting.
-        target: assignTo ? `image:${assignTo.segmentId}:${assignTo.slot}` : undefined,
+        fingerprint: `image:${JSON.stringify([params, assignTo?.segmentId, assignTo?.slot, boardShown?.id, boardShown?.imagePath])}`,
+        // A newer picture for the same slot or board replaces one still waiting.
+        target: assignTo
+          ? `image:${assignTo.segmentId}:${assignTo.slot}`
+          : boardShown
+            ? `image:board:${boardShown.id}`
+            : undefined,
         verify: async () => {
           // A path names a place, not a picture: the references must still be the very files shown.
           if (referenceIdentity(followReferences(params.referenceImages, mark)) !== identity) {
             throw new Error(`Referensbilderna i förfrågan ${CHANGED}`)
+          }
+          if (boardShown && storyboard) {
+            if (storyboardOfBoard(boardShown.id) !== storyboard.id) {
+              throw new Error('Rutan som bilden skulle bli finns inte längre, så förfrågan gäller inte.')
+            }
+            // The user approves "ruta N" as the dialog names it: the board must still be there, with the picture
+            // it had, so a picture the user put in meanwhile isn't replaced behind their back.
+            const index = boardIndex(boardShown.id)
+            if (index + 1 !== boardShown.number) {
+              throw new Error(
+                `Rutan som bilden skulle bli har flyttats (det var ruta ${boardShown.number}, nu ruta ${index + 1}), så förfrågan gäller inte längre. Be agenten fråga igen om bilden fortfarande ska skapas.`
+              )
+            }
+            const now = await callService<Storyboard>('storyboards:get', storyboard.id)
+            const imageNow = now.boards.find((b) => b.id === boardShown.id)?.imagePath
+            if ((imageNow ?? '') !== (followPath(boardShown.imagePath, mark) ?? '')) {
+              throw new Error(`Ruta ${boardShown.number} har fått en annan bild sedan agenten frågade, så förfrågan gäller inte längre.`)
+            }
+            if (now.running) {
+              throw new Error(
+                '”Generera saknade” pågår för storyboarden, så bilden kan inte sättas in nu och förfrågan gäller inte. Be agenten fråga igen när körningen är klar.'
+              )
+            }
+            return
           }
           if (!assignTo) return
           const row = store.getSegmentRow(assignTo.segmentId)
@@ -730,6 +1089,26 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
             ...params,
             referenceImages: followReferences(params.referenceImages, mark)
           })
+          if (boardShown) {
+            // Checked again now that the picture is made, which takes a while: as verify says, a picture the user
+            // put in meanwhile isn't replaced behind their back.
+            if ((boardImagePath(boardShown.id) ?? '') !== (followPath(boardShown.imagePath, mark) ?? '')) {
+              return {
+                stillId: still.id,
+                notice: `Bilden skapades och sparades bland storyboardens bilder, men ruta ${boardShown.number} fick en annan bild medan den skapades, så den nya sattes inte in där.`
+              }
+            }
+            try {
+              await callService<Storyboard>('boards:update', boardShown.id, { image: { kind: 'still', stillId: still.id } })
+              return { stillId: still.id }
+            } catch (err) {
+              // Paid for and saved either way; only putting it into the board didn't work.
+              return {
+                stillId: still.id,
+                notice: `Bilden skapades och sparades bland storyboardens bilder, men kunde inte bli bild för ruta ${boardShown.number}: ${errorText(err)}`
+              }
+            }
+          }
           if (!assignTo) return { stillId: still.id }
           try {
             await callService<Sequence>('segments:setImage', assignTo.segmentId, assignTo.slot, {
@@ -746,11 +1125,13 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           }
         }
       })
-      const where = assignTo
-        ? ` till klipp ${assignTo.clipNumber}${sequence ? ` i ${q(sequence.name)}` : ''}`
-        : sequence
-          ? ` i ${q(sequence.name)}`
-          : ''
+      const where = boardShown
+        ? ` till ruta ${boardShown.number} i ${q(storyboard!.name)}`
+        : assignTo
+          ? ` till klipp ${assignTo.clipNumber}${sequence ? ` i ${q(sequence.name)}` : ''}`
+          : owner
+            ? ` i ${q(owner.name)}`
+            : ''
       return {
         data: {
           ...pendingAnswer(request, reused),
@@ -765,6 +1146,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
             what: r.label,
             ...(i === 0 ? { base: true } : {})
           })),
+          ...(boardShown ? { assign_to: { board_id: boardShown.id, board_number: boardShown.number } } : {}),
           ...(assignTo
             ? { assign_to: { segment_id: assignTo.segmentId, clip_number: assignTo.clipNumber, slot: assignTo.slot } }
             : {}),
@@ -783,7 +1165,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get approval status',
       description:
-        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence; for an image, the still_id – look at it with get_still), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, or replaced by a newer request) or failed (the error). Poll every 15–30 seconds while pending.",
+        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence, for generate-storyboard the storyboard with get_storyboard; for an image, the still_id – look at it with get_still – and assigned when it went into its board or clip), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, or replaced by a newer request) or failed (the error). Poll every 15–30 seconds while pending.",
       input: { approval_id: z.string() },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'kollade svaret på en förfrågan'
@@ -791,18 +1173,26 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     async ({ approval_id }) => {
       const request = ctx.approvals.get(approval_id)
       if (!request) throw new Error('Förfrågan finns inte. Förfrågningar glöms när Studio startas om.')
+      const storyboardId = request.sequenceKind === 'storyboard' ? request.sequenceId : undefined
+      // A storyboard's transitions are segments to the approval store; the agent asked for transitions.
+      const transitions = !!storyboardId && (request.kind === 'segment' || request.kind === 'generate-all')
+      const board = request.image?.assignToBoard
       const data: Record<string, unknown> = {
         approval_id: request.id,
         status: request.status,
-        kind: request.kind,
+        kind: transitions ? (request.kind === 'segment' ? 'transition' : 'generate-storyboard') : request.kind,
         price_usd: priceValue(request.priceUsd),
         created: localTime(request.createdAt),
         ...(request.status === 'pending' ? { expires: localTime(request.expiresAt) } : {}),
         note: request.note,
         error: request.error,
         reason: request.reason,
-        sequence_id: request.sequenceId,
-        clip_numbers: request.clipNumbers,
+        ...(storyboardId
+          ? {
+              storyboard_id: storyboardId,
+              ...(transitions ? { transition_ids: request.segmentIds, transition_numbers: request.clipNumbers } : {})
+            }
+          : { sequence_id: request.sequenceId, clip_numbers: request.clipNumbers }),
         generation_ids: request.generationIds,
         ...(request.kind === 'image' && request.image?.assignTo
           ? {
@@ -813,6 +1203,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
               }
             }
           : {}),
+        ...(request.kind === 'image' && board ? { assign_to: { board_id: board.boardId, board_number: board.boardNumber } } : {}),
         ...(request.stillId ? { still_id: request.stillId } : {}),
         ...(request.notice ? { notice: request.notice } : {})
       }
@@ -820,9 +1211,15 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         if (request.stillId) {
           const still = await callService<Still>('stills:get', request.stillId).catch(() => undefined)
           data.still = still
-            ? { still_id: still.id, file: basename(still.path), sequence_id: still.sequenceId ?? null }
+            ? {
+                still_id: still.id,
+                file: basename(still.path),
+                ...(still.sequenceId && isStoryboardId(still.sequenceId)
+                  ? { storyboard_id: still.sequenceId }
+                  : { sequence_id: still.sequenceId ?? null })
+              }
             : { still_id: request.stillId, status: 'deleted' }
-          if (request.image?.assignTo && !request.notice) data.assigned = true
+          if ((request.image?.assignTo || board) && !request.notice) data.assigned = true
         }
         if (request.generationIds?.length) {
           data.generations = request.generationIds.map((id) => {
@@ -830,7 +1227,16 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
             return g ? { id, status: g.status, error: g.error } : { id, status: 'deleted' }
           })
         }
-        if (request.kind === 'generate-all' && request.sequenceId) {
+        if (request.kind === 'generate-all' && storyboardId) {
+          const now = await callService<Storyboard>('storyboards:get', storyboardId).catch(() => undefined)
+          if (now) {
+            data.storyboard = {
+              generate_all_running: now.running,
+              last_run_error: readableRunError(now.runError),
+              transitions_without_finished_take: now.transitions.flatMap((t, i) => (transitionDone(t) ? [] : [i + 1]))
+            }
+          }
+        } else if (request.kind === 'generate-all' && request.sequenceId) {
           const sequence = await callService<Sequence>('sequences:get', request.sequenceId).catch(() => undefined)
           if (sequence) {
             data.sequence = {

@@ -41,6 +41,14 @@ import Modal from '../pickers/Modal'
 import { effectiveParams, needsTake, parseConsent, pendingTake } from '../sequences/sequenceUtils'
 import { approvalOutcome, approvalTitle, approvalVerb, expiresText, slotName } from './agentText'
 import PromptText, { type TokenTarget } from './PromptText'
+import {
+  BoardTargetSummary,
+  TransitionSummary,
+  boardTargetNow,
+  storyboardTransitions,
+  useStoryboard,
+  type BoardTarget
+} from './StoryboardApproval'
 
 /**
  * Paid generations (videos and pictures) an agent asks for wait here for the user's OK. Shown above every view;
@@ -115,7 +123,11 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const { assets, loaded: assetsLoaded } = useAssetsState()
   const photos = useMemo(() => photoIndex(assets), [assets])
   const voices = useMemo(() => audioSourcesByPath(assets), [assets])
-  const { sequence, error: sequenceError } = useSequence(a.sequenceId)
+  // A request about a storyboard (one transition, its missing transitions, or a board's picture) reads the
+  // storyboard; the sequence handlers don't know storyboards.
+  const storyboardId = a.sequenceKind === 'storyboard' ? a.sequenceId : undefined
+  const { sequence, error: sequenceError } = useSequence(storyboardId ? undefined : a.sequenceId)
+  const { storyboard, error: storyboardError } = useStoryboard(storyboardId)
   const now = useNow(15_000)
   const language = usePromptLanguageSetting()
   // Composes a prompt the way main sends it, from the library as it is now; undefined until everything it
@@ -145,7 +157,16 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const expired = pending && now > expiresAt
   // A still for a storyboard (Venice's image models) rather than a video.
   const image = a.kind === 'image' ? (a.image ?? null) : undefined
-  const clips = useMemo(() => withDescriptions(clipsOf(a, sequence), a, composer), [a, sequence, composer])
+  const clips = useMemo(
+    () => (storyboardId ? [] : withDescriptions(clipsOf(a, sequence), a, composer)),
+    [a, sequence, composer, storyboardId]
+  )
+  // The transitions it generates: the two board pictures each goes between, with the prompt and settings.
+  const transitionState = useMemo(
+    () => (storyboardId && a.kind !== 'image' ? storyboardTransitions(a, storyboard) : undefined),
+    [a, storyboard, storyboardId]
+  )
+  const transitions = transitionState?.transitions ?? []
   // The automatic start and end frames of the one clip a 'segment' request generates, as they are right now.
   const frameClip = a.kind === 'segment' && clips.length === 1 ? clips[0] : undefined
   const needsFrames = !!frameClip && !!(frameClip.continuesFrom || frameClip.endsAt)
@@ -155,6 +176,8 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   )
   // The clip number an image request's picture goes to, as the sequence is now (the request has it as it was).
   const imageTarget = imageTargetNow(image?.assignTo, sequence)
+  // Or the board it becomes, as the storyboard is now.
+  const boardTarget = boardTargetNow(image?.assignToBoard, storyboard)
   const armed = useArmed(
     JSON.stringify([
       a.id,
@@ -162,7 +185,9 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
       a.priceUsd,
       image?.params,
       imageTarget,
+      boardTarget,
       clips.map((c) => [c.key, c.title, c.params, c.continuesFrom, c.endsAt, c.legend, c.descriptionsChanged]),
+      transitions.map((t) => [t.key, t.number, t.params, t.problem]),
       // A neighbour's other take (or trim) is another frame: the user must see it before it is paid for. While a
       // new answer is on its way the old frame may be stale, so the request arms again only once it has come.
       framesLoading,
@@ -185,7 +210,15 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     // What stands in the way of the clip's start and end frames (a neighbour without a finished take …).
     frames?.problems[0] ??
     (image === null ? 'Förfrågan saknar uppgifter om bilden' : undefined) ??
-    imageTarget?.problem
+    imageTarget?.problem ??
+    transitionState?.blocking ??
+    boardTarget?.problem
+  // Changed since the agent asked (rather than something the agent can fix): the agent has to ask again.
+  const askAgain =
+    !!blocking &&
+    (blocking === descriptionsChanged ||
+      (!!transitionState?.lapsed && blocking === transitionState.blocking) ||
+      blocking === boardTarget?.problem)
   // The frames shown must be the ones that will be sent: no approving while they are being fetched (again).
   const framesPending = needsFrames && pending && framesLoading
 
@@ -271,8 +304,9 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     )
   }
 
+  const ownerName = storyboard?.name ?? sequence?.name ?? a.sequenceName
   const subtitle = [
-    approvalTitle(a, sequence?.name ?? a.sequenceName),
+    approvalTitle(a, ownerName),
     pending ? expiresText(expiresAt, now) : undefined,
     position && position.total > 1 ? `${position.index} av ${position.total} som väntar` : undefined
   ]
@@ -379,7 +413,9 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         {!pending && phase !== 'failed' && phase !== 'submitting' && (
           <p className="rounded-md border border-line bg-raised px-3 py-2 text-[12px] text-muted">{approvalOutcome(a)}</p>
         )}
-        {phase === 'done' && madeStill && <MadeStill stillId={madeStill} sequenceId={a.sequenceId} />}
+        {phase === 'done' && madeStill && (
+          <MadeStill stillId={madeStill} sequenceId={a.sequenceId} inStoryboard={!!storyboardId} />
+        )}
 
         {a.note && (
           <div className="rounded-md border border-line bg-raised/60 px-3 py-2.5">
@@ -388,16 +424,25 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           </div>
         )}
 
-        {sequenceError && a.sequenceId && (
+        {sequenceError && a.sequenceId && !storyboardId && (
           <p className="text-[12px] text-accent">Sekvensen kunde inte läsas: {sequenceError}</p>
+        )}
+        {storyboardError && storyboardId && (
+          <p className="text-[12px] text-accent">Storyboarden kunde inte läsas: {storyboardError}</p>
         )}
 
         {image && (
           <ImageSummary
             image={image}
-            sequenceName={sequence?.name ?? a.sequenceName}
+            sequenceName={ownerName}
             hasSequence={!!a.sequenceId}
+            inStoryboard={!!storyboardId}
             clipNumber={imageTarget?.clipNumber}
+            boardTarget={
+              image.assignToBoard
+                ? (boardTarget ?? { number: image.assignToBoard.boardNumber })
+                : undefined
+            }
           />
         )}
         {image === null && <p className="text-accent">Förfrågan saknar uppgifter om bilden.</p>}
@@ -413,16 +458,35 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             frames={clip === frameClip ? frames : undefined}
           />
         ))}
+        {transitions.map((view) => (
+          <TransitionSummary
+            key={view.key}
+            view={view}
+            models={models}
+            aspectRatio={storyboard?.aspectRatio}
+            compact={transitions.length > 1}
+          />
+        ))}
         {a.kind === 'generate-all' && sequence && !clips.length && (
           <p className="text-muted">Alla klipp i sekvensen har redan en färdig tagning.</p>
         )}
-        {a.kind !== 'generation' && image === undefined && !sequence && !sequenceError && !clips.length && (
+        {a.kind === 'generate-all' && storyboard && !transitions.length && (
+          <p className="text-muted">Alla övergångar i storyboarden har redan en färdig tagning.</p>
+        )}
+        {a.kind !== 'generation' && image === undefined && !storyboardId && !sequence && !sequenceError && !clips.length && (
           <p className="text-muted">Läser sekvensen…</p>
+        )}
+        {storyboardId && a.kind === 'generate-all' && !storyboard && !storyboardError && (
+          <p className="text-muted">Läser storyboarden…</p>
         )}
 
         <div className="flex items-baseline justify-between gap-4 border-t border-line pt-4">
           <span className="text-muted">
-            {clips.length > 1 ? `Totalt för ${clips.length} klipp` : 'Kostnad'}
+            {clips.length > 1
+              ? `Totalt för ${clips.length} klipp`
+              : transitions.length > 1
+                ? `Totalt för ${transitions.length} övergångar`
+                : 'Kostnad'}
             <span className="ml-1.5 text-[11px]">(dras från ditt Venice-konto)</span>
           </span>
           <span className="text-lg font-semibold tabular-nums">
@@ -435,7 +499,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         {blocking && (
           <p className="text-[12px] text-accent">
             Kan inte genereras som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {a.client}{' '}
-            {blocking === descriptionsChanged ? 'fråga igen' : 'rätta det'}, eller avböj.
+            {askAgain ? 'fråga igen' : 'rätta det'}, eller avböj.
           </p>
         )}
       </div>
@@ -880,7 +944,7 @@ function frameTime(seconds: number | undefined): string {
 }
 
 /** The picture an approved image request made, as it was saved among the sequence's stills. */
-function MadeStill({ stillId, sequenceId }: { stillId: string; sequenceId?: string }) {
+function MadeStill({ stillId, sequenceId, inStoryboard }: { stillId: string; sequenceId?: string; inStoryboard: boolean }) {
   const [path, setPath] = useState<string | null>()
   useEffect(() => {
     let active = true
@@ -896,7 +960,11 @@ function MadeStill({ stillId, sequenceId }: { stillId: string; sequenceId?: stri
   if (path === null) {
     return (
       <p className="text-[12px] text-muted">
-        {sequenceId ? 'Bilden är sparad bland sekvensens bilder.' : 'Bilden är sparad i Referensbilder.'}
+        {sequenceId
+          ? inStoryboard
+            ? 'Bilden är sparad bland storyboardens bilder.'
+            : 'Bilden är sparad bland sekvensens bilder.'
+          : 'Bilden är sparad i Referensbilder.'}
       </p>
     )
   }
@@ -966,14 +1034,20 @@ function ImageSummary({
   image,
   sequenceName,
   hasSequence,
-  clipNumber
+  inStoryboard,
+  clipNumber,
+  boardTarget
 }: {
   image: ApprovalImageRequest
   sequenceName?: string
-  /** The picture is saved with a sequence (else among the stills of no sequence, in Referensbilder). */
+  /** The picture is saved with a sequence or storyboard (else among the stills of none, in Referensbilder). */
   hasSequence: boolean
+  /** It is saved with a storyboard. */
+  inStoryboard: boolean
   /** The target clip's number as the sequence is now. */
   clipNumber?: number
+  /** The board it becomes, as the storyboard is now. */
+  boardTarget?: BoardTarget
 }) {
   const p = image.params
   const safeMode = useImageSafeMode()
@@ -1026,17 +1100,28 @@ function ImageSummary({
         </>
       )}
 
+      {boardTarget && <BoardTargetSummary target={boardTarget} storyboardName={sequenceName} />}
+
       <p className="mt-3 text-[12px] leading-relaxed text-muted">
-        {target
-          ? `Bilden sparas bland sekvensens bilder och blir ${slotName(target.slot)} för klipp ${clipNumber ?? target.clipNumber}${where}.`
-          : hasSequence
-            ? `Bilden sparas bland sekvensens bilder${where} i storyboarden.`
-            : 'Bilden hör inte till någon sekvens och sparas i Referensbilder, bland alla bilder.'}
-        {safeMode === undefined
-          ? ''
-          : safeMode
-            ? ' Säkert läge är på: Venice suddar ut vuxet innehåll.'
-            : ' Säkert läge är av: Venice suddar inte ut vuxet innehåll.'}
+        {[
+          // A board's place is said next to its picture above.
+          boardTarget
+            ? undefined
+            : target
+              ? `Bilden sparas bland sekvensens bilder och blir ${slotName(target.slot)} för klipp ${clipNumber ?? target.clipNumber}${where}.`
+              : hasSequence
+                ? inStoryboard
+                  ? `Bilden sparas bland storyboardens bilder${where}.`
+                  : `Bilden sparas bland sekvensens bilder${where}.`
+                : 'Bilden hör inte till någon sekvens eller storyboard och sparas i Referensbilder, bland alla bilder.',
+          safeMode === undefined
+            ? undefined
+            : safeMode
+              ? 'Säkert läge är på: Venice suddar ut vuxet innehåll.'
+              : 'Säkert läge är av: Venice suddar inte ut vuxet innehåll.'
+        ]
+          .filter(Boolean)
+          .join(' ')}
       </p>
     </section>
   )

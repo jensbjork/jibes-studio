@@ -4,8 +4,9 @@ A desktop video studio for [Venice.ai](https://venice.ai)'s video models. Studio
 text, a start image or a set of reference photos (and voices), keep a library of **characters**, **environments**,
 **outfits** and **poses** with their reference photos — and what the characters and places sound like — and save
 the prompts that work. Clips are chained into longer films that continue seamlessly from one clip's last frame into
-the next, planned as **storyboards** with start and end images that Studio can make for you, and a clip in the
-middle that didn't turn out can be redone so it fits exactly between its neighbours. Everything lives in a plain
+the next, and a clip in the middle that didn't turn out can be redone so it fits exactly between its neighbours. A
+film can also start as a **storyboard**: one picture for every milestone — made with Venice's image models or taken
+from what you already have — with the clips between the pictures generated for you. Everything lives in a plain
 folder you choose, with human-readable folder and file names, and your own AI agents can work in the app over
 [MCP](https://modelcontextprotocol.io) — preparing references, prompts, sequences and storyboards, and reviewing
 what the generations became to write better prompts next time — while every paid generation still waits for your
@@ -21,11 +22,11 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   generation's settings.
 - **A live clip feed built for many clips.** Queued, rendering and finished videos as big cards or a compact table
   (*Kort* / *Tabell*, with keyboard navigation), search in the prompts, filters (status, model, the asset whose
-  photos or voice were used, rating, unrated or reviewed, time, standalone or in a sequence), sorting (newest,
-  oldest, rating, cost, length) and a summary of the filtered clips. A detail drawer shows the player, the prompt
-  with its tokens (and *Skickad prompt*, the prompt exactly as it was sent, when descriptions were appended), the
-  references and voices that were sent, the settings, and your own rating (1–5 stars), note and tags next to the
-  agents' reviews.
+  photos or voice were used, rating, unrated or reviewed, time, standalone or a take), sorting (newest, oldest,
+  rating, cost, length) and a summary of the filtered clips. A detail drawer shows the player, the prompt with its
+  tokens (and *Skickad prompt*, the prompt exactly as it was sent, when descriptions were appended), the references
+  and voices that were sent, the settings, and your own rating (1–5 stars), note and tags next to the agents'
+  reviews.
 - **A reference-aware prompt editor.** In reference mode the prompt points at the photos as `@Image1`, `@Image2` …
   and at the voice and sound clips as `@Audio1`, `@Audio2` …; the editor colours each token like the asset it points
   at, shows the photo on hover and plays the voice, offers an `@` menu, flags wrong or malformed tokens with one-click
@@ -41,16 +42,19 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   sketch of how people stand relative to each other, applied to the characters in the shot.
 - **Prompt library** with titles, tags, favourites, a negative prompt and usage counts, and **Lärdomar**
   (learnings): short insights about what works, recorded by you or your agents, with the clips they are based on.
-- **Sequences:** films made of clips. Each clip has its own prompt, references, voices and settings, any number of
-  takes, a selected take and start/end trims. A clip can start on the previous clip's last (trimmed) frame
-  (*Startbild från föregående klipp*) and end on the next clip's first frame (*Slutbild från nästa klipp*), both
-  taken out automatically with ffmpeg. *Generate missing* renders the clips in the order their frames allow;
-  *Export* cuts the selected takes into one mp4 with ffmpeg.
-- **Storyboards:** the same sequence as panels (*Tidslinje / Storyboard*): each clip with a start image, an end
-  image and *Vad händer* notes. A slot takes an uploaded or dropped picture, a library photo, a frame picked from
-  any take, a picture made with **Skapa bild…** (Venice's image models, about $0.06, with characters, outfits,
-  places, poses or other stills as references), or automatically the previous clip's last frame / the next clip's
-  first frame. Clips with images are generated image-to-video from them.
+- **Sequences:** films made of clips. Each clip has its own prompt, references, voices and settings, *Vad händer*
+  notes, any number of takes, a selected take and start/end trims. A clip can start on the previous clip's last
+  (trimmed) frame (*Startbild från föregående klipp*) and end on the next clip's first frame (*Slutbild från nästa
+  klipp*), both taken out automatically with ffmpeg, or on start and end images of its own. *Generate missing*
+  renders the clips in the order their frames allow; *Export* cuts the selected takes into one mp4 with ffmpeg.
+- **Storyboards** (their own view, next to Sekvenser): mock up a film's milestones as pictures, one per board
+  (*ruta*), then generate the clips between them. A board's picture is made with **Skapa bild…** (Venice's image
+  models, about $0.06, with characters, outfits, places, poses, other storyboard pictures — or the previous board's
+  picture, for continuity — as references) or taken from what you have: a library photo, an uploaded or dropped
+  file, a frame of any clip. Between every two neighbouring boards there is a **transition**, the clip that goes
+  from the first picture to the second (*Vad händer?*, length, price, takes). *Generera saknade* makes every missing
+  one, *Förhandsvisa* plays them in order, *Exportera* cuts them into one film, and *Gör om till sekvens* carries
+  them over to Sekvenser for further editing.
 - **Redo a clip between its neighbours** (*Gör om mellan grannarna*): a clip in the middle that didn't turn out is
   set up to start exactly on the previous clip's last frame and end exactly on the next clip's first frame — both
   taken out automatically, with live previews — and a new take fits the cut without touching the neighbours.
@@ -141,9 +145,16 @@ every file the library knows about back where it belongs.
 ├── Sekvenser/<Sequence name>/
 │   ├── Tagningar/<YYYY-MM-DD HH.MM> <prompt>.mp4
 │   │                                       Takes of the sequence's clips
-│   ├── Storyboard/                         Stills: pictures made with Skapa bild (<HH.MM> <prompt>.png),
-│   │                                       pictures uploaded into a panel, frames saved from takes
+│   ├── Storyboard/                         Stills used as the clips' start and end images (keyframes):
+│   │                                       pictures made for a clip, frames saved from takes
 │   └── <Sequence name> <YYYY-MM-DD HH.MM>.mp4
+│                                           Exported films
+├── Storyboards/<Storyboard name>/
+│   ├── Övergångar/<YYYY-MM-DD HH.MM> <prompt>.mp4
+│   │                                       Takes of the transitions between the boards
+│   ├── Bilder/                             The boards' pictures: made with Skapa bild (<HH.MM> <prompt>.png),
+│   │                                       uploaded or dropped files, frames saved from clips
+│   └── <Storyboard name> <YYYY-MM-DD HH.MM>.mp4
 │                                           Exported films
 └── .studio/                                Hidden app data:
     ├── studio.db                           the SQLite database
@@ -242,40 +253,77 @@ take, each after the clips whose frames it needs, waiting for each one; if two c
 says which switch to turn off before anything is paid for. **Exportera** renders the selected, trimmed takes into
 one H.264/AAC mp4 in the sequence's folder, showing a picture two clips share at a cut only once.
 
-**Storyboard.** *Tidslinje / Storyboard* in the sequence header shows the clips as panels: number, take, start
-image → end image, *Vad händer* notes, the prompt and the price, with *Generera tagning*. Drag panels to reorder
-them and add new ones with *+ Ny ruta*. Put a picture into a slot by dropping or uploading it, picking a library
-photo or a still, *Bildruta från ett klipp* (scrub any finished take of the sequence and save the frame),
-**Skapa bild…** or *Från föregående / nästa klipp*. A clip with a start or end image is generated with the
-image-to-video model of its family: the look comes from the pictures, so its reference photos are dropped (and
-their `@` tokens taken out of the prompt), and the prompt describes what happens between them.
+**Start and end images.** A clip can also start or end on a picture of its own (a file or a library photo in the
+clip editor; agents can also put in pictures made with Venice's image models or frames of takes). A clip with a
+start or end image is generated with the image-to-video model of its family: the look comes from the pictures, so
+its reference photos are dropped (and their `@` tokens taken out of the prompt), and the prompt describes what
+happens between them. Pictures made or saved for a sequence's clips are kept as stills in its `Storyboard/` folder.
 
-**Skapa bild…** makes a picture with Venice's image models — from a prompt alone, or combining references (the
-first one is the base picture the model edits) — with model, format, resolution and quality to choose, the price on
-the button, *Skapa igen* for another attempt and *Använd som startbild / slutbild*. Every result is saved in the
-sequence's `Storyboard/` folder, and the stills strip under the panels holds them all, together with the pictures
-uploaded or dropped into slots and the frames saved from takes. **Säkert läge för bilder** (Inställningar → Bilder,
-on by default, also switchable in the dialog) lets Venice blur adult content.
+**Gör om mellan grannarna.** When one clip in the middle came out badly, this button (on the timeline cards and in
+the clip editor) sets it to start on the previous clip's last frame and end on the next clip's first frame, with an
+image-to-video model that takes an end image, keeping its prompt, length and sound. The first or last clip only gets
+the one neighbour it has. The editor shows both frames and the price; the neighbours need finished selected takes.
+When the new take is ready, pick it with *Välj* under *Tagningar* — the old take stays selected until you choose,
+and stays among the takes in case you want it back.
 
-**Gör om mellan grannarna.** When one clip in the middle came out badly, this button (on the timeline cards, the
-panels and in the clip editor) sets it to start on the previous clip's last frame and end on the next clip's first
-frame, with an image-to-video model that takes an end image, keeping its prompt, length and sound. The first or
-last clip only gets the one neighbour it has. The editor shows both frames and the price; the neighbours need
-finished selected takes. When the new take is ready, the panel offers *Använd den* — the old take stays selected
-until you choose, and stays among the takes in case you want it back.
+## Storyboards
+
+A **storyboard** is a different way to make a film: first the milestones as pictures, then the motion between them.
+It has a name, a format (16:9 by default; 9:16, 1:1, 4:3, 3:4 or 21:9) and an ordered row of **boards** (*rutor*),
+and it lives in its own view, **Storyboards** — storyboards never show up in Sekvenser, nor sequences here.
+
+- **One picture per board**, with a short note under it (*Vad visar bilden?*). Click the picture (or the empty
+  board) for **Skapa bild…**, *Från biblioteket…* (any photo of a character, place, outfit or pose, used where it
+  is), *Storyboardbilder* (pictures made or added for this storyboard before; *Visa* opens one full size, where it
+  can be used or deleted), *Ladda upp en bild…* (or drop a file on the board; it is copied into the storyboard's
+  `Bilder/`) or *Bildruta ur ett klipp…* (scrub any finished clip in the library and save the frame; needs ffmpeg). A picture whose shape differs from the storyboard's format is marked
+  *Annat format*: the clips to and from it get the picture's shape. A board may stay empty while you plan.
+- **Boards are reordered** by dragging them or with ⌥← / ⌥→, added with **+** before, between or after them (several
+  pictures dropped on *Ny ruta* become one board each) and removed with a two-step confirmation.
+- **Transitions.** Between every two neighbouring boards there is a transition (*Övergång N*): the clip from the
+  first board's picture (the start image) to the second's (the end image). Click it to edit *Vad händer?* — what
+  moves and how the camera travels from one picture to the other; *Föreslå* fills in a plain template from the two
+  boards' notes — and its length (5 s by default), resolution (480p), sound and model (only image-to-video models that
+  take an end image; Seedance by default). **Generera** shows the price first; every take is kept, and you choose the
+  one that is used. Moving, inserting or removing a board removes the transitions between boards that are no longer
+  neighbours — their prompts go, their takes go back to the clip feed in Generera, nothing is deleted — and new
+  neighbours get a new, empty transition; Studio asks first when a move or a new board would remove a transition with
+  a prompt or takes. A take made before one of its boards got another picture is marked *Tidigare bild*; a new take
+  made from the pictures there now takes its place when it is done, and deleting the selected take selects another
+  finished one. A negative prompt an agent gave a transition is shown under *Vad händer?*, where it can be removed.
+- **Generera saknade** sends every transition without a finished take, with the total price on the button. The
+  transitions don't depend on each other, so they are sent one after another without waiting for each to render;
+  nothing is paid for while any of them can't be made (a board without a picture, a missing prompt) — the button then
+  shows no price, and a click shows the transition that stands in the way.
+- **Förhandsvisa** plays the selected takes back to back; **Exportera** cuts them into one mp4 in the storyboard's
+  folder. Two neighbouring transitions both show the board between them (one ends on it, the next starts on it), so
+  where both takes were made from the same picture the export drops the later one's first frame and the board is
+  shown once.
+- **Gör om till sekvens** (under ⋯) makes an ordinary sequence, *"<name> (sekvens)"*, with one clip per transition and
+  a copy of its selected take, so the film can be trimmed, extended and redone in Sekvenser. The storyboard stays as
+  it is.
+
+**Skapa bild…** makes a picture with Venice's image models — from a prompt alone, or combining references (the first
+one is the base picture the model edits) — with model, format (the storyboard's by default), resolution and quality
+to choose, the price on the button and *Skapa igen* for another attempt. **Använd föregående bild som referens** (on
+by default when the previous board has a picture) puts that picture first among the references, so place, light and
+people carry over from one milestone to the next. The finished picture goes onto the board, and every result is
+kept in the storyboard's `Bilder/` folder. **Säkert läge för bilder** (Inställningar → Bilder, on by default, also
+switchable in the dialog) lets Venice blur adult content.
 
 ## Connecting your own agent
 
 Studio can run an MCP server so agents such as OpenClaw, Hermes Agent, Claude Desktop or Claude Code can work in
 the app: read the library and see its photos (and hear its voices), choose references, write and validate prompts,
-fill in the Generate form, build sequences and storyboards, and set a clip up to be redone between its neighbours.
+fill in the Generate form, build sequences, plan storyboards (boards, their pictures and the transitions' prompts),
+and set a clip up to be redone between its neighbours.
 They can also look back: review finished clips and exported films frame by frame next to the references they were
 made from, record reviews, and save *learnings* that every later session reads before it writes a prompt. Agents
 **cannot generate anything on their own** — the paid tools (videos and pictures) only create a request that Studio
 shows you with the prompt, references, voices and price, and nothing is sent to Venice until you approve it.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 47
+Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 60
 tools, the review loop and troubleshooting.
 
 ## Security
@@ -304,12 +352,13 @@ Done:
 5. A prompt editor that checks references; the agent connection (MCP) with approval of paid generations
 6. Voices and soundscapes (`@AudioN`), poses, a clip feed with filters and a table view, ratings, and a review and
    learning loop for agents
-7. Storyboards with start and end images and *Skapa bild…*, redoing a clip between its neighbours
+7. Start and end images (keyframes) and *Skapa bild…*, redoing a clip between its neighbours
 8. Asset descriptions appended to the prompt automatically, references reordered by drag and drop
+9. Storyboards as a workflow of their own: milestone pictures, with the clips between them generated
 
 Next:
 
-9. Cost overview, cancelling a running export, transitions (fades) between clips
+10. Cost overview, cancelling a running export, fades between clips
 
 Ideas where help is welcome: an English UI (i18n), an automated test suite, signed and notarized builds.
 

@@ -8,7 +8,9 @@ import type {
   Sequence,
   SequenceSummary,
   Still,
-  StillParams
+  StillParams,
+  Storyboard,
+  StoryboardSummary
 } from '@shared/types'
 import * as db from '../../db'
 import { DEFAULT_EDIT_MODEL, DEFAULT_IMAGE_MODEL } from '../../images'
@@ -17,6 +19,7 @@ import { getImageSafeMode } from '../../settings'
 import * as store from '../../sequence-store'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
+import { isStoryboardId } from '../storyboard-rows'
 import { AssetIndex, StillIndex, errorText, imageRef, localTime, q, requireLibrary, seconds } from '../studio'
 import {
   READ_ONLY,
@@ -29,33 +32,62 @@ import {
   type ToolContext
 } from './kit'
 import { assertNotRunning, asSent, clipInfo, continues, loadClip, loadSequence } from './sequences'
+import { loadStoryboard } from './storyboards'
 
-// Storyboards: the stills of a sequence (generated keyframes, uploaded pictures, frames saved from clips), the image
-// models that make them, a clip's automatic start and end frames, and setting a clip up to be redone between its
-// neighbours. Everything here is free; making a picture is request_image_generation (paid.ts), which asks the user.
+// Stills – the pictures of a sequence (its clips' keyframes) or of a storyboard (its boards): generated with an
+// image model, added by the user, or frames saved from clips – and the image models that make them; a sequence
+// clip's automatic start and end frames, and setting a clip up to be redone between its neighbours. Everything
+// here is free; making a picture is request_image_generation (paid.ts), which asks the user.
 
 // ── Stills ───────────────────────────────────────────────────────────────────
 
 const pathKey = (path: string): string => path.normalize('NFC')
 
-/** Where a still is used: a clip's start or end image. */
-export interface StillUse {
-  sequence_id: string
-  sequence_name: string
-  segment_id: string
-  clip_number: number
-  slot: SegmentImageSlot
+/** Where a still is used: a sequence clip's start or end image, or a storyboard board's picture. */
+export type StillUse =
+  | { sequence_id: string; sequence_name: string; segment_id: string; clip_number: number; slot: SegmentImageSlot }
+  | { storyboard_id: string; storyboard_name: string; board_id: string; board_number: number }
+
+/** The sequences and storyboards stills belong to and are used by. */
+export interface StillOwners {
+  sequences: { id: string; name: string }[]
+  storyboards: Storyboard[]
+  /** Name and kind of every sequence and storyboard, by id. */
+  byId: Map<string, { name: string; storyboard: boolean }>
 }
 
-/** Every clip's explicit start and end image, by file path (the automatic frames from neighbours aren't files yet). */
-export function imageUses(sequences: readonly Pick<Sequence, 'id' | 'name'>[]): Map<string, StillUse[]> {
+/** Every sequence and storyboard (a storyboard with its boards, for where its pictures are used). */
+export async function loadStillOwners(): Promise<StillOwners> {
+  const [sequenceList, storyboardList] = await Promise.all([
+    callService<SequenceSummary[]>('sequences:list'),
+    // Where stills are used is extra information: a listing doesn't fail for want of it.
+    callService<StoryboardSummary[]>('storyboards:list').catch(() => [] as StoryboardSummary[])
+  ])
+  const sequences = sequenceList.filter((s) => !isStoryboardId(s.id)).map((s) => ({ id: s.id, name: s.name }))
+  // One at a time: few storyboards, and each read is a small database query.
+  const storyboards: Storyboard[] = []
+  for (const summary of storyboardList) {
+    const storyboard = await callService<Storyboard>('storyboards:get', summary.id).catch(() => undefined)
+    if (storyboard) storyboards.push(storyboard)
+  }
+  const byId = new Map<string, { name: string; storyboard: boolean }>()
+  for (const s of sequences) byId.set(s.id, { name: s.name, storyboard: false })
+  for (const s of storyboards) byId.set(s.id, { name: s.name, storyboard: true })
+  return { sequences, storyboards, byId }
+}
+
+/**
+ * Where every picture is used, by file path: each sequence clip's explicit start and end image (the automatic
+ * frames from neighbours aren't files yet) and each storyboard board's picture.
+ */
+export function imageUses(owners: Pick<StillOwners, 'sequences' | 'storyboards'>): Map<string, StillUse[]> {
   const uses = new Map<string, StillUse[]>()
   const add = (path: string | undefined, use: StillUse): void => {
     if (!path) return
     const key = pathKey(path)
     uses.set(key, [...(uses.get(key) ?? []), use])
   }
-  for (const sequence of sequences) {
+  for (const sequence of owners.sequences) {
     store.listSegmentRows(sequence.id).forEach((row, i) => {
       const params = store.parseParams(row.params)
       const base = { sequence_id: sequence.id, sequence_name: sequence.name, segment_id: row.id, clip_number: i + 1 }
@@ -63,12 +95,25 @@ export function imageUses(sequences: readonly Pick<Sequence, 'id' | 'name'>[]): 
       add(params.endImage, { ...base, slot: 'end' })
     })
   }
+  for (const storyboard of owners.storyboards) {
+    storyboard.boards.forEach((board, i) =>
+      add(board.imagePath, {
+        storyboard_id: storyboard.id,
+        storyboard_name: storyboard.name,
+        board_id: board.id,
+        board_number: i + 1
+      })
+    )
+  }
   return uses
 }
 
-/** The sequences (id and name), for imageUses and for naming a still's sequence. */
-async function sequenceNames(): Promise<{ id: string; name: string }[]> {
-  return (await callService<SequenceSummary[]>('sequences:list')).map((s) => ({ id: s.id, name: s.name }))
+/** The still's owner as the tools name it: its sequence or its storyboard, or none (Referensbilder). */
+function ownerInfo(sequenceId: string | undefined, owners: StillOwners): Record<string, unknown> {
+  if (!sequenceId) return { sequence_id: null }
+  const owner = owners.byId.get(sequenceId)
+  if (owner?.storyboard) return { storyboard_id: sequenceId, storyboard_name: owner.name }
+  return { sequence_id: sequenceId, ...(owner ? { sequence_name: owner.name } : {}) }
 }
 
 const SOURCE_LABEL: Record<Still['source'], string> = {
@@ -82,7 +127,7 @@ export function stillInfo(
   still: Still,
   assets: AssetIndex,
   stills: StillIndex,
-  names: ReadonlyMap<string, string>,
+  owners: StillOwners,
   uses?: ReadonlyMap<string, StillUse[]>
 ): Record<string, unknown> {
   const p = still.params ?? {}
@@ -98,8 +143,7 @@ export function stillInfo(
     source: still.source,
     source_text: SOURCE_LABEL[still.source],
     file: basename(still.path),
-    sequence_id: still.sequenceId ?? null,
-    ...(still.sequenceId && names.get(still.sequenceId) ? { sequence_name: names.get(still.sequenceId) } : {}),
+    ...ownerInfo(still.sequenceId, owners),
     created: localTime(still.createdAt),
     ...(still.prompt ? { prompt: still.prompt } : {}),
     ...(p.negativePrompt ? { negative_prompt: p.negativePrompt } : {}),
@@ -178,7 +222,7 @@ export function defaultImageModel(models: readonly ImageModel[], withReferences:
   return usable.find((m) => m.id === preferred) ?? usable[0]
 }
 
-export function registerStoryboardTools(server: McpServer, ctx: ToolContext): void {
+export function registerStillTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
     server,
     ctx,
@@ -245,23 +289,30 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'List stills',
       description:
-        "The stills of a sequence's storyboard (or of every sequence, without sequence_id), newest first: pictures generated with request_image_generation, pictures the user added and frames saved from clips. Each has its still_id, source, prompt and model (generated ones), the references it was made from, and used_by – the clips that use it as their start or end image. With include_thumbnails (default true) the newest ones come as small images. Use a still as a clip's start or end image with update_segment({start_image: {still_id}}), or as a reference of a new picture (reference_still_ids).",
+        "The stills of a sequence or a storyboard (or all of them, without an id), newest first: pictures generated with request_image_generation, pictures the user added and frames saved from clips. Each has its still_id, source, prompt and model (generated ones), the references it was made from, the sequence or storyboard it belongs to, and used_by – the sequence clips that use it as their start or end image and the storyboard boards that show it. With include_thumbnails (default true) the newest ones come as small images. Use a still as a board's picture (update_board({image: {still_id}})), as a clip's start or end image (update_segment({start_image: {still_id}})), or as a reference of a new picture (reference_still_ids).",
       input: {
-        sequence_id: z.string().optional(),
+        sequence_id: z.string().optional().describe('Only the stills of this sequence.'),
+        storyboard_id: z.string().optional().describe('Only the stills of this storyboard.'),
         include_thumbnails: z.boolean().default(true),
         limit: z.number().int().min(1).max(100).default(30)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'listade stillbilderna'
     },
-    async ({ sequence_id, include_thumbnails, limit }) => {
+    async ({ sequence_id, storyboard_id, include_thumbnails, limit }) => {
       requireLibrary()
-      const sequence = sequence_id ? await loadSequence(sequence_id) : undefined
-      const [all, assets, sequences] = await Promise.all([StillIndex.load(), AssetIndex.load(), sequenceNames()])
-      const names = new Map(sequences.map((s) => [s.id, s.name]))
-      const uses = imageUses(sequences)
+      if (sequence_id && storyboard_id) throw new Error('Ange sequence_id eller storyboard_id, inte båda.')
+      // A storyboard's id given as sequence_id is taken as meant: its stills are what was asked for.
+      const ownerId = storyboard_id ?? sequence_id
+      const owner = !ownerId
+        ? undefined
+        : storyboard_id || isStoryboardId(ownerId)
+          ? await loadStoryboard(ownerId)
+          : await loadSequence(ownerId)
+      const [all, assets, owners] = await Promise.all([StillIndex.load(), AssetIndex.load(), loadStillOwners()])
+      const uses = imageUses(owners)
       const list = all.stills
-        .filter((s) => !sequence || s.sequenceId === sequence.id)
+        .filter((s) => !owner || s.sequenceId === owner.id)
         .sort((a, b) => b.createdAt - a.createdAt)
       const shown = list.slice(0, limit)
       const images: LabeledImage[] = []
@@ -271,17 +322,22 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           if (image) images.push({ label: `Still ${still.id} (${still.source})`, image })
         }
       }
+      const storyboard = !!owner && isStoryboardId(owner.id)
       return {
         data: {
-          ...(sequence ? { sequence_id: sequence.id, sequence_name: sequence.name } : {}),
+          ...(owner
+            ? storyboard
+              ? { storyboard_id: owner.id, storyboard_name: owner.name }
+              : { sequence_id: owner.id, sequence_name: owner.name }
+            : {}),
           count: list.length,
-          stills: shown.map((s) => stillInfo(s, assets, all, names, uses)),
+          stills: shown.map((s) => stillInfo(s, assets, all, owners, uses)),
           ...(include_thumbnails && shown.length > THUMBNAILS
             ? { note: `Thumbnails of the ${THUMBNAILS} newest; get_still shows any of them.` }
             : {})
         },
         images,
-        summary: sequence ? `listade stillbilderna i ${q(sequence.name)}` : 'listade stillbilderna'
+        summary: owner ? `listade stillbilderna i ${q(owner.name)}` : 'listade stillbilderna'
       }
     }
   )
@@ -293,7 +349,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Get still',
       description:
-        'One still as an image (JPEG, at most 768 px), with its prompt, model, settings, the references it was made from and the clips that use it. With include_references the reference pictures it was made from come too, in order (the first is the base picture). Free; changes nothing.',
+        'One still as an image (JPEG, at most 768 px), with its prompt, model, settings, the references it was made from, the sequence or storyboard it belongs to, and where it is used (sequence clips, storyboard boards). With include_references the reference pictures it was made from come too, in order (the first is the base picture). Free; changes nothing.',
       input: {
         still_id: z.string(),
         include_references: z.boolean().default(false)
@@ -302,9 +358,8 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       summary: () => 'tittade på en stillbild'
     },
     async ({ still_id, include_references }) => {
-      const [stills, assets, sequences] = await Promise.all([StillIndex.load(), AssetIndex.load(), sequenceNames()])
+      const [stills, assets, owners] = await Promise.all([StillIndex.load(), AssetIndex.load(), loadStillOwners()])
       const still = stills.require(still_id)
-      const names = new Map(sequences.map((s) => [s.id, s.name]))
       const images: LabeledImage[] = []
       const image = await imageBlock(still.path)
       if (image) images.push({ label: `Still ${still.id}`, image })
@@ -316,7 +371,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       }
       return {
         data: {
-          ...stillInfo(still, assets, stills, names, imageUses(sequences)),
+          ...stillInfo(still, assets, stills, owners, imageUses(owners)),
           ...(image ? {} : { note: 'The picture could not be read (moved or deleted in Finder?).' })
         },
         images
@@ -331,35 +386,39 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Save a frame as a still',
       description:
-        "Saves one frame of a finished clip (a generation) as a still of a sequence's storyboard, e.g. to use it as another clip's start or end image or as a reference of a new picture. time is seconds into the clip: the frame saved is the first one at or after it, the frame review_generation and get_frames show for that time, so a time from their frame_times / times (or a caption) saves exactly the frame you looked at; past the end gives the last frame. sequence_id defaults to the clip's own sequence. Free. Returns the still and its picture.",
+        "Saves one frame of a finished clip (a generation) as a still of a sequence or a storyboard, e.g. to use it as a board's picture, a clip's start or end image or a reference of a new picture. time is seconds into the clip: the frame saved is the first one at or after it, the frame review_generation and get_frames show for that time, so a time from their frame_times / times (or a caption) saves exactly the frame you looked at; past the end gives the last frame. Without sequence_id or storyboard_id the still goes to the clip's own sequence or storyboard. Free. Returns the still and its picture.",
       input: {
         generation_id: z.string(),
         time: z.number().min(0).describe('Seconds into the clip.'),
-        sequence_id: z.string().optional().describe("The sequence whose storyboard gets the still; default the clip's own.")
+        sequence_id: z.string().optional().describe("The sequence that gets the still; default the clip's own."),
+        storyboard_id: z.string().optional().describe('The storyboard that gets the still instead.')
       },
       annotations: WRITE,
       summary: () => 'sparade en bildruta som stillbild'
     },
-    async ({ generation_id, time, sequence_id }) => {
+    async ({ generation_id, time, sequence_id, storyboard_id }) => {
       requireLibrary()
+      if (sequence_id && storyboard_id) throw new Error('Ange sequence_id eller storyboard_id, inte båda.')
       const g = db.getGeneration(generation_id)
       if (!g) throw new Error(`Det finns ingen generering med id ${generation_id}.`)
       if (g.status !== 'completed') throw new Error('Genereringen är inte färdig, så den har inga bildrutor än.')
       const own = g.segmentId ? store.sequenceOfSegment(g.segmentId)?.id : undefined
-      const target = sequence_id ?? own
-      if (sequence_id) await loadSequence(sequence_id)
+      const asked = storyboard_id ?? sequence_id
+      const target = asked ?? own
+      if (storyboard_id || (sequence_id && isStoryboardId(sequence_id))) await loadStoryboard(asked!)
+      else if (sequence_id) await loadSequence(sequence_id)
       // Agents see frames by input seeking (the first frame at or after a time); stills' saveFrame takes the frame
       // a paused player shows (the last one starting at or before it). Asked for the moment that frame starts, it
       // saves the frame the agent looked at.
       const at = g.filePath ? await frameStartAtOrAfter(g.filePath, time) : time
       const still = await callService<Still>('stills:saveFrame', generation_id, at, target)
-      const [stills, assets, sequences] = await Promise.all([StillIndex.load(), AssetIndex.load(), sequenceNames()])
-      const names = new Map(sequences.map((s) => [s.id, s.name]))
+      const [stills, assets, owners] = await Promise.all([StillIndex.load(), AssetIndex.load(), loadStillOwners()])
       const image = await imageBlock(still.path)
+      const ownerName = target ? owners.byId.get(target)?.name : undefined
       return {
-        data: stillInfo(still, assets, stills, names),
+        data: stillInfo(still, assets, stills, owners),
         images: image ? [{ label: `Still ${still.id} – frame at t = ${seconds(time).toFixed(1)} s`, image }] : [],
-        summary: `sparade en bildruta som stillbild${target && names.get(target) ? ` i ${q(names.get(target)!)}` : ''}`
+        summary: `sparade en bildruta som stillbild${ownerName ? ` i ${q(ownerName)}` : ''}`
       }
     }
   )

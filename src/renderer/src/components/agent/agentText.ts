@@ -66,22 +66,36 @@ export function activityText(a: AgentActivity): string {
   return `${client} ${summary}`
 }
 
-/** What an approval would generate, in a few words. */
+/** What an approval would generate, in a few words. `sequenceName`: the sequence's or storyboard's name. */
 export function approvalTitle(a: ApprovalRequest, sequenceName?: string): string {
   const inSequence = sequenceName ? ` i ”${sequenceName}”` : ''
+  // A storyboard's transitions are segments to main; the user knows them as transitions ("övergångar").
+  const storyboard = a.sequenceKind === 'storyboard'
   switch (a.kind) {
     case 'image': {
+      const board = a.image?.assignToBoard
+      if (board) return `Bilden till ruta ${board.boardNumber}${inSequence}`
       const target = a.image?.assignTo
       if (target) return `En ${slotName(target.slot)} till klipp ${target.clipNumber}${inSequence}`
-      // Without a sequence the picture is a still of none, in Referensbilder.
-      return a.sequenceId ? `En bild till storyboarden${inSequence}` : 'En bild till Referensbilder'
+      // Without a sequence or storyboard the picture is a still of none, in Referensbilder.
+      if (!a.sequenceId) return 'En bild till Referensbilder'
+      const named = sequenceName ? ` ”${sequenceName}”` : ''
+      return storyboard ? `En bild till storyboarden${named}` : `En bild till sekvensen${named}`
     }
     case 'generation':
       return 'En video från Generera'
-    case 'segment':
-      return `En ny tagning av ett klipp${inSequence}`
+    case 'segment': {
+      if (!storyboard) return `En ny tagning av ett klipp${inSequence}`
+      const n = a.clipNumbers?.[0]
+      return `En ny tagning av ${n ? `övergång ${n}` : 'en övergång'}${inSequence}`
+    }
     case 'generate-all': {
       const n = a.segmentIds?.length ?? 0
+      if (storyboard) {
+        return n
+          ? `${n === 1 ? 'En saknad övergång' : `${n} saknade övergångar`}${inSequence}`
+          : `Alla saknade övergångar${inSequence}`
+      }
       return n ? `${n === 1 ? 'Ett saknat klipp' : `${n} saknade klipp`}${inSequence}` : `Alla saknade klipp${inSequence}`
     }
   }
@@ -106,13 +120,16 @@ export function approvalOutcome(a: ApprovalRequest): string {
     case 'approved': {
       if (a.kind !== 'image') return 'Godkänd – genereringen är skickad.'
       if (a.notice) return a.notice
+      const board = a.image?.assignToBoard
+      if (board) return `Godkänd – bilden är skapad, sparad och blev bilden i ruta ${board.boardNumber}.`
       const target = a.image?.assignTo
       if (target) {
         return `Godkänd – bilden är skapad, sparad och blev ${slotName(target.slot)} för klipp ${target.clipNumber}.`
       }
-      return a.sequenceId
-        ? 'Godkänd – bilden är skapad och sparad bland sekvensens bilder.'
-        : 'Godkänd – bilden är skapad och sparad i Referensbilder.'
+      if (!a.sequenceId) return 'Godkänd – bilden är skapad och sparad i Referensbilder.'
+      return a.sequenceKind === 'storyboard'
+        ? 'Godkänd – bilden är skapad och sparad bland storyboardens bilder.'
+        : 'Godkänd – bilden är skapad och sparad bland sekvensens bilder.'
     }
     case 'declined':
       return 'Begäran avböjdes.'

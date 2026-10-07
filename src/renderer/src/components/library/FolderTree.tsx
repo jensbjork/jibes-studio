@@ -54,6 +54,12 @@ const ENTRIES: Entry[] = [
     name: 'Sekvenser',
     explanation: 'En mapp per sekvens med tagningarna och de färdiga, exporterade filmerna.',
     example: () => 'Min film/Tagningar/ och färdiga filmer'
+  },
+  {
+    target: 'storyboards',
+    name: 'Storyboards',
+    explanation: 'En mapp per storyboard med bilderna, klippen mellan dem och de färdiga, exporterade filmerna.',
+    example: () => 'Min storyboard/Bilder/, Övergångar/ och färdiga filmer'
   }
 ]
 

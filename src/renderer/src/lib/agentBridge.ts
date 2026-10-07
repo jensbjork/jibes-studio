@@ -35,7 +35,7 @@ import { ipcErrorMessage, loadModels } from './hooks'
 import { followAssetImages, readRememberedImageIds } from './library'
 import type { Intent, Navigate, View } from './navigation'
 import { promptIssuesOf } from './promptIssues'
-import { openInSequenceEditor } from './workspace'
+import { openInSequenceEditor, openStoryboard } from './workspace'
 
 // The renderer half of the agent connection. Tools that read or fill the Generate form (get_workspace,
 // set_form, set_references, reorder_references, open_in_studio) reach main's MCP server as an 'agent:command';
@@ -642,7 +642,7 @@ function audioReferences(audios: readonly ReferenceAudio[], assets: readonly Ass
 export function describeForm(
   params: GenerationParams,
   assets: readonly Asset[],
-  where: { view: View; sequenceId?: string; segmentId?: string },
+  where: { view: View; sequenceId?: string; segmentId?: string; storyboardId?: string },
   notes: string[] = []
 ): FormSnapshot {
   const sent = paramsForSubmit(params)
@@ -705,9 +705,18 @@ async function assetsFollowingForm(): Promise<Asset[]> {
   return assets
 }
 
+/** Where the user is: the view, and the sequence and clip or the storyboard open in it. */
+export function whereNow(view: View): { view: View; sequenceId?: string; segmentId?: string; storyboardId?: string } {
+  if (view === 'sequences') return { view, ...openInSequenceEditor() }
+  if (view === 'storyboards') {
+    const storyboardId = openStoryboard()
+    return storyboardId ? { view, storyboardId } : { view }
+  }
+  return { view }
+}
+
 function snapshot(view: View, assets: readonly Asset[], notes?: string[]): FormSnapshot {
-  const where = view === 'sequences' ? { view, ...openInSequenceEditor() } : { view }
-  return describeForm(getGenerateParams(), assets, where, notes)
+  return describeForm(getGenerateParams(), assets, whereNow(view), notes)
 }
 
 async function findSequenceOfSegment(segmentId: string): Promise<string | undefined> {
@@ -722,14 +731,16 @@ function optionalId(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-async function open(rawArgs: unknown, ctx: BridgeContext): Promise<AgentOpenResult> {
+/** open_in_studio: brings the Generate view, a sequence (and clip) or a storyboard to the front. */
+export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<AgentOpenResult> {
   const args = asArgs(rawArgs)
   if (args.view === 'generate') {
     ctx.show('generate')
     return { view: 'generate' }
   }
+  if (args.view === 'storyboards' || args.view === 'storyboard') return openStoryboardView(args, ctx)
   if (args.view !== 'sequences' && args.view !== 'sequence') {
-    throw new BridgeError('view ska vara ”generate” eller ”sequences”.')
+    throw new BridgeError('view ska vara ”generate”, ”sequences” eller ”storyboards”.')
   }
   const segmentId = optionalId(field(args, 'segment_id'))
   const sequenceId = optionalId(field(args, 'sequence_id')) ?? (segmentId && (await findSequenceOfSegment(segmentId)))
@@ -756,6 +767,27 @@ async function open(rawArgs: unknown, ctx: BridgeContext): Promise<AgentOpenResu
     sequenceName: sequence.name,
     segmentId: onScreen.sequenceId === sequenceId ? onScreen.segmentId : undefined,
     ...(shown || !segmentId ? {} : { note: 'Sekvensen öppnades, men ett annat klipp än det begärda visas.' })
+  }
+}
+
+/** Shows Storyboards, with the storyboard asked for open (or the one it last showed). */
+async function openStoryboardView(args: Args, ctx: BridgeContext): Promise<AgentOpenResult> {
+  const storyboardId = optionalId(field(args, 'storyboard_id'))
+  if (!storyboardId) {
+    ctx.show('storyboards')
+    const shown = openStoryboard()
+    return shown ? { view: 'storyboards', storyboardId: shown } : { view: 'storyboards' }
+  }
+  const storyboard = await window.studio.getStoryboard(storyboardId).catch(() => undefined)
+  if (!storyboard) throw new BridgeError('Storyboarden finns inte (längre).')
+  ctx.show('storyboards', { type: 'open-storyboard', storyboardId })
+  // The view remembers the storyboard it shows as soon as it has taken the intent.
+  const shown = await settled(() => openStoryboard() === storyboardId)
+  return {
+    view: 'storyboards',
+    storyboardId,
+    storyboardName: storyboard.name,
+    ...(shown ? {} : { note: 'Storyboards visas, men storyboarden öppnades inte i tid – be användaren välja den i listan.' })
   }
 }
 
@@ -786,7 +818,7 @@ async function run(cmd: AgentCommand, ctx: BridgeContext): Promise<unknown> {
 
   // Compared as text: a command this window doesn't know yet (main newer than the window) is refused below.
   const command: string = cmd.command
-  if (command === 'open') return open(cmd.args, ctx)
+  if (command === 'open') return applyOpen(cmd.args, ctx)
   if (!['get_form', 'set_form', 'set_references', 'reorder_references'].includes(command)) {
     throw new BridgeError(`Studio känner inte igen kommandot ”${command}”.`)
   }

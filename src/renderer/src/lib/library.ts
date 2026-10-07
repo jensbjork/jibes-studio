@@ -7,6 +7,8 @@ export const LAST_PARAMS_KEY = 'generate:lastParams:v2'
 /** Which asset image each remembered image path is (path → image id), so the form can follow it. */
 export const LAST_PARAMS_IMAGE_IDS_KEY = 'generate:lastParamsImageIds:v1'
 export const LAST_SEQUENCE_KEY = 'sequences:lastOpen'
+/** The storyboard open in Storyboards. */
+export const LAST_STORYBOARD_KEY = 'storyboards:lastOpen'
 /** The asset selected in each library view. */
 export const SELECTED_ASSET_KEYS: Record<AssetKind, string> = {
   character: 'characters:selected',
@@ -207,6 +209,7 @@ const LIBRARY_FOLDERS = new Set([
   'Referensbilder',
   'Genereringar',
   'Sekvenser',
+  'Storyboards',
   '.studio'
 ])
 /** An earlier Studio version's folders, reorganized into the ones above when such a library is adopted. */
@@ -281,6 +284,7 @@ export function rememberAfterSwitch(
     // Selections are ids in the old library's database; a moved library keeps them.
     if (!carriesOver(m)) {
       localStorage.removeItem(LAST_SEQUENCE_KEY)
+      localStorage.removeItem(LAST_STORYBOARD_KEY)
       for (const key of Object.values(SELECTED_ASSET_KEYS)) localStorage.removeItem(key)
     }
   } catch {

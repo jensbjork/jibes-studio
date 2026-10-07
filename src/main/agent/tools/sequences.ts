@@ -33,6 +33,7 @@ import { withoutReferenceTokens } from '../../sequences'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
 import { movedSummary, movedTokens, newOrder, reorderAnswer, unchanged, type MovedToken } from '../reorder'
+import { isStoryboardId, storyboardNotSequence } from '../storyboard-rows'
 import {
   AssetIndex,
   StillIndex,
@@ -78,9 +79,10 @@ import {
 } from './kit'
 
 // Sequences: films made of clips (segments), each with its own prompt and references – or its own start and end
-// images (keyframes), or frames taken from its neighbours – and any number of takes. In Studio's Storyboard view
-// each clip is a panel with its keyframes and notes. These tools go straight to the sequence service; the window
-// follows through its usual change events.
+// images (keyframes), or frames taken from its neighbours – and any number of takes. Storyboards are stored as
+// sequences too (their transitions are segments), but they are a workflow of their own with their own tools
+// (storyboards.ts): these tools refuse their ids and say where to go instead. They go straight to the sequence
+// service; the window follows through its usual change events.
 
 /** A completed take whose video is still there: something the cut (and a continuation clip) can use. */
 export function isUsableTake(take: Generation | undefined): boolean {
@@ -105,16 +107,26 @@ export function endsOnNext(sequence: Sequence, index: number): boolean {
   return index < sequence.segments.length - 1 && !!sequence.segments[index].endFromNext
 }
 
+/** A sequence (not a storyboard: those have their own tools, which the error names). */
 export async function loadSequence(sequenceId: string): Promise<Sequence> {
   requireLibrary()
+  if (isStoryboardId(sequenceId)) throw storyboardNotSequence('get_storyboard')
   return callService<Sequence>('sequences:get', sequenceId)
 }
 
-/** The sequence a clip belongs to, and the clip's index in it. */
+/** Says that a storyboard's transition was given to a tool for sequence clips. */
+export function transitionNotClip(): Error {
+  return new Error(
+    'Det här är en övergång i en storyboard, inte ett klipp i en sekvens. Använd update_transition, preview_transition och request_transition_generation (get_storyboard visar övergångarna).'
+  )
+}
+
+/** The sequence a clip belongs to, and the clip's index in it (never a storyboard's transition). */
 export async function loadClip(segmentId: string): Promise<{ sequence: Sequence; index: number; segment: Segment }> {
   requireLibrary()
   const row = store.getSegmentRow(segmentId)
   if (!row) throw new Error('Klippet finns inte längre.')
+  if (isStoryboardId(row.sequence_id)) throw transitionNotClip()
   const sequence = await loadSequence(row.sequence_id)
   const index = sequence.segments.findIndex((s) => s.id === segmentId)
   if (index < 0) throw new Error('Klippet finns inte längre.')
@@ -662,7 +674,7 @@ export async function reorderClipReferences(
 }
 
 const SLOT_HELP =
-  ' {still_id} (a still, list_stills), {asset_image_id} (a library photo), {generation_id, time} (that frame of a finished clip, saved as a still), or null to clear it.'
+  ' {still_id} (a still, list_stills), {asset_image_id} (a library photo), {generation_id, time} (that frame of a finished clip, saved as a still of the sequence), or null to clear it.'
 
 const clipFields = {
   prompt: z
@@ -693,7 +705,7 @@ const clipFields = {
     .string()
     .max(4000)
     .optional()
-    .describe('"Vad händer": what happens in the shot, for the storyboard panel (any language). Not sent to Venice.'),
+    .describe('"Vad händer": what happens in the shot, shown with the clip in Studio (any language). Not sent to Venice.'),
   continue_from_previous: z
     .boolean()
     .optional()
@@ -714,14 +726,15 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'List sequences',
       description:
-        "The user's sequences (films made of several clips), most recently changed first, with the number of clips and the length of the current cut in seconds.",
+        "The user's sequences (films made of several clips), most recently changed first, with the number of clips and the length of the current cut in seconds. Storyboards are not sequences and are not listed here: list_storyboards lists them.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'listade sekvenserna'
     },
     async () => {
       requireLibrary()
-      const list = await callService<SequenceSummary[]>('sequences:list')
+      // The service lists sequences only; filtered here as well, so a storyboard never shows up as a sequence.
+      const list = (await callService<SequenceSummary[]>('sequences:list')).filter((s) => !isStoryboardId(s.id))
       return {
         data: {
           sequences: list.map((s) => ({
@@ -730,7 +743,8 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
             clip_count: s.segmentCount,
             cut_seconds: s.totalDuration,
             updated: localTime(s.updatedAt)
-          }))
+          })),
+          note: 'Storyboards (milestone pictures with generated transitions between them) are listed by list_storyboards.'
         }
       }
     }
@@ -743,7 +757,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Get sequence',
       description:
-        "One sequence with its clips in order – the panels of its storyboard. Each clip has its notes (\"Vad händer\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error). With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
+        "One sequence with its clips in order (for a storyboard use get_storyboard). Each clip has its notes (\"Vad händer\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error). With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
       input: {
         sequence_id: z.string(),
         include_thumbnails: z.boolean().default(true)
@@ -779,7 +793,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Create sequence',
       description:
-        'Creates an empty sequence (a film made of clips) with the default settings (Seedance 2.5, 8s, 480p, 16:9, audio). Add clips with add_segment – one per storyboard panel.',
+        'Creates an empty sequence (a film made of clips) with the default settings (Seedance 2.5, 8s, 480p, 16:9, audio). Add clips with add_segment, one per shot. To plan a film as milestone pictures with generated transitions between them, use create_storyboard instead.',
       input: { name: z.string().describe('e.g. "Promenad på stranden".') },
       annotations: WRITE,
       summary: ({ name }) => `skapade sekvensen ${q(name)}`
@@ -798,7 +812,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Add clip to sequence',
       description:
-        "Adds a clip (a storyboard panel) to a sequence, at the end or after after_segment_id, with its notes (\"Vad händer\") and prompt. Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false. A continuing clip starts from the previous clip's last frame: it is image-to-video and takes no references or tokens – describe what happens next. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The descriptions of its referenced assets are appended to its prompt when it is generated (include_descriptions / excluded_description_asset_ids choose which; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
+        "Adds a clip (a shot) to a sequence, at the end or after after_segment_id, with its notes (\"Vad händer\") and prompt. Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false. A continuing clip starts from the previous clip's last frame: it is image-to-video and takes no references or tokens – describe what happens next. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The descriptions of its referenced assets are appended to its prompt when it is generated (include_descriptions / excluded_description_asset_ids choose which; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
       input: {
         sequence_id: z.string(),
         after_segment_id: z.string().optional().describe('Insert after this clip; at the end when left out.'),
@@ -863,7 +877,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update clip',
       description:
-        "Changes a clip (a storyboard panel): only the fields you pass change. notes is the panel's \"Vad händer\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none. Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt; reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
+        "Changes a clip: only the fields you pass change. notes is the clip's \"Vad händer\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none. Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt; reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
       input: {
         segment_id: z.string(),
         ...clipFields,

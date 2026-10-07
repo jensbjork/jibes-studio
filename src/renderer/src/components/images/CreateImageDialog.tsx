@@ -8,10 +8,12 @@ import {
   type SegmentImageSlot,
   type Sequence,
   type Still,
-  type StillParams
+  type StillParams,
+  type Storyboard
 } from '@shared/types'
 import { ASSET_VIEW } from '../../lib/assets'
 import { ipcErrorMessage, useAssets } from '../../lib/hooks'
+import { samePath } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import ConsentDialog from '../ConsentDialog'
@@ -28,11 +30,13 @@ import {
   ratioOf,
   rememberImageModel,
   rememberedImageModel,
+  mayPlaceOnBoard,
   snapImageOptions,
   stillParamsForSubmit,
   useImageModels,
   useStillQuote,
   useStills,
+  withPreviousReference,
   type ImageMode,
   type ImageOptions
 } from './imageModels'
@@ -40,33 +44,52 @@ import ReferenceImages from './ReferenceImages'
 import StillThumb from './StillThumb'
 import StillViewer from './StillViewer'
 
+/** Where a created image is put, besides being saved as a still. */
+export type CreateImageTarget =
+  /**
+   * A sequence clip's start or end image. The result offers "Använd som startbild / slutbild" (setSegmentImage),
+   * which puts it there and closes the dialog; the slot given here is the main choice.
+   */
+  | { segmentId: string; slot: SegmentImageSlot }
+  /**
+   * A storyboard's board (sequenceId is then the storyboard's id). Every new image is put on the board as soon as
+   * it is made (updateBoard), unless the board got another image meanwhile; an earlier result can be put back.
+   */
+  | { boardId: string }
+
 export interface CreateImageDialogProps {
   open: boolean
   /**
-   * The sequence the image is for: it is saved in the sequence's Storyboard folder, gets the sequence's aspect
-   * ratio by default, and the sequence's stills are offered as references. Without one it goes to Referensbilder.
+   * The sequence or storyboard the image is for: it is saved with its stills (a sequence's Storyboard folder, a
+   * storyboard's Bilder folder), gets its aspect ratio by default, and its stills are offered as references.
+   * Without one it goes to Referensbilder.
    */
   sequenceId?: string
-  /** Prefills the prompt (e.g. the clip's notes or prompt); @ImageN tokens are taken out. */
+  /** Prefills the prompt (e.g. the board's note, the clip's notes or prompt); @ImageN tokens are taken out. */
   initialPrompt?: string
   /**
-   * The clip slot the dialog was opened from. The result then offers "Använd som startbild / slutbild", which
-   * puts it there (setSegmentImage) and closes the dialog; the slot given here is the main choice.
+   * The previous board's image (absolute). Offered as "Använd föregående bild som referens", on from the start:
+   * it goes first among the references (the base the edit model works from), so people, clothes and place carry
+   * over from one milestone to the next.
    */
-  assign?: { segmentId: string; slot: SegmentImageSlot }
+  previousImagePath?: string
+  /** Where a result goes besides the stills (see CreateImageTarget). */
+  assign?: CreateImageTarget
   onClose: () => void
   /** Every image created, as soon as it is saved as a still (also when the user creates several). */
   onCreated?: (still: Still) => void
   /** After the dialog put a result into the clip, with the updated sequence. */
   onAssigned?: (sequence: Sequence, slot: SegmentImageSlot, still: Still) => void
+  /** After the dialog put a result on the board, with the updated storyboard. */
+  onBoardAssigned?: (storyboard: Storyboard, still: Still) => void
   /** Lets the dialog link to Settings and the library views (it closes first). */
   navigate?: Navigate
 }
 
 /**
  * "Skapa bild…": a still from a prompt, or from reference images combined by an edit model (characters,
- * environments, outfits, poses, the sequence's stills), with the model's options and its live price. Paid: the
- * button shows the price, and nothing is sent before it is pressed.
+ * environments, outfits, poses, the sequence's or storyboard's own images), with the model's options and its live
+ * price. Paid: the button shows the price, and nothing is sent before it is pressed.
  */
 export default function CreateImageDialog(props: CreateImageDialogProps) {
   // Mounted only while open, so every opening starts from the props (prompt, slot) with nothing left over.
@@ -88,48 +111,95 @@ function consentOf(message: string): ConsentRequest | undefined {
   }
 }
 
+/** What the image is made for: the sequence or storyboard behind sequenceId, once loaded. */
+type Owner = { kind: 'sequence'; sequence: Sequence } | { kind: 'storyboard'; storyboard: Storyboard }
+
+/**
+ * Loads the sequence or storyboard behind the id. A board target says it is a storyboard; otherwise it is tried as
+ * a sequence first (main refuses storyboard ids there) and then as a storyboard. A storyboard is kept current, since
+ * its boards' numbers and images decide the wording and whether a new image may go on the board.
+ */
+function useOwner(id: string | undefined, isStoryboard: boolean): [Owner | undefined, (owner: Owner) => void] {
+  const [owner, setOwner] = useState<Owner>()
+  useEffect(() => {
+    if (!id) return
+    let active = true
+    let storyboard = isStoryboard
+    let latest = 0
+    const loadStoryboard = () => {
+      const n = ++latest
+      window.studio.getStoryboard(id).then(
+        (s) => active && n === latest && setOwner({ kind: 'storyboard', storyboard: s }),
+        // Deleted meanwhile, or neither kind: the dialog still works, with plainer wording.
+        () => {}
+      )
+    }
+    if (storyboard) loadStoryboard()
+    else {
+      window.studio.getSequence(id).then(
+        (s) => active && setOwner({ kind: 'sequence', sequence: s }),
+        () => {
+          if (!active) return
+          storyboard = true
+          loadStoryboard()
+        }
+      )
+    }
+    const off = window.studio.onStoryboardChange((changed) => storyboard && changed === id && loadStoryboard())
+    return () => {
+      active = false
+      off()
+    }
+  }, [id, isStoryboard])
+  return [owner, setOwner]
+}
+
 function CreateImageDialogBody({
   sequenceId,
   initialPrompt,
+  previousImagePath,
   assign,
   onClose,
   onCreated,
   onAssigned,
+  onBoardAssigned,
   navigate
 }: CreateImageDialogProps) {
   const { models, loaded: modelsLoaded, error: modelsError } = useImageModels()
   const assets = useAssets()
   const { stills } = useStills(sequenceId)
 
-  // The sequence gives the default aspect ratio, the dialog's subtitle and, with a slot, the clip.
-  const [sequence, setSequence] = useState<Sequence>()
-  useEffect(() => {
-    if (!sequenceId) return
-    let active = true
-    window.studio.getSequence(sequenceId).then(
-      (s) => active && setSequence(s),
-      () => {}
-    )
-    return () => {
-      active = false
-    }
-  }, [sequenceId])
-  const segmentIndex = assign && sequence ? sequence.segments.findIndex((s) => s.id === assign.segmentId) : -1
+  const slotTarget = assign && 'segmentId' in assign ? assign : undefined
+  const boardId = assign && 'boardId' in assign ? assign.boardId : undefined
+  const [owner, setOwner] = useOwner(sequenceId, !!boardId)
+  const sequence = owner?.kind === 'sequence' ? owner.sequence : undefined
+  const storyboard = owner?.kind === 'storyboard' ? owner.storyboard : undefined
+  const isStoryboard = !!boardId || !!storyboard
+  const ownerName = (storyboard?.name ?? sequence?.name)?.trim() || undefined
+
+  const segmentIndex = slotTarget && sequence ? sequence.segments.findIndex((s) => s.id === slotTarget.segmentId) : -1
   const segment = segmentIndex === -1 ? undefined : sequence?.segments[segmentIndex]
-  const sequenceAspect =
-    sequence?.defaults.aspectRatio ?? sequence?.segments.find((s) => s.params.aspectRatio)?.params.aspectRatio ?? '16:9'
+  const boardIndex = boardId && storyboard ? storyboard.boards.findIndex((b) => b.id === boardId) : -1
+  const board = boardIndex === -1 ? undefined : storyboard?.boards[boardIndex]
+  const boardNumber = boardIndex === -1 ? undefined : boardIndex + 1
+  const ownerAspect =
+    storyboard?.aspectRatio ??
+    sequence?.defaults.aspectRatio ??
+    sequence?.segments.find((s) => s.params.aspectRatio)?.params.aspectRatio ??
+    '16:9'
 
   // ── Form ────────────────────────────────────────────────────────────────────
   const [prompt, setPrompt] = useState(() => plainImagePrompt(initialPrompt ?? ''))
   const [negativePrompt, setNegativePrompt] = useState('')
-  const [references, setReferences] = useState<string[]>([])
+  // The previous board's image starts as the first reference ("Använd föregående bild som referens" is on).
+  const [references, setReferences] = useState<string[]>(() => (previousImagePath ? [previousImagePath] : []))
   const [referenceNote, setReferenceNote] = useState<string>()
   const [chosen, setChosen] = useState<Record<ImageMode, string | undefined>>(() => ({
     text: rememberedImageModel('text'),
     edit: rememberedImageModel('edit')
   }))
   const [options, setOptions] = useState<ImageOptions>({})
-  // Until the user picks an aspect ratio, it follows the sequence's (which may arrive after the models).
+  // Until the user picks an aspect ratio, it follows the sequence's or storyboard's (which may load after the models).
   const aspectTouched = useRef(false)
 
   const mode = modeOf(references.length)
@@ -141,15 +211,28 @@ function CreateImageDialogBody({
   useEffect(() => {
     if (!model) return
     setOptions((o) =>
-      snapImageOptions(model, aspectTouched.current ? o : { ...o, aspectRatio: undefined }, sequenceAspect)
+      snapImageOptions(model, aspectTouched.current ? o : { ...o, aspectRatio: undefined }, ownerAspect)
     )
-  }, [model?.id, sequenceAspect])
+  }, [model?.id, ownerAspect])
 
   useEffect(() => {
     if (!referenceNote) return
     const t = setTimeout(() => setReferenceNote(undefined), 6000)
     return () => clearTimeout(t)
   }, [referenceNote])
+
+  // Derived from the list, so taking the picture out among the references unticks the box too.
+  const usingPrevious = !!previousImagePath && references.includes(previousImagePath)
+  const togglePrevious = (on: boolean) => {
+    if (!previousImagePath) return
+    const next = withPreviousReference(references, previousImagePath, on)
+    setReferenceNote(
+      on && next.length > maxReferences
+        ? `Föregående bild lades först. Modellen tar högst ${maxReferences} bilder, så den sista skickas inte.`
+        : undefined
+    )
+    setReferences(next)
+  }
 
   const params: StillParams | undefined = model
     ? stillParamsForSubmit(
@@ -190,12 +273,27 @@ function CreateImageDialogBody({
   const [consent, setConsent] = useState<{ request: ConsentRequest; params: StillParams }>()
   const [viewing, setViewing] = useState<Still>()
   const [assigning, setAssigning] = useState(false)
+  // Why the newest image wasn't put on the board by itself (it got another image meanwhile).
+  const [boardNote, setBoardNote] = useState<string>()
   const current = results.find((r) => r.id === currentId) ?? results[0]
-  // Read when a generation answers, which may be after the parent passed new callbacks.
-  const callbacks = useRef({ onCreated, onAssigned, onClose })
+  // Read when a generation answers, which may be after the parent passed new callbacks, or after the dialog closed.
+  const callbacks = useRef({ onCreated, onAssigned, onBoardAssigned, onClose })
   useEffect(() => {
-    callbacks.current = { onCreated, onAssigned, onClose }
+    callbacks.current = { onCreated, onAssigned, onBoardAssigned, onClose }
   })
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  const latestOwner = useRef(owner)
+  useEffect(() => {
+    latestOwner.current = owner
+  })
+  // The pictures made in this dialog: a board showing one of them may get the next one.
+  const madeHere = useRef<string[]>([])
 
   useEffect(() => {
     if (!busy) return
@@ -203,6 +301,51 @@ function CreateImageDialogBody({
     const t = setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000)
     return () => clearInterval(t)
   }, [busy, startedAt])
+
+  /** The board's image as this dialog last saw it: a path, undefined for an empty board, null when not known. */
+  const boardImageSeen = (): string | undefined | null => {
+    const o = latestOwner.current
+    if (!boardId || o?.kind !== 'storyboard') return null
+    const b = o.storyboard.boards.find((x) => x.id === boardId)
+    return b ? b.imagePath : null
+  }
+
+  /** Puts the still on the board and shows the storyboard as main answered (when the dialog is still open). */
+  const putOnBoard = async (still: Still) => {
+    if (!boardId) return
+    const updated = await window.studio.updateBoard(boardId, { image: { kind: 'still', stillId: still.id } })
+    if (mounted.current) setOwner({ kind: 'storyboard', storyboard: updated })
+    callbacks.current.onBoardAssigned?.(updated, still)
+  }
+
+  /**
+   * After an image is made for a board: put it there, unless the board got another picture while it was being made
+   * (in the storyboard, or by an agent) – that one is never replaced without asking. `seen` is what the board showed
+   * when the image was asked for. Also runs when the dialog was closed meanwhile, so the board still gets its image.
+   */
+  const placeNewImage = async (still: Still, seen: string | undefined | null) => {
+    if (!boardId || !sequenceId) return
+    if (mounted.current) setAssigning(true)
+    try {
+      const fresh = await window.studio.getStoryboard(sequenceId)
+      const now = fresh.boards.find((b) => b.id === boardId)
+      if (!now) throw new Error('Rutan finns inte längre. Bilden finns kvar bland storyboardens bilder.')
+      if (!mayPlaceOnBoard(now.imagePath, seen, madeHere.current)) {
+        if (mounted.current) {
+          setOwner({ kind: 'storyboard', storyboard: fresh })
+          setBoardNote('Rutan fick en annan bild medan den här skapades, så den byttes inte ut.')
+        }
+        return
+      }
+      await putOnBoard(still)
+    } catch (e) {
+      if (mounted.current) {
+        setError(`Bilden sparades bland storyboardens bilder men kunde inte läggas i rutan: ${ipcErrorMessage(e)}`)
+      }
+    } finally {
+      if (mounted.current) setAssigning(false)
+    }
+  }
 
   // A paid call: guarded by a ref too, since two quick presses (or ⌘+Enter) can both run before the
   // disabled button has rendered.
@@ -213,19 +356,26 @@ function CreateImageDialogBody({
     setBusy(true)
     setStartedAt(Date.now())
     setError(undefined)
+    setBoardNote(undefined)
+    const seen = boardImageSeen()
     try {
       const still = await window.studio.generateStill(sent)
-      setResults((r) => [still, ...r])
-      setCurrentId(still.id)
+      madeHere.current.push(still.path)
+      if (mounted.current) {
+        setResults((r) => [still, ...r])
+        setCurrentId(still.id)
+      }
       callbacks.current.onCreated?.(still)
+      void placeNewImage(still, seen)
     } catch (e) {
+      if (!mounted.current) return
       const message = ipcErrorMessage(e)
       const request = consentOf(message)
       if (request) setConsent({ request, params: sent })
       else setError(message)
     } finally {
       inFlight.current = false
-      setBusy(false)
+      if (mounted.current) setBusy(false)
     }
   }
 
@@ -244,18 +394,36 @@ function CreateImageDialogBody({
     await create(sent)
   }
 
-  const assignTo = async (slot: SegmentImageSlot, still: Still) => {
-    if (!assign || assigning) return
+  const assignToSlot = async (slot: SegmentImageSlot, still: Still) => {
+    if (!slotTarget || assigning) return
     setAssigning(true)
     setError(undefined)
     try {
-      const updated = await window.studio.setSegmentImage(assign.segmentId, slot, { kind: 'still', stillId: still.id })
+      const updated = await window.studio.setSegmentImage(slotTarget.segmentId, slot, {
+        kind: 'still',
+        stillId: still.id
+      })
       callbacks.current.onAssigned?.(updated, slot, still)
       callbacks.current.onClose()
     } catch (e) {
       setError(ipcErrorMessage(e))
     } finally {
-      setAssigning(false)
+      if (mounted.current) setAssigning(false)
+    }
+  }
+
+  /** "Använd i ruta N": an earlier result back on the board, by the user's own choice. */
+  const assignToBoard = async (still: Still) => {
+    if (!boardId || assigning) return
+    setAssigning(true)
+    setError(undefined)
+    setBoardNote(undefined)
+    try {
+      await putOnBoard(still)
+    } catch (e) {
+      setError(ipcErrorMessage(e))
+    } finally {
+      if (mounted.current) setAssigning(false)
     }
   }
 
@@ -280,37 +448,59 @@ function CreateImageDialogBody({
     else onClose()
   }
 
+  // ── Wording ─────────────────────────────────────────────────────────────────
   const clipNumber = segmentIndex === -1 ? undefined : segmentIndex + 1
   // What putting the image into the clip changes besides the slot (main does it; the user should know first).
   const assignNotes: string[] = []
-  if (assign && segment && clipNumber) {
+  if (slotTarget && segment && clipNumber) {
     if (kindOfModelId(segment.params.model) === 'reference-to-video' && segment.params.referenceImages?.length) {
       assignNotes.push(
         `Klipp ${clipNumber} görs i dag med referensbilder. Med en start- eller slutbild görs det som ` +
           'bild-till-video i stället, och referensbilderna tas bort från klippet.'
       )
     }
-    if (assign.slot === 'start' && segment.continueFromPrevious) {
+    if (slotTarget.slot === 'start' && segment.continueFromPrevious) {
       assignNotes.push(
         `Klipp ${clipNumber} fortsätter i dag från klipp ${clipNumber - 1}. Som startbild ersätter bilden det.`
       )
     }
-    if (assign.slot === 'end' && segment.endFromNext) {
+    if (slotTarget.slot === 'end' && segment.endFromNext) {
       assignNotes.push(
         `Klipp ${clipNumber} slutar i dag där klipp ${clipNumber + 1} börjar. Som slutbild ersätter bilden det.`
       )
     }
   }
   const slotWord = (slot: SegmentImageSlot) => (slot === 'start' ? 'startbild' : 'slutbild')
-  const subtitle = assign
+  const quoted = (name: string | undefined) => (name ? ` ”${name}”` : '')
+  const subtitle = slotTarget
     ? clipNumber
-      ? `Till klipp ${clipNumber} – ${slotWord(assign.slot)}. Bilden sparas också bland sekvensens bilder.`
-      : `Till klippets ${slotWord(assign.slot)}. Bilden sparas också bland sekvensens bilder.`
-    : sequenceId
-      ? `Sparas bland bilderna i ${sequence ? `”${sequence.name}”` : 'sekvensen'} – ` +
-        'dra den sedan till en ruta i storyboarden.'
-      : 'Sparas i Referensbilder.'
+      ? `Till klipp ${clipNumber} – ${slotWord(slotTarget.slot)}. Bilden sparas också bland sekvensens bilder.`
+      : `Till klippets ${slotWord(slotTarget.slot)}. Bilden sparas också bland sekvensens bilder.`
+    : boardId
+      ? `${boardNumber ? `Till ruta ${boardNumber}${ownerName ? ` i ”${ownerName}”` : ''}` : 'Till rutan'}. ` +
+        'Bilden läggs i rutan och sparas bland storyboardens bilder.'
+      : isStoryboard
+        ? `Sparas bland bilderna i storyboarden${quoted(ownerName)}.`
+        : sequenceId
+          ? `Sparas bland bilderna i ${ownerName ? `”${ownerName}”` : 'sekvensen'}.`
+          : 'Sparas i Referensbilder.'
+  const whereItGoes = boardId
+    ? 'läggs i rutan'
+    : isStoryboard
+      ? 'hamnar bland storyboardens bilder'
+      : sequenceId
+        ? 'hamnar bland sekvensens bilder'
+        : 'hamnar i Referensbilder'
+  const aspectNote =
+    model && options.aspectRatio && options.aspectRatio !== ownerAspect && sequenceId && owner
+      ? isStoryboard
+        ? `Storyboarden är i ${ownerAspect}. Med en bild i ett annat format får klippen bildens format.`
+        : `Sekvensen är i ${ownerAspect}. En start- eller slutbild i ett annat format ger klippet det formatet.`
+      : undefined
 
+  const inBoard = !!current && !!board?.imagePath && samePath(board.imagePath, current.path)
+  // Once the image is where it should go, finishing is the next step rather than making another.
+  const placed = !!current && !busy && (slotTarget ? true : boardId ? inBoard : false)
   const priceText = pricePending ? '…' : formatImagePrice(price)
   const createLabel = busy ? 'Skapar…' : (missing ?? (results.length ? 'Skapa igen' : 'Skapa'))
 
@@ -324,7 +514,14 @@ function CreateImageDialogBody({
         footer={
           <>
             <SafeModeNote onSettings={goTo ? () => goTo('settings') : undefined} />
-            <button onClick={onClose} className="rounded-md border border-line px-4 py-2 hover:bg-raised">
+            <button
+              onClick={onClose}
+              className={
+                boardId && placed
+                  ? 'rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-hover'
+                  : 'rounded-md border border-line px-4 py-2 hover:bg-raised'
+              }
+            >
               {results.length ? 'Klar' : 'Avbryt'}
             </button>
             <button
@@ -332,9 +529,7 @@ function CreateImageDialogBody({
               disabled={!!missing || busy || !params}
               title={missing ?? (params?.referenceImages ? 'Kombinera referensbilderna enligt prompten' : undefined)}
               className={`flex items-center gap-2 rounded-md px-4 py-2 font-medium disabled:opacity-40 ${
-                current && assign
-                  ? 'border border-line text-text hover:bg-raised'
-                  : 'bg-accent text-white hover:bg-accent-hover'
+                placed ? 'border border-line text-text hover:bg-raised' : 'bg-accent text-white hover:bg-accent-hover'
               }`}
             >
               <span>{createLabel}</span>
@@ -368,13 +563,18 @@ function CreateImageDialogBody({
               </span>
             </label>
 
+            {previousImagePath && (
+              <PreviousImageOption path={previousImagePath} checked={usingPrevious} onChange={togglePrevious} />
+            )}
+
             <ReferenceImages
               value={references}
               onChange={setReferences}
               max={maxReferences}
               assets={assets}
               stills={stills}
-              stillsOfSequence={!!sequenceId}
+              stillsOf={isStoryboard ? 'storyboard' : sequenceId ? 'sequence' : undefined}
+              pathLabels={previousImagePath ? { [previousImagePath]: 'Föregående' } : undefined}
               clipReferences={segment?.params.referenceImages}
               clipNumber={clipNumber}
               onNote={setReferenceNote}
@@ -466,11 +666,7 @@ function CreateImageDialogBody({
                 )}
               </div>
             )}
-            {model && options.aspectRatio && options.aspectRatio !== sequenceAspect && sequenceId && (
-              <p className="-mt-2 text-[11px] leading-relaxed text-muted">
-                Sekvensen är i {sequenceAspect}. En start- eller slutbild i ett annat format ger klippet det formatet.
-              </p>
-            )}
+            {aspectNote && <p className="-mt-2 text-[11px] leading-relaxed text-muted">{aspectNote}</p>}
 
             {mode === 'text' && (
               <label className="block">
@@ -489,17 +685,26 @@ function CreateImageDialogBody({
           <ResultPanel
             busy={busy}
             elapsed={elapsed}
+            busyNote={`Brukar ta 5–30 sekunder. Stänger du fönstret blir bilden klar ändå och ${whereItGoes}.`}
             error={error}
             results={results}
             current={current}
-            aspectRatio={options.aspectRatio ?? sequenceAspect}
+            aspectRatio={options.aspectRatio ?? ownerAspect}
             onSelect={(s) => setCurrentId(s.id)}
             onView={setViewing}
-            assign={assign}
-            clipNumber={clipNumber}
-            assignNotes={assignNotes}
+            slot={slotTarget ? { main: slotTarget.slot, clipNumber, notes: assignNotes } : undefined}
+            board={
+              boardId
+                ? {
+                    number: boardNumber,
+                    imagePath: board?.imagePath,
+                    note: boardNote
+                  }
+                : undefined
+            }
             assigning={assigning}
-            onAssign={(slot, still) => void assignTo(slot, still)}
+            onAssignSlot={(slot, still) => void assignToSlot(slot, still)}
+            onAssignBoard={(still) => void assignToBoard(still)}
           />
         </div>
       </Modal>
@@ -521,6 +726,43 @@ function CreateImageDialogBody({
   )
 }
 
+/** "Använd föregående bild som referens": the previous board's image as the first reference, for continuity. */
+function PreviousImageOption({
+  path,
+  checked,
+  onChange
+}: {
+  path: string
+  checked: boolean
+  onChange: (on: boolean) => void
+}) {
+  const [missing, setMissing] = useState(false)
+  return (
+    <label className="flex cursor-pointer items-center gap-3 rounded-md border border-line px-3 py-2 transition hover:bg-raised/50">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="accent-accent" />
+      <span className="h-9 w-16 shrink-0 overflow-hidden rounded bg-raised">
+        {!missing && (
+          <img
+            src={mediaUrl(path)}
+            alt=""
+            draggable={false}
+            onError={() => setMissing(true)}
+            className="h-full w-full object-cover"
+          />
+        )}
+      </span>
+      <span className="min-w-0">
+        <span className="block">Använd föregående bild som referens</span>
+        <span className="mt-0.5 block text-[11px] leading-snug text-muted">
+          {missing
+            ? 'Bilden i rutan före finns inte kvar på sin plats.'
+            : 'Bilden i rutan före läggs först bland referenserna, så att personer, kläder och miljö håller ihop.'}
+        </span>
+      </span>
+    </label>
+  )
+}
+
 /** "Seedream V5 Pro · max 6 bilder", "Flux 2 Pro (offline)". */
 function modelOptionLabel(m: ImageModel, mode: ImageMode): string {
   const extra = [mode === 'edit' ? `högst ${m.maxInputImages} bilder` : undefined, m.offline ? 'offline' : undefined]
@@ -532,6 +774,8 @@ function modelOptionLabel(m: ImageModel, mode: ImageMode): string {
 interface ResultProps {
   busy: boolean
   elapsed: number
+  /** Under the spinner: how long it takes and where the image goes if the dialog is closed. */
+  busyNote: string
   error?: string
   /** This dialog's images, newest first. */
   results: Still[]
@@ -539,34 +783,42 @@ interface ResultProps {
   aspectRatio: string
   onSelect: (still: Still) => void
   onView: (still: Still) => void
-  assign?: { segmentId: string; slot: SegmentImageSlot }
-  clipNumber?: number
-  /** What assigning changes in the clip besides the slot. */
-  assignNotes: string[]
+  /** Made for a sequence clip: the slot it was opened from first, what assigning changes besides the slot. */
+  slot?: { main: SegmentImageSlot; clipNumber?: number; notes: string[] }
+  /** Made for a storyboard board: its number, the image it shows now, and why a new one wasn't put there. */
+  board?: { number?: number; imagePath?: string; note?: string }
   assigning: boolean
-  onAssign: (slot: SegmentImageSlot, still: Still) => void
+  onAssignSlot: (slot: SegmentImageSlot, still: Still) => void
+  onAssignBoard: (still: Still) => void
 }
+
+const primaryButton =
+  'rounded-md bg-accent px-3.5 py-1.5 font-medium text-white hover:bg-accent-hover disabled:opacity-40'
+const secondaryButton = 'rounded-md border border-line px-3.5 py-1.5 hover:bg-raised disabled:opacity-40'
 
 /** The latest image (or the one picked among this dialog's results), with where it can go. */
 function ResultPanel({
   busy,
   elapsed,
+  busyNote,
   error,
   results,
   current,
   aspectRatio,
   onSelect,
   onView,
-  assign,
-  clipNumber,
-  assignNotes,
+  slot,
+  board,
   assigning,
-  onAssign
+  onAssignSlot,
+  onAssignBoard
 }: ResultProps) {
   // The placeholder's shape; 16:9 for "auto".
   const ratio = ratioOf(aspectRatio) ?? 16 / 9
   // The slot the dialog was opened from first; the other one is offered too, since a keyframe often fits both.
-  const slots: SegmentImageSlot[] = assign ? (assign.slot === 'start' ? ['start', 'end'] : ['end', 'start']) : []
+  const slots: SegmentImageSlot[] = slot ? (slot.main === 'start' ? ['start', 'end'] : ['end', 'start']) : []
+  const onBoard = (s: Still) => !!board?.imagePath && samePath(board.imagePath, s.path)
+  const boardName = board?.number ? `ruta ${board.number}` : 'rutan'
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -578,9 +830,7 @@ function ResultPanel({
           <div className="flex flex-col items-center gap-2 px-6 text-center text-muted">
             <span className="h-6 w-6 animate-spin rounded-full border-2 border-line border-t-accent" />
             <span>Skapar bilden… {elapsed > 0 && `${elapsed} s`}</span>
-            <span className="text-[11px]">
-              Brukar ta 5–30 sekunder. Stänger du rutan blir bilden klar ändå och hamnar bland sekvensens bilder.
-            </span>
+            <span className="text-[11px]">{busyNote}</span>
           </div>
         ) : current ? (
           <button
@@ -606,31 +856,40 @@ function ResultPanel({
         </p>
       )}
 
-      {current && !busy && assign && assignNotes.length > 0 && (
-        <p className="text-[11px] leading-relaxed text-muted">{assignNotes.join(' ')}</p>
+      {current && !busy && slot && slot.notes.length > 0 && (
+        <p className="text-[11px] leading-relaxed text-muted">{slot.notes.join(' ')}</p>
       )}
 
       {current && !busy && (
         <div className="flex flex-wrap items-center gap-2">
-          {slots.map((slot, i) => (
+          {slots.map((s, i) => (
             <button
-              key={slot}
-              onClick={() => onAssign(slot, current)}
+              key={s}
+              onClick={() => onAssignSlot(s, current)}
               disabled={assigning}
               title={
-                clipNumber
-                  ? `Lägg bilden i klipp ${clipNumber}s ${slot === 'start' ? 'startruta' : 'slutruta'}`
+                slot?.clipNumber
+                  ? `Lägg bilden i klipp ${slot.clipNumber}s ${s === 'start' ? 'startruta' : 'slutruta'}`
                   : undefined
               }
-              className={
-                i === 0
-                  ? 'rounded-md bg-accent px-3.5 py-1.5 font-medium text-white hover:bg-accent-hover disabled:opacity-40'
-                  : 'rounded-md border border-line px-3.5 py-1.5 hover:bg-raised disabled:opacity-40'
-              }
+              className={i === 0 ? primaryButton : secondaryButton}
             >
-              {slot === 'start' ? 'Använd som startbild' : 'Använd som slutbild'}
+              {s === 'start' ? 'Använd som startbild' : 'Använd som slutbild'}
             </button>
           ))}
+          {board &&
+            (onBoard(current) ? (
+              <span className="flex items-center gap-1.5 text-emerald-300">
+                <span aria-hidden>✓</span>
+                Bilden ligger i {boardName}
+              </span>
+            ) : assigning ? (
+              <span className="text-muted">Läggs i {boardName}…</span>
+            ) : (
+              <button onClick={() => onAssignBoard(current)} className={primaryButton}>
+                Använd i {boardName}
+              </button>
+            ))}
           <button
             onClick={() => void window.studio.revealFile(current.path)}
             className="rounded-md px-2.5 py-1.5 text-muted hover:bg-raised hover:text-text"
@@ -641,6 +900,14 @@ function ResultPanel({
             {current.costUsd !== undefined && `${formatImagePrice(current.costUsd)} · `}Sparad
           </span>
         </div>
+      )}
+
+      {current && !busy && board && (onBoard(current) || board.note) && (
+        <p className={`text-[11px] leading-relaxed ${onBoard(current) ? 'text-muted' : 'text-amber-300'}`}>
+          {onBoard(current)
+            ? 'Skapar du en till byts bilden i rutan ut. De tidigare finns kvar bland storyboardens bilder.'
+            : board.note}
+        </p>
       )}
 
       {results.length > 1 && (
@@ -654,7 +921,16 @@ function ResultPanel({
                 selected={s.id === current?.id}
                 onOpen={onSelect}
                 className="aspect-video w-20"
-              />
+              >
+                {board && onBoard(s) ? (
+                  <span
+                    title={`Ligger i ${boardName}`}
+                    className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-[9px] font-semibold text-black"
+                  >
+                    ✓
+                  </span>
+                ) : undefined}
+              </StillThumb>
             ))}
           </div>
         </div>

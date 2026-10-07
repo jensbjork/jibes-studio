@@ -12,7 +12,9 @@ import { prepareLibrary, registerLibraryRootIpc } from './library-root'
 import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty } from './paths'
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
 import { attachReviewSummary, registerReviewIpc } from './reviews'
+import { reselectTransitionTake } from './sequence-store'
 import { registerSequenceIpc } from './sequences'
+import { registerStoryboardIpc } from './storyboards'
 import { acceptConsent, getApiKey, getSettings, setApiKey, setImageSafeMode, setPromptLanguage } from './settings'
 import { importStillFile, registerStillsIpc, saveFrameAsStill, stillWorkBusy } from './stills'
 import { VeniceClient } from './venice'
@@ -51,7 +53,7 @@ const venice = new VeniceClient(getApiKey)
 // Submits read the models' prompt limits (for the descriptions appended to a prompt) from main's cached list.
 const jobs = new JobManager(venice, () => loadVideoModels())
 let modelCache: { at: number; models: VideoModel[] } | undefined
-/** Exports and "generate all" runs; set once the sequence handlers are registered. */
+/** Exports and "generate all" runs (of sequences and storyboards); set once their handlers are registered. */
 let sequencesBusy: () => string | undefined = () => undefined
 
 function createWindow(): BrowserWindow {
@@ -118,12 +120,23 @@ async function loadVideoModels(force = false): Promise<VideoModel[]> {
   return modelCache.models
 }
 
-/** Every sequence refetches: image paths in segment params (or take paths) may have been rewritten. */
+/**
+ * A sequence or a storyboard changed: each has its own view, listening on its own channel. A row that is gone
+ * (just deleted) is announced as a sequence; the storyboard service announces its own deletes.
+ */
+function broadcastSequenceChange(id: string): void {
+  const kind = db.isDbOpen() ? db.getDb().prepare('SELECT kind FROM sequences WHERE id = ?').pluck().get(id) : undefined
+  broadcast(kind === 'storyboard' ? 'storyboard:change' : 'sequence:change', id)
+}
+
+/**
+ * Every sequence and storyboard refetches: image paths in segment params, board images or take paths may have been
+ * rewritten.
+ */
 function broadcastAllSequences(): void {
   if (!db.isDbOpen()) return
-  for (const id of db.getDb().prepare('SELECT id FROM sequences').pluck().all() as string[]) {
-    broadcast('sequence:change', id)
-  }
+  const rows = db.getDb().prepare('SELECT id, kind FROM sequences').all() as { id: string; kind: string }[]
+  for (const r of rows) broadcast(r.kind === 'storyboard' ? 'storyboard:change' : 'sequence:change', r.id)
 }
 
 /**
@@ -209,9 +222,16 @@ function registerIpc(): void {
       .prepare('SELECT DISTINCT sequence_id FROM segments WHERE id = ? OR selected_generation_id = ?')
       .pluck()
       .all(g.segmentId ?? null, id) as string[]
+    // Storyboard transitions that use it as their take fall back on another of theirs (reselectTransitionTake).
+    const transitions = db
+      .getDb()
+      .prepare('SELECT id FROM segments WHERE selected_generation_id = ? AND from_board_id IS NOT NULL')
+      .pluck()
+      .all(id) as string[]
     // The row goes in the same tick as the read: a video that is being moved or saved right now then finds
     // its row gone and is trashed by whoever moves it, rather than landing somewhere untracked.
     db.deleteGeneration(id)
+    for (const segmentId of transitions) reselectTransitionTake(segmentId)
     // Only the library's own copies: a path outside it (e.g. an old library copied elsewhere by hand) is
     // somebody else's file.
     for (const file of [g.filePath, g.thumbPath]) {
@@ -220,7 +240,7 @@ function registerIpc(): void {
     if (g.filePath) await removeDayFolderIfEmpty(dirname(g.filePath))
     // Every view drops it, also the feed when the take was deleted in the sequence editor.
     broadcast('generation:delete', id)
-    for (const sequenceId of sequenceIds) broadcast('sequence:change', sequenceId)
+    for (const sequenceId of sequenceIds) broadcastSequenceChange(sequenceId)
   })
 
   ipcMain.handle('file:reveal', (_e, path: string) => shell.showItemInFolder(path))
@@ -262,7 +282,8 @@ function registerIpc(): void {
   const sequences = registerSequenceIpc({
     jobs,
     venice,
-    notify: (sequenceId: string) => broadcast('sequence:change', sequenceId),
+    // A storyboard's takes, folder and export run here too; its view hears about them on its own channel.
+    notify: (sequenceId: string) => broadcastSequenceChange(sequenceId),
     exportProgress: (p: ExportProgress) => broadcast('export:progress', p),
     models: () => loadVideoModels(),
     // Keyframe slots that get a file or a frame make a still of the sequence (stills.ts announces it).
@@ -272,7 +293,18 @@ function registerIpc(): void {
     },
     stillsChanged: (sequenceId) => broadcast('stills:change', sequenceId)
   })
-  sequencesBusy = () => sequences.isBusy()
+  // Storyboards: boards and their transitions, which are segments the sequence service generates, keeps and exports.
+  const storyboards = registerStoryboardIpc({
+    sequences,
+    notify: (storyboardId: string) => broadcast('storyboard:change', storyboardId),
+    // A board that gets a file or a frame makes a still of the storyboard (stills.ts announces it).
+    stills: {
+      importFile: (path, storyboardId) => importStillFile(path, storyboardId),
+      saveFrame: (generationId, time, storyboardId) => saveFrameAsStill(generationId, time, storyboardId)
+    },
+    models: () => loadVideoModels()
+  })
+  sequencesBusy = () => sequences.isBusy() ?? storyboards.isBusy()
   // Images and stills for storyboards. A deleted still that clips or generations still use is kept in
   // Referensbilder, which rewrites their paths: views showing them refetch.
   registerStillsIpc(

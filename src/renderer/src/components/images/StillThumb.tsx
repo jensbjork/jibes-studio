@@ -3,7 +3,7 @@ import type { Still } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { formatStillTime, stillSourceLabel } from './imageModels'
 
-/** Drag payload of a still: its id. Storyboard slots and the image dialog's references accept it. */
+/** Drag payload of a still: its id. Board image slots and the image dialog's references accept it. */
 export const STILL_DRAG_TYPE = 'application/x-studio-still'
 
 /** Whether a drag carries a still (only the types can be read before the drop). */
@@ -20,7 +20,7 @@ interface Props {
   still: Still
   /** Click (or Enter) opens it, e.g. in the StillViewer. */
   onOpen?: (still: Still) => void
-  /** Can be dragged onto a storyboard slot or the image dialog's references (payload: STILL_DRAG_TYPE). */
+  /** Can be dragged onto a board or the image dialog's references (payload: STILL_DRAG_TYPE). */
   draggable?: boolean
   /** Marked as chosen, e.g. already among the references. */
   selected?: boolean
