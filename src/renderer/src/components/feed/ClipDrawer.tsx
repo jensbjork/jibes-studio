@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-label'
 import { durationSeconds, kindOfModelId, type Kind } from '@shared/models'
-import type { Generation, GenerationReview, VideoModel } from '@shared/types'
+import type { Edit, Generation, GenerationReview, VideoModel } from '@shared/types'
 import { ASSET_VIEW } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
@@ -18,7 +19,8 @@ import ConfirmButton from '../sequences/ConfirmButton'
 import { CloseIcon } from '../sequences/icons'
 import { STATUS_LABEL, formatClipLength, isPending, progressOf } from './feedText'
 import HighlightedPrompt from './HighlightedPrompt'
-import { BulbIcon, ChevronLeftIcon, ChevronRightIcon, SoundIcon } from './icons'
+import { BulbIcon, CameraIcon, ChevronLeftIcon, ChevronRightIcon, ScissorsIcon, SoundIcon } from './icons'
+import { workingCopyNote } from './ownClips'
 import { pauseOthers } from './playback'
 import {
   audioWindowFragment,
@@ -192,8 +194,8 @@ export default function ClipDrawer({
             )}
           </div>
         )}
-        <h2 className="min-w-0 flex-1 truncate px-2 font-medium" title={g.prompt}>
-          {titleFromPrompt(g.prompt, 8, 60) || 'Klipp'}
+        <h2 className="min-w-0 flex-1 truncate px-2 font-medium" title={generationTitle(g)}>
+          {g.title?.trim() ? generationTitle(g, 60) : titleFromPrompt(g.prompt, 8, 60) || 'Klipp'}
         </h2>
         <button
           type="button"
@@ -225,44 +227,49 @@ export default function ClipDrawer({
 
           <YourReview key={g.id} generation={g} review={userReview} loaded={loaded} onRate={onRate} />
 
-          <section>
-            <div className="mb-2 flex items-center">
-              <h3 className={`${sectionTitle} mb-0 flex-1`}>Prompt</h3>
-              <CopyButton text={g.prompt} disabled={!g.prompt} />
-            </div>
-            <HighlightedPrompt
-              text={g.prompt}
-              images={refs.images}
-              audios={refs.audios}
-              highlighted={highlighted}
-              onHover={setHighlighted}
-              className="text-[13px]"
-            />
-            {/* What Venice actually got, when Studio appended the referenced assets' descriptions to it. Keyed by
-                clip, so an unfolded prompt folds again on the next one. */}
-            {sentPromptDiffers(g.prompt, g.sentPrompt) && (
-              <SentPrompt
-                key={`sent:${g.id}`}
-                prompt={g.prompt}
-                sentPrompt={g.sentPrompt}
+          {(g.source === 'import' || g.source === 'edit') && <OwnFilm key={`own:${g.id}`} g={g} navigate={navigate} />}
+
+          {/* An own film or a version has no prompt of its own: its name is shown above instead. */}
+          {(g.prompt || g.source === undefined || g.source === 'generated') && (
+            <section>
+              <div className="mb-2 flex items-center">
+                <h3 className={`${sectionTitle} mb-0 flex-1`}>Prompt</h3>
+                <CopyButton text={g.prompt} disabled={!g.prompt} />
+              </div>
+              <HighlightedPrompt
+                text={g.prompt}
                 images={refs.images}
                 audios={refs.audios}
                 highlighted={highlighted}
                 onHover={setHighlighted}
+                className="text-[13px]"
               />
-            )}
-            {g.params.negativePrompt && (
-              <div className="mt-3">
-                <h4 className="mb-1 text-[11px] text-muted">Negativ prompt</h4>
-                <HighlightedPrompt
-                  text={g.params.negativePrompt}
+              {/* What Venice actually got, when Studio appended the referenced assets' descriptions to it. Keyed by
+                  clip, so an unfolded prompt folds again on the next one. */}
+              {sentPromptDiffers(g.prompt, g.sentPrompt) && (
+                <SentPrompt
+                  key={`sent:${g.id}`}
+                  prompt={g.prompt}
+                  sentPrompt={g.sentPrompt}
                   images={refs.images}
                   audios={refs.audios}
-                  className="text-[12px] text-muted"
+                  highlighted={highlighted}
+                  onHover={setHighlighted}
                 />
-              </div>
-            )}
-          </section>
+              )}
+              {g.params.negativePrompt && (
+                <div className="mt-3">
+                  <h4 className="mb-1 text-[11px] text-muted">Negativ prompt</h4>
+                  <HighlightedPrompt
+                    text={g.params.negativePrompt}
+                    images={refs.images}
+                    audios={refs.audios}
+                    className="text-[12px] text-muted"
+                  />
+                </div>
+              )}
+            </section>
+          )}
 
           {(refs.images.length > 0 || refs.audios.length > 0) && (
             <References
@@ -351,14 +358,27 @@ function Actions({
   return (
     <div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => onReuse(g)}
-          title={reuseTitle}
-          className="rounded-md bg-accent px-3 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
-        >
-          Använd igen
-        </button>
+        {canUseAgain(g) && (
+          <button
+            type="button"
+            onClick={() => onReuse(g)}
+            title={reuseTitle}
+            className="rounded-md bg-accent px-3 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
+          >
+            Använd igen
+          </button>
+        )}
+        {g.status === 'completed' && g.filePath && navigate && (
+          <button
+            type="button"
+            onClick={() => navigate('editor', { type: 'open-editor', generationId: g.id })}
+            title="Ändra klippet med AI i Redigera. Originalet lämnas orört – varje ändring blir en ny version."
+            className={`${actionButton} flex items-center gap-1.5`}
+          >
+            <ScissorsIcon size={12} />
+            Redigera…
+          </button>
+        )}
         {g.status !== 'failed' && (
           <button
             ref={sequenceButton}
@@ -530,21 +550,36 @@ function ReferenceImage({ path }: { path: string }) {
 
 function Settings({ g, modelName, navigate }: { g: Generation; modelName?: string; navigate?: Navigate }) {
   const p = g.params
-  const rows: [string, ReactNode][] = [
-    ['Modell', <span title={g.model}>{modelName ?? g.model}</span>],
-    ['Läge', MODE_LABEL[kindOfModelId(g.model)]],
-    [
-      'Längd',
-      // The model sometimes delivers a little more or less than asked for.
-      g.videoDuration && Math.abs(g.videoDuration - durationSeconds(p.duration)) > 0.05
-        ? `${p.duration} (blev ${formatClipLength(g.videoDuration)})`
-        : p.duration
-    ]
-  ]
+  // An own film or a version has no model, mode or price of its own to speak of.
+  const own = g.source === 'import' || g.source === 'edit'
+  const rows: [string, ReactNode][] = own
+    ? [
+        ['Källa', g.source === 'import' ? 'Egen film' : 'Version från Redigera'],
+        ['Längd', g.videoDuration ? formatClipLength(g.videoDuration) : p.duration]
+      ]
+    : [
+        ['Modell', <span title={g.model}>{modelName ?? g.model}</span>],
+        [
+          'Läge',
+          // A take made from a video in Redigera (an edit or an upscale) isn't one of the Generate form's modes.
+          p.upscaleFactor
+            ? 'Uppskalning'
+            : p.sourceVideo || p.referenceVideos?.length
+              ? 'Video till video'
+              : MODE_LABEL[kindOfModelId(g.model)]
+        ],
+        [
+          'Längd',
+          // The model sometimes delivers a little more or less than asked for.
+          g.videoDuration && Math.abs(g.videoDuration - durationSeconds(p.duration)) > 0.05
+            ? `${p.duration} (blev ${formatClipLength(g.videoDuration)})`
+            : p.duration
+        ]
+      ]
   if (p.resolution) rows.push(['Upplösning', p.resolution])
   if (p.aspectRatio) rows.push(['Bildformat', p.aspectRatio])
   if (p.audio !== undefined) rows.push(['Ljud', p.audio ? 'På' : 'Av'])
-  rows.push(['Kostnad', formatUsd(g.quote)])
+  rows.push(['Kostnad', g.source === 'import' ? 'Ingen (egen film)' : formatUsd(g.quote)])
   rows.push(['Status', STATUS_LABEL[g.status]])
   rows.push(['Skapad', new Date(g.createdAt).toLocaleString('sv-SE', { dateStyle: 'medium', timeStyle: 'short' })])
   if (g.completedAt && g.status === 'completed') rows.push(['Tog', formatSeconds(g.completedAt - g.createdAt)])
@@ -570,6 +605,96 @@ function Settings({ g, modelName, navigate }: { g: Generation; modelName?: strin
           </div>
         ))}
       </dl>
+    </section>
+  )
+}
+
+/**
+ * An own film's original (when Studio made a working copy of it), or where a version came from: "Gjord från v2 i
+ * "<redigering>"", with a way to open the edit.
+ */
+function OwnFilm({ g, navigate }: { g: Generation; navigate?: Navigate }) {
+  const badge = sourceBadge(g)
+  // A version's edit, for its name and the base version's number; undefined while looking, null when it is gone.
+  const [edit, setEdit] = useState<Edit | null>()
+  useEffect(() => {
+    if (!g.editId) return
+    let current = true
+    window.studio.getEdit(g.editId).then(
+      (e) => current && setEdit(e),
+      () => current && setEdit(null)
+    )
+    return () => {
+      current = false
+    }
+  }, [g.editId])
+
+  const reasons = g.recipe?.import?.workingCopy
+  const note = workingCopyNote(reasons)
+  const parent = edit && g.parentId ? edit.versions.find((v) => v.id === g.parentId) : undefined
+
+  return (
+    <section>
+      <h3 className={sectionTitle}>{g.source === 'import' ? 'Egen film' : 'Version'}</h3>
+      <div className="space-y-2 rounded-md border border-line px-3 py-2.5 text-[12px]">
+        <p className="flex items-center gap-1.5">
+          {g.source === 'import' ? (
+            <CameraIcon size={12} className="shrink-0 text-muted" />
+          ) : (
+            <ScissorsIcon size={12} className="shrink-0 text-muted" />
+          )}
+          <span className="min-w-0 truncate font-medium" title={generationTitle(g)}>
+            {generationTitle(g)}
+          </span>
+          {badge && <span className="shrink-0 text-[11px] text-muted">· {badge.label}</span>}
+        </p>
+        {g.source === 'import' && (
+          <>
+            {g.recipe?.import?.name && (
+              <p className="text-muted">
+                Importerad från <span className="text-text">{g.recipe.import.name}</span>
+                {note ? ` · ${note}` : ''}
+              </p>
+            )}
+            {g.originalPath && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="min-w-0 text-muted">
+                  Originalfil: <span className="break-all text-text select-text">{g.originalPath.split('/').pop()}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void window.studio.revealFile(g.originalPath!)}
+                  className="rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-text"
+                >
+                  Visa original i Finder
+                </button>
+              </div>
+            )}
+          </>
+        )}
+        {g.source === 'edit' && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-muted">
+              {edit === undefined && g.editId
+                ? 'Letar efter redigeringen…'
+                : edit
+                  ? parent
+                    ? `Gjord från v${parent.number} i ”${edit.name}”`
+                    : `En version i ”${edit.name}”`
+                  : 'Redigeringen finns inte längre.'}
+            </span>
+            {edit && navigate && (
+              <button
+                type="button"
+                onClick={() => navigate('editor', { type: 'open-editor', editId: edit.id })}
+                className="rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-text"
+              >
+                Öppna i Redigera
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </section>
   )
 }

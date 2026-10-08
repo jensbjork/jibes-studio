@@ -6,10 +6,12 @@ import { readdir, rm, rmdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios } from '@shared/models'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
+import { generationSource, isVeniceGeneration } from '@shared/generation-label'
 import { isExtractedFirstFrame, isExtractedFrame } from '@shared/seams'
 import type { Generation, GenerationParams, Segment, Sequence, SequenceKind, SequenceSummary } from '@shared/types'
 import * as db from './db'
 import { toPublic } from './jobs'
+import { attachKeptByEdit } from './edit-store'
 import { attachReviewSummary } from './reviews'
 import {
   dayStamp,
@@ -41,6 +43,8 @@ export interface SequenceRow {
   kind: string
   /** A storyboard's aspect ratio; null for sequences. */
   aspect_ratio: string | null
+  /** "Exportformat": the exported film's height (480, 720, 1080); null (or absent before schema 11) = Automatiskt. */
+  export_height?: number | null
   created_at: number
   updated_at: number
 }
@@ -142,6 +146,26 @@ export function listSegmentRows(sequenceId: string): SegmentRow[] {
 /** Ids of every generation stored as a take of the given segments. */
 export function takeIdsForSegments(segmentIds: string[]): string[] {
   return db.listGenerationsForSegments(segmentIds).map((g) => g.id)
+}
+
+/**
+ * A clip nothing has been put in yet (the empty Klipp 1 of a new sequence), as isUntouchedClip in the renderer: no takes
+ * (of any status) or selected take, no prompt, pictures or sounds, no frame links and no notes.
+ */
+export function isUntouchedSegment(row: SegmentRow): boolean {
+  const p = parseParams(row.params)
+  return (
+    !row.selected_generation_id &&
+    !takeIdsForSegments([row.id]).length &&
+    !p.prompt?.trim() &&
+    !p.startImage &&
+    !p.endImage &&
+    !p.referenceImages?.length &&
+    !p.referenceAudios?.length &&
+    !row.continue_from_previous &&
+    !row.end_from_next &&
+    !(row.notes ?? '').trim()
+  )
 }
 
 export function touchSequence(id: string): void {
@@ -417,12 +441,15 @@ export function loadSequence(id: string, run: RunInfo): Sequence {
   })
   // The user's stars and the review count, like the feed shows them (one query for every take).
   attachReviewSummary(segments.flatMap((s) => s.takes))
+  // Which takes Redigera keeps, so the take list offers "Ta bort" (off the clip) rather than "Radera" for them.
+  attachKeptByEdit(segments.flatMap((s) => s.takes))
 
   return {
     id: row.id,
     name: row.name,
     defaults: parseDefaults(row.defaults),
     segments,
+    exportHeight: exportHeightOf(row),
     running: run.running,
     runError: run.error,
     createdAt: row.created_at,
@@ -506,11 +533,37 @@ export function setSequenceFolder(id: string, folder: string): void {
   conn().prepare('UPDATE sequences SET folder = ? WHERE id = ?').run(folder, id)
 }
 
-/** Remembers a finished export, so moving or tidying the library carries it along. */
-export function recordExport(sequenceId: string, path: string): void {
+/**
+ * Remembers a finished export, so moving or tidying the library carries it along. `cuts`: where its clips meet in
+ * the film (seconds, the start of every clip after the first), so Redigera knows the film's Klippgränser exactly.
+ */
+export function recordExport(sequenceId: string, path: string, cuts?: readonly number[]): void {
+  const clean = (cuts ?? []).filter((t) => Number.isFinite(t) && t > 0).map((t) => Math.round(t * 1000) / 1000)
   conn()
-    .prepare('INSERT INTO exports (id, sequence_id, file_path, created_at) VALUES (?, ?, ?, ?)')
-    .run(randomUUID(), sequenceId, toStoredPath(path), Date.now())
+    .prepare('INSERT INTO exports (id, sequence_id, file_path, created_at, cuts) VALUES (?, ?, ?, ?, ?)')
+    .run(randomUUID(), sequenceId, toStoredPath(path), Date.now(), cuts ? JSON.stringify(clean) : null)
+}
+
+// ── Exportformat ─────────────────────────────────────────────────────────────
+
+/** The heights "Exportformat" offers besides Automatiskt (the first clip's own size). */
+export const EXPORT_HEIGHTS: readonly number[] = [480, 720, 1080]
+
+/** The sequence's Exportformat as stored: one of EXPORT_HEIGHTS, or null (Automatiskt; also anything unknown). */
+export function exportHeightOf(row: Pick<SequenceRow, 'export_height'>): number | null {
+  const h = row.export_height
+  return typeof h === 'number' && EXPORT_HEIGHTS.includes(h) ? h : null
+}
+
+/** A height from the window as it may be stored, or a Swedish refusal. null (and undefined) is Automatiskt. */
+export function cleanExportHeight(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number' && EXPORT_HEIGHTS.includes(value)) return value
+  throw new Error('Exportformatet kan vara Automatiskt, 480p, 720p eller 1080p.')
+}
+
+export function setExportHeight(sequenceId: string, height: number | null): void {
+  conn().prepare('UPDATE sequences SET export_height = ? WHERE id = ?').run(height, sequenceId)
 }
 
 /** Sekvenser/, or Storyboards/ for storyboards (not created here). */
@@ -597,18 +650,13 @@ export function availableFolderName(base: string, kind: SequenceKind = 'sequence
 }
 
 /**
- * The file exists, or a generation or export still records it. A row whose video was deleted in Finder
- * must not end up pointing at somebody else's file that later got the same name.
+ * The file exists, or a row still records it (a generation's video or an import's original, an export …; see
+ * db.isStoredPathRecorded). A row whose video was deleted in Finder must not end up pointing at somebody else's file
+ * that later got the same name.
  */
 export function pathTaken(path: string): boolean {
   if (existsSync(path)) return true
-  const stored = toStoredPath(path)
-  return !!conn()
-    .prepare(
-      `SELECT 1 FROM generations WHERE file_path = ? COLLATE NOCASE
-       UNION ALL SELECT 1 FROM exports WHERE file_path = ? COLLATE NOCASE LIMIT 1`
-    )
-    .get(stored, stored)
+  return db.isStoredPathRecorded(toStoredPath(path))
 }
 
 /** A free file name in dir for base + ext (see pathTaken). */
@@ -616,15 +664,54 @@ export function availableFileName(dir: string, base: string, ext: string): strin
   return firstFreeName(base, ext, (name) => pathTaken(join(dir, name)))
 }
 
+/**
+ * What a generation's file names say about it: its title (an import's file name, a version's "<redigering> v3"),
+ * else its prompt's first line, so an own clip or a version is never named "Utan prompt".
+ */
+function nameExcerpt(g: Pick<Generation, 'prompt' | 'title'>): string {
+  // The title as it is (not generationTitle's display form), so a Venice generation keeps exactly the name it has
+  // always had and "Städa upp" never renames it.
+  return promptExcerpt(g.title?.trim() ? g.title : g.prompt)
+}
+
 /** "<YYYY-MM-DD HH.MM> <prompt>": a take in Tagningar/, dated when it was submitted. */
-export function takeFileBase(g: Pick<Generation, 'createdAt' | 'prompt'>): string {
+export function takeFileBase(g: Pick<Generation, 'createdAt' | 'prompt' | 'title'>): string {
   const created = new Date(g.createdAt)
-  return `${dayStamp(created)} ${timeStamp(created)} ${promptExcerpt(g.prompt)}`
+  return `${dayStamp(created)} ${timeStamp(created)} ${nameExcerpt(g)}`
 }
 
 /** "<HH.MM> <prompt>": a generation in Genereringar/<day>/. */
-export function freeFileBase(g: Pick<Generation, 'createdAt' | 'prompt'>): string {
-  return `${timeStamp(new Date(g.createdAt))} ${promptExcerpt(g.prompt)}`
+export function freeFileBase(g: Pick<Generation, 'createdAt' | 'prompt' | 'title'>): string {
+  return `${timeStamp(new Date(g.createdAt))} ${nameExcerpt(g)}`
+}
+
+/**
+ * The row's file has a home of its own that sequence moves never change (the home rule, jobs.videoLocation): an
+ * import (Egna klipp/<day>/, or an edit's folder for an export cloned in as an edit's v1), and anything Redigera
+ * made for an edit (Redigeringar/<namn>/). Such a file is never moved into Tagningar nor renamed after a prompt.
+ * An orphaned version (its edit deleted) follows today's rule like a Venice generation.
+ */
+export function keepsOwnHome(g: Partial<Pick<Generation, 'source' | 'editId'>>): boolean {
+  return generationSource(g) === 'import' || !!g.editId
+}
+
+/** Not a Venice generation: the user's own film or a version made in Redigera (an "own clip" in a sequence). */
+export function isOwnClip(g: Partial<Pick<Generation, 'source'>> | undefined): boolean {
+  return !!g && !isVeniceGeneration(g)
+}
+
+/**
+ * The clip's selected take is an own clip whose file is gone (moved or deleted in Finder): what "Generera saknade"
+ * and the clip editor say instead of asking for a prompt.
+ */
+export function ownClipMissing(row: SegmentRow): boolean {
+  const take = selectedTake(row)
+  return isOwnClip(take) && !isUsable(take)
+}
+
+/** Said for clip `number` whose own film is gone (see ownClipMissing). */
+export function ownClipMissingMessage(number: number): string {
+  return `Klipp ${number}:s egna video saknas (flyttad eller raderad i Finder). Lägg till filen igen eller generera en AI-tagning.`
 }
 
 /**

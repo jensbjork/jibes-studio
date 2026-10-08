@@ -102,6 +102,11 @@ export interface ValidateOptions {
   audioInput?: boolean
   /** How many audio clips the model takes (maxReferenceAudios); later ones are not sent. Default 3. */
   maxAudios?: number
+  /**
+   * Reference videos sent with the prompt (Seedance reference-to-video edits from Redigera, named <Video 1>…).
+   * They are references too, so a prompt with videos but no images is not missing its references. Default 0.
+   */
+  referenceVideos?: number
 }
 
 // ── Scanning ──────────────────────────────────────────────────────────────────
@@ -745,7 +750,8 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
       }
     }
   } else {
-    if (count === 0 && field === 'prompt') {
+    const videosSent = Math.max(0, Math.floor(Number(opts.referenceVideos)) || 0)
+    if (count === 0 && field === 'prompt' && (videosSent === 0 || tokens.length > 0)) {
       // Venice refuses reference audio on its own, so that is worth saying when audio is all there is.
       const audioOnly = !tokens.length && audioSent > 0
       general.push({
@@ -1004,7 +1010,10 @@ export function validateNegativePrompt(
   return validate(negativePrompt, referenceCount, opts, 'negative').filter((i) => i.severity === 'error')
 }
 
-type PromptParams = Pick<GenerationParams, 'model' | 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios'>
+type PromptParams = Pick<
+  GenerationParams,
+  'model' | 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios' | 'referenceVideos'
+>
 
 /**
  * What the checks need to know about a generation's params: the mode and the limits come from the model, only
@@ -1018,10 +1027,12 @@ export function validationContext(
   const kind = kindOfModelId(params.model)
   const referenceCount = kind === 'reference-to-video' ? (params.referenceImages?.length ?? 0) : 0
   const audios = kind === 'reference-to-video' ? (sanitizeReferenceAudios(params.referenceAudios) ?? []) : []
+  const videos = kind === 'reference-to-video' && Array.isArray(params.referenceVideos) ? params.referenceVideos.length : 0
   return {
     referenceCount,
     options: {
       kind,
+      ...(videos ? { referenceVideos: videos } : {}),
       maxImages: maxReferenceImages(params.model),
       ...(extra.continuing ? { continuing: true } : {}),
       audioLengths: audios.map((a) => (a.length === undefined ? undefined : referenceAudioWindow(a).length)),

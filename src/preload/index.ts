@@ -4,8 +4,10 @@ import type {
   AgentCommand,
   AgentStatus,
   ApprovalRequest,
+  EditProgress,
   ExportProgress,
   Generation,
+  ImportProgress,
   StudioApi
 } from '@shared/types'
 
@@ -32,7 +34,7 @@ const api: StudioApi = {
   generate: (params) => ipcRenderer.invoke('video:generate', params),
   acceptConsent: (flow, version) => ipcRenderer.invoke('consent:accept', flow, version),
   listGenerations: () => ipcRenderer.invoke('generations:list'),
-  deleteGeneration: (id) => ipcRenderer.invoke('generations:delete', id),
+  deleteGeneration: (id, from) => ipcRenderer.invoke('generations:delete', id, from),
   onGenerationUpdate: (cb) => on<Generation>('generation:update', cb),
   onGenerationDelete: (cb) => on<string>('generation:delete', cb),
 
@@ -74,7 +76,7 @@ const api: StudioApi = {
   deleteSequence: (id) => ipcRenderer.invoke('sequences:delete', id),
   addSegment: (sequenceId, init) => ipcRenderer.invoke('segments:add', sequenceId, init),
   updateSegment: (segmentId, patch) => ipcRenderer.invoke('segments:update', segmentId, patch),
-  deleteSegment: (segmentId) => ipcRenderer.invoke('segments:delete', segmentId),
+  deleteSegment: (segmentId, opts) => ipcRenderer.invoke('segments:delete', segmentId, opts),
   moveSegment: (segmentId, toIndex) => ipcRenderer.invoke('segments:move', segmentId, toIndex),
   generateSegment: (segmentId) => ipcRenderer.invoke('segments:generate', segmentId),
   generateAllSegments: (sequenceId) => ipcRenderer.invoke('sequences:generateAll', sequenceId),
@@ -140,6 +142,41 @@ const api: StudioApi = {
   onApproval: (cb) => on<ApprovalRequest>('agent:approval', cb),
   onAgentCommand: (cb) => on<AgentCommand>('agent:command', cb),
   replyAgentCommand: (id, reply) => ipcRenderer.send('agent:reply', id, reply),
+
+  // Own clips (Egna klipp)
+  pickVideos: (multiple) => ipcRenderer.invoke('file:pickVideos', multiple),
+  inspectVideoFiles: (paths) => ipcRenderer.invoke('imports:inspect', paths),
+  importVideoFiles: (paths, target) => ipcRenderer.invoke('imports:import', paths, target),
+  cancelImports: (path) => ipcRenderer.invoke('imports:cancel', path),
+  onImportProgress: (cb) => on<ImportProgress>('import:progress', cb),
+
+  // Redigera (edits and versions)
+  listEdits: () => ipcRenderer.invoke('edits:list'),
+  getEdit: (id) => ipcRenderer.invoke('edits:get', id),
+  createEdit: (source, name) => ipcRenderer.invoke('edits:create', source, name),
+  renameEdit: (id, name) => ipcRenderer.invoke('edits:rename', id, name),
+  deleteEdit: (id) => ipcRenderer.invoke('edits:delete', id),
+  setCurrentVersion: (editId, versionId) => ipcRenderer.invoke('edits:setCurrent', editId, versionId),
+  deleteVersion: (versionId) => ipcRenderer.invoke('edits:deleteVersion', versionId),
+  pruneVersions: (editId, dryRun) => ipcRenderer.invoke('edits:prune', editId, dryRun),
+  editTimeline: (generationId) => ipcRenderer.invoke('edits:timeline', generationId),
+  planEditOperation: (editId, op, baseId) => ipcRenderer.invoke('edits:plan', editId, op, baseId),
+  runEditOperation: (editId, op, opts) => ipcRenderer.invoke('edits:run', editId, op, opts),
+  cancelEditJob: (jobId) => ipcRenderer.invoke('edits:cancel', jobId),
+  resumeEditJob: (jobId, expectedPriceUsd, expectedPartial) =>
+    ipcRenderer.invoke('edits:resume', jobId, expectedPriceUsd, expectedPartial),
+  getTranscript: (generationId) => ipcRenderer.invoke('edits:transcript', generationId),
+  updateTranscript: (generationId, patch) => ipcRenderer.invoke('edits:updateTranscript', generationId, patch),
+  saveSubtitles: (generationId) => ipcRenderer.invoke('edits:srt', generationId),
+  addEditAudio: (editId, paths) => ipcRenderer.invoke('edits:addAudio', editId, paths),
+  sendEditToSequence: (versionId, target) => ipcRenderer.invoke('edits:send', versionId, target),
+  listAudioModels: (force) => ipcRenderer.invoke('audio:models', force),
+  separationStatus: () => ipcRenderer.invoke('audio:separation'),
+  planVoiceDesign: (req) => ipcRenderer.invoke('voices:plan', req),
+  designVoice: (req, expectedPriceUsd) => ipcRenderer.invoke('voices:design', req, expectedPriceUsd),
+  setVoiceCloneConsent: (audioId, consent) => ipcRenderer.invoke('voices:consent', audioId, consent),
+  onEditChange: (cb) => on<string>('edit:change', cb),
+  onEditProgress: (cb) => on<EditProgress>('edit:progress', cb),
 
   // Files
   revealFile: (path) => ipcRenderer.invoke('file:reveal', path),

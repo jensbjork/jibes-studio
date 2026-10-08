@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Storyboard } from '@shared/types'
+import type { ExportSummary, Storyboard } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatUsd } from '../../lib/media'
+import { ScissorsIcon } from '../feed/icons'
 import FolderIcon from '../library/FolderIcon'
 import Popover from '../pickers/Popover'
 import { MoreIcon, PlayIcon } from '../sequences/icons'
@@ -41,6 +42,8 @@ interface Props {
   onExport: () => void
   onConvert: () => void
   onDelete: () => void
+  /** "Redigera senaste exporten": opens that film in Redigera. */
+  onEditExport: (exportId: string) => void
   onError: (message: string) => void
 }
 
@@ -68,6 +71,7 @@ export default function StoryboardHeader({
   onExport,
   onConvert,
   onDelete,
+  onEditExport,
   onError
 }: Props) {
   const count = storyboard.transitions.length
@@ -166,8 +170,10 @@ export default function StoryboardHeader({
         <MoreMenu
           storyboard={storyboard}
           converting={converting}
+          exportStatus={exportState?.status}
           onConvert={onConvert}
           onDelete={onDelete}
+          onEditExport={onEditExport}
           onError={onError}
         />
       </div>
@@ -175,27 +181,58 @@ export default function StoryboardHeader({
   )
 }
 
-/** The rarer actions: continue in Sekvenser, the folder in Finder, deleting (asked twice). */
+/** The newest export of the storyboard whose film is still there, if any. */
+async function latestExport(storyboardId: string): Promise<ExportSummary | undefined> {
+  const exports = await window.studio.listExports()
+  return exports
+    .filter((e) => e.sequenceId === storyboardId && e.exists)
+    .sort((a, b) => b.createdAt - a.createdAt)[0]
+}
+
+/**
+ * The rarer actions: continue in Sekvenser, the latest export into Redigera, the folder in Finder, deleting (asked
+ * twice).
+ */
 function MoreMenu({
   storyboard,
   converting,
+  exportStatus,
   onConvert,
   onDelete,
+  onEditExport,
   onError
 }: {
   storyboard: Storyboard
   converting: boolean
+  exportStatus?: ExportState['status']
   onConvert: () => void
   onDelete: () => void
+  onEditExport: (exportId: string) => void
   onError: (message: string) => void
 }) {
   const anchor = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  // undefined while looking, null when there is no export (yet).
+  const [latest, setLatest] = useState<ExportSummary | null>()
   const close = () => {
     setOpen(false)
     setConfirming(false)
   }
+
+  // Looked up each time the menu opens: an export may have finished (or its film been deleted) since.
+  useEffect(() => {
+    if (!open) return
+    let current = true
+    setLatest(undefined)
+    latestExport(storyboard.id).then(
+      (e) => current && setLatest(e ?? null),
+      () => current && setLatest(null)
+    )
+    return () => {
+      current = false
+    }
+  }, [open, storyboard.id, exportStatus])
 
   const reveal = async () => {
     close()
@@ -266,6 +303,30 @@ function MoreMenu({
               <span>{converting ? 'Gör om till sekvens…' : 'Gör om till sekvens'}</span>
               <span className="text-[11px] leading-snug text-muted">
                 En ny sekvens med ett klipp per övergång, att fortsätta redigera i Sekvenser. Storyboarden finns kvar.
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-menu-item
+              disabled={!latest}
+              onClick={() => {
+                if (!latest) return
+                close()
+                onEditExport(latest.id)
+              }}
+              className={`${menuRow} flex-col items-start gap-0.5`}
+            >
+              <span className="flex items-center gap-2">
+                <ScissorsIcon size={13} className="shrink-0 text-muted" />
+                Redigera senaste exporten
+              </span>
+              <span className="pl-[21px] text-[11px] leading-snug text-muted">
+                {latest === undefined
+                  ? 'Letar efter exporten…'
+                  : latest === null
+                    ? 'Exportera först.'
+                    : 'Ändra den färdiga filmen med AI i Redigera. Storyboarden rörs inte.'}
               </span>
             </button>
             <button type="button" role="menuitem" data-menu-item onClick={() => void reveal()} className={menuRow}>

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import Database from 'better-sqlite3'
-import type { Generation, GenerationParams, GenerationStatus } from '@shared/types'
+import type { EditRecipe, Generation, GenerationParams, GenerationSource, GenerationStatus } from '@shared/types'
 import {
   fromStoredParams,
   fromStoredPath,
@@ -190,7 +190,106 @@ const migrations: string[] = [
   );
   CREATE INDEX storyboard_boards_by_sequence ON storyboard_boards(sequence_id, position);
   ALTER TABLE segments ADD COLUMN from_board_id TEXT REFERENCES storyboard_boards(id) ON DELETE SET NULL;
-  ALTER TABLE segments ADD COLUMN to_board_id TEXT REFERENCES storyboard_boards(id) ON DELETE SET NULL;`
+  ALTER TABLE segments ADD COLUMN to_board_id TEXT REFERENCES storyboard_boards(id) ON DELETE SET NULL;`,
+
+  // Phase 10: Redigera and own clips. A generations row is no longer only a Venice generation: `source` tells a
+  // Venice generation ('generated') from the user's own imported film ('import') and a version made in Redigera
+  // ('edit'). Imports and versions are always inserted completed (never pending). An edit is one film being worked
+  // on: its versions and AI takes point at it with edit_id, a version at its base with parent_id. edit_media holds
+  // an edit's paid or added audio (Redigeringar/<namn>/Ljud/), media_jobs and media_job_steps the bookkeeping of
+  // multi-step paid work, so a job interrupted by quitting can be fetched or resumed without sending anything twice.
+  // original_path and edit_media.file_path are stored paths like every other; recipe, details, request and
+  // segments are JSON with ids only, never paths. exports.cuts records where the clips meet in an exported film,
+  // sequences.export_height its "Exportformat" (NULL = Automatiskt).
+  `CREATE TABLE edits (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    folder TEXT,
+    origin_kind TEXT NOT NULL,
+    origin_generation_id TEXT REFERENCES generations(id) ON DELETE SET NULL,
+    origin_export_id TEXT REFERENCES exports(id) ON DELETE SET NULL,
+    current_generation_id TEXT REFERENCES generations(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  ALTER TABLE generations ADD COLUMN source TEXT NOT NULL DEFAULT 'generated';
+  ALTER TABLE generations ADD COLUMN title TEXT;
+  ALTER TABLE generations ADD COLUMN parent_id TEXT REFERENCES generations(id) ON DELETE SET NULL;
+  ALTER TABLE generations ADD COLUMN edit_id TEXT REFERENCES edits(id) ON DELETE SET NULL;
+  ALTER TABLE generations ADD COLUMN recipe TEXT;
+  ALTER TABLE generations ADD COLUMN original_path TEXT;
+  CREATE INDEX generations_by_parent ON generations(parent_id);
+  CREATE INDEX generations_by_edit ON generations(edit_id);
+  CREATE TABLE edit_media (
+    id TEXT PRIMARY KEY,
+    edit_id TEXT NOT NULL REFERENCES edits(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    model TEXT,
+    cost REAL,
+    duration REAL,
+    details TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX edit_media_by_edit ON edit_media(edit_id, created_at);
+  CREATE TABLE media_jobs (
+    id TEXT PRIMARY KEY,
+    edit_id TEXT REFERENCES edits(id) ON DELETE CASCADE,
+    asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL,
+    base_generation_id TEXT REFERENCES generations(id) ON DELETE SET NULL,
+    op TEXT NOT NULL,
+    request TEXT NOT NULL,
+    status TEXT NOT NULL,
+    quote REAL,
+    cost REAL NOT NULL DEFAULT 0,
+    take_generation_id TEXT REFERENCES generations(id) ON DELETE SET NULL,
+    result_generation_id TEXT REFERENCES generations(id) ON DELETE SET NULL,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX media_jobs_by_edit ON media_jobs(edit_id, created_at);
+  CREATE TABLE media_job_steps (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL REFERENCES media_jobs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    endpoint TEXT NOT NULL,
+    model TEXT NOT NULL,
+    request TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL,
+    queue_id TEXT,
+    quote REAL,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+  );
+  CREATE INDEX media_job_steps_by_job ON media_job_steps(job_id, position);
+  CREATE TABLE transcripts (
+    id TEXT PRIMARY KEY,
+    generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
+    model TEXT,
+    language TEXT,
+    segments TEXT NOT NULL,
+    source TEXT NOT NULL,
+    cost REAL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX transcripts_by_generation ON transcripts(generation_id);
+  CREATE TABLE voice_clones (
+    id TEXT PRIMARY KEY,
+    audio_id TEXT NOT NULL REFERENCES asset_audio(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    handle TEXT NOT NULL,
+    window_start REAL NOT NULL,
+    window_length REAL NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  ALTER TABLE asset_audio ADD COLUMN clone_consent_at INTEGER;
+  ALTER TABLE exports ADD COLUMN cuts TEXT;
+  ALTER TABLE sequences ADD COLUMN export_height INTEGER;`
 ]
 
 
@@ -205,6 +304,12 @@ export const POSES_SCHEMA_VERSION = 7
 
 /** The user_version from which a library has storyboards of their own: from then on Storyboards is its own folder. */
 export const STORYBOARDS_SCHEMA_VERSION = 10
+
+/**
+ * The user_version from which a library has edits and own clips: from then on Egna klipp and Redigeringar are its
+ * own folders.
+ */
+export const EDITS_SCHEMA_VERSION = 11
 
 /**
  * Why this build doesn't open a library whose database a newer Studio has migrated: it doesn't know the newer
@@ -304,6 +409,15 @@ export interface GenerationRow {
   video_duration: number | null
   /** The prompt as sent (the user's with the References legend); NULL for generations from before it was kept. */
   sent_prompt: string | null
+  /** 'generated' | 'import' | 'edit' (schema 11; rows from before are 'generated'). */
+  source: string | null
+  title: string | null
+  parent_id: string | null
+  edit_id: string | null
+  /** JSON EditRecipe (ids only). */
+  recipe: string | null
+  /** Stored form, like file_path. */
+  original_path: string | null
 }
 
 /** A generation with absolute paths (the conversion to and from the stored form happens here). */
@@ -311,10 +425,35 @@ export interface StoredGeneration extends Generation {
   downloadUrl?: string
 }
 
+const SOURCES: ReadonlySet<string> = new Set<GenerationSource>(['generated', 'import', 'edit'])
+
+/** The row's source; a value this version doesn't know (a newer Studio's) is treated as a Venice generation. */
+function sourceOf(value: string | null | undefined): GenerationSource {
+  return typeof value === 'string' && SOURCES.has(value) ? (value as GenerationSource) : 'generated'
+}
+
+/** A recipe column parsed; a missing or broken one gives undefined (it is only ever informative). */
+function parseRecipe(json: string | null | undefined): EditRecipe | undefined {
+  if (typeof json !== 'string' || !json) return undefined
+  try {
+    const recipe = JSON.parse(json) as unknown
+    return recipe && typeof recipe === 'object' && !Array.isArray(recipe) ? (recipe as EditRecipe) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function generationFromRow(r: GenerationRow): StoredGeneration {
+  const recipe = parseRecipe(r.recipe)
   return {
     id: r.id,
     createdAt: r.created_at,
+    source: sourceOf(r.source),
+    ...(typeof r.title === 'string' && r.title ? { title: r.title } : {}),
+    ...(r.parent_id ? { parentId: r.parent_id } : {}),
+    ...(r.edit_id ? { editId: r.edit_id } : {}),
+    ...(recipe ? { recipe } : {}),
+    ...(r.original_path ? { originalPath: fromStoredPath(r.original_path) } : {}),
     model: r.model,
     prompt: r.prompt,
     ...(typeof r.sent_prompt === 'string' ? { sentPrompt: r.sent_prompt } : {}),
@@ -339,15 +478,21 @@ export function generationFromRow(r: GenerationRow): StoredGeneration {
 
 const storedPathOrNull = (p: string | undefined | null): string | null => (p ? toStoredPath(p) : null)
 
-export function insertGeneration(g: StoredGeneration): void {
+const recipeOrNull = (r: EditRecipe | undefined | null): string | null => (r ? JSON.stringify(r) : null)
+
+/**
+ * A new row. `source` undefined is written as 'generated' (callers from before own clips existed). An import or
+ * version must be inserted completed: only Venice generations are ever pending (listPendingGenerations).
+ */
+export function insertGeneration(g: Omit<StoredGeneration, 'source'> & { source?: GenerationSource }): void {
   getDb()
     .prepare(
       `INSERT INTO generations (id, created_at, model, prompt, params, status, queue_id, download_url, file_path,
          error, quote, average_execution_time, execution_duration, completed_at, segment_id, thumb_path,
-         video_duration, sent_prompt)
+         video_duration, sent_prompt, source, title, parent_id, edit_id, recipe, original_path)
        VALUES (@id, @createdAt, @model, @prompt, @params, @status, @queueId, @downloadUrl, @filePath, @error,
          @quote, @averageExecutionTime, @executionDuration, @completedAt, @segmentId, @thumbPath, @videoDuration,
-         @sentPrompt)`
+         @sentPrompt, @source, @title, @parentId, @editId, @recipe, @originalPath)`
     )
     .run({
       id: g.id,
@@ -367,12 +512,21 @@ export function insertGeneration(g: StoredGeneration): void {
       segmentId: g.segmentId ?? null,
       thumbPath: storedPathOrNull(g.thumbPath),
       videoDuration: g.videoDuration ?? null,
-      sentPrompt: typeof g.sentPrompt === 'string' ? g.sentPrompt : null
+      sentPrompt: typeof g.sentPrompt === 'string' ? g.sentPrompt : null,
+      source: sourceOf(g.source),
+      title: typeof g.title === 'string' && g.title ? g.title : null,
+      parentId: g.parentId ?? null,
+      editId: g.editId ?? null,
+      recipe: recipeOrNull(g.recipe),
+      originalPath: storedPathOrNull(g.originalPath)
     })
 }
 
-/** Patchable fields → column, and how a value is written. */
-const columns: Record<string, { column: string; store?: (v: unknown) => unknown }> = {
+/**
+ * Patchable fields → column, and how a value is written. `required`: a NOT NULL column, which a patch can change
+ * but never clear (undefined or null there leaves it as it is).
+ */
+const columns: Record<string, { column: string; store?: (v: unknown) => unknown; required?: boolean }> = {
   status: { column: 'status' },
   queueId: { column: 'queue_id' },
   downloadUrl: { column: 'download_url' },
@@ -384,12 +538,20 @@ const columns: Record<string, { column: string; store?: (v: unknown) => unknown 
   segmentId: { column: 'segment_id' },
   thumbPath: { column: 'thumb_path', store: (v) => storedPathOrNull(v as string | undefined) },
   videoDuration: { column: 'video_duration' },
-  params: { column: 'params', store: (v) => JSON.stringify(toStoredParams(v as GenerationParams)) }
+  params: { column: 'params', store: (v) => JSON.stringify(toStoredParams(v as GenerationParams)) },
+  source: { column: 'source', store: (v) => sourceOf(v as string), required: true },
+  title: { column: 'title' },
+  parentId: { column: 'parent_id' },
+  editId: { column: 'edit_id' },
+  recipe: { column: 'recipe', store: (v) => recipeOrNull(v as EditRecipe) },
+  originalPath: { column: 'original_path', store: (v) => storedPathOrNull(v as string | undefined) }
 }
 
 /** Callers pass absolute paths; they are stored relative to the library when inside it. */
 export function updateGeneration(id: string, patch: Partial<StoredGeneration>): StoredGeneration {
-  const entries = Object.entries(patch).filter(([k, v]) => k in columns && !(k === 'params' && v == null))
+  const entries = Object.entries(patch).filter(
+    ([k, v]) => k in columns && !((k === 'params' || columns[k].required) && v == null)
+  )
   if (entries.length) {
     const sets = entries.map(([k]) => `${columns[k].column} = @${k}`).join(', ')
     getDb()
@@ -418,9 +580,16 @@ export function listGenerations(): StoredGeneration[] {
   )
 }
 
+/**
+ * Venice generations still on their way. Only `source = 'generated'` rows: imports and versions are inserted
+ * completed, so a row of another source in a pending state (a newer Studio's, or a crash mid-insert) is never
+ * polled at Venice.
+ */
 export function listPendingGenerations(): StoredGeneration[] {
   return (
-    getDb().prepare(`SELECT * FROM generations WHERE status IN ('queued', 'processing')`).all() as GenerationRow[]
+    getDb()
+      .prepare(`SELECT * FROM generations WHERE status IN ('queued', 'processing') AND source = 'generated'`)
+      .all() as GenerationRow[]
   ).map(generationFromRow)
 }
 
@@ -448,15 +617,16 @@ function audioPaths(p: Partial<GenerationParams>): unknown[] {
 }
 
 /**
- * The start/end/reference image paths and reference audio paths in a params JSON string: generation and segment
- * params, and a still's params (whose reference images are the only paths in it).
+ * The start/end/reference image paths, reference audio paths and source/reference video paths in a params JSON
+ * string: generation and segment params, and a still's params (whose reference images are the only paths in it).
  */
 function paramFilePaths(json: string): string[] {
   try {
     const p = JSON.parse(json) as Partial<GenerationParams> | null
     if (!p || typeof p !== 'object') return []
     const refs = Array.isArray(p.referenceImages) ? p.referenceImages : []
-    return [p.startImage, p.endImage, ...refs, ...audioPaths(p)].filter(
+    const videos = Array.isArray(p.referenceVideos) ? p.referenceVideos : []
+    return [p.startImage, p.endImage, ...refs, ...audioPaths(p), p.sourceVideo, ...videos].filter(
       (v): v is string => typeof v === 'string' && v !== ''
     )
   } catch {
@@ -465,9 +635,9 @@ function paramFilePaths(json: string): string[] {
 }
 
 /**
- * Whether a row records this stored path (letter case ignored, like the disk): a generation, export, asset
- * image, asset audio or still file, a storyboard board's image, or an image or audio clip in generation, segment
- * or still params. A row
+ * Whether a row records this stored path (letter case ignored, like the disk): a generation's file or original
+ * (an import's untouched copy), an export, asset image, asset audio, edit media or still file, a storyboard
+ * board's image, or an image, audio clip or video in generation, segment or still params. A row
  * whose file was deleted in Finder still claims its name: a new file given that name would otherwise be taken
  * for the old row's file — deleting that row would take the new file with it, and an old generation or clip
  * whose picture was removed would silently use somebody else's picture on "Använd igen" or a regenerated take.
@@ -479,9 +649,11 @@ export function isStoredPathRecorded(stored: string, opts: { ignoreStillId?: str
   const recorded = db
     .prepare(
       `SELECT 1 FROM generations WHERE file_path = @p COLLATE NOCASE
+       UNION ALL SELECT 1 FROM generations WHERE original_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM exports WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM asset_images WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM asset_audio WHERE file_path = @p COLLATE NOCASE
+       UNION ALL SELECT 1 FROM edit_media WHERE file_path = @p COLLATE NOCASE
        UNION ALL SELECT 1 FROM stills WHERE file_path = @p COLLATE NOCASE AND (@i IS NULL OR id != @i)
        UNION ALL SELECT 1 FROM storyboard_boards WHERE image_path = @p COLLATE NOCASE
        LIMIT 1`
@@ -516,9 +688,11 @@ export function isStoredPrefixRecorded(folder: string): boolean {
   const recorded = db
     .prepare(
       `SELECT 1 FROM generations WHERE instr(studio_fold(file_path), @p) = 1
+       UNION ALL SELECT 1 FROM generations WHERE instr(studio_fold(original_path), @p) = 1
        UNION ALL SELECT 1 FROM exports WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM asset_images WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM asset_audio WHERE instr(studio_fold(file_path), @p) = 1
+       UNION ALL SELECT 1 FROM edit_media WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM stills WHERE instr(studio_fold(file_path), @p) = 1
        UNION ALL SELECT 1 FROM storyboard_boards WHERE instr(studio_fold(image_path), @p) = 1
        LIMIT 1`
@@ -538,8 +712,8 @@ export function isStoredPrefixRecorded(folder: string): boolean {
 }
 
 /**
- * Every stored path in the library database (files, posters, params images and audio, asset files, stills,
- * board images, exports).
+ * Every stored path in the library database (files, originals, posters, params images, audio and videos, asset
+ * files, edit media, stills, board images, exports).
  */
 export function listStoredPaths(): string[] {
   const paths: string[] = []
@@ -551,7 +725,7 @@ export function listStoredPaths(): string[] {
 }
 
 /**
- * Applies map to the image and audio paths in a params JSON string (generation, segment or still params);
+ * Applies map to the image, audio and video paths in a params JSON string (generation, segment or still params);
  * returns undefined when nothing changed.
  */
 function mapParamsJson(json: string, map: (stored: string) => string): string | undefined {
@@ -581,13 +755,15 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
       return next === path ? a : { ...a, path: next }
     }) as GenerationParams['referenceAudios']
   }
+  if ('sourceVideo' in out) out.sourceVideo = one(out.sourceVideo) as string | undefined
+  if (Array.isArray(out.referenceVideos)) out.referenceVideos = out.referenceVideos.map(one) as string[]
   return changed ? JSON.stringify(out) : undefined
 }
 
 /**
- * Runs map over every stored path in the library database (generation files, posters and params, segment
- * params, asset images and audio, stills and the reference images in their params, storyboard board images,
- * exports) in one transaction and writes back what changed. `contains`, when given, skips rows that can't hold a
+ * Runs map over every stored path in the library database (generation files, originals, posters and params,
+ * segment params, asset images and audio, edit media, stills and the reference images in their params, storyboard
+ * board images, exports) in one transaction and writes back what changed. `contains`, when given, skips rows that can't hold a
  * matching path. `onGeneration` hears the id of every generation changed. Returns the number of rows changed.
  */
 export function mapStoredPaths(
@@ -602,20 +778,22 @@ export function mapStoredPaths(
   let changed = 0
 
   conn.transaction(() => {
-    const generations = conn.prepare('SELECT id, file_path, thumb_path, params FROM generations').all() as Pick<
-      GenerationRow,
-      'id' | 'file_path' | 'thumb_path' | 'params'
-    >[]
+    const generations = conn
+      .prepare('SELECT id, file_path, thumb_path, params, original_path FROM generations')
+      .all() as Pick<GenerationRow, 'id' | 'file_path' | 'thumb_path' | 'params' | 'original_path'>[]
     const updateGeneration = conn.prepare(
-      'UPDATE generations SET file_path = ?, thumb_path = ?, params = ? WHERE id = ?'
+      'UPDATE generations SET file_path = ?, thumb_path = ?, params = ?, original_path = ? WHERE id = ?'
     )
     for (const r of generations) {
-      if (!hit(r.file_path) && !hit(r.thumb_path) && !hit(r.params)) continue
+      if (!hit(r.file_path) && !hit(r.thumb_path) && !hit(r.params) && !hit(r.original_path)) continue
       const file = mapPath(r.file_path)
       const thumb = mapPath(r.thumb_path)
+      const original = mapPath(r.original_path)
       const params = hit(r.params) ? mapParamsJson(r.params, map) : undefined
-      if (file === r.file_path && thumb === r.thumb_path && params === undefined) continue
-      updateGeneration.run(file, thumb, params ?? r.params, r.id)
+      if (file === r.file_path && thumb === r.thumb_path && original === r.original_path && params === undefined) {
+        continue
+      }
+      updateGeneration.run(file, thumb, params ?? r.params, original, r.id)
       onGeneration?.(r.id)
       changed++
     }
@@ -630,7 +808,7 @@ export function mapStoredPaths(
       changed++
     }
 
-    for (const table of ['asset_images', 'asset_audio', 'exports']) {
+    for (const table of ['asset_images', 'asset_audio', 'exports', 'edit_media']) {
       const rows = conn.prepare(`SELECT id, file_path FROM ${table}`).all() as { id: string; file_path: string }[]
       const update = conn.prepare(`UPDATE ${table} SET file_path = ? WHERE id = ?`)
       for (const r of rows) {
@@ -724,9 +902,9 @@ export function takeRewrittenGenerations(): string[] {
 
 /**
  * Rewrites every stored relative path equal to or under oldRel to the same place under newRel: generations
- * (file_path, thumb_path, params incl. reference audio), segments.params, asset_images.file_path,
- * asset_audio.file_path, stills (file_path, the reference images in params), storyboard_boards.image_path,
- * exports.file_path.
+ * (file_path, thumb_path, original_path, params incl. reference audio and source/reference videos),
+ * segments.params, asset_images.file_path, asset_audio.file_path, edit_media.file_path, stills (file_path, the
+ * reference images in params), storyboard_boards.image_path, exports.file_path.
  */
 export function rewriteStoredPrefix(oldRel: string, newRel: string): number {
   const from = cleanRelative(oldRel)
@@ -750,7 +928,7 @@ export function rewriteMark(): number {
 
 /**
  * Params held in memory across a long await (a submit uploading its pictures) miss the rewrites done
- * meanwhile, e.g. an asset renamed and its folder with it. Image and audio paths whose file is gone are
+ * meanwhile, e.g. an asset renamed and its folder with it. Image, audio and video paths whose file is gone are
  * carried along the rewrites made since `mark`, when that leads to an existing file; anything else stays as
  * it is.
  */
@@ -776,6 +954,11 @@ export function followRewrites(params: GenerationParams, mark: number): Generati
     result.referenceAudios = params.referenceAudios.map((a) =>
       a && typeof a === 'object' && typeof a.path === 'string' ? { ...a, path: follow(a.path) ?? a.path } : a
     )
+  }
+  // An edit's proxy in Underlag/ follows its folder when the edit is renamed while the take is being sent.
+  if (typeof params.sourceVideo === 'string') result.sourceVideo = follow(params.sourceVideo)
+  if (Array.isArray(params.referenceVideos)) {
+    result.referenceVideos = params.referenceVideos.map((v) => (typeof v === 'string' ? (follow(v) ?? v) : v))
   }
   return result
 }

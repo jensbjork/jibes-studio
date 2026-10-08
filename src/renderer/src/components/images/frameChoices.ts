@@ -1,6 +1,7 @@
 // What "Bildruta ur ett klipp" (FramePickerDialog) offers: a sequence's finished takes grouped by clip, or any
 // finished video in the library. Pure functions, so the dialog's choices can be checked without a window.
 
+import { generationTitle } from '@shared/generation-label'
 import { durationSeconds } from '@shared/models'
 import type { Generation, Segment, Sequence } from '@shared/types'
 import { plainImagePrompt } from './imageModels'
@@ -105,9 +106,13 @@ export function takeTime(ms: number, now = Date.now()): string {
 
 const lengthFormat = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 1 })
 
-/** "Skapad 3 okt. · 5 s · ”Wide shot of …”": what a library video is, under the player. */
+/**
+ * "Skapad 3 okt. · 5 s · ”Wide shot of …”": what a library video is, under the player. An own film or a version is
+ * named by its title ("Eget klipp ”Strand”").
+ */
 export function describeVideo(take: Generation, now = Date.now()): string {
-  const prompt = plainImagePrompt(take.prompt || take.params.prompt || '')
+  const titled = !!take.title?.trim()
+  const prompt = titled ? generationTitle(take) : plainImagePrompt(take.prompt || take.params.prompt || '')
   const excerpt = prompt.length > 140 ? `${prompt.slice(0, 137)}…` : prompt
   const seconds = take.videoDuration ?? durationSeconds(take.params.duration)
   return [

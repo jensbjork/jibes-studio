@@ -137,6 +137,11 @@ interface AssetAudioRow {
   /** NULL: the default window, min(duration, 10). */
   clip_length: number | null
   created_at: number
+  /**
+   * When the user confirmed they may use this voice ("Får klonas för nya repliker"), so Redigera may clone it for new
+   * lines; NULL: not confirmed. Set only by the user in Studio (schema 11).
+   */
+  clone_consent_at?: number | null
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -489,7 +494,8 @@ function audioFromRow(r: AssetAudioRow): AssetAudio {
     id: r.id,
     path: fromStoredPath(r.file_path),
     duration: r.duration,
-    ...resolveAudioWindow(r.duration, r.clip_start, r.clip_length)
+    ...resolveAudioWindow(r.duration, r.clip_start, r.clip_length),
+    cloneConsent: typeof r.clone_consent_at === 'number'
   }
 }
 
@@ -1013,6 +1019,68 @@ function reorderAudio(assetId: unknown, audioIds: unknown): Asset {
   return getAsset(row.id)
 }
 
+/**
+ * A clip made for the asset rather than picked by the user (a voice designed in Redigera): copied from `file` into
+ * the asset's folder as "<baseName>.<ext>" (made unique), appended after its clips with the default window.
+ */
+async function addGenerated(assetId: unknown, file: unknown, baseName: unknown): Promise<Asset> {
+  const row = requireAssetRow(assetId)
+  const refused = noAudioReason(row.kind)
+  if (refused) throw new Error(refused)
+  if (typeof file !== 'string' || !file) throw new Error(AUDIO_GONE)
+  const duration = await audioDuration(file)
+  const dir = assetsDir(row.kind, await ensureFolder(row))
+  const ext = extname(file).toLowerCase() || '.mp3'
+  let dest: string
+  try {
+    dest = await copyInto(file, dir, safeName(text(baseName), { fallback: 'Ljud' }), ext)
+  } catch (err) {
+    throw new Error(`Kunde inte spara ljudet: ${fileErrorReason(err)}.`)
+  }
+  const db = getDb()
+  let inserted: boolean
+  try {
+    inserted = db.transaction((): boolean => {
+      if (!findAssetRow(row.id)) return false
+      const last = db.prepare('SELECT MAX(position) FROM asset_audio WHERE asset_id = ?').pluck().get(row.id) as
+        | number
+        | null
+      const now = Date.now()
+      db.prepare(
+        `INSERT INTO asset_audio (id, asset_id, file_path, position, duration, clip_start, clip_length, created_at)
+         VALUES (?, ?, ?, ?, ?, 0, NULL, ?)`
+      ).run(randomUUID(), row.id, toStoredPath(dest), (last ?? -1) + 1, duration, now)
+      touchAsset(row.id, now)
+      return true
+    })()
+  } catch (err) {
+    await rm(dest, { force: true }).catch(() => {})
+    throw err
+  }
+  if (!inserted) {
+    await rm(dest, { force: true }).catch(() => {})
+    throw new Error(`${THE[row.kind]} finns inte längre.`)
+  }
+  notifyChange()
+  return getAsset(row.id)
+}
+
+/** "Får klonas för nya repliker": records (or withdraws) the user's confirmation that they may use this voice. */
+function setCloneConsent(audioId: unknown, consent: unknown): Asset {
+  const db = getDb()
+  const row = findAudioRow(safeId(audioId))
+  if (!row) throw new Error(AUDIO_GONE)
+  const value = consent === true ? Date.now() : null
+  const had = typeof row.clone_consent_at === 'number'
+  if (had === (consent === true)) return getAsset(row.asset_id)
+  db.transaction(() => {
+    db.prepare('UPDATE asset_audio SET clone_consent_at = ? WHERE id = ?').run(value, row.id)
+    touchAsset(row.asset_id)
+  })()
+  notifyChange()
+  return getAsset(row.asset_id)
+}
+
 // ── Queued entry points ──────────────────────────────────────────────────────
 
 /**
@@ -1065,6 +1133,23 @@ export function updateAssetAudio(audioId: string, patch: { clipStart?: number; c
 /** The given clips first, in that order (unknown ids ignored); the rest keep their order after them. */
 export function reorderAssetAudio(assetId: string, audioIds: string[]): Promise<Asset> {
   return assetTask(async () => reorderAudio(assetId, audioIds))
+}
+
+/**
+ * Adds a clip made for the asset (a voice designed with AI in Redigera) under `baseName`, e.g. "Skapad röst
+ * 2026-10-07": copied into the asset's folder after its clips, with the default reference window. Characters and
+ * environments only.
+ */
+export function addGeneratedAudio(assetId: string, file: string, baseName: string): Promise<Asset> {
+  return assetTask(() => addGenerated(assetId, file, baseName))
+}
+
+/**
+ * Records whether the user may let Redigera clone this voice for new lines (D6). The user's own decision: the IPC
+ * handler refuses agents.
+ */
+export function setVoiceCloneConsent(audioId: string, consent: boolean): Promise<Asset> {
+  return assetTask(async () => setCloneConsent(audioId, consent))
 }
 
 /**

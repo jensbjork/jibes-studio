@@ -39,7 +39,8 @@ import {
 } from '../pickers/audioRefs'
 import Modal from '../pickers/Modal'
 import { effectiveParams, needsTake, parseConsent, pendingTake } from '../sequences/sequenceUtils'
-import { approvalOutcome, approvalTitle, approvalVerb, expiresText, slotName } from './agentText'
+import { approvalHeading, approvalOutcome, approvalTitle, approveLabel, expiresText, slotName } from './agentText'
+import { EditSummary, VoiceDesignSummary, useEditApproval } from './EditApproval'
 import PromptText, { type TokenTarget } from './PromptText'
 import {
   BoardTargetSummary,
@@ -85,8 +86,15 @@ export default function ApprovalDialog() {
   )
 }
 
-/** done: an image request was approved and its picture is made (shown until the user closes the dialog). */
-type Phase = 'review' | 'declining' | 'submitting' | 'failed' | 'done'
+/**
+ * done: an image request was approved and its picture is made (shown until the user closes the dialog).
+ * confirming: an edit or a voice design above BIG_PRICE_USD, with an unknown price or a part without one asks "Det
+ * här kostar … Fortsätt?" once more before it is approved (Redigera's own rule for a paid click).
+ */
+type Phase = 'review' | 'confirming' | 'declining' | 'submitting' | 'failed' | 'done'
+
+/** Redigera's rule for every paid click (D5): above this price a second step asks once more. */
+const BIG_PRICE_USD = 5
 
 interface PanelProps {
   approval: ApprovalRequest
@@ -150,6 +158,22 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const [reason, setReason] = useState('')
   /** The still an approved image request made. */
   const [madeStill, setMadeStill] = useState<string>()
+  // Redigera's requests: an operation on an edit's version, or a new voice for a character.
+  const editRequest = a.kind === 'edit' || a.kind === 'voice-design' ? (a.edit ?? null) : undefined
+  const editState = useEditApproval(a)
+  /** "Jag har rätt att använda den här rösten", ticked in this dialog (a cloned voice needs it). */
+  const [cloneConsent, setCloneConsent] = useState(false)
+  const consentClip = a.kind === 'edit' ? a.edit?.needsCloneConsent : undefined
+  const consentGiven =
+    !!consentClip && assets.some((asset) => asset.audio?.some((x) => x.id === consentClip.audioId && x.cloneConsent))
+  const consentMissing = !!consentClip && !consentGiven && !cloneConsent
+  // Redigera's requests (an edit, a voice design) ask once more, as Redigera's own buttons and the voice design dialog
+  // do, when the price is above $5, unknown, or leaves a part out.
+  const redigera = a.kind === 'edit' || a.kind === 'voice-design'
+  const partialPrice = redigera && !!a.edit?.partialPrice
+  const bigPrice = redigera && (a.priceUsd === undefined || partialPrice || a.priceUsd > BIG_PRICE_USD)
+  /** "$0.51", "≈ $0.45 +" (a part without a price). */
+  const priceShown = (usd: number): string => (partialPrice ? `≈ ${formatUsd(usd)} +` : formatUsd(usd))
 
   const expiresAt = a.expiresAt ?? a.createdAt + APPROVAL_TTL_MS
   const pending = a.status === 'pending'
@@ -188,6 +212,10 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
       boardTarget,
       clips.map((c) => [c.key, c.title, c.params, c.continuesFrom, c.endsAt, c.legend, c.descriptionsChanged]),
       transitions.map((t) => [t.key, t.number, t.params, t.problem]),
+      // An edit: what it does, and the plan as it would run now (another plan is something else to approve).
+      editRequest && { ...editRequest, jobId: undefined, resultId: undefined },
+      editState.plan?.fingerprint,
+      editState.blocking,
       // A neighbour's other take (or trim) is another frame: the user must see it before it is paid for. While a
       // new answer is on its way the old frame may be stale, so the request arms again only once it has come.
       framesLoading,
@@ -212,15 +240,20 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     (image === null ? 'Förfrågan saknar uppgifter om bilden' : undefined) ??
     imageTarget?.problem ??
     transitionState?.blocking ??
-    boardTarget?.problem
+    boardTarget?.problem ??
+    (editRequest === null ? 'Förfrågan saknar uppgifter om ändringen' : undefined) ??
+    editState.blocking
   // Changed since the agent asked (rather than something the agent can fix): the agent has to ask again.
   const askAgain =
     !!blocking &&
     (blocking === descriptionsChanged ||
       (!!transitionState?.lapsed && blocking === transitionState.blocking) ||
-      blocking === boardTarget?.problem)
+      blocking === boardTarget?.problem ||
+      blocking === editState.blocking)
   // The frames shown must be the ones that will be sent: no approving while they are being fetched (again).
   const framesPending = needsFrames && pending && framesLoading
+  // An edit is approved once its plan as it would run now is on screen (its warnings, a price that moved).
+  const editPlanPending = a.kind === 'edit' && pending && !editState.plan && !editState.blocking
 
   const fail = (message: string) => {
     const request = parseConsent(message)
@@ -238,6 +271,8 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     setError(undefined)
     hold(true)
     try {
+      // The user's own consent to clone the voice, given here before main checks for it (an agent can't give it).
+      if (consentClip && !consentGiven) await window.studio.setVoiceCloneConsent(consentClip.audioId, true)
       const result = await resolveApproval(a.id, true)
       if (result.status === 'approved') {
         // The picture is made by now: show it before moving on, so the user sees what they paid for.
@@ -281,7 +316,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
 
   const close = () => {
     if (phase === 'submitting') return
-    if (phase === 'declining') return setPhase('review')
+    if (phase === 'declining' || phase === 'confirming') return setPhase('review')
     if (phase === 'failed' || phase === 'done' || !pending) {
       hold(false)
       setPhase('review')
@@ -305,6 +340,8 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   }
 
   const ownerName = storyboard?.name ?? sequence?.name ?? a.sequenceName
+  /** "Kan inte genereras" a video, "Kan inte göras" an edit or a voice. */
+  const cannot = editRequest !== undefined ? 'Kan inte göras' : 'Kan inte genereras'
   const subtitle = [
     approvalTitle(a, ownerName),
     pending ? expiresText(expiresAt, now) : undefined,
@@ -314,7 +351,28 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     .join(' · ')
 
   const footer =
-    phase === 'declining' ? (
+    phase === 'confirming' ? (
+      <>
+        <span className="mr-auto text-[13px]">
+          {a.priceUsd === undefined
+            ? 'Venice anger inget pris för det här i förväg. Fortsätt?'
+            : partialPrice
+              ? `Det kostar minst ${formatUsd(a.priceUsd)} – en del anger Venice inget pris för. Fortsätt?`
+              : `Det här kostar ${formatUsd(a.priceUsd)}. Fortsätt?`}
+        </span>
+        <button onClick={() => setPhase('review')} className={secondary}>
+          Tillbaka
+        </button>
+        <button
+          autoFocus
+          onClick={() => void approve()}
+          disabled={!!blocking || !pending || expired || consentMissing || !armed}
+          className={primary}
+        >
+          Ja, fortsätt
+        </button>
+      </>
+    ) : phase === 'declining' ? (
       <>
         <input
           autoFocus
@@ -346,7 +404,11 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           Stäng
         </button>
         {pending && (
-          <button onClick={() => void approve()} disabled={!!blocking || !armed || framesPending} className={primary}>
+          <button
+            onClick={() => void approve()}
+            disabled={!!blocking || !armed || framesPending || consentMissing}
+            className={primary}
+          >
             Försök igen
           </button>
         )}
@@ -365,18 +427,31 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           Avböj
         </button>
         <button
-          onClick={() => void approve()}
-          disabled={phase === 'submitting' || !!blocking || !pending || expired || !armed || framesPending}
+          onClick={() => (bigPrice ? setPhase('confirming') : void approve())}
+          disabled={
+            phase === 'submitting' ||
+            !!blocking ||
+            !pending ||
+            expired ||
+            !armed ||
+            framesPending ||
+            editPlanPending ||
+            consentMissing
+          }
           title={
             blocking
-              ? `Kan inte genereras: ${blocking}`
+              ? `${cannot}: ${blocking}`
               : expired
                 ? 'Begäran har gått ut – be agenten fråga igen'
                 : framesPending
                   ? 'Hämtar start- och slutbilden…'
-                  : !armed
-                    ? 'Läs igenom förfrågan först'
-                    : undefined
+                  : editPlanPending
+                    ? 'Läser redigeringen…'
+                    : consentMissing
+                      ? 'Bocka i att du har rätt att använda rösten först'
+                      : !armed
+                        ? 'Läs igenom förfrågan först'
+                        : undefined
           }
           className={`flex items-center gap-2 ${primary}`}
         >
@@ -384,13 +459,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             {phase === 'submitting'
               ? image !== undefined
                 ? 'Skapar bilden…'
-                : 'Skickar…'
-              : image !== undefined
-                ? 'Godkänn och skapa'
-                : 'Godkänn och generera'}
+                : a.kind === 'edit'
+                  ? 'Startar…'
+                  : 'Skickar…'
+              : approveLabel(a)}
           </span>
           {phase !== 'submitting' && a.priceUsd !== undefined && (
-            <span className="text-white/80">{formatUsd(a.priceUsd)}</span>
+            <span className="text-white/80">{priceShown(a.priceUsd)}</span>
           )}
         </button>
       </>
@@ -398,7 +473,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
 
   return (
     <Modal
-      title={`${a.client} ${approvalVerb(a)}${image !== undefined ? ' en bild' : ''}`}
+      title={`${a.client} ${approvalHeading(a)}`}
       subtitle={subtitle}
       onClose={close}
       footer={footer}
@@ -447,6 +522,19 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         )}
         {image === null && <p className="text-accent">Förfrågan saknar uppgifter om bilden.</p>}
 
+        {editRequest && a.kind === 'edit' && (
+          <EditSummary
+            approval={a}
+            request={editRequest}
+            state={editState}
+            assets={assets}
+            consent={cloneConsent}
+            onConsent={setCloneConsent}
+          />
+        )}
+        {editRequest && a.kind === 'voice-design' && <VoiceDesignSummary request={editRequest} />}
+        {editRequest === null && <p className="text-accent">Förfrågan saknar uppgifter om ändringen.</p>}
+
         {clips.map((clip) => (
           <ClipSummary
             key={clip.key}
@@ -473,9 +561,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         {a.kind === 'generate-all' && storyboard && !transitions.length && (
           <p className="text-muted">Alla övergångar i storyboarden har redan en färdig tagning.</p>
         )}
-        {a.kind !== 'generation' && image === undefined && !storyboardId && !sequence && !sequenceError && !clips.length && (
-          <p className="text-muted">Läser sekvensen…</p>
-        )}
+        {a.kind !== 'generation' &&
+          image === undefined &&
+          editRequest === undefined &&
+          !storyboardId &&
+          !sequence &&
+          !sequenceError &&
+          !clips.length && <p className="text-muted">Läser sekvensen…</p>}
         {storyboardId && a.kind === 'generate-all' && !storyboard && !storyboardError && (
           <p className="text-muted">Läser storyboarden…</p>
         )}
@@ -490,7 +582,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             <span className="ml-1.5 text-[11px]">(dras från ditt Venice-konto)</span>
           </span>
           <span className="text-lg font-semibold tabular-nums">
-            {a.priceUsd !== undefined ? formatUsd(a.priceUsd) : 'Okänt pris'}
+            {a.priceUsd !== undefined ? priceShown(a.priceUsd) : 'Okänt pris'}
           </span>
         </div>
         {phase === 'submitting' && image !== undefined && (
@@ -498,7 +590,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         )}
         {blocking && (
           <p className="text-[12px] text-accent">
-            Kan inte genereras som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {a.client}{' '}
+            {cannot} som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {a.client}{' '}
             {askAgain ? 'fråga igen' : 'rätta det'}, eller avböj.
           </p>
         )}

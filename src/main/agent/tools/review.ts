@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { kindOfModelId } from '@shared/models'
+import { generationTitle } from '@shared/generation-label'
 import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
 import type {
   ExportSummary,
@@ -47,8 +48,8 @@ import {
 } from '../studio'
 import { READ_ONLY, WRITE, defineTool, priceValue, type LabeledAudio, type LabeledImage, type ToolContext } from './kit'
 import { isStoryboardId } from '../storyboard-rows'
-import { learningInfo, reviewInfo, takeOf } from './library'
-import { continues, endsOnNext, isUsableTake, loadSequence, selectedTake } from './sequences'
+import { learningInfo, recipeInfo, reviewInfo, sourceFields, takeOf } from './library'
+import { continues, endsOnNext, isUsableTake, loadSequence, ownTake, selectedTake } from './sequences'
 import { boardNumbers, selectedTakeOf } from './storyboards'
 
 // Looking back at results to write better prompts: agents look at finished clips, sequences and exported films
@@ -142,12 +143,6 @@ function requireGeneration(id: string): Generation {
   const g = db.getGeneration(id)
   if (!g) throw new Error(`Genereringen ${id} finns inte (längre). Använd list_generations för att se vilka som finns.`)
   return g
-}
-
-/** The first words of a prompt, for activity summaries and listings. */
-function excerpt(text: string, max = 60): string {
-  const flat = text.replace(/\s+/g, ' ').trim()
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
 }
 
 async function listExports(): Promise<ExportSummary[]> {
@@ -261,6 +256,8 @@ interface FilmClip {
   continue_from_previous: boolean
   end_from_next: boolean
   prompt: string
+  /** The take's title when it is the user's own film or a Redigera version (its clip may have no prompt). */
+  title?: string
   /** Seconds in the film. */
   start: number
   end: number
@@ -342,6 +339,7 @@ async function filmClips(exp: ExportSummary, length: number): Promise<{ clips?: 
       continue_from_previous: continuing,
       end_from_next: ending,
       prompt: segment.params.prompt,
+      ...(ownTake(take) ? { title: generationTitle(take) } : {}),
       start: Math.round(at * 1000) / 1000,
       end: Math.round((at + span) * 1000) / 1000
     })
@@ -472,7 +470,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Review a generation',
       description:
-        "Look closely at what a finished generation actually became, to learn how prompts translate into video: returns its prompt (and sent_prompt, the prompt as Venice got it with the descriptions of its referenced assets appended, when that differs), settings, the reference token maps, price, the user's rating and every review so far, then `frames` frames evenly spaced from the first to the last (JPEG, 512 px wide, each captioned \"t = 2.4 s\"), followed by the reference images it was made from (include_references) so you can compare identity, outfit, pose and place – and with include_audio the clip's own sound (MP3) plus the reference voice windows (@AudioN), for clients that take audio. Afterwards record what you saw with add_review, and anything that generalises with save_learning. Free; changes nothing.",
+        "Look closely at what a finished generation – or the user's own clip, or a version made in Redigera – actually became, to learn how prompts translate into video: returns its prompt (and sent_prompt, the prompt as Venice got it with the descriptions of its referenced assets appended, when that differs; an own clip or a version has its source, title and recipe instead), settings, the reference token maps, price, the user's rating and every review so far, then `frames` frames evenly spaced from the first to the last (JPEG, 512 px wide, each captioned \"t = 2.4 s\"), followed by the reference images it was made from (include_references) so you can compare identity, outfit, pose and place – and with include_audio the clip's own sound (MP3, up to 30 s from audio_start) plus the reference voice windows (@AudioN), for clients that take audio. Afterwards record what you saw with add_review, and anything that generalises with save_learning. Free; changes nothing.",
       input: {
         generation_id: z.string(),
         frames: z.number().int().min(1).max(12).default(6).describe('How many frames, first to last. Default 6.'),
@@ -483,21 +481,29 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         include_audio: z
           .boolean()
           .default(false)
-          .describe("Also return the clip's sound and its reference audio windows as MP3 audio. Default false.")
+          .describe("Also return the clip's sound (up to 30 s from audio_start) and its reference audio windows as MP3 audio. Default false."),
+        audio_start: z
+          .number()
+          .min(0)
+          .default(0)
+          .describe('With include_audio: where the sound starts, in seconds – to hear a long version past its first 30 s.')
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'granskade en generering'
     },
-    async ({ generation_id, frames, include_references, include_audio }) => {
+    async ({ generation_id, frames, include_references, include_audio, audio_start }) => {
       const g = requireGeneration(generation_id)
       const index = await AssetIndex.load()
       const { rating, reviews } = await reviewsOf(g.id)
       const data: Record<string, unknown> = {
         id: g.id,
+        ...sourceFields(g),
         status: g.status,
         created: localTime(g.createdAt),
         model: g.model,
         prompt: g.prompt,
+        // An import or a Redigera version: how it was made instead of a prompt.
+        ...(g.recipe ? { recipe: recipeInfo(g.recipe) } : {}),
         // What Venice actually got, when the descriptions of its references were appended to the prompt.
         ...(g.sentPrompt && g.sentPrompt !== g.prompt ? { sent_prompt: g.sentPrompt } : {}),
         ...(g.params.negativePrompt ? { negative_prompt: g.params.negativePrompt } : {}),
@@ -508,7 +514,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         reviews,
         ...(g.error ? { error: g.error } : {})
       }
-      const summary = `granskade genereringen ${q(excerpt(g.prompt, 40))}`
+      const summary = `granskade ${g.source && g.source !== 'generated' ? 'videon' : 'genereringen'} ${q(generationTitle(g, 40))}`
       if (g.status !== 'completed') {
         data.note =
           g.status === 'failed'
@@ -541,12 +547,16 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
       }
       if (include_audio && file) {
         try {
-          const sound = await soundtrack(file, 0, length)
+          const from = Math.min(audio_start, Math.max(0, length - 1))
+          const sound = await soundtrack(file, from, length - from)
           if (sound) {
             audio.push({
-              label: `The clip's sound, 0–${seconds(Math.min(length, MAX_SOUNDTRACK_SECONDS))} s`,
+              label: `The clip's sound, ${seconds(from)}–${seconds(Math.min(length, from + MAX_SOUNDTRACK_SECONDS))} s`,
               audio: sound
             })
+            if (from + MAX_SOUNDTRACK_SECONDS < length) {
+              data.audio_note = `The sound is ${seconds(length)} s long; ask again with audio_start ${seconds(from + MAX_SOUNDTRACK_SECONDS)} for the next part.`
+            }
           } else data.audio_note = 'The clip has no sound track.'
         } catch (err) {
           data.audio_error = errorText(err)
@@ -628,7 +638,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List exported films',
       description:
-        'Films exported from sequences and storyboards (newest first): export_id, the sequence or storyboard it came from (if it still exists), the file, when it was made, its length and whether the file is still on disk. Look at one with review_export or get_frames.',
+        "Films exported from sequences and storyboards (newest first): export_id, the sequence or storyboard it came from (if it still exists), the file, when it was made, its length, its cuts (where the clips meet, in seconds; recorded since Redigera came, so older films have none) and whether the file is still on disk. Look at one with review_export or get_frames; change it with create_edit({export_id}).",
       input: {
         sequence_id: z.string().optional().describe('Only films exported from this sequence.'),
         storyboard_id: z.string().optional().describe('Only films exported from this storyboard.'),
@@ -649,6 +659,8 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
             file: basename(e.path),
             created: localTime(e.createdAt),
             ...(e.duration !== undefined ? { seconds: seconds(e.duration) } : {}),
+            // Where the clips meet in the film, recorded at export (older exports don't have them).
+            ...(e.cuts ? { cuts: e.cuts.map(seconds) } : {}),
             exists: e.exists
           }))
         }
@@ -829,6 +841,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         const { rating, reviews } = await reviewsOf(take.id)
         info.selected_take = {
           generation_id: take.id,
+          ...(ownTake(take) ? { source: take.source, title: generationTitle(take), own_clip: true } : {}),
           video_seconds: take.videoDuration !== undefined ? seconds(take.videoDuration) : undefined,
           ...(segment.trimStart || segment.trimEnd ? { trim_start: segment.trimStart, trim_end: segment.trimEnd } : {}),
           rating,
@@ -896,7 +909,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
       )
       return {
         data: reviewInfo(review),
-        summary: `recenserade genereringen ${q(excerpt(g.prompt, 40))}${rating ? ` (${rating} av 5)` : ''}`
+        summary: `recenserade ${q(generationTitle(g, 40))}${rating ? ` (${rating} av 5)` : ''}`
       }
     }
   )
@@ -933,7 +946,14 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         if (generation_id) return undefined
         if (!generations.has(id)) generations.set(id, db.getGeneration(id))
         const g = generations.get(id)
-        return g ? { prompt: g.prompt, model: g.model, created: localTime(g.createdAt) } : undefined
+        return g
+          ? {
+              prompt: g.prompt,
+              ...(g.source && g.source !== 'generated' ? { source: g.source, title: generationTitle(g) } : {}),
+              model: g.model,
+              created: localTime(g.createdAt)
+            }
+          : undefined
       }
       return {
         data: {

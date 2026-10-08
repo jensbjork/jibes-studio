@@ -10,6 +10,7 @@ import { constants, createReadStream, existsSync } from 'node:fs'
 import { copyFile, link, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { app, ipcMain, shell } from 'electron'
+import { generationTitle } from '@shared/generation-label'
 import type { GenerationParams, ImageModel, SequenceKind, Still, StillParams } from '@shared/types'
 import * as db from './db'
 import { extractFrame } from './ffmpeg'
@@ -837,7 +838,8 @@ export async function saveFrameAsStill(generationId: unknown, time: unknown, seq
       // extractFrame keeps the last frame that starts before the time it is given; a millisecond more makes a
       // frame that starts exactly at `time` count, as it does in a paused player. 0 is the very first frame.
       await extractFrame(g.filePath, tmp, ms === 0 ? 0 : ms / 1000 + 0.001)
-      const base = `${timeStamp(new Date())} Bildruta ${secondsLabel(ms)} ${promptExcerpt(g.prompt, 40)}`
+      // Named after the take's title: an own clip or an edit version has no prompt to name it by.
+      const base = `${timeStamp(new Date())} Bildruta ${secondsLabel(ms)} ${promptExcerpt(generationTitle(g), 40)}`
       return await saveNewStill(tmp, base, '.png', {
         sequenceId: owner,
         source: 'frame',

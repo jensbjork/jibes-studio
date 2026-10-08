@@ -94,8 +94,17 @@ let stopFeed: (() => void) | undefined
 function notifyNewApproval(a: ApprovalRequest): void {
   if (document.hasFocus() || typeof Notification === 'undefined') return
   try {
-    // An image request makes a still for a storyboard; everything else generates video.
-    const note = new Notification(`${a.client} ${a.kind === 'image' ? 'vill skapa en bild' : 'vill generera'}`, {
+    // An image request makes a still, an edit changes a film in Redigera, a voice design makes a voice; the rest
+    // generates video.
+    const what =
+      a.kind === 'image'
+        ? 'vill skapa en bild'
+        : a.kind === 'edit'
+          ? 'vill redigera en film'
+          : a.kind === 'voice-design'
+            ? 'vill skapa en röst'
+            : 'vill generera'
+    const note = new Notification(`${a.client} ${what}`, {
       body: 'Öppna Studio för att godkänna eller avböja.',
       silent: false
     })

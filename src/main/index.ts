@@ -1,23 +1,35 @@
 import { dirname, join } from 'node:path'
+import { existsSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import type { ExportProgress, Generation, GenerationParams, VideoModel } from '@shared/types'
+import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'electron'
+import type {
+  EditProgress,
+  ExportProgress,
+  Generation,
+  GenerationParams,
+  ImportProgress,
+  VideoModel
+} from '@shared/types'
 import { AgentService, recordIpcHandlers, registerAgentIpc } from './agent'
 import { isAgentCall } from './agent/local-ipc'
 import * as db from './db'
+import { registerEditIpc, type EditServiceHandle } from './edits'
 import { ffmpegStatus, stopAllFfmpeg } from './ffmpeg'
+import { registerImportIpc, VIDEO_FILE_TYPES } from './imports'
 import { JobManager, prepareSubmission, toPublic } from './jobs'
 import { assetWorkBusy, AUDIO_FILE_TYPES, registerLibraryIpc } from './library'
 import { prepareLibrary, registerLibraryRootIpc } from './library-root'
-import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty } from './paths'
+import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty, toStoredPath } from './paths'
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
 import { attachReviewSummary, registerReviewIpc } from './reviews'
 import { reselectTransitionTake } from './sequence-store'
-import { registerSequenceIpc } from './sequences'
+import { registerSequenceIpc, type SequenceService } from './sequences'
 import { registerStoryboardIpc } from './storyboards'
 import { acceptConsent, getApiKey, getSettings, setApiKey, setImageSafeMode, setPromptLanguage } from './settings'
 import { importStillFile, registerStillsIpc, saveFrameAsStill, stillWorkBusy } from './stills'
 import { VeniceClient } from './venice'
+import { VeniceAudio } from './venice-audio'
+import { separationStatus } from './voice-separation'
 
 // `npm run dev` runs as "Studio Dev": its own settings (API key, chosen base folder) and suggested base folder
 // (~/Movies/Studio Dev), so what we try out while developing never touches the library Studio.app uses — and both
@@ -50,11 +62,22 @@ registerMediaScheme()
 recordIpcHandlers()
 
 const venice = new VeniceClient(getApiKey)
+/** Venice's speech, music, transcription and voice endpoints (Redigera and voice design). */
+const audio = new VeniceAudio(getApiKey)
 // Submits read the models' prompt limits (for the descriptions appended to a prompt) from main's cached list.
 const jobs = new JobManager(venice, () => loadVideoModels())
 let modelCache: { at: number; models: VideoModel[] } | undefined
 /** Exports and "generate all" runs (of sequences and storyboards); set once their handlers are registered. */
 let sequencesBusy: () => string | undefined = () => undefined
+/** Imports of own clips (Egna klipp); set once their handlers are registered. */
+let importsService: { isBusy(): string | undefined; stop(): void } | undefined
+/** Redigera: edits, versions and their paid jobs; set once its handlers are registered. */
+let editsService: EditServiceHandle | undefined
+/** Sequences (their clips and takes); set once their handlers are registered. */
+let sequenceService: SequenceService | undefined
+
+/** Second line of defence behind the agents' tool list: what only the user may do in Studio. */
+const USER_ONLY = 'Det här kan bara du göra i Studio.'
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -101,6 +124,16 @@ function broadcastGeneration(g: Generation): void {
   broadcast('generation:update', attachReviewSummary([g])[0])
 }
 
+/**
+ * A generation the import or edit service inserted or changed (completed rows that never pass the job manager):
+ * given as the row or its id, it is read again and sent to the feed, sequences and frame pickers.
+ */
+function generationChanged(g: Generation | string): void {
+  if (!db.isDbOpen()) return
+  const row = db.getGeneration(typeof g === 'string' ? g : g.id)
+  if (row) broadcastGeneration(toPublic(row))
+}
+
 /** The MCP server the user's own agents connect to (off until they switch it on in Settings). */
 const agent = new AgentService({ broadcast })
 
@@ -110,7 +143,9 @@ const agent = new AgentService({ broadcast })
  */
 function libraryBusyReason(): string | undefined {
   if (jobs.hasActiveJobs()) return 'Det pågår genereringar. Vänta tills de är klara och försök igen.'
-  return sequencesBusy() ?? assetWorkBusy() ?? stillWorkBusy()
+  // An import copying a film in, or an edit job (a half-sent paid job's runner must never be carried into another
+  // library), would otherwise write into the wrong folder.
+  return sequencesBusy() ?? importsService?.isBusy() ?? editsService?.isBusy() ?? assetWorkBusy() ?? stillWorkBusy()
 }
 
 /** The video model list, fetched at most every ten minutes unless forced (GET /models is free). */
@@ -210,12 +245,35 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('consent:accept', (_e, flow: string, version: string) => acceptConsent(flow, version))
-  ipcMain.handle('generations:list', () => attachReviewSummary(db.listGenerations().map(toPublic)))
-  ipcMain.handle('generations:delete', async (_e, id: string) => {
+  // A finished video that is gone (moved or deleted in Finder) is flagged, so pickers leave it out and views say so.
+  ipcMain.handle('generations:list', () =>
+    attachReviewSummary(
+      db.listGenerations().map((g) => {
+        const pub = toPublic(g)
+        return g.status === 'completed' && g.filePath && !existsSync(g.filePath) ? { ...pub, fileMissing: true } : pub
+      })
+    )
+  )
+  ipcMain.handle('generations:delete', async (_e, id: string, from?: unknown) => {
     // Not while "Städa upp" or a switch moves files: the video could be moved away from the path trashed here.
     await libraryOperationSettled()
     const g = db.getGeneration(id)
     if (!g) return
+    // A take list (a sequence clip's or a storyboard transition's): a film Redigera keeps (a version sent as a take, an
+    // edit's original) is only taken off the clip; deleting it would take it out of its edit (and an edit's original
+    // away from all its versions). So is one the list offered "Ta bort" for (`release`: it showed the take as kept,
+    // which may have changed since), so the click never does more than the button said.
+    const { segmentId, release } = (from && typeof from === 'object' ? from : {}) as {
+      segmentId?: unknown
+      release?: unknown
+    }
+    if (typeof segmentId === 'string' && sequenceService && (release === true || editsService?.keeps(id))) {
+      await sequenceService.releaseTake(segmentId, id)
+      return
+    }
+    // Redigera's rules hold here too: nothing a running (paid) operation or a stopped one that has paid for parts works
+    // on, no edit's original, no version Redigera itself would refuse to delete. Throws in Swedish; the caller shows it.
+    editsService?.beforeGenerationDelete(id)
     // Deleting a take changes the sequence it belongs to (FKs clear segment selections).
     const sequenceIds = db
       .getDb()
@@ -237,7 +295,21 @@ function registerIpc(): void {
     for (const file of [g.filePath, g.thumbPath]) {
       if (file && isInsideRoot(file)) await shell.trashItem(file).catch(() => unlink(file).catch(() => {}))
     }
+    // An import's untouched original (its file is then a working copy), unless another row still records it (a
+    // copy of the take in another clip shares the original): otherwise a multi-GB file stays behind untracked.
+    const original = g.originalPath
+    if (original && isInsideRoot(original) && !db.isStoredPathRecorded(toStoredPath(original))) {
+      await shell.trashItem(original).catch(() => unlink(original).catch(() => {}))
+      await removeDayFolderIfEmpty(dirname(original))
+    }
     if (g.filePath) await removeDayFolderIfEmpty(dirname(g.filePath))
+    // An edit whose current version this was falls back on its parent (or v1); versions built on it hang under its
+    // parent. The row as it was tells the service where it sat.
+    try {
+      editsService?.onGenerationDeleted(id, { parentId: g.parentId, editId: g.editId })
+    } catch (err) {
+      console.error('Updating the edits after a deleted generation failed:', err)
+    }
     // Every view drops it, also the feed when the take was deleted in the sequence editor.
     broadcast('generation:delete', id)
     for (const sequenceId of sequenceIds) broadcastSequenceChange(sequenceId)
@@ -258,6 +330,17 @@ function registerIpc(): void {
       properties: multiple ? ['openFile', 'multiSelections'] : ['openFile'],
       filters: [{ name: 'Ljud', extensions: [...AUDIO_FILE_TYPES] }]
     })
+    return res.canceled ? [] : res.filePaths
+  })
+  // Own clips: only the user picks files from disk (agents can't import, D10).
+  ipcMain.handle('file:pickVideos', async (e, multiple: boolean) => {
+    if (isAgentCall(e)) throw new Error(USER_ONLY)
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options: OpenDialogOptions = {
+      properties: multiple === true ? ['openFile', 'multiSelections'] : ['openFile'],
+      filters: [{ name: 'Filmer', extensions: [...VIDEO_FILE_TYPES] }]
+    }
+    const res = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     return res.canceled ? [] : res.filePaths
   })
 
@@ -305,6 +388,35 @@ function registerIpc(): void {
     models: () => loadVideoModels()
   })
   sequencesBusy = () => sequences.isBusy() ?? storyboards.isBusy()
+  sequenceService = sequences
+  // Own clips: films copied into Egna klipp and added to the feed, a sequence or a clip.
+  importsService = registerImportIpc({
+    sequences,
+    progress: (p: ImportProgress) => broadcast('import:progress', p),
+    generationChanged,
+    notifySequence: (sequenceId: string) => broadcastSequenceChange(sequenceId)
+  })
+  // Redigera: edits, their versions and paid jobs, transcripts, audio models, voice design and clone consent.
+  editsService = registerEditIpc({
+    jobs,
+    venice,
+    audio,
+    sequences,
+    models: () => loadVideoModels(),
+    notify: (editId: string) => broadcast('edit:change', editId),
+    progress: (p: EditProgress) => broadcast('edit:progress', p),
+    generationChanged,
+    // A version or an export clone the service removed: every list drops it, as after generations:delete.
+    generationDeleted: (id: string) => broadcast('generation:delete', id),
+    // A deleted edit's files that clips still used moved to Referensbilder: sequences and the feed read them again.
+    pathsRewritten: () => {
+      broadcastAllSequences()
+      broadcastRewrittenGenerations()
+      broadcastRewrittenStills()
+    },
+    // A designed voice added to a character, or clone consent changed: asset lists and pickers refetch.
+    libraryChanged: () => broadcast('library:change')
+  })
   // Images and stills for storyboards. A deleted still that clips or generations still use is kept in
   // Referensbilder, which rewrites their paths: views showing them refetch.
   registerStillsIpc(
@@ -320,6 +432,12 @@ function registerIpc(): void {
     busy: libraryBusyReason,
     onOpened: () => {
       jobs.resume()
+      // Picks up edit jobs: parts already sent are fetched, nothing paid is sent (a job waits for "Fortsätt").
+      try {
+        editsService?.resume()
+      } catch (err) {
+        console.error('Resuming the edits failed:', err)
+      }
       agent.libraryOpened()
     },
     onReorganized: broadcastLibraryReorganized,
@@ -342,6 +460,9 @@ void app.whenReady().then(async () => {
     console.error('Preparing the library failed:', err)
   }
   createWindow()
+  // Asks the voice separation helper once in the background (free, local), so Inställningar and Redigera's sound
+  // cards know at once whether "Ta bort rösten" and "Behåll bakgrundsljudet" can be offered.
+  void separationStatus().catch((err: unknown) => console.warn('Checking voice separation failed:', err))
   // Agents can connect from now on; tools that need the library say so while none is open.
   void agent.startIfEnabled().catch((err: unknown) => console.error('Starting the agent connection failed:', err))
 
@@ -353,6 +474,14 @@ void app.whenReady().then(async () => {
 app.on('will-quit', () => {
   // No agent may start anything while the app shuts down.
   agent.shutdown()
+  // Imports and edit jobs stop where they are: an interrupted paid job waits for "Fortsätt" at the next start.
+  for (const service of [importsService, editsService]) {
+    try {
+      service?.stop()
+    } catch (err) {
+      console.error('Stopping a service failed:', err)
+    }
+  }
   // Exports and frame grabs must not outlive the app or leave their half-written files behind.
   stopAllFfmpeg()
   // Folds the WAL back into studio.db, leaving a single file in .studio.

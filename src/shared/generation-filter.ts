@@ -9,11 +9,15 @@ export type GenerationSort = NonNullable<GenerationFilter['sort']>
 
 export const GENERATION_SORTS: readonly GenerationSort[] = ['newest', 'oldest', 'rating', 'cost', 'length']
 
-/** What filtering and sorting read of a generation (a Generation has all of it). */
+/**
+ * What filtering and sorting read of a generation (a Generation has all of it). `source` and `title` may be left
+ * out: a row without a source is a Venice generation.
+ */
 export type FilterableGeneration = Pick<
   Generation,
   'id' | 'createdAt' | 'model' | 'prompt' | 'params' | 'status' | 'segmentId' | 'quote' | 'videoDuration' | 'rating'
-> & { reviewCount?: number }
+> &
+  Partial<Pick<Generation, 'source' | 'title'>> & { reviewCount?: number }
 
 // ── Assets used by a generation ──────────────────────────────────────────────
 
@@ -56,15 +60,19 @@ function toIndex(assets: AssetPathIndex | readonly IndexableAsset[] | undefined)
 }
 
 /**
- * Every file a generation's params use, in order: start image, end image, reference images, reference audio.
- * Params come from the database and older versions, so anything malformed is skipped.
+ * Every file a generation's params use, in order: start image, end image, reference images, reference audio, the
+ * source video and reference videos (video-to-video models). Params come from the database and older versions, so
+ * anything malformed is skipped.
  */
 export function generationFilePaths(g: Pick<Generation, 'params'>): string[] {
   const p = g.params
   if (!p || typeof p !== 'object') return []
   const images = Array.isArray(p.referenceImages) ? p.referenceImages : []
   const audio = Array.isArray(p.referenceAudios) ? p.referenceAudios.map((a) => a?.path) : []
-  return [p.startImage, p.endImage, ...images, ...audio].filter((v): v is string => typeof v === 'string' && v !== '')
+  const videos = Array.isArray(p.referenceVideos) ? p.referenceVideos : []
+  return [p.startImage, p.endImage, ...images, ...audio, p.sourceVideo, ...videos].filter(
+    (v): v is string => typeof v === 'string' && v !== ''
+  )
 }
 
 function assetOf(path: string, index: AssetPathIndex): string | undefined {
@@ -105,7 +113,8 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 /**
  * The generations that pass every filter set in `filter`, in the order given (sort with sortGenerations, or use
  * queryGenerations for both). Filters left out don't filter:
- * - query: every word appears in the prompt or the negative prompt (letter case ignored).
+ * - query: every word appears in the prompt, the negative prompt or the title (an own clip's file name, a
+ *   version's "<redigering> v3"); letter case ignored.
  * - status: that status; 'pending' is queued or processing.
  * - model: that model id.
  * - assetId: the params use one of that asset's photos or audio clips (needs `assets`: the asset list or
@@ -114,6 +123,8 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
  * - since: created at or after that time (epoch ms).
  * - placement: 'standalone' (not a take) or 'sequence' (a take of a sequence clip or a storyboard transition).
  * - hasReviews: true for the ones with a review (the user's or an agent's), false for the ones without.
+ * - source ("Källa"): 'generated' (made by Venice, also AI takes made in Redigera), 'import' (the user's own
+ *   clips) or 'edit' (versions made in Redigera). A row without a source counts as 'generated'.
  */
 export function filterGenerations<T extends FilterableGeneration>(
   list: readonly T[],
@@ -125,8 +136,10 @@ export function filterGenerations<T extends FilterableGeneration>(
   const index = f.assetId ? toIndex(assets) : undefined
   const minRating = finite(f.minRating) && f.minRating > 0 ? f.minRating : undefined
   const since = finite(f.since) ? f.since : undefined
+  const source = f.source === 'generated' || f.source === 'import' || f.source === 'edit' ? f.source : undefined
 
   return list.filter((g) => {
+    if (source && (g.source ?? 'generated') !== source) return false
     if (f.status) {
       const pending = g.status === 'queued' || g.status === 'processing'
       if (f.status === 'pending' ? !pending : g.status !== f.status) return false
@@ -139,7 +152,7 @@ export function filterGenerations<T extends FilterableGeneration>(
     if (f.placement === 'sequence' && !g.segmentId) return false
     if (typeof f.hasReviews === 'boolean' && ((g.reviewCount ?? 0) > 0) !== f.hasReviews) return false
     if (words.length) {
-      const text = fold(`${g.prompt ?? g.params?.prompt ?? ''}\n${g.params?.negativePrompt ?? ''}`)
+      const text = fold(`${g.prompt ?? g.params?.prompt ?? ''}\n${g.params?.negativePrompt ?? ''}\n${g.title ?? ''}`)
       if (!words.every((w) => text.includes(w))) return false
     }
     if (f.assetId && !usesAsset(g, f.assetId, index)) return false

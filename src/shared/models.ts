@@ -38,20 +38,59 @@ export const DEFAULT_PARAMS: GenerationParams = {
 const knownKinds = new Map<string, Kind>()
 // Which models take reference audio (VideoModel.audioInput), from the same list: the id says nothing about it.
 const knownAudioInput = new Map<string, boolean>()
+// Which models take a source video (VideoModel.videoInput), and which of those are upscalers. The ids of some
+// (minimax-h3-max-recast, kling-v3-*-motion-control) say nothing about it.
+const knownVideoInput = new Map<string, boolean>()
+const knownUpscale = new Set<string>()
+
+/** An upscaler lists its factors ("2x", "4x") where other models list resolutions. */
+function listsUpscaleFactors(resolutions: readonly string[] | undefined): boolean {
+  return !!resolutions?.length && resolutions.every((r) => /^\d+(\.\d+)?x$/i.test(r))
+}
 
 /**
- * Records the kinds (and whether each model takes reference audio) from a fetched model list. Main and
- * renderer each call this when they get the list.
+ * Records the kinds (and whether each model takes reference audio or a source video) from a fetched model list.
+ * Main and renderer each call this when they get the list.
  */
 export function rememberModelKinds(
-  models: readonly (Pick<VideoModel, 'id' | 'kind'> & Partial<Pick<VideoModel, 'audioInput'>>)[]
+  models: readonly (Pick<VideoModel, 'id' | 'kind'> &
+    Partial<Pick<VideoModel, 'audioInput' | 'videoInput' | 'resolutions'>>)[]
 ): void {
   for (const m of models) {
     if (m.kind === 'text-to-video' || m.kind === 'image-to-video' || m.kind === 'reference-to-video') {
       knownKinds.set(m.id, m.kind)
     }
     if (typeof m.audioInput === 'boolean') knownAudioInput.set(m.id, m.audioInput)
+    if (typeof m.videoInput === 'boolean') {
+      knownVideoInput.set(m.id, m.videoInput)
+      if (m.videoInput && (m.id.includes('upscale') || listsUpscaleFactors(m.resolutions))) knownUpscale.add(m.id)
+      else knownUpscale.delete(m.id)
+    }
   }
+}
+
+/**
+ * Whether the model takes a source video (`video_url`): a video-to-video edit model or an upscaler. From the
+ * fetched model list when it has been fetched (Venice's constraints.video_input), else by id: main may not have
+ * fetched the list yet when a take is resumed or a request body is built.
+ */
+export function isVideoInputModel(id: string): boolean {
+  if (typeof id !== 'string' || !id) return false
+  return knownVideoInput.get(id) ?? /video-to-video|upscale/.test(id)
+}
+
+/** Whether the model is an upscaler (Topaz): it takes `upscale_factor` and no prompt, resolution or aspect. */
+export function isUpscaleModel(id: string): boolean {
+  if (typeof id !== 'string' || !id) return false
+  return id.includes('upscale') || knownUpscale.has(id)
+}
+
+/**
+ * Whether the model takes reference videos (`reference_video_urls`, "<Video 1>" in the prompt) and a reference
+ * task (`omni_reference_task_type`): Seedance 2.x reference-to-video.
+ */
+export function supportsReferenceVideos(id: string): boolean {
+  return typeof id === 'string' && /^seedance-2-.*reference-to-video/.test(id)
 }
 
 /**
@@ -203,20 +242,46 @@ export function referenceAudioWindow(clip: ReferenceAudio, duration?: number): {
 /**
  * Drops inputs the model doesn't use, so stale form state isn't sent: start images outside image-to-video,
  * end images unless the model takes one (supportsEndImage), reference images outside reference-to-video (and
- * past the model's limit), and reference audio unless the model takes it (and past its limit).
+ * past the model's limit), and reference audio unless the model takes it (and past its limit). A video-input
+ * model (an edit model or an upscaler) keeps only its source video (and an upscaler its factor) and drops every
+ * image and audio; a Seedance 2.x reference-to-video model keeps its reference videos and reference task; every
+ * other model drops those video fields.
  */
 export function paramsForSubmit(params: GenerationParams): GenerationParams {
+  const videoInput = isVideoInputModel(params.model)
+  const upscale = videoInput && isUpscaleModel(params.model)
+  const referenceVideos = !videoInput && supportsReferenceVideos(params.model)
   const kind = kindOfModelId(params.model)
-  const audios = supportsAudioInput(params.model) ? sanitizeReferenceAudios(params.referenceAudios) : undefined
+  const audios =
+    !videoInput && supportsAudioInput(params.model) ? sanitizeReferenceAudios(params.referenceAudios) : undefined
   return {
     ...params,
-    startImage: kind === 'image-to-video' ? params.startImage : undefined,
-    endImage: kind === 'image-to-video' && supportsEndImage(params.model) ? params.endImage : undefined,
+    startImage: !videoInput && kind === 'image-to-video' ? params.startImage : undefined,
+    endImage: !videoInput && kind === 'image-to-video' && supportsEndImage(params.model) ? params.endImage : undefined,
     referenceImages:
-      kind === 'reference-to-video' ? params.referenceImages?.slice(0, maxReferenceImages(params.model)) : undefined,
-    referenceAudios: audios?.slice(0, maxReferenceAudios(params.model))
+      !videoInput && kind === 'reference-to-video'
+        ? params.referenceImages?.slice(0, maxReferenceImages(params.model))
+        : undefined,
+    referenceAudios: audios?.slice(0, maxReferenceAudios(params.model)),
+    sourceVideo: videoInput && typeof params.sourceVideo === 'string' ? params.sourceVideo || undefined : undefined,
+    upscaleFactor: upscale ? params.upscaleFactor : undefined,
+    referenceVideos:
+      referenceVideos && Array.isArray(params.referenceVideos)
+        ? params.referenceVideos.filter((v) => typeof v === 'string' && v !== '').slice(0, MAX_REFERENCE_VIDEOS)
+        : undefined,
+    referenceTask: referenceVideos ? params.referenceTask : undefined
   }
 }
+
+/** Venice takes at most this many reference videos per request. */
+export const MAX_REFERENCE_VIDEOS = 10
+
+/**
+ * The most raw media (videos, images and audio together, before base64) Studio puts into one Venice request body.
+ * Venice has no upload endpoint, so media travels as data URLs inside a JSON body capped at about 35 MB: 25 MB of
+ * raw media passed, 26 MB got 413. 22 MB keeps a margin for base64 and the rest of the body.
+ */
+export const MAX_REQUEST_MEDIA_BYTES = 22_000_000
 
 /** Parses "8s" → 8. */
 export function durationSeconds(duration: string): number {

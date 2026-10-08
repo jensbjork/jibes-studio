@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Sequence } from '@shared/types'
+import type { ExportSummary, Sequence } from '@shared/types'
+import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd } from '../../lib/media'
+import { ScissorsIcon } from '../feed/icons'
 import OpenFolderButton from '../library/OpenFolderButton'
-import { PlayIcon } from './icons'
+import Popover from '../pickers/Popover'
+import { menuRow, onMenuKeyDown } from '../storyboards/ui'
+import { MoreIcon, PlayIcon } from './icons'
 
 export type ExportState =
   | { status: 'running'; progress: number }
@@ -29,8 +33,25 @@ interface Props {
   onStop: () => void
   onPreview: () => void
   onExport: () => void
+  /** "Exportformat": 480/720/1080, or null for Automatiskt. */
+  onExportHeight: (height: number | null) => void
+  /** "Redigera senaste exporten": opens that film in Redigera. */
+  onEditExport: (exportId: string) => void
   /** Problems opening the sequence's folder in Finder. */
   onError: (message: string) => void
+}
+
+/** The heights "Exportformat" offers; Automatiskt (null) keeps the first clip's own size. */
+const EXPORT_FORMATS: { height: number | null; label: string; text: string }[] = [
+  { height: null, label: 'Automatiskt', text: 'Första klippets storlek' },
+  { height: 480, label: '480p', text: 'Liten fil' },
+  { height: 720, label: '720p', text: 'HD' },
+  { height: 1080, label: '1080p', text: 'Full HD' }
+]
+
+/** "720p" / "Automatiskt", for the export button's tooltip. */
+function exportFormatLabel(height: number | null | undefined): string {
+  return EXPORT_FORMATS.find((f) => f.height === (height ?? null))?.label ?? 'Automatiskt'
 }
 
 const primary =
@@ -57,6 +78,8 @@ export default function SequenceHeader({
   onStop,
   onPreview,
   onExport,
+  onExportHeight,
+  onEditExport,
   onError
 }: Props) {
   const count = sequence.segments.length
@@ -132,14 +155,145 @@ export default function SequenceHeader({
           <button
             onClick={onExport}
             disabled={!!exportBlocked}
-            title={exportBlocked ?? 'Renderar hela sekvensen till en mp4-fil'}
+            title={
+              exportBlocked ??
+              `Renderar hela sekvensen till en mp4-fil (Exportformat: ${exportFormatLabel(sequence.exportHeight)})`
+            }
             className={exportIsNext ? primary : secondary}
           >
             Exportera
           </button>
         )}
+
+        <MoreMenu
+          sequence={sequence}
+          exportState={exportState}
+          onExportHeight={onExportHeight}
+          onEditExport={onEditExport}
+          onError={onError}
+        />
       </div>
     </div>
+  )
+}
+
+/** The newest export of the sequence whose film is still there, if any. */
+async function latestExport(sequenceId: string): Promise<ExportSummary | undefined> {
+  const exports = await window.studio.listExports()
+  return exports
+    .filter((e) => e.sequenceId === sequenceId && e.exists)
+    .sort((a, b) => b.createdAt - a.createdAt)[0]
+}
+
+/** ⋯: the Exportformat, and the latest export into Redigera. */
+function MoreMenu({
+  sequence,
+  exportState,
+  onExportHeight,
+  onEditExport,
+  onError
+}: {
+  sequence: Sequence
+  exportState?: ExportState
+  onExportHeight: (height: number | null) => void
+  onEditExport: (exportId: string) => void
+  onError: (message: string) => void
+}) {
+  const anchor = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  // undefined while looking, null when the sequence has no export (yet).
+  const [latest, setLatest] = useState<ExportSummary | null>()
+
+  // Looked up each time the menu opens: an export may have finished (or its film been deleted) since.
+  useEffect(() => {
+    if (!open) return
+    let current = true
+    setLatest(undefined)
+    latestExport(sequence.id).then(
+      (e) => current && setLatest(e ?? null),
+      (e: unknown) => {
+        if (!current) return
+        setLatest(null)
+        onError(ipcErrorMessage(e))
+      }
+    )
+    return () => {
+      current = false
+    }
+  }, [open, sequence.id, exportState?.status])
+
+  const height = sequence.exportHeight ?? null
+
+  return (
+    <>
+      <button
+        ref={anchor}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Fler val"
+        title="Fler val"
+        className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
+      >
+        <MoreIcon size={14} />
+      </button>
+      <Popover anchorRef={anchor} open={open} onClose={() => setOpen(false)} align="end" width={280} label="Fler val">
+        <div role="menu" aria-label="Fler val" onKeyDown={onMenuKeyDown} className="p-1">
+          <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
+            Exportformat
+          </p>
+          {EXPORT_FORMATS.map((f) => (
+            <button
+              key={f.label}
+              type="button"
+              role="menuitemradio"
+              aria-checked={height === f.height}
+              data-menu-item
+              autoFocus={height === f.height}
+              onClick={() => {
+                setOpen(false)
+                if (height !== f.height) onExportHeight(f.height)
+              }}
+              className={menuRow}
+            >
+              <span className={`w-3 shrink-0 text-accent ${height === f.height ? '' : 'invisible'}`}>✓</span>
+              <span className="flex-1">{f.label}</span>
+              <span className="text-[11px] text-muted">{f.text}</span>
+            </button>
+          ))}
+          <p className="px-2.5 pb-1.5 pt-0.5 text-[11px] leading-snug text-muted">
+            Filmen får första klippets bildformat i den höjden.
+          </p>
+          <div className="mx-2 my-1 border-t border-line" />
+          <button
+            type="button"
+            role="menuitem"
+            data-menu-item
+            disabled={!latest}
+            title={latest === null ? 'Exportera först' : undefined}
+            onClick={() => {
+              if (!latest) return
+              setOpen(false)
+              onEditExport(latest.id)
+            }}
+            className={`${menuRow} flex-col items-start gap-0.5`}
+          >
+            <span className="flex items-center gap-2">
+              <ScissorsIcon size={13} className="shrink-0 text-muted" />
+              Redigera senaste exporten
+            </span>
+            <span className="pl-[21px] text-[11px] leading-snug text-muted">
+              {latest === undefined
+                ? 'Letar efter exporten…'
+                : latest === null
+                  ? 'Exportera först.'
+                  : 'Ändra den färdiga filmen med AI i Redigera. Sekvensen rörs inte.'}
+            </span>
+          </button>
+        </div>
+      </Popover>
+    </>
   )
 }
 

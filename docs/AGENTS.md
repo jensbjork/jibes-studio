@@ -8,11 +8,15 @@ write and validate prompts, fill in the Generate form, build sequences — notes
 the milestones as boards with notes and pictures, and the prompts of the transitions generated between them. It can
 also look back at what the generations became — frames of finished clips and exported films next to the references
 they were made from, and their sound — record reviews, and save *learnings* (*Lärdomar*) that every later session
-reads before it writes a prompt. Everything an agent prepares, reviews or records is free.
+reads before it writes a prompt. It can change a finished film in **Redigera** — a clip, a take, an exported film
+or your own footage — into new versions: free cuts, fades and sound fixes right away, and paid voice, music and
+picture operations once you approve them; and it can use your own clips (*Egna klipp*) in sequences once you have
+imported them. Everything an agent prepares, plans, reviews or records is free.
 
-**An agent can never spend money on its own.** The six paid tools only create an *approval request*. Studio
+**An agent can never spend money on its own.** The eight paid tools only create an *approval request*. Studio
 shows it to you with the prompt, the reference images, the voices and the price, and nothing is sent to Venice
-until you click *Godkänn och generera* (approve and generate) — or *Godkänn och skapa* for a picture.
+until you click *Godkänn och generera* (approve and generate) — *Godkänn och skapa* for a picture or a voice,
+*Godkänn och kör* for an edit.
 
 - [Enabling the server](#enabling-the-server)
 - [Addresses and token](#addresses-and-token)
@@ -164,7 +168,7 @@ connect (see [Troubleshooting](#troubleshooting)).
 
 ## Tools
 
-Studio offers **60 tools** — 26 that read, 28 that write (free) and 6 paid ones that only ask for approval — plus
+Studio offers **73 tools** — 31 that read, 34 that write (free) and 8 paid ones that only ask for approval — plus
 one prompt and one resource. Tool errors come back as readable tool errors; their messages are in Swedish, like the
 app's UI. Tools that touch the library fail with an explanation until a library is open, and the tools that read or
 fill the Generate form need the Studio window to be open.
@@ -177,34 +181,36 @@ fill the Generate form need the Studio window to be open.
 | Stills and keyframes (`tools/stills.ts`) | `list_image_models`, `list_stills`, `get_still`, `preview_segment_frames` | `save_frame_as_still`, `bridge_segment` | |
 | Storyboards (`tools/storyboards.ts`) | `list_storyboards`, `get_storyboard`, `preview_transition` | `create_storyboard`, `update_storyboard`, `add_board`, `update_board`, `move_board`, `delete_board`, `update_transition`, `convert_storyboard_to_sequence` | |
 | Approvals (`tools/paid.ts`) | `get_approval` | | `request_generation`, `request_segment_generation`, `request_generate_all`, `request_transition_generation`, `request_generate_storyboard`, `request_image_generation` |
+| Redigera (`tools/editor.ts`, `tools/editor-paid.ts`, operations in `tools/edit-input.ts`) | `list_edits`, `get_edit`, `get_transcript`, `plan_edit_operation`, `list_audio_models` | `create_edit`, `apply_edit`, `set_current_version`, `rename_edit`, `update_transcript`, `send_edit_to_sequence` | `request_edit_operation`, `request_voice_design` |
 | Reviews and learnings (`tools/review.ts`) | `review_generation`, `get_frames`, `list_exports`, `review_export`, `review_sequence`, `list_reviews`, `list_learnings` | `add_review`, `delete_review`, `save_learning`, `update_learning`, `delete_learning` | |
-| **Total (60)** | **26** | **28** | **6** |
+| **Total (73)** | **31** | **34** | **8** |
 
 **Images and sound.** Tools that return media send pictures as MCP image content (JPEG) and sound as MCP **audio
 content** (MP3, mono), each preceded by a text label that says what it is (`Reference @Audio1 = Anna's voice
 (window 0–8 s)`, `t = 2.4 s – frame 3 of 6`). Sound is only sent when asked for — `include_audio` on `get_asset`,
-`review_generation` and `review_export`, or `audio_id` on `get_asset` — because it is large. Audio content arrived
+`review_generation` and `review_export` (up to 30 s, from `audio_start` on the last two), or `audio_id` on
+`get_asset` — because it is large. Audio content arrived
 with MCP protocol version 2025-03-26: Studio reads the version from the client's `initialize` request (and the
 `MCP-Protocol-Version` header), and a client on an older version gets a one-line note that the sound was left out
 instead of content it would reject. Whether an agent can actually listen depends on its client and model; the
 frames, reference images and text work without it.
 
-### Read (26 tools; change nothing)
+### Read (31 tools; change nothing)
 
 | Tool | What it does |
 | --- | --- |
 | `get_studio_guide` | How Studio works and how to write video prompts for it (voices, poses and the review loop included), ending with the learnings recorded so far. Read once at the start of a session. |
-| `get_workspace` | What the user is looking at (view, open sequence and clip, or open storyboard) and the Generate form: mode, model, settings, prompt, reference token maps (`@ImageN` and `@AudioN`), pictures past the model's limit (`not_sent`), `composed_prompt` (the prompt as it is sent, with the References legend of the referenced assets' descriptions) and `description_entries`, validation issues, price. |
-| `list_assets` | Characters, environments, outfits and poses with ids, descriptions, photo ids, default outfits and — for characters and environments — their audio clips (`audio_id`, role `voice` or `soundscape`, duration, reference window `clip_start` / `clip_length`); optional `kind` and `query` filters. |
+| `get_workspace` | What the user is looking at (view, open sequence and clip, open storyboard, or the edit open in Redigera: view `editor`, `edit_id`, `edit_name`) and the Generate form: mode, model, settings, prompt, reference token maps (`@ImageN` and `@AudioN`), pictures past the model's limit (`not_sent`), `composed_prompt` (the prompt as it is sent, with the References legend of the referenced assets' descriptions) and `description_entries`, validation issues, price. |
+| `list_assets` | Characters, environments, outfits and poses with ids, descriptions, photo ids, default outfits and — for characters and environments — their audio clips (`audio_id`, role `voice` or `soundscape`, duration, reference window `clip_start` / `clip_length`; for a character's voice `clone_consent`, whether you allow cloning it for new lines); optional `kind` and `query` filters. `get_asset` shows the same per clip. |
 | `get_asset` | One asset with its photos as images (JPEG, at most 768 px; `max_images` 1–12, default 4), each labelled with its photo number and `image_id`; for an outfit, the characters wearing it by default. With `include_audio` (the first clip, or the one named by `audio_id`) also a clip's reference window as MP3 audio, exactly as Venice would get it. |
 | `list_models` | Venice's usable video models (optionally one `kind`) with mode, durations, resolutions, aspect ratios, reference image limit, whether they take reference audio (`audio_input`, `max_reference_audios`), audio and prompt length limit; the default model is marked. |
 | `list_prompts` | The prompt library, favourites first. |
-| `list_generations` | Generations filtered and sorted like Studio's clip feed (`query`, `status`, `model`, `asset_id`, `min_rating`, `unrated`, `since_days`, `placement`, `has_reviews`, `sort`, `limit` 1–50 default 20, `offset`), each with status, prompt, settings, price, the user's rating, review count and a reference summary, plus totals for the filtered set. |
-| `get_generation` | One generation with its token maps, `sent_prompt` (what Venice got, when descriptions were appended), the sequence clip or storyboard transition it is a take of (with the boards it goes between), the user's rating and every review, its poster frame and optionally up to 6 `frames` from the video. |
+| `list_generations` | Generations filtered and sorted like Studio's clip feed (`query`, `status`, `model`, `asset_id`, `min_rating`, `unrated`, `since_days`, `placement`, `has_reviews`, `source` — *Källa*: `generated`, `import` (own clips, and copies of exported films opened in Redigera, marked `recipe.export`) or `edit` — `sort`, `limit` 1–50 default 20, `offset`), each with its `source`, `title` (an own clip's file name, a version's "<redigering> v3"), `parent_id` and `edit_id` where they apply, status, prompt, settings, price, the user's rating, review count and a reference summary, plus totals for the filtered set. |
+| `get_generation` | One generation with its source fields, the `recipe` of an own clip or a version (how it was made: the operation, its base version, its cost, its added sound `layers`; for an import the file name and why a working copy was made; for a copy of an exported film `export`) and `original_path` (an import's untouched original next to its working copy), its token maps, `sent_prompt` (what Venice got, when descriptions were appended), the sequence clip or storyboard transition it is a take of (with the boards it goes between), the user's rating and every review, its poster frame and optionally up to 6 `frames` from the video. |
 | `list_sequences` | Sequences with clip count and the length of the current cut. Storyboards are not listed (a note points to `list_storyboards`). |
-| `get_sequence` | One sequence (a storyboard's id is refused with a pointer to `get_storyboard`) with its clips and its number of stills; each clip with its `notes`, token maps, `composed_prompt` and `description_entries`, `start_image` / `end_image` (`{kind: "previous" \| "next", from_clip}`, `{kind: "image", still_id \| asset_image_id, path}` or null), `continue_from_previous`, `end_from_next`, `supports_end_image`, validation issues, `frame_problems` (why its neighbours' frames can't be had yet) and selected take; poster frames with `include_thumbnails` (default true). |
+| `get_sequence` | One sequence (a storyboard's id is refused with a pointer to `get_storyboard`) with its clips, its number of stills and its `export_height` (the *Exportformat*, null = the first clip's own size); each clip with its `notes`, token maps, `composed_prompt` and `description_entries`, `start_image` / `end_image` (`{kind: "previous" \| "next", from_clip}`, `{kind: "image", still_id \| asset_image_id, path}` or null), `continue_from_previous`, `end_from_next`, `supports_end_image`, validation issues, `frame_problems` (why its neighbours' frames can't be had yet) and selected take (with its `source`; `own_clip: true` when it is your own film or a version from Redigera); poster frames with `include_thumbnails` (default true). |
 | `validate_prompt` | Checks a prompt's `@ImageN` and `@AudioN` tokens (and the audio windows) against the form's references or a given set — the same check Studio applies before every paid generation — and answers with `composed_prompt` and `description_entries` (`include_descriptions` / `excluded_description_asset_ids` try other switches), measured against the model's `prompt_character_limit`. |
-| `get_approval` | The state of an approval request: `pending`, `approved` (with `generation_ids`, or for an image request the `still_id` and whether it was put into its clip), `declined`, `expired` or `failed`. |
+| `get_approval` | The state of an approval request: `pending`, `approved` (with `generation_ids`, or for an image request the `still_id` and whether it was put into its clip; for an edit the edit, base version, operation, the job's progress and then `result_version`; for a designed voice the new clip's `audio_id`), `declined`, `expired` or `failed`. |
 | `list_image_models` | Venice's image models for `request_image_generation`, with the price of one picture: text-to-image models (prompt only) and models that combine up to `max_input_images` references; the Seedream defaults are marked. Also says whether *Säkert läge för bilder* is on (`safe_mode`: Venice blurs adult content; only you can switch it, under Inställningar → Bilder). |
 | `list_stills` | The stills of a sequence or a storyboard (`sequence_id` or `storyboard_id`; or all), newest first: generated pictures, uploaded pictures and saved frames, each with its prompt, model, references and `used_by` (the sequence clips using it as start or end image and the storyboard boards showing it); small thumbnails with `include_thumbnails` (default true). |
 | `get_still` | One still as an image, with its settings and the clips and boards that use it; with `include_references` also the pictures it was made from (the base first). |
@@ -212,28 +218,33 @@ frames, reference images and text work without it.
 | `list_storyboards` | Storyboards, most recently changed first, with their number of boards and transitions and how many transitions have a finished take. |
 | `get_storyboard` | One storyboard: its format, the boards in order with their notes ("Vad visar bilden?") and pictures (a still or a library photo; `aspect_mismatch` when its shape differs from the storyboard's), and the transitions between them with the boards they join, prompt, settings, `ready` / `problems`, takes and the selected take (`made_from_earlier_pictures` when a board's picture changed since). With `include_images` (default true) the board pictures and the selected takes' poster frames come as images. |
 | `preview_transition` | The two pictures a transition goes between — the first board's (its start) and the next board's (its end) — as images, with the boards' notes, the transition's prompt and settings, whether it is ready and its price. |
-| `review_generation` | What a finished generation became: prompt, settings, token maps, price, the user's rating and all reviews, `frames` frames evenly spaced from the first to the last (1–12, default 6; JPEG 512 px wide, captioned "t = 2.4 s"), the reference images (or start and end image — for a storyboard transition the two board pictures) it was made from (`include_references`, default true), and with `include_audio` its sound and the reference voice windows as MP3. Ends with a review checklist (for a transition also whether it starts on the first picture and ends on the second) and the suggested tags. |
+| `review_generation` | What a finished generation (or an own clip, or a version from Redigera) became: prompt (or source, title and recipe), settings, token maps, price, the user's rating and all reviews, `frames` frames evenly spaced from the first to the last (1–12, default 6; JPEG 512 px wide, captioned "t = 2.4 s"), the reference images (or start and end image — for a storyboard transition the two board pictures) it was made from (`include_references`, default true), and with `include_audio` its sound (up to 30 s from `audio_start`) and the reference voice windows as MP3. Ends with a review checklist (for a transition also whether it starts on the first picture and ends on the second) and the suggested tags. |
 | `get_frames` | Frames of a generation (`generation_id`) or an exported film (`export_id`) at up to 12 given times (times past the end give the last frame), `width` 256–768 px (default 512). |
-| `list_exports` | Exported films of sequences and storyboards, newest first (optionally of one `sequence_id` or `storyboard_id`; `limit` default 20), with the sequence or storyboard, file, date, length and whether the file still exists. |
+| `list_exports` | Exported films of sequences and storyboards, newest first (optionally of one `sequence_id` or `storyboard_id`; `limit` default 20), with the sequence or storyboard, file, date, length, `cuts` (where the clips meet, recorded at export; older films have none) and whether the file still exists. |
 | `review_export` | A whole exported film (of a sequence or a storyboard): when it still matches its sequence or storyboard, the clips (a storyboard's transitions) with their place in the film, `frames_per_clip` frames inside each clip (1–4, default 2) and the last frame before and first frame after every cut (`include_cut_frames`), at most 24 frames; otherwise evenly spread frames and a note why the cuts are unknown. With `include_audio`, up to 30 s of its sound from `audio_start`. |
 | `review_sequence` | A sequence clip by clip: prompt, references, continuation, the selected take's rating and review count, and `frames_per_clip` frames of it (2–6, default 3; first and last frame included, within the trims; at most 30 frames in all), plus continuity hints for every cut. |
 | `list_reviews` | Reviews by the user (author `user`) and agents, most recently changed first (for one generation: the user's first), filtered by `generation_id`, `author`, `tag` or `min_rating`; outside a single generation each comes with that generation's prompt and model. |
+| `list_edits` | The edits in Redigera, newest first: origin (a clip from the feed, a take, an export or an own film), current version, number of versions, length, whether a paid job runs and the cost so far. |
+| `get_edit` | One edit: the version tree (`version_id`, `parent_version_id`, the operation, its cost, which sequence clips use it, its added sound `layers` with `layer_id`), the current version, the paid jobs (progress, errors), AI takes, the edit's audio media (`media_id`), and for the current version its cut markers (*Klippgränser*), its layers and muted spans as the timeline draws them and a transcript summary; whether this Mac separates voice and background and whether Venice lists a voice changer; poster frames with `include_thumbnails`. |
+| `get_transcript` | A version's (or any generation's) transcript lines (`segment_id`, start, end, text) as JSON, or as SubRip with `format: "srt"`; an inherited one names `inherited_from`. |
+| `plan_edit_operation` | Checks an operation on a version exactly as Redigera's cards do and says what it would do and cost, without doing it: the normalized operation (range snapped, defaults filled), `paid`, `price_usd`, `partial_price` / `price_note`, the parts, notes, warnings and problems — and for picture operations the frames it works from as images (`regenerate`: the frame before and after the range, or the film's first frame for a range at 0; `extend`: the film's last frame; `prompt_edit`: the first and last frame of the range; `upscale`: none). Free (it may ask Venice for free quotes). |
+| `list_audio_models` | Venice's speech, music, effect, transcription, voice-changer and voice-design models with voices, limits and prices, the default models, and whether this Mac can separate voice and background. |
 | `list_learnings` | The learnings so far, pinned first, then the most recently changed; filters `query` (every word in the title, insight, model or tags), `model` (that model's plus the general ones), `tag`, `author`; `limit` default 50. Also tells the agent the name its own reviews and learnings are recorded under (`your_name`). |
 
-### Write (28 tools; free, change the library or the form)
+### Write (34 tools; free, change the library or the form)
 
 | Tool | What it does |
 | --- | --- |
 | `set_form` | Fills in the Generate form (mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, start image, and which descriptions are appended: `include_descriptions`, `excluded_description_asset_ids`) and shows the Generate view. All or nothing: invalid values change nothing. |
 | `set_references` | Sets the form's reference images and audio from assets, in order (`replace` or `append`): all photos or chosen `image_ids` (`[]` for none, e.g. only a voice); with a model that takes reference audio, a character's first voice clip unless `include_voice` is false, an environment's first sound clip with `include_voice: true`, or chosen `audio_ids`. Switches the form to reference-to-video if needed and returns the token maps (`references`, `audio_references`) to write the prompt with. Photos and clips over the model's limits (9 images for Seedance; 3 clips, 15 s of audio in all) are listed in `not_added` / `not_added_audio`, and so is a default voice under 2 s (no model takes it). Replacing the references doesn't renumber the prompt's tokens; `reorder_references` does. |
 | `reorder_references` | Changes the order of the form's (`target: "form"`, default) or a clip's (`target: {segment_id}`) reference images (`images`) and/or audio clips (`audios`), like dragging a thumbnail in Studio, and renumbers every `@ImageN` / `@AudioN` in the prompt and negative prompt so each keeps pointing at the same picture or clip: references [A, B, C] with "@Image1 hugs @Image3", `images: ["@Image3"]` → [C, A, B] and "@Image2 hugs @Image1". References are named by token, `image_id` / `audio_id` or `asset_id` (all of that asset's photos or clips); the named ones come first, the rest keep their order. Answers with the new token maps, `moved` (old → new token), the prompt, `composed_prompt` and the pictures past the model's limit (`not_sent`; moving one forward sends it). Not for a clip that sends no references. |
-| `open_in_studio` | Brings the Generate view, a sequence (optionally one clip) or a storyboard to the front. |
+| `open_in_studio` | Brings the Generate view, a sequence (optionally one clip), a storyboard or an edit in Redigera (`view: "editor"`, `edit_id`; without it the list) to the front. |
 | `create_asset` | Creates a character, environment, outfit or pose with a name and description. Photos and audio clips can only be added by the user in Studio. |
 | `update_asset` | Changes an asset's name, description or (characters) default outfit. Renaming also renames its folder. The description is appended to every later prompt that sends the asset's photos or voice. |
 | `update_asset_audio` | Moves or resizes an audio clip's reference window (`clip_start`, `clip_length`); Studio keeps it 2–15 s inside the file and says when it adjusted it. |
 | `save_prompt` | Saves a prompt to the prompt library. |
 | `create_sequence` | Creates an empty sequence with the default settings. |
-| `add_segment` | Adds a clip (`notes`, prompt, references with the same items as `set_references`, model and options, `include_descriptions` / `excluded_description_asset_ids` (by default those of the clip before), `continue_from_previous`, `end_from_next`, `start_image` / `end_image`), validated like a generation. A clip that continues from the previous one, or has a start or end image, is image-to-video and takes no references, so no voices either. |
+| `add_segment` | Adds a clip — or, with `from_generation_id`, a clip whose selected take is a finished video that already exists (your own clip, a version from Redigera; only `notes` go along, it doesn't continue from the clip before) — (`notes`, prompt, references with the same items as `set_references`, model and options, `include_descriptions` / `excluded_description_asset_ids` (by default those of the clip before), `continue_from_previous`, `end_from_next`, `start_image` / `end_image`), validated like a generation. A clip that continues from the previous one, or has a start or end image, is image-to-video and takes no references, so no voices either. |
 | `update_segment` | Changes a clip; only the fields passed change (`references` replaces its photos and audio; `include_descriptions` / `excluded_description_asset_ids` choose the descriptions appended to its prompt). `start_image` / `end_image` take `{still_id}`, `{asset_image_id}`, `{generation_id, time}` (a frame, saved as a still), `"previous"` / `"next"` or `null`; a picture makes the clip image-to-video (with a model that takes an end image when it has one), drops its references and takes the `@` tokens out of a prompt the agent didn't rewrite. `selected_take_id` chooses which of its finished takes is in the cut. Existing takes are kept. |
 | `delete_segment` | Removes a clip (marked destructive). Its takes are kept as ordinary generations. |
 | `move_segment` | Moves a clip to another position (`to_clip_number`, 1-based). |
@@ -247,6 +258,12 @@ frames, reference images and text work without it.
 | `delete_board` | Removes a board (marked destructive); its two transitions are replaced by one between its neighbours, their takes stay as ordinary generations, and its picture stays among the stills. |
 | `update_transition` | Changes a transition's `prompt` (the motion from the first picture to the second; no `@` tokens), `negative_prompt`, `duration`, `resolution`, `audio`, `model` (only image-to-video models that take an end image) or `selected_take_id` (one of its finished takes). |
 | `convert_storyboard_to_sequence` | Makes an ordinary sequence, "<storyboard> (sekvens)", with one clip per transition and a copy of each transition's selected take, so the film can be edited further in Sekvenser. The storyboard stays as it is. |
+| `create_edit` | Opens a finished film in Redigera as a new edit: `generation_id` (a feed clip, a take, an own clip, another edit's version) or `export_id` (copied in as v1); optional `name`. The answer names other edits of the same film. Files from disk only you can open. |
+| `apply_edit` | Makes a free operation (see [Edit operations](#edit-operations)) on a version — the current one unless `base_version_id` — and saves the result as a new version, rendered on your Mac. Paid operations are refused with a pointer to `request_edit_operation`. |
+| `set_current_version` | Makes a version the edit's current one (an undo is choosing the parent). |
+| `rename_edit` | Renames an edit; its folder and its versions' titles follow. |
+| `update_transcript` | Corrects the text of transcript lines (`segment_id`, `text`); an inherited transcript is copied to the version first. |
+| `send_edit_to_sequence` | Puts a version into a sequence: as a new, selected take of a clip (`segment_id`) or as a new clip (`sequence_id`, `after_segment_id`). Not into storyboards. |
 | `add_review` | Records the agent's review of a generation (rating 1–5, up to 12 tags, a note) under its own name; each call adds a new review. |
 | `delete_review` | Deletes one of the agent's own reviews (marked destructive). |
 | `save_learning` | Records a learning: title, insight, optional model (left out: every model), tags and evidence (up to 50 generation ids, which must exist). |
@@ -255,7 +272,7 @@ frames, reference images and text work without it.
 
 While *Generera saknade* runs for a sequence or a storyboard, agents cannot change its clips, boards or transitions.
 
-### Paid (6 tools; create an approval request, nothing is generated until the user approves)
+### Paid (8 tools; create an approval request, nothing is generated until the user approves)
 
 | Tool | What it asks for |
 | --- | --- |
@@ -265,8 +282,40 @@ While *Generera saknade* runs for a sequence or a storyboard, agents cannot chan
 | `request_transition_generation` | A new take of one storyboard transition: from the first board's picture to the next board's, with the transition's prompt and settings. Both boards need pictures and the prompt must be written. Lapses if a board's picture, the transition or the pair of boards changes before approval. |
 | `request_generate_storyboard` | Every transition of a storyboard without a finished selected take (and none rendering); they are independent of each other, so the order doesn't matter. Refused, naming the transition, unless all of them are ready; the price is the sum. Lapses if the boards' pictures or the transitions change. |
 | `request_image_generation` | One still (about $0.06 with the default Seedream models), typically a board's picture or a keyframe: an English prompt, optionally references (`reference_still_ids`, `reference_image_ids` for library photos, `reference_asset_ids` for assets' cover photos, sent in that order — after the previous board's picture with `previous_board_as_reference`; the first is the base picture), model, aspect ratio (default the storyboard's or sequence's, or the clip's with `assign_to` a clip), resolution, quality, a negative prompt (text-to-image models only), the storyboard or sequence it belongs to (`storyboard_id` / `sequence_id`), and `assign_to` a board (`{board_id}`) or a clip's start or end slot (`{segment_id, slot}`). Checked and priced exactly like *Skapa bild…* in the window; the answer also says whether *Säkert läge för bilder* is on (`safe_mode`). Saved as a still of the storyboard or sequence once approved (with neither: in `Referensbilder`), and made the board's picture or put into the slot when `assign_to` names one. Refused while *Generera saknade* runs there; lapses if the board moves, is removed or gets another picture, or the clip moves or its slot starts or stops taking a neighbour's frame, before approval. A picture the user puts onto the board while the image is being made stays: the new still is kept, not put in, and the answer's `notice` says so. |
+| `request_edit_operation` | A paid operation on a version of an edit (`transcribe`, `change_voice`, `speak_lines`, `music`, `effect`, `regenerate`, `prompt_edit`, `extend`, `upscale`; the same `operation` input as `plan_edit_operation`, which the agent calls first). Planned exactly as Redigera's cards plan it; problems come back as an error and free operations are refused. Lapses if the version's file, the plan (range, prompt, model, voice, lines) or the transcript lines it uses change, or Venice's price rises by more than a cent, before approval; a newer request for the same operation on the same version replaces a pending older one, and so does the same request at another price (the same at the same price returns the pending one). The answer has `partial_price` when a part (a voice clone) has no price. Once approved it runs as a job, and its result becomes a new version by itself. |
+| `request_voice_design` | A new voice for a character (*Skapa röst med AI*, about $0.35): an English description of the voice and a sample text. Once approved and made, it is added as a new *Röst* clip of the character — the only way an agent adds an audio clip. One design per character waits at a time: a newer request for the same character replaces a pending one. |
 
 Each takes an optional `note` (up to 500 characters) that is shown to the user in the approval dialog.
+
+### Edit operations
+
+`plan_edit_operation`, `apply_edit` and `request_edit_operation` take one `operation`, chosen by `op` (snake_case,
+like every field). Ranges are `{start, end}` in seconds of the base version; the plan snaps them to frames, cut
+markers, transcript lines and what the model allows. Fields left out get the defaults Redigera's cards start from.
+
+| `op` | Fields | Cost |
+| --- | --- | --- |
+| `trim` / `cut` | `keep` / `range` | free |
+| `fade` | `in_seconds`, `out_seconds` | free |
+| `volume` | `gain_db`, `range?`, `target?` (`all`, `voice`, `background`) | free |
+| `mute` | `range?`, `target` (`voice` removes the voice, `background` keeps only the voice) | free |
+| `denoise` / `loudness` | `strength` (`mild`, `strong`) / `lufs` (−14, −16, −23) | free |
+| `add_audio` | `media_id` (audio already in the edit) or `asset_audio_id` (a library clip), `at`, `gain_db?`, `duck?`, `loop?`, `length?`, fades, `replace_bed?` | free |
+| `layer` | `layer_id` (a layer of the base version: `get_edit` lists every version's), `gain_db?`, `at?`, `remove?` | free |
+| `transcribe` | `model?` (Scribe v2), `language?` | paid |
+| `change_voice` | `model?` (a listed voice changer), `voice` (`{preset}` or `{voice_id}`), `range?` or `segment_ids?` (only those lines get the new voice), `background?`, `remove_noise?` | paid, per started minute per part |
+| `speak_lines` | `model?`, `voice` (`{preset}`, `{voice_id}` or `{clone_audio_id}`), `lines` (`{segment_id, text}` replaces a line, `{at, text}` adds one; at most 200), `background?`, `fit?`, `style?`, `language?` | paid, per line |
+| `music` / `effect` | `model?`, `prompt`, `range?` / `at` + `seconds`, gain and ducking | paid |
+| `regenerate` | `range` (whole seconds), `prompt`, `model?`, `resolution?`, `audio?` (`keep`, `model`) | paid |
+| `prompt_edit` | `range`, `prompt` (the one change), `model?`, `resolution?`, `reference_image_ids?`, `audio?` | paid |
+| `extend` | `seconds` (4–15), `prompt`, `model?`, `resolution?`, `audio?` (`model`, `silence`) | paid |
+| `upscale` | `factor` (2 or 4) | paid |
+
+Voice separation (needed for the `voice` / `background` targets, and to keep music and effects under a new voice)
+uses macOS's built-in sound isolation; `get_edit` and `list_audio_models` say whether this Mac has it. A
+character's *Röst* clip can be cloned for new lines only once you have ticked *Får klonas för nya repliker* for it
+(`clone_consent`); the approval dialog asks for it when it is missing. Withdrawn, no further line is said in that
+voice: lines not yet sent are refused, and the clip's clone handles are forgotten.
 
 ### Prompt and resource
 
@@ -278,9 +327,12 @@ Each takes an optional `note` (up to 500 characters) that is shown to the user i
 ### What agents cannot do
 
 Agents cannot add or remove photos, add, remove or reorder an asset's audio clips (only move a clip's reference
-window; the order of a form's or clip's *references* is theirs to change with `reorder_references`), upload pictures
-or delete stills (they can save frames and ask for generated pictures), delete assets, prompts, generations,
-sequences or storyboards, rename sequences, export films, change settings (*Säkert läge för bilder* included),
+window; the order of a form's or clip's *references* is theirs to change with `reorder_references`; a designed voice
+is added only once you approve `request_voice_design`), upload pictures or delete stills (they can save frames and
+ask for generated pictures), import video files from disk (*Egna klipp*) or add their own audio files to an edit,
+delete assets, prompts, generations, sequences, storyboards, edits or versions, clean versions up (*Rensa
+versioner*), give the consent to clone a voice, rename sequences, export films or set a sequence's *Exportformat*,
+save subtitles to a file (they read them with `get_transcript`), change settings (*Säkert läge för bilder* included),
 switch the library, or approve anything. They cannot set the user's own rating, note or tags, pin learnings, or
 change or delete reviews and learnings written by the user or by other agents; their own reviews can be deleted but
 not edited. Their own learnings stop being theirs to change once the user pins one (it can no longer be updated or
@@ -318,11 +370,27 @@ with the same validation.
    Generate form was captured when the request was made, so later edits to the form don't change it) — then
    submits through the normal generation path, sending exactly the composed prompt that was checked. If Venice first needs you to accept a model's terms, the consent
    dialog appears; accepting it submits the request, and until then the request stays pending.
+
+   **Edits in Redigera** (`request_edit_operation`) show the version's poster, for a picture operation the frames
+   it works from (captioned: the frame before or after the range, the film's first or last frame, the range's first
+   and last frame), what changes (the prompt; old → new lines; for `change_voice` with `segment_ids` the lines that
+   get the new voice; the voice, with a play button for a cloned one), the parts with their prices and the price
+   note (billed per started minute, a voice clone Venice doesn't price), and the plan's warnings (lip sync, real
+   people …), planned again live while the dialog is open. A price with an unpriced part is shown as *≈ $X +*.
+   Above $5, with an unknown price or with a part that has none, a second step asks *Det här kostar … Fortsätt?*. A cloned voice whose clip you haven't allowed to be cloned shows a required
+   checkbox, *Jag har rätt att använda den här rösten*; ticking it and approving saves that consent on the clip.
+   On approval Studio checks that the version still exists and is the very same file (device, inode, size and
+   modification time), plans the operation again and requires the same plan and a price no more than $0.01 above
+   the approved one, that the transcript lines it uses are unchanged, and that the clone consent is there — then runs
+   it through Redigera's own service with the approved price as its ceiling. *Skapa röst* requests
+   (`request_voice_design`) show the character, the description, the sample text and the price; with an unknown
+   price (or one above $5) they too ask once more before approving.
 5. The agent polls `get_approval` (every 15–30 seconds is plenty) and then follows the result with `get_generation`,
-   `get_sequence` or `get_storyboard` — or, for a picture, `get_still`. A picture is made while the dialog waits
-   (*Skapar bilden…*, usually 10–30 seconds), and the dialog then shows it to you too; if it couldn't be put into
-   its clip or onto its board, `get_approval` says why in `notice` (the picture is saved among the stills either
-   way).
+   `get_sequence` or `get_storyboard` — or, for a picture, `get_still`; for an edit, `get_approval` itself follows
+   the job until the new version is there (then `review_generation`), and for a designed voice it names the new clip.
+   A picture is made while the dialog waits (*Skapar bilden…*, usually 10–30 seconds), and the dialog then shows it
+   to you too; if it couldn't be put into its clip or onto its board, `get_approval` says why in `notice` (the
+   picture is saved among the stills either way).
 
 A request **expires** after 30 minutes without an answer, and immediately when the token is replaced, the library
 is switched or the agent connection is switched off.
@@ -368,7 +436,11 @@ from the characters, outfits, environment and pose, with the previous board's pi
 write each transition's prompt as the motion from picture A to picture B; generate, review, regenerate), making
 pictures, replacing a clip between its neighbours (review → `bridge_segment` → look at the frames →
 `request_segment_generation` → review again), approvals, the review loop, and how to write prompts for
-Seedance-class video models, for transitions and for pictures, and it ends with the learnings recorded so far (the
+Seedance-class video models, for transitions and for pictures, your own clips (*Egna klipp*) and editing films in
+Redigera (always plan first; which operation for which problem — a broken stretch → `regenerate`, a visual change →
+`prompt_edit`, one change per run on the shortest range, a whole film's voice → `change_voice` when Venice lists one,
+else `transcribe` + `speak_lines`; spoken lines don't move lips; Seedance often refuses real people; prefer the free
+operations; review every version), designed and cloned voices, and it ends with the learnings recorded so far (the
 pinned ones and the ten most recently changed). The `write_video_prompt` prompt starts from the prompt-writing part
 of the guide, with the clip's actual references (or, for an image-to-video clip, the prompts of the neighbours it
 starts and ends on; for a transition, its two boards and their notes), its notes and the learnings for its model.

@@ -19,6 +19,10 @@ export const FOLDERS = {
   generations: 'Genereringar',
   sequences: 'Sekvenser',
   storyboards: 'Storyboards',
+  /** The user's own imported films, by import day (Egna klipp/<YYYY-MM-DD>/). */
+  ownClips: 'Egna klipp',
+  /** Redigera: one folder per edit, with its versions, AI takes (Tagningar/), audio (Ljud/) and inputs (Underlag/). */
+  edits: 'Redigeringar',
   appData: '.studio'
 } as const
 
@@ -44,8 +48,19 @@ export const LEGACY_FOLDERS = {
   frames: 'frames'
 } as const
 
-/** Inside FOLDERS.appData. */
-export const APP_DATA = { thumbs: 'miniatyrer', frames: 'bildrutor', tmp: 'tmp' } as const
+/**
+ * Inside FOLDERS.appData. stammar: separated voice/background stems (an LRU cache). redigering: scratch of paid
+ * edit jobs, one folder per job. tidslinje: the editor's filmstrip and waveform cache. Only tmp is cleared when a
+ * library is opened.
+ */
+export const APP_DATA = {
+  thumbs: 'miniatyrer',
+  frames: 'bildrutor',
+  tmp: 'tmp',
+  stems: 'stammar',
+  editJobs: 'redigering',
+  timeline: 'tidslinje'
+} as const
 
 /** Inside a sequence folder. */
 export const TAKES_FOLDER = 'Tagningar'
@@ -58,6 +73,16 @@ export const TRANSITIONS_FOLDER = 'Övergångar'
 
 /** Inside a storyboard folder: its stills (board images generated, uploaded or saved from takes). */
 export const BOARD_IMAGES_FOLDER = 'Bilder'
+
+/** Inside an edit folder (Redigeringar/<namn>/): the edit's subfolders. */
+export const EDIT_FOLDERS = {
+  /** AI takes made for picture operations. */
+  takes: 'Tagningar',
+  /** edit_media: converted voices, spoken lines, music, effects, added audio and rendered beds. */
+  audio: 'Ljud',
+  /** What was sent to Venice: frames and proxies. */
+  inputs: 'Underlag'
+} as const
 
 /**
  * Where a sequence or a storyboard keeps its files: its own folder in `parent` (named after it), its takes in
@@ -223,7 +248,10 @@ export function fromStoredPath(stored: string): string {
   return join(libraryRoot(), stored)
 }
 
-/** Applies map to every file path in params: the start, end and reference images and the reference audio. */
+/**
+ * Applies map to every file path in params: the start, end and reference images, the reference audio, and the
+ * source and reference videos of video-to-video models.
+ */
 function mapParamPaths(p: GenerationParams, map: (path: string) => string): GenerationParams {
   if (!p || typeof p !== 'object') return p
   const out: GenerationParams = { ...p }
@@ -237,10 +265,14 @@ function mapParamPaths(p: GenerationParams, map: (path: string) => string): Gene
       a && typeof a === 'object' && typeof a.path === 'string' && a.path ? { ...a, path: map(a.path) } : a
     )
   }
+  if (typeof out.sourceVideo === 'string' && out.sourceVideo) out.sourceVideo = map(out.sourceVideo)
+  if (Array.isArray(out.referenceVideos)) {
+    out.referenceVideos = out.referenceVideos.map((v) => (typeof v === 'string' && v ? map(v) : v))
+  }
   return out
 }
 
-/** Converts startImage/endImage/referenceImages and the referenceAudios' paths to the stored form. */
+/** Converts every params path (images, audio, videos; see mapParamPaths) to the stored form. */
 export function toStoredParams(p: GenerationParams): GenerationParams {
   return mapParamPaths(p, toStoredPath)
 }
@@ -360,6 +392,14 @@ function ensureDir(dir: string): string {
   return dir
 }
 
+/**
+ * Creates a folder inside the open library (and its parents) and returns it; throws when the base folder is gone
+ * (see assertRootIntact), so a vanished library is never brought back as an empty folder.
+ */
+export function ensureLibraryDir(dir: string): string {
+  return ensureDir(dir)
+}
+
 /** Before creating folders for a destination: one inside the open library needs the base folder to be intact. */
 function assertDestinationIntact(dest: string): void {
   if (activeRoot && relativeInside(activeRoot, dest) !== undefined) assertRootIntact()
@@ -390,6 +430,17 @@ export function generationsDayDir(d: Date): string {
   return ensureDir(join(libraryRoot(), FOLDERS.generations, dayStamp(d)))
 }
 
+/** Egna klipp/<day>: where an import made on that day is kept. */
+export function ownClipsDayDir(d: Date): string {
+  return ensureDir(join(libraryRoot(), FOLDERS.ownClips, dayStamp(d)))
+}
+
+/** Redigeringar/<folder>[/Tagningar|Ljud|Underlag]: an edit's folder or one of its subfolders. */
+export function editDir(folder: string, sub?: keyof typeof EDIT_FOLDERS): string {
+  const base = join(libraryRoot(), FOLDERS.edits, folderSegment(folder))
+  return ensureDir(sub ? join(base, EDIT_FOLDERS[sub]) : base)
+}
+
 /** Sekvenser/<folder>, or Storyboards/<folder> for a storyboard */
 export function sequenceDir(folder: string, kind: SequenceKind = 'sequence'): string {
   return ensureDir(join(libraryRoot(), KIND_FOLDERS[kind].parent, folderSegment(folder)))
@@ -418,11 +469,29 @@ export function tmpDir(): string {
   return appDataDir(APP_DATA.tmp)
 }
 
-const DAY_FOLDER = new RegExp(`^(${FOLDERS.generations}|${FOLDERS.references})/\\d{4}-\\d{2}-\\d{2}$`)
+/** .studio/stammar: the voice/background stem cache. */
+export function stemsDir(): string {
+  return appDataDir(APP_DATA.stems)
+}
+
+/** .studio/redigering[/<jobId>]: scratch of a paid edit job (removed when the job is finished). */
+export function editJobDir(jobId?: string): string {
+  return jobId === undefined ? appDataDir(APP_DATA.editJobs) : appDataDir(APP_DATA.editJobs, folderSegment(jobId))
+}
+
+/** .studio/tidslinje: the editor's filmstrip and waveform cache. */
+export function timelineDir(): string {
+  return appDataDir(APP_DATA.timeline)
+}
+
+const DAY_FOLDER = new RegExp(
+  `^(${FOLDERS.generations}|${FOLDERS.references}|${FOLDERS.ownClips})/\\d{4}-\\d{2}-\\d{2}$`
+)
 
 /**
- * Removes a Genereringar/<day> or Referensbilder/<day> folder that a move or delete has just emptied (Finder's
- * own files aside), so Finder doesn't fill up with empty days. Anything else is left alone; never throws.
+ * Removes a Genereringar/<day>, Referensbilder/<day> or Egna klipp/<day> folder that a move or delete has just
+ * emptied (Finder's own files aside), so Finder doesn't fill up with empty days. Anything else is left alone;
+ * never throws.
  */
 export async function removeDayFolderIfEmpty(dir: string): Promise<void> {
   if (!activeRoot || !DAY_FOLDER.test(toStoredPath(dir))) return

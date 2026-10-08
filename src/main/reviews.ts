@@ -575,6 +575,20 @@ interface ExportRow {
   sequence_name: string | null
   file_path: string
   created_at: number
+  /** JSON number[] (seconds), recorded at export since schema 11; NULL for older exports. */
+  cuts: string | null
+}
+
+/** An export's recorded cuts, or undefined when it has none (made before they were recorded) or they are unreadable. */
+function parseCuts(json: string | null | undefined): number[] | undefined {
+  if (typeof json !== 'string' || !json) return undefined
+  try {
+    const value = JSON.parse(json) as unknown
+    if (!Array.isArray(value)) return undefined
+    return value.filter((t): t is number => typeof t === 'number' && Number.isFinite(t) && t > 0).sort((a, b) => a - b)
+  } catch {
+    return undefined
+  }
 }
 
 /** Films are probed a few at a time; the list can hold every export ever made. */
@@ -622,21 +636,28 @@ async function summarizeExports(rows: ExportRow[]): Promise<ExportSummary[]> {
     }
   }
   await Promise.all(Array.from({ length: Math.min(PROBE_CONCURRENCY, items.length) }, worker))
-  return items.map(({ row, path }, i) => ({
-    id: row.id,
-    sequenceId: row.sequence_id ?? undefined,
-    sequenceName: row.sequence_name ?? undefined,
-    path,
-    createdAt: row.created_at,
-    duration: files[i].duration,
-    exists: files[i].exists
-  }))
+  return items.map(({ row, path }, i) => {
+    const cuts = parseCuts(row.cuts)
+    return {
+      id: row.id,
+      sequenceId: row.sequence_id ?? undefined,
+      sequenceName: row.sequence_name ?? undefined,
+      path,
+      createdAt: row.created_at,
+      duration: files[i].duration,
+      exists: files[i].exists,
+      ...(cuts ? { cuts } : {})
+    }
+  })
 }
 
-const EXPORT_COLUMNS = `SELECT e.id, e.sequence_id, e.file_path, e.created_at, s.name AS sequence_name
+const EXPORT_COLUMNS = `SELECT e.id, e.sequence_id, e.file_path, e.created_at, e.cuts, s.name AS sequence_name
   FROM exports e LEFT JOIN sequences s ON s.id = e.sequence_id`
 
-/** Exported films, newest first: whether the file is still there, and its length when it could be probed. */
+/**
+ * Exported films, newest first: whether the file is still there, its length when it could be probed, and where its
+ * clips meet (cuts) when that was recorded.
+ */
 export async function listExports(): Promise<ExportSummary[]> {
   const rows = getDb().prepare(`${EXPORT_COLUMNS} ORDER BY e.created_at DESC, e.id`).all() as ExportRow[]
   return summarizeExports(rows)

@@ -3,8 +3,9 @@
 This document describes how Studio is put together: its processes, the modules in each, the data model, how
 files are stored, how a generation travels from the form to a video on disk, how voices and sounds reach Venice,
 how sequences are exported, given keyframes and stills, and redone between their neighbours, how storyboards turn
-milestone pictures into the transitions between them, how reviews and learnings close the loop, and how the agent
-connection (MCP server) plugs into all of it. It reflects
+milestone pictures into the transitions between them, how the user's own films come in (*Egna klipp*), how
+Redigera turns a finished film into versions with free and paid operations, how reviews and learnings close the
+loop, and how the agent connection (MCP server) plugs into all of it. It reflects
 the code in `src/`; when they disagree, the code wins — please fix the document.
 
 - [Processes](#processes)
@@ -17,6 +18,9 @@ the code in `src/`; when they disagree, the code wins — please fix the documen
 - [Sequences and export](#sequences-and-export)
 - [Keyframes and stills](#keyframes-and-stills)
 - [Storyboards: boards and transitions](#storyboards-boards-and-transitions)
+- [Own clips (Egna klipp)](#own-clips-egna-klipp)
+- [Redigera: edits and versions](#redigera-edits-and-versions)
+- [Voice separation helper](#voice-separation-helper)
 - [Reviews and learnings](#reviews-and-learnings)
 - [The agent bridge](#the-agent-bridge)
 - [Shared modules](#shared-modules)
@@ -53,31 +57,39 @@ folds the SQLite WAL back into `studio.db`.
 
 | Module | Responsibility |
 | --- | --- |
-| `index.ts` | App entry: profiles, single-instance lock, window creation, the core IPC handlers (settings — a change of *Säkert läge för bilder* is broadcast as `settings:change`, since Inställningar and the image dialogs each show it —, models, quote/generate, generations, files), wiring of the services (generations are sent with their review summary; the job manager, the sequence service and the storyboard service get the cached video model list — the job manager for the models' prompt limits — and the sequence and storyboard services the stills service's import and save-frame functions; the sequence service's change notifications go out as `sequence:change` or, for a storyboard, `storyboard:change`; storyboard runs count as busy for a library switch), shutdown. |
+| `index.ts` | App entry: profiles, single-instance lock, window creation, the core IPC handlers (settings — a change of *Säkert läge för bilder* is broadcast as `settings:change`, since Inställningar and the image dialogs each show it —, models, quote/generate, generations, files), wiring of the services (generations are sent with their review summary; the job manager, the sequence service and the storyboard service get the cached video model list — the job manager for the models' prompt limits — and the sequence and storyboard services the stills service's import and save-frame functions; the sequence service's change notifications go out as `sequence:change` or, for a storyboard, `storyboard:change`; storyboard runs, imports and edit jobs count as busy for a library switch; the import service and the edit service are registered with their events, `edits.resume()` runs when a library opens and both services stop on quit; `file:pickVideos` for own clips, refused for agents; deleting a generation first asks the edit service — nothing a running Redigera job works on or a stopped one has paid parts for, no edit's original, no version Redigera itself would refuse to delete (its transcript goes to the versions that inherit it), and from a take list (a sequence clip's or a storyboard transition's) a version or an edit's original — or a take the list offered *Ta bort* for (`release`) — is only taken off the clip (`SequenceService.releaseTake`; a transition falls back on another take) —, then also trashes an import's original once no other row records it and tells the edit service, which moves an edit's current version to the parent), the background check of voice separation at start, shutdown. |
 | `settings.ts` | `settings.json` in the profile's `userData`: base folder, prompt language, *Säkert läge för bilder* (image safe mode, on unless switched off), accepted Venice consents, agent port/on-off; the Venice API key and the agent token encrypted with `safeStorage`. |
 | `images.ts` | Venice image client for stills: text-to-image models from `/models?type=image` (background removers and upscalers left out) and edit models that combine references from `/models?type=inpaint` (only those with `combineImages`; `maxInputImages` 3 when the list doesn't say), cached for 10 minutes; prices from `model_spec.pricing` (per quality, per resolution or flat, plus `inputImages.additional` per extra reference); the `/image/generate` and `/image/multi-edit` bodies (references as data URLs within Venice's input limits, decoded as Studio shows them by `input-image.ts`, base first; models without an aspect-ratio list get width/height), safe mode from settings, and Swedish errors (402 balance, 4xx detail, the `x-venice-is-content-violation` header, a 4-minute limit after which the picture may still have been charged). Paid requests are never retried. |
 | `stills.ts` | Stills: rows, `planStill` (model, references, options and price checked before anything is paid for; also what an agent's image approval shows; a storyboard's aspect ratio is the default format), generating (`images:generate`), saving the frame a paused player shows (`stills:saveFrame`), importing dropped files (deduplicated by content), placement in `Sekvenser/<sequence>/Storyboard/`, `Storyboards/<storyboard>/Bilder/` or `Referensbilder/<day>/` (safe against a folder renamed or deleted meanwhile), deleting (a still other rows or boards use is kept in `Referensbilder`), the still-work busy state, and the `images:*` and `stills:*` handlers. A paid picture that can't be saved in the library is written to the user's Downloads folder instead (its path is in the error). |
-| `venice.ts` | Venice API client (`/models` incl. `audio_input`, `/api_keys/rate_limits`, `/video/quote`, `/video/queue`, `/video/retrieve`, `/video/complete`; a fetched model list is remembered by the shared `rememberModelKinds` and `rememberPromptLimits`), request bodies (images become downscaled JPEG data URLs, decoded by `input-image.ts`; each reference audio window becomes an MP3 data URL of whole frames, 2–15 s each and 15 s in all), measuring reference audio (`resolveReferenceAudios`), `VeniceError` / `NetworkError`. |
-| `jobs.ts` | `JobManager`: the guard in front of every paid submission (`prepareSubmission`: `@ImageN`/`@AudioN` checks, canonical tokens, audio clips measured), composing the prompt that is sent (`composeSubmission`: the References legend of the referenced assets' descriptions, read from the database at that moment and fitted into the model's prompt limit) and storing it as `sent_prompt`, queueing at Venice, polling with backoff, saving videos into the library (a take into its sequence's `Tagningar/` or its storyboard's `Övergångar/`), posters and durations, resuming pending jobs and backfilling missing posters. |
-| `db.ts` | The SQLite connection (WAL, foreign keys), the migrations, generation rows, and stored-path maintenance (board images included): prefix rewrites, relativizing, "is this path recorded" checks. |
-| `paths.ts` | Folder layout constants (`FOLDERS`, `APP_DATA`, `TAKES_FOLDER`, `STORYBOARD_FOLDER`, `TRANSITIONS_FOLDER`, `BOARD_IMAGES_FOLDER`, and `KIND_FOLDERS`: where a sequence and a storyboard keep their takes and stills), conversion between absolute and stored paths, Finder-safe names, unique names, verified moves and renames, the "base folder is still there" check and the library-wide operation lock. |
-| `library-root.ts` | The base folder's lifecycle: opening it at startup, status, choosing/inspecting/switching (`move`, `open`, `new`), converting an earlier layout, refusing a library from before a folder existed whose base folder holds a folder of the user's own by that name (*Miljöer*, *Kläder* from schema 6, *Poser* from 7, *Storyboards* from 10), *Städa upp* (reorganize, asset photos and audio clips, stills, storyboards' takes, pictures and exports included), revealing folders in Finder (a sequence's or a storyboard's own folder by id). |
+| `venice.ts` | Venice API client (`/models` incl. `audio_input` and `video_input` — video-input models get kind `video-to-video` —, `/api_keys/rate_limits`, `/video/quote`, `/video/queue`, `/video/retrieve`, `/video/complete`; a fetched model list is remembered by the shared `rememberModelKinds` and `rememberPromptLimits`; `listRawModels(type)` for the audio lists), request bodies (images become downscaled JPEG data URLs, decoded by `input-image.ts`; each reference audio window becomes an MP3 data URL of whole frames, 2–15 s each and 15 s in all; for Redigera's picture operations the source clip as `video_url`, Seedance's reference videos as `reference_video_urls` with `omni_reference_task_type`, Topaz upscales as `{model, video_url, upscale_factor, duration}` only, every video file read only from inside the library and refused in Swedish above 22 MB of media per request), quotes for video-input models with a few-KB stand-in clip of the same length (cached 10 minutes; Topaz needs the key), measuring reference audio (`resolveReferenceAudios`), `VeniceError` / `NetworkError`. |
+| `jobs.ts` | `JobManager`: the guard in front of every paid submission (`prepareSubmission`: `@ImageN`/`@AudioN` checks, canonical tokens, audio clips measured), composing the prompt that is sent (`composeSubmission`: the References legend of the referenced assets' descriptions, read from the database at that moment and fitted into the model's prompt limit) and storing it as `sent_prompt`, queueing at Venice, polling with backoff, saving videos into the library (a take into its sequence's `Tagningar/` or its storyboard's `Övergångar/`, an AI take of an edit into its `Redigeringar/<edit>/Tagningar/`), posters and durations, resuming pending jobs (only Venice generations, `source = 'generated'`) and backfilling missing posters. `videoHome` / `videoLocation` (and `originalHome` for an import's original) are the [file home rule](#the-file-home-rule) every service and *Städa upp* use. |
+| `db.ts` | The SQLite connection (WAL, foreign keys), the migrations, generation rows (with `source`, `title`, `parent_id`, `edit_id`, `recipe` and `original_path`), and stored-path maintenance (board images, imports' originals, edit media and the source and reference videos in params included): prefix rewrites, relativizing, "is this path recorded" checks. |
+| `paths.ts` | Folder layout constants (`FOLDERS` with *Egna klipp* and *Redigeringar*, `APP_DATA` with the stem, edit-job and timeline caches, `TAKES_FOLDER`, `STORYBOARD_FOLDER`, `TRANSITIONS_FOLDER`, `BOARD_IMAGES_FOLDER`, `EDIT_FOLDERS` — an edit's `Tagningar`, `Ljud` and `Underlag` —, and `KIND_FOLDERS`: where a sequence and a storyboard keep their takes and stills), conversion between absolute and stored paths, Finder-safe names, unique names, verified moves and renames, the "base folder is still there" check and the library-wide operation lock. |
+| `library-root.ts` | The base folder's lifecycle: opening it at startup, status, choosing/inspecting/switching (`move`, `open`, `new`), converting an earlier layout, refusing a library from before a folder existed whose base folder holds a folder of the user's own by that name (*Miljöer*, *Kläder* from schema 6, *Poser* from 7, *Storyboards* from 10, *Egna klipp* and *Redigeringar* from 11), *Städa upp* (reorganize, asset photos and audio clips, stills, storyboards' takes, pictures and exports, imports with their originals, edit versions, AI takes and edit media included, by the file home rule), revealing folders in Finder (a sequence's, a storyboard's or an edit's own folder by id). |
 | `library.ts` | The prompt library (CRUD, tags, favourites, usage) and registration of the asset and prompt IPC handlers. |
-| `assets.ts` | Characters, environments, outfits and poses: rows, one folder per asset with copies of its photos (and, for characters and environments, audio clips probed with ffprobe, each with a clamped reference window) and `Beskrivning.txt`, renames that move the folder, deletes to the Trash (a photo or clip that generations still use is kept in `Referensbilder`), default outfits, and `describedAssetsFor` (the described assets behind a set of params' files, straight from the database, for composing the prompt). |
+| `assets.ts` | Characters, environments, outfits and poses: rows, one folder per asset with copies of its photos (and, for characters and environments, audio clips probed with ffprobe, each with a clamped reference window) and `Beskrivning.txt`, renames that move the folder, deletes to the Trash (a photo or clip that generations still use is kept in `Referensbilder`), default outfits, `describedAssetsFor` (the described assets behind a set of params' files, straight from the database, for composing the prompt), a voice clip's clone consent (`setVoiceCloneConsent`, `AssetAudio.cloneConsent`; set only by the user) and `addGeneratedAudio` (a designed voice saved as a new *Röst* clip). |
 | `input-image.ts` | Decodes a picture for Venice (and for agents) the way Studio's views show it: a JPEG turned upright by its EXIF orientation (`nativeImage` ignores it, so a portrait phone photo would be sent sideways and an image-to-video take come out rotated), a WebP (which `nativeImage` can't read) decoded by ffmpeg (`stillToPng`), so both get the usual size limits. |
-| `references.ts` | Copies start/end/reference images and reference audio from outside the library into `Referensbilder/<day>/` (deduplicated by content hash) and the shared `placeFile` / `copyInto` helpers that write via the scratch folder. |
-| `reviews.ts` | The user's and agents' reviews of generations (`attachReviewSummary` puts the user's rating and the review count on generations), learnings, the list of exported films, and their IPC handlers (an agent writes under its own name and may only change its own). |
-| `sequences.ts` | `SequenceService`: sequences and clips (reference audio included; continuing clips drop it), the prompt a take sends (`composeClipPrompt`; a take composes it together with the clip read and the approval guard), keyframes (`setSegmentImage`), *Gör om mellan grannarna* (`bridgeSegment`), frame previews, takes, the neighbours' frames (continuation and end frames), *Generera saknade* runs in dependency order, keeping sequence and storyboard folders (with their `Storyboard/`, `Övergångar/` and `Bilder/`) in step with names, deleting a sequence with its stills, export, and the sequence IPC handlers, which refuse storyboards and their transitions. It also runs a storyboard's transitions, which are segments: `createRow` (a sequence or storyboard row with its folder), takes and their placement, `freeTakes`, `copyTake` (for *Gör om till sekvens*), a submit that can be called off (`cancelled`, `isCancelledSubmit`) and the export with the storyboard rule. |
+| `references.ts` | Copies start/end/reference images and reference audio from outside the library into `Referensbilder/<day>/` (deduplicated by content hash), `referencedFiles` (every file a set of params points at, the source and reference videos included) and the shared `placeFile` / `copyInto` / `cloneInto` helpers that write via the scratch folder (`cloneInto`: an APFS clone on the library's volume, else a streamed copy with progress that can be stopped). |
+| `reviews.ts` | The user's and agents' reviews of generations (`attachReviewSummary` puts the user's rating and the review count on generations), learnings, the list of exported films (with their recorded `cuts`), and their IPC handlers (an agent writes under its own name and may only change its own). |
+| `sequences.ts` | `SequenceService`: sequences and clips (reference audio included; continuing clips drop it), the prompt a take sends (`composeClipPrompt`; a take composes it together with the clip read and the approval guard), keyframes (`setSegmentImage`), *Gör om mellan grannarna* (`bridgeSegment`), frame previews, takes, the neighbours' frames (continuation and end frames), *Generera saknade* runs in dependency order, keeping sequence and storyboard folders (with their `Storyboard/`, `Övergångar/` and `Bilder/`) in step with names, deleting a sequence with its stills, export, and the sequence IPC handlers, which refuse storyboards and their transitions. It also runs a storyboard's transitions, which are segments: `createRow` (a sequence or storyboard row with its folder), takes and their placement (by the file home rule, so own clips and versions never move into `Tagningar`), `freeTakes`, `copyTake` (for *Gör om till sekvens*), a submit that can be called off (`cancelled`, `isCancelledSubmit`) and the export with the storyboard rule. For own clips and Redigera: `insertSegment` (a new clip from an existing finished video, with the previous clip's settings as its template), `addTakeFrom` (a video as a selected take of a clip; one that is another clip's take is copied as an APFS clone), the *Exportformat* (`export_height`, user only) and the missing-own-film message. |
 | `storyboards.ts` | `StoryboardService`: storyboards, their boards (one picture each, from a library photo, a still, a file or a frame), the transitions between neighbouring boards kept in step by `syncTransitions`, the transitions' settings and problems, *Generera saknade* for transitions, the export and *Gör om till sekvens* (both through the sequence service), picture sizes for the format warning (`imageSize`), and the `storyboards:*`, `boards:*` and `transitions:*` handlers (`registerStoryboardIpc`). |
-| `sequence-store.ts` | Row access and assembly for sequences (with their `kind`), segments (notes, `endFromNext`, the description switches and a transition's boards included) and stills, the refusals between kinds (`requirePlainSequence`, `requirePlainSegment`), take selection (`seamTrims`: a side the new take was made to meet exactly starts untrimmed) and trim clamping, folder and file naming per kind. |
-| `sequence-export.ts` | Turns the selected, trimmed takes into ffmpeg concat clips (dropping the duplicated picture where a take was made from its neighbour's frame: `repeatsPreviousFrame`, `dropsLastFrame`; for a storyboard `buildStoryboardClips` with `repeatsBoardImage`) and reserves the export's file name. |
-| `ffmpeg.ts` | Finds `ffmpeg`/`ffprobe`, probes videos and audio files (decoding when the header only estimates the length), extracts frames (the frame showing at a moment, and the first frame at or after a start trim: `extractFrameAtOrAfter`, `frameStartAtOrAfter`) and posters, decodes still pictures to PNG (`stillToPng`), cuts reference audio windows to mono MP3 (`encodeAudioClip`), JPEG frames and sound previews for agents' reviews (`extractFrames`, `extractAudioPreview`), renders the concat export, and kills/cleans up running processes on quit. |
-| `media-protocol.ts` | The `media://` scheme (video, image and audio types). |
+| `sequence-store.ts` | Row access and assembly for sequences (with their `kind`), segments (notes, `endFromNext`, the description switches and a transition's boards included) and stills, the refusals between kinds (`requirePlainSequence`, `requirePlainSegment`), take selection (`seamTrims`: a side the new take was made to meet exactly starts untrimmed) and trim clamping, folder and file naming per kind, the *Exportformat* helpers and `recordExport` with the export's cut times. |
+| `sequence-export.ts` | Turns the selected, trimmed takes into ffmpeg concat clips (dropping the duplicated picture where a take was made from its neighbour's frame: `repeatsPreviousFrame`, `dropsLastFrame`; for a storyboard `buildStoryboardClips` with `repeatsBoardImage`), the cut times of the film it makes (`exportCuts`, recorded in `exports.cuts` for Redigera's *Klippgränser*: worked out on the film's own frame grid, so clips of other frame rates land where concat puts them) and reserves the export's file name. |
+| `ffmpeg.ts` | Finds `ffmpeg`/`ffprobe`, probes videos and audio files (decoding when the header only estimates the length), extracts frames (the frame showing at a moment, and the first frame at or after a start trim: `extractFrameAtOrAfter`, `frameStartAtOrAfter`) and posters, decodes still pictures to PNG (`stillToPng`), cuts reference audio windows to mono MP3 (`encodeAudioClip`), JPEG frames and sound previews for agents' reviews (`extractFrames`, `extractAudioPreview`), renders the concat export (at the sequence's *Exportformat* height), and kills/cleans up running processes on quit. For own clips and Redigera: `probeMedia` (HDR, bit depth, rotation, variable frame rate, every audio stream and whether it decodes), `normalizeVideo` (the working copy: tone-mapped H.264 SDR, ≤1080p, constant frame rate, upright, square pixels, picture and sound both from the file's time zero, mono at full level on both sides, metadata stripped), `makeProxy` and `makeStandIn` (what a picture operation sends, and the stand-in its free quote uses), sample-exact audio (`extractAudio`, `encodeUpload`, `silences`, `loudness`, `timeStretch`, `renderMix` — the layered mix with gain envelopes, ducking, noise reduction and loudness —, `assembleAt`, `replaceAudioTrack`) and pictures (`spliceVideo`, frame-exact, and the timeline's `waveform` — placed by time over the film's length —, `filmstrip` and `sceneCuts`). The concat export upmixes mono at full level too. Partial files of every kind (`.part.mp4`, `.part.wav` …) are cleaned up. |
+| `media-protocol.ts` | The `media://` scheme (video — `.mp4`, `.mov`, `.m4v`, `.webm`, `.mkv` —, image and audio types). |
+| `imports.ts` | Own clips (*Egna klipp*): `imports:inspect` (probes every file, says whether it can be cloned — on the library's volume and that volume APFS, read from `mount` — and why a working copy is needed, finds an earlier import of the same file by size and SHA-256), `imports:import` (user only: copy or APFS clone through the scratch folder into `Egna klipp/<day>/`, a working copy when needed or when cropping to the sequence's shape, poster, a completed `source = 'import'` row; into the feed, as new clips of a sequence or as a take of a clip; a disk-space check; *Avbryt* leaves nothing behind) and `imports:cancel` (one file by path — its card's *Avbryt*, the others go on — or every import), with `import:progress` events. |
+| `edits.ts` | Redigera's service and its `edits:*`, `audio:*` and `voices:*` handlers (`registerEditIpc`): edits (from a generation used where it is, or an export cloned in as v1), renaming (folder and version titles follow), versions (current, delete, prune with a dry run), the timeline (filmstrip, waveform and cut markers, cached in `.studio/tidslinje` up to 512 MB), transcripts (inherited along versions with the same timing, SRT through a save dialog), added audio, sending a version to a sequence, deleting an edit by the rules below, the busy state, `resume()` at library open and `onGenerationDeleted`. The user-only handlers refuse agents. |
+| `edit-ops.ts` | Redigera's operations: the plan (the single check for the window and agents: snapped range, defaults, price from Venice's free quotes or the published prices, notes, warnings, problems, a fingerprint), free renders (one at a time), paid audio jobs made of steps (written before they are sent, at most three in flight, polled with backoff, never resent; *Fortsätt* quotes again), picture operations through the job manager (frames, proxies in `Underlag/` sized to leave room for the pictures sent with them, the take spliced in when it settles, a failed finish done again for free with *Fortsätt*) and voice design. |
+| `edit-store.ts` | Persistence for Redigera: `edits`, versions (generations with `source = 'edit'`), `edit_media`, `media_jobs` and `media_job_steps`, `transcripts` and `voice_clones`. |
+| `edit-mix.ts` | The layered sound of a version (`AudioMix`: a bed — v1's sound or a rendered bake —, optional voice and background stems, gain spans and layers of edit media) resolved to files for `renderMix`, and the stem cache in `.studio/stammar` (4 GB, least recently used first, pruned when a library opens). |
+| `venice-audio.ts` | `VeniceAudio`: the audio model lists (`/models?type=` `tts`, `music` and `asr`, classified into speech, music, effects, transcription, voice changers and voice design), free quotes (`/audio/quote`, `/audio/voice-changer/quote`, whole seconds, cached), and the paid endpoints — voice changer (multipart), `/audio/speech`, `/audio/voices` (cloning), `/audio/transcriptions` (with `timestamps=true`), `/audio/queue` — sent once and never retried, with optional fields only where the model allows them and Swedish errors that keep the HTTP status. |
+| `voice-separation.ts` | Finds and probes the `studio-voice-isolate` helper (`separationStatus`, Swedish reason when it is missing) and separates a film's sound into voice and background stems (`separateStems`: refused when its scratch WAVs won't fit on the disk, the helper stopped by a watchdog when its progress stalls or it runs far past the sound's length). |
+| `audio-align.ts` | Puts a converted voice chunk back on the exact sample it came from (`estimateOffsetSamples` from loudness envelopes, `alignTo` with crossfades at cuts inside speech). |
 | `agent/index.ts` | Public entry of the agent connection. |
 | `agent/service.ts` | `AgentService`: on/off, port, token, following the Tailscale address, status for the UI, one MCP server per client session. |
 | `agent/server.ts` | The HTTP server: peer, `Origin` and bearer checks, body limits, MCP Streamable HTTP sessions and their lifecycle, and the protocol version each session speaks (audio content needs 2025-03-26). |
 | `agent/network.ts` | Loopback and Tailscale address detection, the peer allow-list, MagicDNS lookup through Tailscale's resolver. |
-| `agent/approvals.ts` | `ApprovalStore`: paid requests (generations — clips, transitions, *generate all* of a sequence or a storyboard — and, kind `image`, stills) waiting for the user's decision. |
+| `agent/approvals.ts` | `ApprovalStore`: paid requests (generations — clips, transitions, *generate all* of a sequence or a storyboard —, kind `image` for stills, `edit` for Redigera's paid operations and `voice-design` for a designed voice) waiting for the user's decision. |
 | `agent/activity.ts` | The activity log of tool calls shown in the app (ring of 200 entries). |
 | `agent/bridge.ts` | `FormBridge`: main ↔ renderer commands for the Generate form. |
 | `agent/local-ipc.ts` | Records the `ipcMain` handlers so agent tools call exactly the services the window calls (`callService`, `isAgentCall`). |
@@ -88,7 +100,14 @@ folds the SQLite WAL back into `studio.db`.
 | `agent/studio.ts` | Helpers shared by the tools: asset index (photos and audio clips), still index, `@ImageN` and `@AudioN` token maps, model and option checks, prompt problems, and the composed prompt with its description entries (`descriptionInfo`, through main's `composeSubmission`). |
 | `agent/storyboard-rows.ts` | Synchronous answers about storyboards for the tools and the submit guards: which kind an id is, a board's storyboard and place, the two boards a transition joins, and the pointer from a sequence tool to the storyboard tools. |
 | `agent/reorder.ts` | `reorder_references`: reading the new order an agent names (tokens, photo or clip ids, asset ids), which tokens moved, and the pictures past the model's limit. |
-| `agent/tools/*.ts` | The MCP tools (`library.ts`, `form.ts`, `sequences.ts` with keyframes and notes, `stills.ts` for stills, image models, frame previews and bridging, `storyboards.ts` for storyboards, boards and transitions, `paid.ts` with the image, transition and storyboard requests, and `review.ts` for reviewing clips, films and sequences, reviews and learnings), the `defineTool` frame (`kit.ts`, image and audio content, older clients get a note instead of audio) and registration of the tools, the `write_video_prompt` prompt and the `studio://guide` resource (`index.ts`). |
+| `agent/tools/*.ts` | The MCP tools (`library.ts`, `form.ts`, `sequences.ts` with keyframes and notes, `stills.ts` for stills, image models, frame previews and bridging, `storyboards.ts` for storyboards, boards and transitions, `paid.ts` with the image, transition and storyboard requests, `editor.ts` for Redigera's read and free tools, `editor-paid.ts` for `request_edit_operation` and `request_voice_design`, `edit-input.ts` for the operation input and its one converter, and `review.ts` for reviewing clips, films and sequences, reviews and learnings), the `defineTool` frame (`kit.ts`, image and audio content, older clients get a note instead of audio) and registration of the tools, the `write_video_prompt` prompt and the `studio://guide` resource (`index.ts`). |
+
+### `native/` and `scripts/`
+
+| Module | Responsibility |
+| --- | --- |
+| `native/voice-isolate/main.swift` | `studio-voice-isolate`, a small command-line helper around macOS's AUSoundIsolation audio unit: `--probe` answers `{ok, hq, latency}`; `<in.wav> <voice.wav> <background.wav>` writes both stems at the input's rate and length, latency-compensated, with background = input − voice, and prints `progress=…` lines. See [Voice separation helper](#voice-separation-helper). |
+| `scripts/build-helpers.mjs` | `npm run build:helpers` (also run first by `dev`, `dev:real`, `build` and `app`): compiles the helper with `xcrun --sdk macosx swiftc` into `build/bin/` (gitignored), signs it ad hoc, and skips it when a stamp says it is up to date, when `STUDIO_SKIP_HELPERS=1`, or with a note when there is no Swift compiler (`--force` rebuilds). |
 
 ### `src/preload`
 
@@ -104,24 +123,25 @@ folds the SQLite WAL back into `studio.db`.
 | `main.tsx`, `App.tsx` | Entry and root component: the library gate (setup screen until a base folder is open), the views, the agent feed, bridge and approval dialog. |
 | `styles.css` | Tailwind CSS v4 import and theme tokens (`bg`, `panel`, `raised`, `line`, `muted`, `text`, `accent`). |
 | `lib/generateStore.ts` | The Generate form as an app-level store above the views, persisted to `localStorage`, so agents can read and fill it while another view is open. Follows library audio clips that move or get a new window; the description switches are cleaned with `sanitizeDescriptionFlags` when the form is loaded. |
-| `lib/agentBridge.ts` | The renderer half of the form bridge: applies `get_form`, `set_form` (the description switches included), `set_references` (photos and audio clips, with the 3-clip and 15 s caps), `reorder_references` (the shared `reorderReferences`, prompt and negative prompt in the same change) and `open` (the Generate view, a sequence and clip, or a storyboard) to the form store and the views, and replies with the token maps, the pictures past the model's limit (`unsentReferences`) and where the user is (the open sequence and clip, or the open storyboard). |
+| `lib/agentBridge.ts` | The renderer half of the form bridge: applies `get_form`, `set_form` (the description switches included), `set_references` (photos and audio clips, with the 3-clip and 15 s caps), `reorder_references` (the shared `reorderReferences`, prompt and negative prompt in the same change) and `open` (the Generate view, a sequence and clip, a storyboard, or an edit in Redigera) to the form store and the views, and replies with the token maps, the pictures past the model's limit (`unsentReferences`) and where the user is (the open sequence and clip, the open storyboard, or the open edit). |
 | `lib/agent.ts` | Live agent status, activity and approval requests for the indicator, the drawer, the dialog and Settings. |
 | `lib/promptIssues.ts` | The `@ImageN` and `@AudioN` checks for a set of params, with the rules main applies. |
-| `lib/hooks.ts` | Shared data hooks (model list, assets, prompts, price quote) and `ipcErrorMessage`. |
-| `lib/library.ts` | `localStorage` keys that hold library data (the open sequence and storyboard among them) and how they are rewritten or forgotten after a library switch; `withImportedCopies`, which points the form at the copies in `Referensbilder` of images and audio picked from outside the library once a generation is submitted. |
-| `lib/assets.ts`, `lib/media.ts`, `lib/navigation.ts`, `lib/workspace.ts`, `lib/takes.ts` | Asset kind wording, `media://` URLs and formatting, cross-view navigation intents (`open-sequence`, `open-storyboard` …), where the user is in the sequence editor and which storyboard is open, and which sequence clip or storyboard transition a take belongs to (the clip feed's badge and drawer open it there). |
+| `lib/hooks.ts` | Shared data hooks (model list, assets, prompts, price quote, the audio model catalog `useAudioCatalog` — refreshed after 10 minutes, on *Kontrollera igen* and when the API key changes —, `useSeparationStatus`) and `ipcErrorMessage`. |
+| `lib/library.ts` | `localStorage` keys that hold library data (the open sequence, storyboard and edit — `LAST_EDIT_KEY` — among them) and how they are rewritten or forgotten after a library switch; `withImportedCopies`, which points the form at the copies in `Referensbilder` of images and audio picked from outside the library once a generation is submitted. |
+| `lib/assets.ts`, `lib/media.ts`, `lib/navigation.ts`, `lib/workspace.ts`, `lib/takes.ts` | Asset kind wording, `media://` URLs and formatting, cross-view navigation intents (`open-sequence`, `open-storyboard`, `open-editor` with an edit, a generation or an export …), where the user is in the sequence editor, which storyboard and which edit is open (`openEditInEditor`, for agents), and which sequence clip or storyboard transition a take belongs to (the clip feed's badge and drawer open it there). |
 | `components/GenerateView.tsx`, `ParamsForm.tsx`, `GenerationCard.tsx`, `ImageInput.tsx` | The Generate view: the form (references, voices and sounds, poses, the descriptions box), the clip feed's cards, image inputs (the reference strip reorders by drag and drop or ⌥← / ⌥→, showing the numbers each picture will get and which won't be sent). |
-| `components/feed/` | The clip feed in Generera: toolbar with search, filters (the shared `generation-filter`), sort and summary; poster-only cards; a windowed table with sortable columns and keyboard navigation; the detail drawer with player, highlighted `@ImageN`/`@AudioN`, *Skickad prompt* (`SentPrompt.tsx`: the prompt as sent, its legend set apart, when it differs), the references and audio windows sent, settings, the user's rating, note and tags, and agents' reviews; kept live through `onGenerationUpdate`, `onGenerationDelete` and `onReviewChange`. |
+| `components/feed/` | The clip feed in Generera: toolbar with search, filters (the shared `generation-filter`, with *Källa*: generated, own clips or versions), sort and summary, *Importera egna klipp…* and a drop target; the own-clip import flow shared with Sekvenser and Redigera (`ownClips.tsx`: refusals, the large-copy question, the shape question, progress cards with *Avbryt*); `GenerationPickerDialog` (any finished video, with search and a *Källa* tab); badges *Egen* / *Redigerad* / *Redigering* and *Redigera…*; poster-only cards; a windowed table with sortable columns and keyboard navigation; the detail drawer with player, highlighted `@ImageN`/`@AudioN`, *Skickad prompt* (`SentPrompt.tsx`: the prompt as sent, its legend set apart, when it differs), the references and audio windows sent, settings, the user's rating, note and tags, and agents' reviews; kept live through `onGenerationUpdate`, `onGenerationDelete` and `onReviewChange`. |
 | `components/prompt/` | The reference-aware prompt editor: `@ImageN` and `@AudioN` colouring, hover cards and players, the `@` menu, issue list and quick fixes; *Läggs till i prompten* (`DescriptionsBox.tsx`, with the pure `descriptions.ts` asking the shared composer what is sent): the legend's entries live, a switch per asset and *Ta med beskrivningar*, the composed length against the model's limit. |
 | `components/prompts/` | The prompt library view (*Prompter*) and its *Lärdomar* tab (learnings: list, editor, evidence clips). |
-| `components/assets/` | The *Karaktärer*, *Miljöer*, *Kläder* and *Poser* views: list, editor, photos, default outfit, and the sound section (voice or soundscape clips, a shared player, the reference window editor). |
+| `components/assets/` | The *Karaktärer*, *Miljöer*, *Kläder* and *Poser* views: list, editor, photos, default outfit, and the sound section (voice or soundscape clips, a shared player, the reference window editor, *Får klonas för nya repliker* per voice clip, and *Skapa röst med AI…* — `VoiceDesignDialog` — with its progress row and the new clip marked *Ny*). |
 | `components/pickers/` | Pickers and dialogs shared by the views (assets, audio clips, outfits, prompts, sequences, modal, popover), the form's asset and audio helpers (`assetRefs`, which re-exports the shared remap, `audioRefs`), and reordering: `reorder.ts` (gap arithmetic, live positions, the nearest gap on wrapped rows) and `useReorder.ts` (the HTML5 drag and drop and ⌥← / ⌥→ hook shared by the image strip and the audio chips, with focus restore and an `aria-live` announcement). |
-| `components/sequences/` | The *Sekvenser* view: list (its empty state points to Storyboards), header, timeline (with *Gör om mellan grannarna* on the cards), clip editor (`KeyframeBox`: *Startbild från föregående klipp* / *Slutbild från nästa klipp* with live frame previews; `NotesField`: *Vad händer*), takes, trims, preview player (also used by Storyboards), the shared clip checks (`clipChecks.ts`), price hooks (`useTotalQuote.ts`), drafts (`useDraft.ts`) and frame previews (`useFramePreview.ts`: cached, at most two at a time). |
+| `components/sequences/` | The *Sekvenser* view: list (its empty state points to Storyboards), header (with *Exportformat* and *Redigera senaste exporten* under ⋯), timeline (with *Gör om mellan grannarna* on the cards, the *Lägg till klipp* split button and the `+` menu — own clips from a file, the clip feed or Redigera —, video files dropped between clips, *Egen* cards with the clip's title), clip editor (`KeyframeBox`: *Startbild från föregående klipp* / *Slutbild från nästa klipp* with live frame previews; `NotesField`: *Vad händer*), takes, trims, preview player (also used by Storyboards), the shared clip checks (`clipChecks.ts`), price hooks (`useTotalQuote.ts`), drafts (`useDraft.ts`) and frame previews (`useFramePreview.ts`: cached, at most two at a time). |
 | `components/storyboards/` | The *Storyboards* view (`StoryboardsView`): the list with covers and progress, *Ny storyboard* (name and format, `CreateStoryboardForm`), the header (`StoryboardHeader`: rename, format, *Generera saknade* with the total price or *Stoppa*, *Förhandsvisa*, *Exportera* with progress, and under ⋯ *Gör om till sekvens*, *Öppna mappen i Finder*, *Radera storyboarden*), one row of large board pictures (`BoardRow`, `BoardCard`: drag or ⌥← / ⌥→ to reorder through the shared `useReorder`, **+** before, between and after, pictures dropped on *Ny ruta* become boards; *Vad visar bilden?* notes), each board's picture menu (`BoardImage`: *Skapa bild…*, *Från biblioteket…*, *Storyboardbilder…*, *Ladda upp en bild…*, *Bildruta ur ett klipp…*, *Ta bort bilden*, drops, *Annat format*), the transitions between them (`TransitionConnector`: status, progress, prompt excerpt, length, price, *Generera*) and the transition editor beside the boards (`TransitionEditor`: both pictures, the selected take's player, *Vad händer?* with *Föreslå*, length, resolution, sound, models that take an end image, price, takes with *Välj* / *Radera*, the earlier-picture note). `useStoryboard` keeps the open storyboard live (`onStoryboardChange`, take updates); `storyboardUtils.ts` holds the pure helpers (labels, status, run plan, *Föreslå*'s template, local reorders). |
 | `components/images/` | *Skapa bild…* (`CreateImageDialog`: prompt, references with the base first, model, format, resolution and quality, the safe-mode note, live price; for a sequence clip *Använd som startbild / slutbild*; for a storyboard board (`assign: {boardId}`) the picture goes onto the board, never over a picture put there meanwhile, and *Använd föregående bild som referens* puts the previous board's picture first), the frame picker (`FramePickerDialog`: a sequence's takes, or with `anyGeneration` every finished video in the library with a search over the prompts — `frameChoices.ts` shapes the lists —, frame-exact stepping, *Använd den här bildrutan*), `StillThumb` (draggable as `application/x-studio-still`), `StillViewer`, and the image model and price helpers (`imageModels.ts`). |
-| `components/library/` | Library setup screen, folder choice, switching overlay and *Inställningar → Bibliotek*. |
-| `components/agent/` | Agent settings section, sidebar indicator, activity drawer, approval dialog (with the References legend a request appends, set apart under the prompt and marked when a description has changed since, the voices a request sends, the start and end frames of a clip that takes them from its neighbours, image requests with their references and the finished picture, and — `StoryboardApproval.tsx` — a transition as its two board pictures side by side, the board a picture is for and the picture it replaces) and their Swedish wording. |
-| `components/SettingsView.tsx`, `Sidebar.tsx`, `ConsentDialog.tsx`, `DevBadge.tsx` | Settings (*Bilder → Säkert läge för bilder* among them), navigation, Venice's consent dialog, the *Dev* badge. |
+| `components/editor/` | *Redigera*: the list of edits (`EditList`, `EditorView` with the `open-editor` intent, *Öppna en egen film…*, *Från klippflödet…*, *Från en export…*), and an edit (`EditWorkspace`): the header (`EditHeader`, `SendMenu`), the player with in/out marks, *Jämför ⇄* and keyboard control (`Player`, `playerController`; `focusOrigin` hands Space and ← → to a button or tab only when it was reached with the keyboard, not after a click), the timeline lanes *Bild*, *Ljud*, *Lager* and *Text* (`Timeline`), the *Åtgärder* tabs (`ActionsPanel`, `PictureTab`, `SoundTab`, `VoiceTab`, `MusicTab`, `TextTab`, `AddAudioDialog`) with plan-driven price buttons (`useEditOps`: debounced plans, the extra question above $5 or for an unknown or partial price, Venice's consent dialog with the confirmed price kept as the ceiling), and the version tree with jobs, *Fortsätt* and *Rensa versioner…* (`VersionsPanel`). |
+| `components/library/` | Library setup screen, folder choice, switching overlay and *Inställningar → Bibliotek* (the folder tree shows *Egna klipp* and *Redigeringar*). |
+| `components/agent/` | Agent settings section, sidebar indicator, activity drawer, approval dialog (with the References legend a request appends, set apart under the prompt and marked when a description has changed since, the voices a request sends, the start and end frames of a clip that takes them from its neighbours, image requests with their references and the finished picture, and — `StoryboardApproval.tsx` — a transition as its two board pictures side by side, the board a picture is for and the picture it replaces; `EditApproval.tsx` — an edit request with the version's poster, the frames it works from (captioned by operation), old → new lines or the lines a change of voice changes, the parts and the price note, planned again live, with the required clone-consent checkbox, and a designed voice) and their Swedish wording. |
+| `components/SettingsView.tsx`, `Sidebar.tsx`, `ConsentDialog.tsx`, `DevBadge.tsx` | Settings (*Bilder → Säkert läge för bilder* and the *Röstseparering* status line among them), navigation (*Redigera* after Storyboards), Venice's consent dialog, the *Dev* badge. |
 
 ## Data model
 
@@ -131,18 +151,24 @@ base folder is.
 
 | Table | Holds |
 | --- | --- |
-| `generations` | Every generation: model, prompt, params (JSON), status (`queued`, `processing`, `completed`, `failed`), Venice queue id, price quote, timings, `file_path`, `thumb_path`, `video_duration`, `segment_id` when it is a take of a sequence clip, and `sent_prompt`: the prompt exactly as Venice got it (`prompt` and `params.prompt` stay the user's text, which *Använd igen* puts back; NULL before migration 9). |
+| `generations` | Every generation: model, prompt, params (JSON), status (`queued`, `processing`, `completed`, `failed`), Venice queue id, price quote, timings, `file_path`, `thumb_path`, `video_duration`, `segment_id` when it is a take of a sequence clip, and `sent_prompt`: the prompt exactly as Venice got it (`prompt` and `params.prompt` stay the user's text, which *Använd igen* puts back; NULL before migration 9). `source` says what made it: `generated` (Venice; every row before migration 11), `import` (the user's own film) or `edit` (a version made in Redigera); imports and versions are inserted completed, with `model` and `prompt` empty, and named by `title` (the file's name, "<edit> v3"). `parent_id` is a version's base version, `edit_id` the edit a version or an AI take belongs to, `recipe` (JSON, ids only, never paths) how a version was made — the operation, its base, its cost, how its sound is built (`mix`), its cut markers, an import's file name, size, SHA-256 and working-copy reasons — and `original_path` an import's untouched original when `file_path` is a working copy. |
 | `assets` | Characters, environments, outfits and poses: `kind` (`character`, `environment`, `outfit`, `pose`), name, description, `folder`, `default_outfit_id` (characters only, a self-reference set to NULL when the outfit is deleted). |
 | `asset_images` | An asset's photos: `file_path` and `position` (position 0 is the cover). |
-| `asset_audio` | A character's voice or an environment's soundscape clips: `file_path`, `position` (position 0 comes along when the character is added to a form), `duration`, and the reference window `clip_start` / `clip_length` (NULL: the default, min(duration, 10 s)). Deleted with their asset. |
+| `asset_audio` | A character's voice or an environment's soundscape clips: `file_path`, `position` (position 0 comes along when the character is added to a form), `duration`, the reference window `clip_start` / `clip_length` (NULL: the default, min(duration, 10 s)) and `clone_consent_at` (when the user allowed the clip to be cloned for new lines; set only from the window). Deleted with their asset. |
 | `generation_reviews` | Reviews of a generation: `author` (`user`, at most one per generation by a partial unique index, or an agent's name), `rating` 1–5, `tags` (JSON), `note`. Deleted with their generation. |
 | `learnings` | Insights about prompting: `title`, `insight`, `model` (NULL: every model), `tags` and `evidence` (generation ids, JSON), `author`, `pinned`. |
 | `prompts` | The prompt library: title, body, negative prompt, tags (JSON), favourite, use count, last used. |
-| `sequences` | Sequences and storyboards: name, `kind` (`sequence` or `storyboard`), `defaults` (JSON params for new clips; a storyboard's for new transitions), `aspect_ratio` (a storyboard's format; NULL for sequences), `folder` (in `Sekvenser/` or `Storyboards/`). |
+| `sequences` | Sequences and storyboards: name, `kind` (`sequence` or `storyboard`), `defaults` (JSON params for new clips; a storyboard's for new transitions), `aspect_ratio` (a storyboard's format; NULL for sequences), `folder` (in `Sekvenser/` or `Storyboards/`), `export_height` (the *Exportformat*: 480, 720 or 1080; NULL = the first clip's size). |
 | `segments` | A sequence's clips, or a storyboard's transitions: `position`, `params` (JSON template for new takes; its `startImage` / `endImage` are the clip's keyframes, a transition's two board pictures), `continue_from_previous`, `end_from_next` (take the end image from the next clip; always 0 for transitions), `notes` (*Vad händer*), `selected_generation_id`, `trim_start`, `trim_end`, and for a transition `from_board_id` / `to_board_id` (the boards it goes between; set to NULL if a board row goes). Deleted with their sequence. |
 | `storyboard_boards` | A storyboard's boards: `sequence_id` (the storyboard; deleted with it), `position`, `image_path` (the picture, a stored path; NULL for an empty board), `still_id` (the still it is, when it is one; set to NULL if the still row goes), `note` (*Vad visar bilden?*). |
 | `stills` | The pictures of a sequence or a storyboard: `sequence_id` (set to NULL when it is deleted and the still is kept), `file_path`, `source` (`generated`, `upload`, `frame`), `prompt`, `model`, `params` (JSON: negative prompt, reference images, aspect ratio, resolution, quality; a saved frame's take and time), `cost`. |
-| `exports` | Exported films of sequences and storyboards (`file_path`, `sequence_id`), so they follow folder renames and library moves. |
+| `exports` | Exported films of sequences and storyboards (`file_path`, `sequence_id`), so they follow folder renames and library moves, and `cuts` (JSON seconds where the clips meet in the film, recorded at export; NULL for older films). |
+| `edits` | Redigera's edits: `name`, `folder` (in `Redigeringar/`), `origin_kind` (`generation`, `export` or `import`), `origin_generation_id` (v1), `origin_export_id`, `current_generation_id` (the version shown and built on); the foreign keys are set to NULL when their row goes. |
+| `edit_media` | An edit's own audio in its `Ljud/`: `kind` (`voice`, `speech`, `music`, `effect`, `audio` — an added file or library clip — or `bake`, a rendered bed), `file_path`, `label`, `model`, `cost`, `duration`, `details` (JSON, no paths). Deleted with the edit. |
+| `media_jobs` | Paid work of Redigera that takes several requests (and a picture operation's bookkeeping): `edit_id` (or `asset_id` for a designed voice), `base_generation_id`, `op`, `request` (the normalized operation, no paths), `status` (`running`, `completed`, `failed`, `cancelled`), `quote`, `cost` (what was sent so far), `take_generation_id` (the AI take of a picture operation), `result_generation_id` (the version it made), `error`. |
+| `media_job_steps` | The requests of a job, in `position` order: `endpoint` (`voice-changer`, `audio-queue`, `speech`, `transcription`, `voice-clone`), `model`, `request` (JSON: range, text, voice …; no paths, no media), `status` (`pending`, `sending`, `queued`, `completed`, `failed`, `cancelled`), Venice's `queue_id`, `quote`, `error`. |
+| `transcripts` | One transcript per generation: `segments` (JSON lines with start, end, text and optional words), `model`, `language`, `source` (`venice`, `remapped` — carried across a cut — or `edited`), `cost`. |
+| `voice_clones` | Handles of a *Röst* clip cloned at Venice (`audio_id`, `model`, `handle`, the sample window, `expires_at`; valid 7 days), reused while they last. |
 
 ### Migrations
 
@@ -162,6 +188,7 @@ reorder an entry, add a new one at the end (see [DEVELOPMENT.md](DEVELOPMENT.md#
 | 8 | Storyboards: added `end_from_next` and `notes` to `segments`; created `stills` (+ index by sequence and creation time). |
 | 9 | Descriptions in the prompt: added `sent_prompt` to `generations` (the prompt with the References legend, as sent). |
 | 10 | Storyboards as their own workflow: added `kind` (existing rows become `sequence`) and `aspect_ratio` to `sequences`, created `storyboard_boards` (+ index by storyboard and position), added `from_board_id` and `to_board_id` to `segments`. `STORYBOARDS_SCHEMA_VERSION = 10` marks libraries that own *Storyboards*. |
+| 11 | Own clips and Redigera: created `edits`, `edit_media`, `media_jobs`, `media_job_steps`, `transcripts` and `voice_clones` (+ indexes); added `source` (existing rows become `generated`), `title`, `parent_id`, `edit_id`, `recipe` and `original_path` to `generations` (+ indexes by parent and edit), `clone_consent_at` to `asset_audio`, `cuts` to `exports` and `export_height` to `sequences`. `EDITS_SCHEMA_VERSION = 11` marks libraries that own *Egna klipp* and *Redigeringar*. |
 
 A library from before the base folder could be chosen (`studio.db`, `generations/`, `thumbs/`, `characters/`,
 `exports/`, `frames/` directly in the folder) is converted to the current layout by `library-root.ts` when it is
@@ -172,19 +199,20 @@ opened; an interrupted conversion resumes on the next open.
 The rules live in `src/main/paths.ts` and `src/main/db.ts`:
 
 - **Relative inside the library's own folders.** A path inside one of the library's top-level folders (`Karaktärer`,
-  `Miljöer`, `Kläder`, `Poser`, `Referensbilder`, `Genereringar`, `Sekvenser`, `Storyboards`, `.studio`, and the old
-  layout's folders until they are converted) is stored relative to the base folder, POSIX-style and NFC-normalised.
-  Anything else — including files of the user's own elsewhere in the base folder — keeps its absolute path, because
-  moving the library only takes its own folders along.
+  `Miljöer`, `Kläder`, `Poser`, `Referensbilder`, `Genereringar`, `Sekvenser`, `Storyboards`, `Egna klipp`,
+  `Redigeringar`, `.studio`, and the old layout's folders until they are converted) is stored relative to the base
+  folder, POSIX-style and NFC-normalised. Anything else — including files of the user's own elsewhere in the base
+  folder — keeps its absolute path, because moving the library only takes its own folders along.
 - **Converted at the database boundary.** Code outside `db.ts` works with absolute paths. `toStoredPath` /
   `fromStoredPath` and `toStoredParams` / `fromStoredParams` convert on the way in and out.
-- **Every path column is known.** `generations.file_path`, `generations.thumb_path`, the `startImage`, `endImage`,
-  `referenceImages` and `referenceAudios[].path` in `generations.params` and `segments.params`,
-  `asset_images.file_path`, `asset_audio.file_path`, `stills.file_path`, the `referenceImages` in `stills.params`,
-  `storyboard_boards.image_path` and `exports.file_path`. `mapStoredPaths` visits all of them, and so do the "is
-  this path recorded" checks (`isStoredPathRecorded` can leave one still's own row out: is anything *else* using its
-  file?), the list of tracked files a library move carries and `followRewrites`; a new path column must be added
-  there.
+- **Every path column is known.** `generations.file_path`, `generations.thumb_path`, `generations.original_path`, the
+  `startImage`, `endImage`, `referenceImages`, `referenceAudios[].path`, `sourceVideo` and `referenceVideos` in
+  `generations.params` and `segments.params`, `asset_images.file_path`, `asset_audio.file_path`, `stills.file_path`,
+  the `referenceImages` in `stills.params`, `storyboard_boards.image_path`, `exports.file_path` and
+  `edit_media.file_path`. The JSON of `recipe`, `details`, `request` and `segments` holds ids only, never paths.
+  `mapStoredPaths` visits all of them, and so do the "is this path recorded" checks (`isStoredPathRecorded` can leave
+  one still's own row out: is anything *else* using its file?), the list of tracked files a library move carries and
+  `followRewrites`; a new path column must be added there.
 - **Renames rewrite in one transaction.** `renameLibraryFolder` moves the folder on disk, then
   `rewriteStoredPrefix` rewrites every stored path under it in a transaction (moving the folder back if that
   fails). A submit that was uploading meanwhile follows the rewrites (`followRewrites`). The generations a rewrite
@@ -203,8 +231,8 @@ The rules live in `src/main/paths.ts` and `src/main/db.ts`:
   what was opened; if it was renamed, moved or unmounted, the library is closed instead of recreating an empty
   folder at the old path.
 - **Library-wide operations are exclusive.** A switch, move or *Städa upp* holds `beginLibraryOperation`; asset,
-  sequence, still and delete work waits with `libraryOperationSettled`, and a switch is refused while generations,
-  exports, asset or still work are running.
+  sequence, still, import, edit and delete work waits with `libraryOperationSettled`, and a switch is refused while
+  generations, exports, asset or still work, imports or edit jobs are running.
 
 ## IPC surface
 
@@ -224,15 +252,20 @@ with Swedish, user-facing messages.
 | Images and stills | `listImageModels`, `quoteStill`, `generateStill`, `listStills`, `deleteStill`, `saveFrameAsStill` | `images:models`, `images:quote`, `images:generate`, `stills:list`, `stills:delete`, `stills:saveFrame` |
 | Library folder | `libraryStatus`, `chooseLibraryFolder`, `inspectLibraryFolder`, `setLibraryRoot`, `reorganizeLibrary`, `revealLibraryFolder` | `library:*` |
 | Agent connection | `getAgentStatus`, `setAgentEnabled`, `setAgentPort`, `restartAgent`, `getAgentToken`, `regenerateAgentToken`, `listAgentActivity`, `listApprovals`, `resolveApproval`, `replyAgentCommand` | `agent:*` |
+| Own clips | `pickVideos`, `inspectVideoFiles`, `importVideoFiles`, `cancelImports` | `file:pickVideos`, `imports:inspect`, `imports:import`, `imports:cancel` |
+| Redigera | `listEdits`, `getEdit`, `createEdit`, `renameEdit`, `deleteEdit`, `setCurrentVersion`, `deleteVersion`, `pruneVersions`, `editTimeline`, `planEditOperation`, `runEditOperation`, `cancelEditJob`, `resumeEditJob`, `getTranscript`, `updateTranscript`, `saveSubtitles`, `addEditAudio`, `sendEditToSequence` | `edits:*` (`edits:setCurrent`, `edits:deleteVersion`, `edits:prune`, `edits:timeline`, `edits:plan`, `edits:run`, `edits:cancel`, `edits:resume`, `edits:transcript`, `edits:updateTranscript`, `edits:srt`, `edits:addAudio`, `edits:send`) |
+| Audio and voices | `listAudioModels`, `separationStatus`, `planVoiceDesign`, `designVoice`, `setVoiceCloneConsent` | `audio:models`, `audio:separation`, `voices:plan`, `voices:design`, `voices:consent` |
 | Files | `revealFile`, `pickImages`, `pickAudio`, `pathForFile` (local, via `webUtils`) | `file:*` |
 
 Events from main to the window (subscribe with the `on…` methods, which return an unsubscribe function):
 `generation:update` (with the review summary), `generation:delete`, `review:change` (the generation id),
-`learnings:change`, `library:change`, `sequence:change`, `storyboard:change` (a storyboard, its boards,
-transitions or their takes), `export:progress` (with the sequence's or storyboard's id), `stills:change` (a
-sequence or storyboard id, or none for "any"), `agent:status`, `agent:activity`, `agent:approval` and
-`agent:command`. The window answers `agent:command` with `agent:reply` (`ipcRenderer.send`). After a library switch
-main reloads every window.
+`learnings:change`, `library:change` (also after a designed voice was added or a clip's clone consent changed),
+`sequence:change`, `storyboard:change` (a storyboard, its boards, transitions or their takes), `export:progress` (with
+the sequence's or storyboard's id), `stills:change` (a sequence or storyboard id, or none for "any"),
+`import:progress` (a file being imported, with the clip it goes to), `edit:change` (an edit id: its versions, jobs or
+media changed), `edit:progress` (a render or a paid job's progress, by edit or — for a designed voice — by asset),
+`agent:status`, `agent:activity`, `agent:approval` and `agent:command`. The window answers `agent:command` with
+`agent:reply` (`ipcRenderer.send`). After a library switch main reloads every window.
 
 Two details matter when changing handlers:
 
@@ -240,6 +273,15 @@ Two details matter when changing handlers:
   `StudioApi`; only the agent connection uses them. The review and learning handlers take the agent's name as a last
   argument (only from an agent's call, `isAgentCall`), refuse `reviews:setUser` for agents, and let an agent change
   or delete only what it wrote.
+- What only the user may do refuses an agent's call (`isAgentCall`) with *"Det här kan bara du göra i Studio."*, as
+  a second line of defence behind the tool list: `file:pickVideos`, `imports:import`, `edits:delete`,
+  `edits:deleteVersion`, `edits:prune`, `edits:addAudio`, `edits:srt`, `voices:consent`, and an `exportHeight` in
+  `sequences:update`.
+- Paid Redigera calls (`edits:run` of a paid operation, `edits:resume`, `voices:design`) need the price the user
+  saw (`expectedPriceUsd`; 0 when Venice gives none) and refuse when the price rose by more than $0.01. `edits:run`
+  and `edits:resume` also take whether that price was unknown or partial (`expectedPartial`); when it wasn't, a part
+  without a price that came in since (a clone handle that ran out) is refused the same way, so the window asks the
+  extra question first.
 - `segments:generate`, `sequences:generateAll`, `transitions:generate` and `storyboards:generateAll` accept an
   optional *submit guard* function. Only in-process calls from an approved agent request can pass one (an IPC message
   cannot carry a function).
@@ -285,16 +327,26 @@ agent request — ends in `JobManager.submit` (`src/main/jobs.ts`). (Stills are 
    video itself, or a download URL. Network errors, 5xx and 429 are retried with backoff (up to 70 attempts, a bit
    over an hour, since the job is already paid for); other unexpected errors get 5 quick retries; other 4xx
    responses fail the job.
-6. **Save.** The video is written to `.studio/tmp/<id>.mp4` and moved to its place: `Sekvenser/<name>/Tagningar/`
-   for a take of a clip, `Storyboards/<name>/Övergångar/` for a take of a transition, `Genereringar/<day>/`
-   otherwise, named after the submit time and the prompt's first line.
+6. **Save.** The video is written to `.studio/tmp/<id>.mp4` and moved to its place (`videoLocation`, the
+   [file home rule](#the-file-home-rule)): `Sekvenser/<name>/Tagningar/` for a take of a clip,
+   `Storyboards/<name>/Övergångar/` for a take of a transition, `Redigeringar/<edit>/Tagningar/` for an AI take of
+   an edit (`SubmitOptions.editId`), `Genereringar/<day>/` otherwise, named after the submit time and the prompt's
+   first line.
 7. **Poster.** `ffprobe` reads the duration and `ffmpeg` writes a poster to `.studio/miniatyrer/<id>.jpg`. This is
    best effort: a missing ffmpeg never fails a generation.
 8. **Settle.** The row becomes `completed` (or `failed` with the error), `settled` fires once (sequences use it to
    select a fresh take automatically) and `POST /video/complete` asks Venice to delete its copy.
 
 When a library is opened, `resume()` picks up jobs that were still pending (a job that never got a queue id is
-failed) and backfills missing posters and durations in the background.
+failed) and backfills missing posters and durations in the background. Only Venice generations are ever pending:
+imports and versions are inserted completed.
+
+**Video-input models** (`constraints.video_input`: Redigera's prompt edits and Topaz upscaling) are never offered
+in the Generate form; only Redigera submits them. `paramsForSubmit` keeps `sourceVideo` (and `upscaleFactor`) for
+them and `referenceVideos` / `referenceTask` for Seedance's reference-to-video models, and drops all four elsewhere.
+The video goes in the body as a data URL (Venice has no upload endpoint), so one request carries at most 22 MB of
+media; Redigera sends a short H.264 proxy from the edit's `Underlag/`, never the film itself, and quotes with a
+few-KB stand-in of the same length, since the price depends only on the length and resolution.
 
 ## Reference audio: from a file to `@AudioN`
 
@@ -394,7 +446,15 @@ trimmed for the cut.
   resampled to 48 kHz stereo (silence for clips without audio), then concatenated and encoded as H.264 (CRF 18) /
   AAC 192 kb/s with `+faststart`. Progress is read from `-progress pipe:1` and sent as `export:progress`. The film
   is rendered into `.studio/tmp`, moved to `Sekvenser/<name>/<name> <YYYY-MM-DD HH.MM>.mp4` and recorded in
-  `exports`.
+  `exports`, with the times where the clips meet (`exportCuts`, measured the way the export cuts) in `cuts`.
+  The film's size is the first clip's, unless the sequence has an *Exportformat* (`export_height` 480, 720 or
+  1080: the first clip's aspect at that height, even pixels) — useful when own footage and AI clips are mixed.
+- **Own clips in a sequence.** A clip's take may be an import or a Redigera version (see
+  [Own clips](#own-clips-egna-klipp)); continuation, *Slutbild från nästa klipp*, *Gör om mellan grannarna* and the
+  export work unchanged, since they read the selected take's file. A new clip made from such a video
+  (`insertSegment`) gets the previous clip's settings with prompt and keyframes cleared (or the defaults), never
+  the video's empty params, and doesn't continue from the previous clip. When its file is missing, `clipProblem`
+  and `missingClips` say *"Klipp N:s egna video saknas …"* instead of asking for a prompt.
 
 ## Keyframes and stills
 
@@ -517,6 +577,166 @@ takes, folders, approvals, previews and the export are the sequence service's; w
   folder already holds a non-empty `Storyboards` folder of the user's own is refused, like *Miljöer*, *Kläder* and
   *Poser*.
 
+## Own clips (Egna klipp)
+
+The user's own video files come into the library as `generations` rows with `source = 'import'`, so they can be
+used wherever a finished generation can: in the clip feed, as a clip or a take in a sequence that AI clips continue
+from, and as the starting point of an edit. `src/main/imports.ts` does the work; the window's flow (file dialog,
+drops on the feed, a sequence's timeline or a clip's takes, the questions before, progress cards) is
+`components/feed/ownClips.tsx`. Agents can't import (`imports:import` and `file:pickVideos` refuse them).
+
+1. **Inspect (free).** `probeMedia` reads every file: video stream, size, length, frame rate, HDR (HLG/PQ), bit
+   depth, rotation, variable frame rate and every audio stream with whether ffmpeg decodes it. A file without a
+   video stream, or one that can't be read, is refused in Swedish by name. `cloneable` says whether the file is on
+   the library's volume and that volume is APFS (an APFS clone then takes no extra space; on exFAT, FAT or HFS+
+   `COPYFILE_FICLONE` would silently copy, so those count as copies; above 2 GB without a clone the window asks
+   first). A
+   file is hashed (SHA-256) only when an earlier import has the same size, and `duplicateOf` names that import while
+   its file still exists — so a multi-GB phone film isn't read twice just to open the dialog.
+2. **A working copy only when needed.** HDR, more than 8 bits, larger than 1080p, a variable frame rate, rotation
+   metadata, ProRes or another codec Chromium can't play, a first audio track ffmpeg can't decode (newer phones
+   put a spatial-audio track first), pixels that aren't square (HDV, DV, anamorphic modes) or sound and picture that
+   start more than half a frame (at least 25 ms) apart each give a Swedish reason, and `normalizeVideo` then makes
+   `<name> (arbetskopia).mp4`: H.264 SDR (HLG and PQ tone-mapped), ≤1080p, at most 30 fps, constant frame rate,
+   upright, square pixels, both streams from the file's time zero, the first decodable audio track as AAC (mono on
+   both sides at full level), metadata (GPS included) stripped. The export and Redigera's cuts start each stream at
+   its own first frame or sample, which is why such files get a working copy. The original stays untouched
+   next to it (`original_path`). Without a working copy the file is used as it is; nothing sent to Venice carries its
+   metadata anyway (proxies strip it, frames are PNGs).
+3. **Import.** Every file is probed before anything is copied, and one bad file never stops the others. Then, one
+   file at a time: a disk-space check (2 GB must stay free), an APFS clone (`COPYFILE_FICLONE`) or a streamed copy
+   with progress into `.studio/tmp`, the SHA-256 on the way, the working copy (also when the user chose *Fyll
+   bilden* to crop it to a sequence's shape), the poster and length, then a rename into `Egna klipp/<day>/` and a
+   completed row (`model` and `prompt` empty, no price, `title` = the file's name, `recipe.import` with name, size,
+   hash and the working-copy reasons). A file already imported is reused instead. A file card's *Avbryt* stops that file's copy or
+   working copy (or skips it when it hasn't started) and removes what was half made; nothing visible is left behind,
+   and the other files go on.
+4. **Targets.** The feed; a sequence (one new clip per file, in name order, each after the previous, through
+   `SequenceService.insertSegment`); or a clip (a new, selected take through `addTakeFrom`). When the film's shape
+   differs from the sequence's, the window asks *Passa in med kanter* (padded at export) or *Fyll bilden (beskär)*.
+   Into a sequence whose only clips are untouched empty ones (the *Klipp 1* a new sequence starts with) there is no
+   question: the films take the empty clips' place. They are deleted with `deleteSegment(id, { onlyIfUntouched })`,
+   which main checks in its file queue right before the delete, so a clip filled while the import ran (a prompt, a
+   picture, a take on its way) stays.
+
+While an import runs, a library switch or *Städa upp* is refused (*"Det pågår en import av egna klipp …"*).
+
+### The file home rule
+
+A file's folder follows from its row, and `jobs.videoHome` / `videoLocation` is the one place that says where; the
+job manager, the sequence service, the import and edit services and *Städa upp* all ask it:
+
+| Row | Home folder |
+| --- | --- |
+| `source = 'import'` with `edit_id` (an exported film cloned in as an edit's v1) | `Redigeringar/<edit folder>/` |
+| `source = 'import'` | `Egna klipp/<day it was imported>/` — also when it is a take of a clip |
+| `source = 'edit'` with `edit_id` (a version) | `Redigeringar/<edit folder>/` |
+| `source = 'generated'` with `edit_id` (an AI take of an edit) | `Redigeringar/<edit folder>/Tagningar/` |
+| anything else (and versions whose edit was deleted) | the sequence's or storyboard's takes folder, else `Genereringar/<day>/` |
+
+An import's original sits next to its working copy (`originalHome`). Imports and versions are named by their title,
+so they are never renamed "… Utan prompt"; an import never moves into a `Tagningar/` folder, and a version only once
+its edit is gone and it is a clip's take. Copying a take into another clip (`copyTake`,
+`addTakeFrom`, *Gör om till sekvens*) keeps `source`, `title`, `recipe` and `original_path` — the original is then
+shared, and deleting a generation trashes it only once no row records it — and drops `edit_id` and `parent_id`, so a
+copy never shows up as another version of the edit.
+
+## Redigera: edits and versions
+
+Redigera (`components/editor/`, `edits.ts`, `edit-ops.ts`, `edit-store.ts`, `edit-mix.ts`) changes one finished,
+continuous film. An **edit** starts from a generation used where it is — a feed clip, a take, an own film, another
+edit's version — or from an exported film, which is cloned into the edit's folder as an import row with `edit_id`
+(its cut markers from `exports.cuts`, else from scene detection). That film is **v1**. Every change is a new
+**version**: a completed generations row with `source = 'edit'`, `edit_id`, `parent_id` (its base), `title`
+"<edit> vN", and a `recipe`, in `Redigeringar/<edit>/<edit> vN – <change>.mp4` (times in the name written `0m41.5s`). The original is never touched.
+`edits.current_generation_id` is the version shown and built on; a finished result becomes current when the current
+version is still its base, otherwise it is a branch in the tree.
+
+- **One plan for everything.** `planEditOperation` (free) is the single check for the window and for agents: it
+  normalizes the operation (the range snapped to frames, cut markers, transcript lines and what the model allows;
+  defaults filled), works out what will be sent and what it costs — Venice's free quotes where they exist, the
+  published per-character prices for `/audio/speech` (shown with ≈), per-line quotes for queued TTS (Venice has a
+  per-request minimum), per-chunk voice-changer quotes in whole seconds — and returns Swedish notes, warnings and
+  problems with a fingerprint of the base file, the operation and the price inputs. `runEditOperation` plans again
+  and refuses when a paid price rose above what the user (or the approval) saw by more than $0.01. Prices are written
+  `$0.51` as everywhere in Studio; a click asks once more above $5, for an unknown price or for one that leaves a part
+  out (a voice clone), and a retry after Venice's consent dialog keeps the confirmed price as its ceiling.
+- **The sound is layers, not mixdowns.** A version's `recipe.mix` (`AudioMix`) says how its sound is built: a bed
+  (v1's own sound, or a rendered `bake` after a cut), optionally split into voice and background stems, gain spans
+  (volume, mute, ducking under a new line) and layers of edit media (lines, converted voice, music, effects, added
+  files) placed on the time line. Every audio operation copies the base's mix, changes it and renders it again from
+  the sources (`renderMix`), so a later volume change or a removed music layer never stacks on an earlier mixdown.
+  Layers only point at the edit's own media in `Ljud/`; a library clip added to a film is copied there first.
+- **Free operations** (trim, cut, fade, volume, mute, denoise, loudness, add audio, layer changes) render on the
+  Mac, one at a time, with `edit:progress`, and insert the version at once. Trims and cuts are frame-exact
+  (`spliceVideo`) and carry the transcript and cut markers along (`timing: 'changed'`, with the spans).
+- **Paid audio jobs** (transcribe, change voice, speak lines, music, effect, voice design) are `media_jobs` with
+  one step per request. Each step is stored before it is sent and set `sending` right before the request; queue
+  endpoints are polled with the job manager's backoff and fetched into `.studio/redigering/<job>/`; at most three
+  steps run at once, and a voice clone runs first, alone. When every step is done the parts are put together
+  (converted voice chunks aligned to the sample and anchored at their absolute positions; spoken lines fitted with
+  up to 15 % tempo), saved as edit media and rendered into a version. *Avbryt* stops only unsent parts.
+  **Nothing paid is ever sent by itself after a restart:** a step found `sending` is failed with *"Svaret från
+  Venice kom aldrig fram – det kan ha debiterats …"* (never resent), queued steps are fetched (they are paid), and a
+  job with unsent parts waits as failed (*"Studio stängdes innan alla delar skickades …"*) for *Fortsätt*, which
+  quotes those parts again and needs the user's click (or an agent's new approval). The button shows what the
+  priced parts cost (`resumePriceUsd`, with `resumePartialPrice` when a part such as a voice clone has no price, and
+  `resumePriceNote` when every such part is a clone); when Venice's price rose meanwhile the click is refused and the
+  parts' stored quotes are refreshed, so the button shows the price that is checked. A quote that fails during the
+  click keeps the part's stored one (what the job's cost adds when it is sent). Change voice on chosen lines lays in only those lines' stretches of the converted
+  sound (a part may run across the gap between them, billed once, but whoever speaks there keeps their own voice).
+- **Picture operations** (regenerate a range between the frame before and after it, edit a range with a prompt,
+  extend after the end, upscale) are AI takes submitted through `JobManager.submit` with `editId`: the frames or a
+  short H.264 proxy (≤720p, ≤22 MB) go into `Underlag/`, the take lands in `Tagningar/`, and when it settles the take
+  is spliced into the film (scaled to the range's length; more than ±8 % is refused as a failed take) with the sound
+  kept or taken from the model, and the job becomes a version. A finish that fails locally (a full disk) leaves the job failed with a free
+  *Fortsätt* that splices the paid take in again; one that would fail the same way again (a take of the wrong length,
+  or one that can't be read) gets no *Fortsätt* (`noRefinish`), and a picture job's row can always be hidden, since its
+  paid take stays among the edit's takes. Seedance edits send the proxy as a reference video
+  with the canonical `Strictly edit <Video 1>, …` prompt; Venice's consent request reaches the window's consent
+  dialog as for any generation.
+- **Transcripts** are stored per generation; a version with the same timing inherits its parent's
+  (`inheritedFrom`), a cut carries a remapped copy, and an edited line stores a copy first. Deleting or pruning a version, or deleting
+  an edit, hands its own transcript to the versions that inherit it (kept ones too), so a paid (and corrected) transcript isn't lost with it. SRT goes through a save
+  dialog (`saveSubtitles`), never next to the video.
+- **Voices.** A character's *Röst* clip is cloned (`tts-chatterbox-hd`, a handle valid 7 days, reused from
+  `voice_clones`) only when the user ticked *Får klonas för nya repliker* (`clone_consent_at`). Every line in a cloned voice checks
+  that consent again right before it is sent; withdrawing it forgets the clip's handles, and *Fortsätt* is refused. *Skapa röst med AI*
+  (`designVoice`) is a one-step job whose result is added to the character as a new *Röst* clip.
+- **Deleting.** *Radera versionen* is refused for v1, for versions a sequence uses and for another edit's original;
+  its children move up to its parent; its confirm names a stopped job that builds on it and has already paid for
+  parts. *Rensa versioner…* trashes every version that is neither v1, the current one nor one of its ancestors, and
+  that no sequence uses, no other edit started from and no stopped, partly paid audio job builds on (a dry run first
+  says how many and how big). *Radera redigeringen* (refused while a job runs) keeps versions that sequences or other edits use (moved
+  to their home, without `edit_id`), turns AI takes into ordinary generations in `Genereringar/` (their inputs to
+  `Referensbilder/`), and trashes the rest with `Ljud/`, `Underlag/` and the folder — after moving out any file in it that a row still
+  records (a take's start image a sequence clip was seeded from goes to `Referensbilder/`; the folder stays if one
+  can't be moved). A feed clip an edit started from is never touched; deleting one from the feed is refused while the
+  edit exists, as is deleting what a running job works on or a stopped one has paid parts for. Takes Redigera keeps
+  are flagged `keptByEdit` when a sequence or storyboard is loaded, so their take lists say *Ta bort* (off the clip)
+  rather than *Radera*, and the click sends `release` so main never does more than the button said.
+- **Sending.** `sendEditToSequence` adds a version to a sequence as a new clip or as a selected take of a clip
+  (`addTakeFrom` / `insertSegment`); never to a storyboard, and not while *Generera saknade* runs there.
+
+While a render, a separation or a paid job of this session runs, a library switch is refused (*"Det pågår en
+redigering …"*), so a half-sent job's runner is never carried into another library.
+
+## Voice separation helper
+
+Venice has no stem separation, so Studio separates voice and background on the Mac with Apple's AUSoundIsolation
+audio unit (macOS 13+, the high-quality model on 15+), through `studio-voice-isolate`
+(`native/voice-isolate/main.swift`). It runs offline at about 28× real time and costs nothing. `voice-separation.ts`
+finds it in `Contents/Resources/bin` of the packaged app or `build/bin/` in development, asks it `--probe` once
+(only a success is cached) and runs it on 48 kHz float WAV extracted from the film; the stems are cached in
+`.studio/stammar/` by the file's path, size and modification time (4 GB, least recently used first). A separation
+first checks that its scratch files (the sound three times over as float WAV) fit with 1 GB to spare, and a watchdog
+stops the helper with a Swedish message when no progress comes for two minutes or it runs longer than the sound
+itself (at least five minutes). The helper is
+optional: without it — another OS, an older macOS, a build without the Swift compiler — `separationStatus()` gives a
+Swedish reason, *Inställningar* shows it, and Redigera offers only what works without stems (lowering the original
+under a new voice instead of keeping its background). See [DEVELOPMENT.md](DEVELOPMENT.md#native-helper) for the
+build.
+
 ## Reviews and learnings
 
 The review loop exists so prompts get better from what earlier prompts actually produced. The user rates clips in
@@ -587,16 +807,17 @@ agent ──HTTP──▶ AgentServer (/mcp) ──▶ McpServer per session ─
   images and audio (each block after a text label; audio is replaced by a one-line note for a session whose
   protocol version predates audio content, 2025-03-26), turns exceptions into tool errors the agent can read
   (Swedish, like the UI) and records every call in the activity log. Tools carry MCP annotations (`readOnlyHint`,
-  `destructiveHint`, `openWorldHint`). The 60 tools live in `tools/library.ts`, `form.ts`, `sequences.ts`,
-  `stills.ts`, `storyboards.ts`, `paid.ts` and `review.ts`; [AGENTS.md](AGENTS.md#tools) lists them.
+  `destructiveHint`, `openWorldHint`). The 73 tools live in `tools/library.ts`, `form.ts`, `sequences.ts`,
+  `stills.ts`, `storyboards.ts`, `paid.ts`, `editor.ts`, `editor-paid.ts` and `review.ts`;
+  [AGENTS.md](AGENTS.md#tools) lists them.
 - **Same services as the window.** `recordIpcHandlers` wraps `ipcMain.handle` before any module registers its
   handlers, so `callService(channel, …args)` runs exactly the handler a window would, with every validation, busy
   check, folder move and change notification. Handlers can tell an agent's call apart with `isAgentCall(event)`
   (used to refuse clip, board and transition changes during *Generera saknade*).
 - **Form commands.** The Generate form lives in the renderer (`lib/generateStore.ts`), because it is what the user
   sees and edits. `FormBridge.send` posts `agent:command` (`get_form`, `set_form`, `set_references`,
-  `reorder_references` or `open` — the Generate view, a sequence and clip, or a storyboard —, with a deadline) to
-  the focused window, and `lib/agentBridge.ts` applies it with the form's own rules (mode switching, model options,
+  `reorder_references` or `open` — the Generate view, a sequence and clip, a storyboard or an edit —, with a deadline)
+  to the focused window, and `lib/agentBridge.ts` applies it with the form's own rules (mode switching, model options,
   the reference cap, the description switches, tokens following a reorder) and answers with `agent:reply`; the form
   state it reports includes the pictures past the model's limit (`unsentReferences`), which `reorder_references` can
   move forward (main names the references to move by path, so a form the user changed meanwhile still gets the
@@ -626,13 +847,24 @@ agent ──HTTP──▶ AgentServer (/mcp) ──▶ McpServer per session ─
   names a clip, `segments:setImage`, or for a board `boards:update` (`verify` refuses once the board has moved or
   got another picture since the agent asked, and `execute` checks the picture again once the still is made, keeping
   one the user put in meanwhile); the approval records the `stillId` (and a `notice` when only the assignment failed
-  or was left out), and the dialog waits for the picture (*Skapar bilden…*) and shows it. Requests expire after 30
-  minutes; at most 10 can be pending; regenerating the token, switching the library or turning the connection off
-  expires them all.
+  or was left out), and the dialog waits for the picture (*Skapar bilden…*) and shows it. An edit request
+  (`request_edit_operation`, kind `edit`, with `edit`: the edit, base version, normalized operation, summary, frames,
+  old → new lines or the lines a change of voice changes, parts, price note and `partialPrice`) is planned by the same `edits:plan` the window uses; `verify` refuses when
+  the base version's file identity (device, inode, size, modification time), the plan's fingerprint, the transcript
+  lines it uses or the clone consent changed, or the price rose by more than $0.01, and `execute` runs `edits:run`
+  with the approved price as its ceiling. The request's identity includes its price: asked again at another price it
+  replaces the pending one rather than being handed back. The dialog shows a partial price as `≈ $X +` and asks once
+  more for it, as for an unknown price or one above $5. When the plan's only problem is a missing clone consent, the request is
+  still made with `needsCloneConsent`, and the dialog's required checkbox gives that consent (`voices:consent`, the
+  user's own call) before approving. A voice design (`request_voice_design`, kind `voice-design`) runs
+  `voices:design`; its dialog asks once more for an unknown price or one above $5, as the user's own *Skapa röst* does. `get_approval` follows both jobs until the version or the new clip is there. Requests expire
+  after 30 minutes; at most 10 can be pending; regenerating the token, switching the library or turning the
+  connection off expires them all.
 - **Guidance.** `guide.ts` provides the server instructions sent at `initialize`, the `get_studio_guide` tool, the
   `studio://guide` resource and the `write_video_prompt` prompt. Prompt-writing advice follows the user's prompt
-  language setting; the guide covers voices (`@AudioN`), poses and the review loop, and ends with the pinned and
-  ten most recent learnings.
+  language setting; the guide covers voices (`@AudioN`, designed voices and clone consent), poses, own clips,
+  editing films in Redigera (always plan first; which operation for which problem) and the review loop, and ends
+  with the pinned and ten most recent learnings.
 - **Looking back.** The review tools (`tools/review.ts`) give agents what a generation, a sequence or an exported
   film actually became: frames as JPEG images captioned with their time, the reference images next to them, and —
   when asked, for clients on MCP 2025-03-26 or later — the clip's sound and the voice windows as MP3 audio content.
@@ -645,11 +877,13 @@ agent ──HTTP──▶ AgentServer (/mcp) ──▶ McpServer per session ─
 
 | Module | Contents |
 | --- | --- |
-| `types.ts` | Every type that crosses the process boundary (segments with keyframes and notes, storyboards with their boards and transitions, stills, image models, approval requests including image, transition and storyboard requests), the `StudioApi` interface, `NEEDS_CONSENT`, the storyboard formats (`STORYBOARD_ASPECT_RATIOS`). |
-| `models.ts` | The three modes (`KINDS`), `DEFAULT_MODEL` per mode (Seedance 2.5 basic), `PREFERRED` options, `DEFAULT_PARAMS` (8s, 480p, 16:9, audio on), `rememberModelKinds` / `kindOfModelId`, `pickOption`, `audioForModel`, `imageToVideoVariant`, `supportsEndImage` (the models known to take an end image: ids with `first-last-frame` or `transition`, Seedance image-to-video, Kling V3/O3 image-to-video; Venice's list has no flag for it) and `endImageVariant`, `maxReferenceImages` (9, or 7 for Grok and 4 for Kling models), reference audio (`supportsAudioInput`, `maxReferenceAudios` = 3, `MIN`/`MAX_AUDIO_CLIP_SECONDS` = 2/15, `MAX_REFERENCE_AUDIO_SECONDS` = 15, `referenceAudioWindow`, `sanitizeReferenceAudios`), `paramsForSubmit` (an end image only for a model that takes one), `durationSeconds`. |
-| `prompt-refs.ts` | Pure `@ImageN` and `@AudioN` logic: finding tokens and near misses (`@Image 3`, `@img3`, `@Bild3`, `@audio 1`, `@Ljud1`, `@Voice1` …), validation with issue codes (`no-references`, `out-of-range`, `over-model-limit`, `malformed`, `unused-reference`, `not-reference-mode`, and for audio `audio-out-of-range`, `audio-over-limit`, `audio-not-supported`, `audio-length`, `audio-too-long`, `unused-audio`), `validationContext`, canonicalisation, and `blockingPromptError` / `blockingContinuationError`. The editor, the submit guard and the agent tools all use it, so they agree. |
+| `types.ts` | Every type that crosses the process boundary (segments with keyframes and notes, storyboards with their boards and transitions, stills, image models, own-clip imports, edits with their versions, jobs, media, timeline, transcripts and operations, the audio model catalog, approval requests including image, transition, storyboard, edit and voice-design requests), the `StudioApi` interface, `NEEDS_CONSENT`, the storyboard formats (`STORYBOARD_ASPECT_RATIOS`). |
+| `models.ts` | The three modes (`KINDS`), `DEFAULT_MODEL` per mode (Seedance 2.5 basic), `PREFERRED` options, `DEFAULT_PARAMS` (8s, 480p, 16:9, audio on), `rememberModelKinds` / `kindOfModelId`, `pickOption`, `audioForModel`, `imageToVideoVariant`, `supportsEndImage` (the models known to take an end image: ids with `first-last-frame` or `transition`, Seedance image-to-video, Kling V3/O3 image-to-video; Venice's list has no flag for it) and `endImageVariant`, `maxReferenceImages` (9, or 7 for Grok and 4 for Kling models), reference audio (`supportsAudioInput`, `maxReferenceAudios` = 3, `MIN`/`MAX_AUDIO_CLIP_SECONDS` = 2/15, `MAX_REFERENCE_AUDIO_SECONDS` = 15, `referenceAudioWindow`, `sanitizeReferenceAudios`), `paramsForSubmit` (an end image only for a model that takes one; the source video and upscale factor only for video-input models, reference videos only for Seedance's reference-to-video models), `durationSeconds`, and for Redigera `isVideoInputModel`, `isUpscaleModel`, `supportsReferenceVideos` and `MAX_REQUEST_MEDIA_BYTES` (22 MB of media per request). |
+| `prompt-refs.ts` | Pure `@ImageN` and `@AudioN` logic: finding tokens and near misses (`@Image 3`, `@img3`, `@Bild3`, `@audio 1`, `@Ljud1`, `@Voice1` …), validation with issue codes (`no-references`, `out-of-range`, `over-model-limit`, `malformed`, `unused-reference`, `not-reference-mode`, and for audio `audio-out-of-range`, `audio-over-limit`, `audio-not-supported`, `audio-length`, `audio-too-long`, `unused-audio`), `validationContext` (reference videos count as references, so a Seedance edit needs no reference image), canonicalisation, and `blockingPromptError` / `blockingContinuationError`. The editor, the submit guard and the agent tools all use it, so they agree. |
 | `prompt-compose.ts` | The References legend: `composePrompt` (which described assets are among the sent references, their tokens in order, whitespace collapsed and `@` removed, proportional shortening at word boundaries within the model's limit, `truncated` / `dropped`), `composeOptionsFor`, `describedAssets`, `sanitizeDescriptionFlags` (the switches stored as absent while they have their defaults) and the remembered prompt limits (`rememberPromptLimits`, `promptLimitOf`). The editor's box, the submit, the approval dialog and the agent tools compose with it, so they show and send the same text. |
 | `prompt-remap.ts` | Keeping tokens on their pictures and clips when the reference lists change: `remapPromptReferences` (any letter case, near misses including ranges and glued words, `(…)` groups, an outfit swap) and `reorderReferences` (a new order named by tokens or paths, the prompt and the negative prompt renumbered in one change), with `referenceOrder` and `referenceMoves`. The form, the bridge, the agents' clip tools, the clip editor's draft merge (an agent's reorder while the user types) and *Använd prompt* on an earlier take use it. |
 | `seams.ts` | Whether a take was made from its neighbour's frame as it is now (`startsOnLastFrameOf`, `endsOnFirstFrameOf`), read from the names main gives the frames it extracts. The clip editor's and timeline's warnings and the export's dedupe both use it, so a cut the editor calls seamless is the one the export dedupes. |
-| `generation-filter.ts` | The clip feed's filter and sort (`filterGenerations`, `sortGenerations`, `queryGenerations`, `summarizeGenerations`, `indexAssetPaths`), shared by the feed and the agents' `list_generations`, so both show the same clips. |
+| `generation-filter.ts` | The clip feed's filter and sort (`filterGenerations`, `sortGenerations`, `queryGenerations`, `summarizeGenerations`, `indexAssetPaths`; *Källa* = `source`, the title searched too), shared by the feed and the agents' `list_generations`, so both show the same clips. |
+| `generation-label.ts` | How a generation is named and marked: `generationTitle` (the title of an import or a version, else the prompt), `sourceBadge` (*Egen*, *Redigerad*, *Redigering*), `canUseAgain` (*Använd igen* only for Venice generations without video inputs). The feed, takes, frame pickers, file names and the agents' summaries all use it. |
+| `edit-plan.ts` | Pure planning helpers for Redigera, shared by main, the window and the agent tools: `snapRange`, `speechRegions`, `planVoiceChunks` (cutting long speech into chunks Venice bills as few started minutes as possible for, in short pauses, with a safety margin), `segmentsFromWords`, `snapSegments`, `remapTranscript`, `toSrt`, `fitLine`, `isPaidOperation`, `operationLabel`, `formatTimecode`, `formatPrice`, `PICTURE_EDIT_MODELS` and the price arithmetic. |
 | `prompts.ts` | `titleFromBody`, the automatic title of an untitled prompt. |

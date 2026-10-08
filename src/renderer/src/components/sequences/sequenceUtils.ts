@@ -35,6 +35,48 @@ export function pendingTake(segment: Segment): Generation | undefined {
   return segment.takes.find(isPending)
 }
 
+/**
+ * The take is an own clip: the user's own film or a version from Redigera, not a Venice generation (an AI take made
+ * in Redigera counts as Venice's).
+ */
+export function isOwnTake(take: Pick<Generation, 'source'> | undefined): boolean {
+  return !!take && take.source !== undefined && take.source !== 'generated'
+}
+
+/**
+ * The shape a sequence's film has ("16:9"): its first clip's selected take, else its defaults, else 16:9. What an own
+ * film of another shape is compared with ("Passa in eller beskär"), the way main crops to it.
+ */
+export function sequenceAspect(sequence: Sequence): string {
+  const first = sequence.segments[0]
+  const take = first && selectedTake(first)
+  const valid = (a: string | undefined): a is string => !!a && /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(a)
+  const own = take?.params.aspectRatio
+  if (valid(own)) return own
+  const defaults = sequence.defaults.aspectRatio
+  return valid(defaults) ? defaults : '16:9'
+}
+
+/**
+ * A clip nobody has done anything with yet: no takes, no prompt, no keyframes, no notes (the empty Klipp 1 a new
+ * sequence starts with). A first own film brought into a sequence of only such clips takes their place.
+ */
+export function isUntouchedClip(segment: Segment): boolean {
+  const p = segment.params
+  return (
+    !segment.takes.length &&
+    !segment.selectedGenerationId &&
+    !p.prompt?.trim() &&
+    !p.startImage &&
+    !p.endImage &&
+    !p.referenceImages?.length &&
+    !p.referenceAudios?.length &&
+    !segment.continueFromPrevious &&
+    !segment.endFromNext &&
+    !segment.notes.trim()
+  )
+}
+
 /** Real length when ffprobe has measured it, else the requested duration. */
 export function takeDuration(take: Generation): number {
   return take.videoDuration ?? durationSeconds(take.params.duration)

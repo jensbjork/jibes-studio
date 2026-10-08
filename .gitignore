@@ -1,9 +1,10 @@
 # Dependencies
 node_modules/
 
-# Build output (electron-vite → out/, electron-builder → dist/)
+# Build output (electron-vite → out/, electron-builder → dist/, native helpers → build/bin/)
 out/
 dist/
+build/bin/
 *.tsbuildinfo
 
 # Test and coverage output

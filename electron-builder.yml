@@ -16,6 +16,12 @@ electronLanguages:
 # Native modules can't be loaded from inside the asar archive.
 asarUnpack:
   - '**/*.node'
+# Native helpers built by scripts/build-helpers.mjs (npm run build:helpers, run first by `npm run app`), found at
+# Contents/Resources/bin by src/main (voice-separation.ts). A build without the Swift compiler has none: electron-builder
+# only warns, and Studio then runs without voice separation.
+extraResources:
+  - from: build/bin/studio-voice-isolate
+    to: bin/studio-voice-isolate
 mac:
   target:
     - target: dir

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { generationTitle } from '@shared/generation-label'
 import type { Generation, VideoModel } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { authorLabel, isPending } from '../feed/feedText'
@@ -266,7 +267,7 @@ function EvidenceThumb({
     <button
       type="button"
       onClick={() => onOpen(id)}
-      title={g.prompt}
+      title={generationTitle(g)}
       className="block w-full overflow-hidden rounded-md border border-line text-left transition hover:border-muted"
     >
       <span className="relative block aspect-video bg-black">
@@ -291,7 +292,9 @@ function EvidenceThumb({
           </span>
         ) : null}
       </span>
-      <span className="block truncate px-2 py-1 text-[11px] text-muted">{g.prompt || 'Ingen prompt'}</span>
+      <span className="block truncate px-2 py-1 text-[11px] text-muted">
+        {g.prompt || g.title ? generationTitle(g, 80) : 'Ingen prompt'}
+      </span>
     </button>
   )
 }

@@ -6,9 +6,9 @@
 // exported here, but the Sekvenser handlers refuse it.
 
 import { randomUUID } from 'node:crypto'
-import { existsSync, statSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
-import { basename, dirname, extname, join } from 'node:path'
+import { constants, existsSync, statSync } from 'node:fs'
+import { copyFile, lstat, mkdir, rm, stat, utimes } from 'node:fs/promises'
+import { basename, dirname, extname, join, resolve } from 'node:path'
 import { ipcMain, shell } from 'electron'
 import {
   audioForModel,
@@ -48,9 +48,9 @@ import type {
 import { isAgentCall } from './agent/local-ipc'
 import * as db from './db'
 import { concatClips, extractFrame, extractFrameAtOrAfter, frameStartAtOrAfter, probe } from './ffmpeg'
-import { composeSubmission, prepareSubmission, toPublic, type JobManager } from './jobs'
+import { composeSubmission, prepareSubmission, toPublic, videoLocation, type JobManager } from './jobs'
 import {
-  copyPathVerified,
+  assertRootIntact,
   FOLDERS,
   framesDir,
   fromStoredPath,
@@ -72,6 +72,7 @@ import { placeFile } from './references'
 import {
   buildConcatClips,
   buildStoryboardClips,
+  exportCuts,
   missingTakesMessage,
   missingTransitionsMessage,
   reserveExportPath
@@ -110,6 +111,8 @@ interface Deps {
 interface SequencePatch {
   name?: string
   defaults?: Partial<GenerationParams>
+  /** "Exportformat": 480, 720 or 1080; null = Automatiskt (the first clip's own size). The user's only. */
+  exportHeight?: number | null
 }
 
 /**
@@ -140,6 +143,9 @@ interface Run {
   guard?: SubmitGuard
 }
 
+/** Said when an agent's call reaches something only the user may do in Studio. */
+const USER_ONLY = 'Det här kan bara du göra i Studio.'
+
 /** Thrown inside a run when the user pressed stop before the next take was submitted. */
 class RunStopped extends Error {}
 
@@ -157,6 +163,40 @@ const PLACE_ATTEMPTS = 3
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
+
+/**
+ * Copies a file to `to` (which must not exist) as an APFS clone where the volume allows it (instant, and no extra
+ * space until either copy changes), else as an ordinary copy, and checks the result; a partial copy is removed.
+ */
+async function clonePathVerified(from: string, to: string): Promise<void> {
+  const src = resolve(from)
+  const dest = resolve(to)
+  const info = await lstat(src)
+  if (!info.isFile()) throw new Error(`${basename(src)} kan inte kopieras.`)
+  assertRootIntact()
+  await mkdir(dirname(dest), { recursive: true })
+  try {
+    // FICLONE falls back to a plain copy by itself where cloning isn't possible (another volume, not APFS).
+    await copyFile(src, dest, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE)
+    await utimes(dest, info.atime, info.mtime).catch(() => {})
+    if ((await stat(dest)).size !== info.size) throw new Error(`Kopian av ${basename(src)} blev ofullständig.`)
+  } catch (err) {
+    // Only what this call made: EEXIST means the destination is somebody else's.
+    if ((err as NodeJS.ErrnoException | undefined)?.code !== 'EEXIST') await rm(dest, { force: true }).catch(() => {})
+    throw err
+  }
+}
+
+/**
+ * Params made for a video input (a video-to-video edit or an upscale in Redigera): the Generate form and a clip's
+ * template can't use them.
+ */
+function usesVideoInput(params: GenerationParams): boolean {
+  return !!params.sourceVideo || !!params.referenceVideos?.length
+}
+
+/** The "Skriv en prompt…" refusal of clipProblem, which a clip whose own film is gone replaces (see clipProblemAt). */
+const PROMPT_FIRST = 'Skriv en prompt för klippet först.'
 
 /** movePath refused because the destination exists (or another move is heading there right now). */
 function nameTaken(err: unknown, to: string): boolean {
@@ -252,7 +292,7 @@ function endImageProblem(params: GenerationParams, links: ClipLinks): string | u
  */
 function clipProblem(params: GenerationParams, links: ClipLinks): string | undefined {
   const kind = kindOfModelId(params.model)
-  if (!params.prompt.trim()) return 'Skriv en prompt för klippet först.'
+  if (!params.prompt.trim()) return PROMPT_FIRST
   // Before the prompt's references: an end image the model can't take is a keyframe the user would pay to lose.
   const end = endImageProblem(params, links)
   if (end) return end
@@ -268,6 +308,21 @@ function clipProblem(params: GenerationParams, links: ClipLinks): string | undef
     return 'Lägg till en startbild för klippet, eller låt det fortsätta från föregående klipp.'
   }
   return blockingPromptError(params)
+}
+
+/**
+ * clipProblem for the clip at `index`: a clip whose selected take is an own film that has gone missing (moved or
+ * deleted in Finder) says so, rather than asking for a prompt for an AI take nobody meant to make.
+ */
+function clipProblemAt(
+  rows: readonly store.SegmentRow[],
+  index: number,
+  params: GenerationParams,
+  links: ClipLinks
+): string | undefined {
+  const problem = clipProblem(params, links)
+  const row = rows[index]
+  return problem === PROMPT_FIRST && row && store.ownClipMissing(row) ? store.ownClipMissingMessage(index + 1) : problem
 }
 
 /** The word in front of an @AudioN inside a reference's brackets ("voice @Audio1", "röst @Audio1"). */
@@ -488,7 +543,9 @@ export interface MissingClip {
  */
 export function missingClipProblem(clip: MissingClip): string | undefined {
   if (!clip.problem) return undefined
-  return clip.waiting ? clip.problem : `Klipp ${clip.clip}: ${clip.problem}`
+  // A message that names its clip itself (two clips waiting on each other, an own film gone) isn't prefixed again.
+  if (clip.waiting || clip.problem.startsWith(`Klipp ${clip.clip}:s `)) return clip.problem
+  return `Klipp ${clip.clip}: ${clip.problem}`
 }
 
 export class SequenceService {
@@ -609,9 +666,14 @@ export class SequenceService {
     const defaults = patch?.defaults
       ? { ...store.parseDefaults(row.defaults), ...store.pickDefaults(patch.defaults) }
       : store.parseDefaults(row.defaults)
-    this.sql()
-      .prepare('UPDATE sequences SET name = ?, defaults = ?, updated_at = ? WHERE id = ?')
-      .run(name, JSON.stringify(defaults), Date.now(), id)
+    // Checked before anything is written: a wrong height must not leave the name changed and the format not.
+    const height = patch?.exportHeight !== undefined ? store.cleanExportHeight(patch.exportHeight) : undefined
+    this.sql().transaction(() => {
+      this.sql()
+        .prepare('UPDATE sequences SET name = ?, defaults = ?, updated_at = ? WHERE id = ?')
+        .run(name, JSON.stringify(defaults), Date.now(), id)
+      if (height !== undefined) store.setExportHeight(id, height)
+    })()
     // The folder follows the name, now or once the takes on their way into it have landed.
     if (name !== row.name) await this.syncFolder(id, true)
     return this.changed(id, false)
@@ -751,10 +813,29 @@ export class SequenceService {
   }
 
   async addSegment(sequenceId: string, init: SegmentInit = {}, caller: Caller = {}): Promise<Sequence> {
+    return (await this.insertSegment(sequenceId, init, caller)).sequence
+  }
+
+  /**
+   * addSegment, resolving the new clip's id too (an import of own clips and Redigera's "Skicka till sekvens" go on
+   * with it). A clip made from an existing generation (`fromGenerationId`) gets it as its selected take: adopted
+   * when it belongs to no clip, selected where it is (shared) when it is another clip's take. Its settings, the
+   * template for an AI take of the clip, come from that generation, except for an own film or a version from Redigera
+   * (or a take made from a video in Redigera): their params are no settings a take could be made with, so the clip
+   * gets the previous clip's settings without its prompt and keyframes, or the sequence's defaults, as a clip added
+   * by hand does. Either way it doesn't continue from the previous clip unless asked to.
+   */
+  async insertSegment(
+    sequenceId: string,
+    init: SegmentInit = {},
+    caller: Caller = {}
+  ): Promise<{ sequence: Sequence; segmentId: string }> {
     init = init ?? {}
     // Taking a frame from a neighbour may switch the model: the list says which sibling Venice offers and what
-    // options it has. Fetched before the rows are read, so what is written below is built from what was read.
-    const models = init.endFromNext || init.continueFromPrevious !== false ? await this.modelList() : undefined
+    // options it has. Fetched before the rows are read, so what is written below is built from what was read. A
+    // clip made from a generation doesn't continue unless asked to, so it needs no list for that.
+    const linking = init.endFromNext || (init.continueFromPrevious ?? !init.fromGenerationId)
+    const models = linking ? await this.modelList() : undefined
     const sequence = store.requireSequenceRow(sequenceId)
     this.refuseWhileRunning(sequenceId, caller)
     const rows = store.listSegmentRows(sequenceId)
@@ -768,9 +849,12 @@ export class SequenceService {
 
     const source = init.fromGenerationId ? db.getGeneration(init.fromGenerationId) : undefined
     if (init.fromGenerationId && !source) throw new Error('Tagningen finns inte längre.')
+    // An import's or a version's params are placeholders (no model, no prompt), and a take made from a video can't be
+    // made again by the clip: neither is a template.
+    const seedsFromSource = !!source && !store.isOwnClip(source) && !usesVideoInput(source.params)
 
     let params: GenerationParams
-    if (source) params = store.sanitizeParams(source.params)
+    if (source && seedsFromSource) params = store.sanitizeParams(source.params)
     else if (init.params) params = store.sanitizeParams(init.params)
     // The previous clip's settings, but not what belongs to its shot: its prompt, and its keyframes (a new clip
     // starts without a start or end image).
@@ -841,7 +925,79 @@ export class SequenceService {
     })()
 
     if (adopt) await this.adopt(source.id)
-    return this.changed(sequenceId)
+    return { sequence: this.changed(sequenceId), segmentId: id }
+  }
+
+  /**
+   * Makes a finished generation a take of the clip, selected when `select` is set (with the trims a newly selected
+   * take keeps, see store.seamTrims): an own film imported into the clip ("Lägg till tagning från fil…"), a version
+   * sent from Redigera ("Som ny tagning av klipp N"). A generation that belongs to no clip is adopted (its file moves
+   * into the sequence's Tagningar, unless it has a home of its own: an import stays in Egna klipp, a version in its
+   * edit's folder). One that is already another clip's take is copied, with a file of its own (an APFS clone), as
+   * "Gör om till sekvens" copies a storyboard's takes, so either clip can drop or delete it without the other losing
+   * it. One that is this clip's take already is only selected. Sequence clips only: a storyboard's transitions take
+   * nothing but takes made for them.
+   */
+  async addTakeFrom(
+    segmentId: string,
+    generationId: string,
+    opts: { select?: boolean } = {},
+    caller: Caller = {}
+  ): Promise<{ sequenceId: string; segmentId: string; generationId: string }> {
+    const row = store.requirePlainSegment(segmentId)
+    this.refuseWhileRunning(row.sequence_id, caller)
+    const g = typeof generationId === 'string' ? db.getGeneration(generationId) : undefined
+    if (!g) throw new Error('Tagningen finns inte längre.')
+    if (!store.isUsable(g)) throw new Error('Tagningen har ingen färdig video att lägga till.')
+
+    let takeId = g.id
+    if (g.segmentId && g.segmentId !== row.id) {
+      // Another clip's take: this clip gets a copy of its own.
+      takeId = await this.withFiles(() => this.copyGeneration(g.id, row.id))
+      this.announceGenerations([takeId])
+    } else if (!g.segmentId) {
+      db.updateGeneration(g.id, { segmentId: row.id })
+      await this.adopt(g.id)
+    }
+
+    if (opts?.select) {
+      // Read again: the copy or the move took a while, and the clip may have changed meanwhile.
+      const current = store.getSegmentRow(row.id)
+      const take = db.getGeneration(takeId)
+      if (current && take) {
+        this.refuseWhileRunning(current.sequence_id, caller)
+        store.setSelectedTake(current, take)
+      }
+    }
+    this.changed(row.sequence_id)
+    return { sequenceId: row.sequence_id, segmentId: row.id, generationId: takeId }
+  }
+
+  /**
+   * Takes a take off a clip without deleting it: the take list's "Radera" on a film Redigera keeps (a version sent
+   * as a take, an edit's original). The clip forgets it (as its take and as its selection); the row and its file stay
+   * where Redigera has them (the file of one kept in its own home never moved into Tagningar, see adopt).
+   */
+  async releaseTake(segmentId: string, generationId: string, caller: Caller = {}): Promise<Sequence> {
+    // A sequence clip or a storyboard transition (whose take list offers the same "Ta bort").
+    const row = store.requireSegmentRow(segmentId)
+    this.refuseWhileRunning(row.sequence_id, caller)
+    await this.withFiles(async () => {
+      const g = db.getGeneration(generationId)
+      const current = store.getSegmentRow(row.id)
+      if (!g || !current) return
+      this.sql().transaction(() => {
+        if (g.segmentId === current.id) db.updateGeneration(g.id, { segmentId: undefined })
+        if (current.selected_generation_id === g.id) {
+          store.setSelectedTake(current, undefined)
+          // A transition falls back on another of its takes, as when its take is deleted.
+          if (current.from_board_id) store.reselectTransitionTake(current.id)
+        }
+      })()
+      await this.releaseTakes([g.id])
+    })
+    this.announceGenerations([generationId])
+    return this.changed(row.sequence_id)
   }
 
   async updateSegment(segmentId: string, patch: SegmentPatch, caller: Caller = {}): Promise<Sequence> {
@@ -931,11 +1087,22 @@ export class SequenceService {
   }
 
   /** Deletes the segment; its takes become ordinary generations and their videos go back to Genereringar/. */
-  async deleteSegment(segmentId: string, caller: Caller = {}): Promise<Sequence> {
+  /**
+   * `onlyIfUntouched`: left alone (the sequence is returned as it is) unless nothing has been put in the clip – checked
+   * in the file queue, right before the delete, so a clip filled while an import ran (the empty Klipp 1 it replaces)
+   * stays. A take on its way to Venice counts as something.
+   */
+  async deleteSegment(
+    segmentId: string,
+    caller: Caller = {},
+    opts: { onlyIfUntouched?: boolean } = {}
+  ): Promise<Sequence> {
     const row = store.requireSegmentRow(segmentId)
     this.refuseWhileRunning(row.sequence_id, caller)
     const freed = await this.withFiles(async () => {
-      if (!store.getSegmentRow(row.id)) return []
+      const current = store.getSegmentRow(row.id)
+      if (!current) return []
+      if (opts.onlyIfUntouched && (this.submitting.has(row.id) || !store.isUntouchedSegment(current))) return undefined
       // The file queue may have kept this waiting; a run may have started meanwhile.
       this.refuseWhileRunning(row.sequence_id, caller)
       const takeIds = store.takeIdsForSegments([row.id])
@@ -946,6 +1113,7 @@ export class SequenceService {
       })()
       return takeIds
     })
+    if (!freed) return this.get(row.sequence_id)
     this.announceGenerations(freed)
     return this.changed(row.sequence_id)
   }
@@ -1225,7 +1393,7 @@ export class SequenceService {
 
     // The frames stand in for the slots they fill when the clip's own settings are checked.
     const startImage = preview.start?.path ?? params.startImage
-    note(clipProblem({ ...params, startImage, endImage: preview.end?.path ?? params.endImage }, links))
+    note(clipProblemAt(rows, index, { ...params, startImage, endImage: preview.end?.path ?? params.endImage }, links))
     return preview
   }
 
@@ -1281,7 +1449,7 @@ export class SequenceService {
 
     const params = takeParams(row, links)
     // Before the frame grabs and the quote: a clip that can't be sent as it stands costs nothing to refuse.
-    const problem = clipProblem(params, links)
+    const problem = clipProblemAt(rows, index, params, links)
     if (problem) throw new Error(problem)
     // The descriptions appended to its prompt are read here too, with the clip and the guard: a description edited
     // while the frames are taken and the pictures uploaded doesn't change what the take sends.
@@ -1536,49 +1704,12 @@ export class SequenceService {
   async copyTake(takeId: string, segmentId: string, trimStart = 0): Promise<string> {
     const id = await this.withFiles(async () => {
       const take = db.getGeneration(takeId)
-      if (!take || !store.isUsable(take)) throw new Error('Tagningen har ingen färdig video att kopiera.')
-      const sequence = store.sequenceOfSegment(segmentId)
-      const folder = sequence && this.ensureFolder(sequence.id)
-      if (!sequence || !folder) throw new Error('Klippet finns inte längre.')
-      const dir = sequenceTakesDir(folder, store.kindOf(sequence))
-      const ext = extname(take.filePath).toLowerCase() || '.mp4'
-      const id = randomUUID()
-      let video: string | undefined
-      let poster: string | undefined
-      try {
-        video = await this.copyToFreeName(take.filePath, () =>
-          join(dir, store.availableFileName(dir, store.takeFileBase(take), ext))
-        )
-        if (take.thumbPath && existsSync(take.thumbPath)) {
-          const to = join(thumbsDir(), `${id}${extname(take.thumbPath).toLowerCase() || '.jpg'}`)
-          // Best effort: a missing poster is made again by the backfill.
-          poster = await copyPathVerified(take.thumbPath, to).then(
-            () => to,
-            () => undefined
-          )
-        }
-        this.sql().transaction(() => {
-          db.insertGeneration({
-            ...take,
-            id,
-            queueId: undefined,
-            downloadUrl: undefined,
-            error: undefined,
-            quote: undefined,
-            filePath: video,
-            thumbPath: poster,
-            segmentId
-          })
-          const row = store.requireSegmentRow(segmentId)
-          this.sql()
-            .prepare('UPDATE segments SET selected_generation_id = ?, trim_start = ?, trim_end = 0 WHERE id = ?')
-            .run(id, store.clampTrims(trimStart, 0, store.takeLength(take), 'end').trimStart, row.id)
-        })()
-      } catch (err) {
-        // Nothing records the copies: they would only be clutter.
-        for (const file of [video, poster]) if (file) await rm(file, { force: true }).catch(() => {})
-        throw err
-      }
+      const id = await this.copyGeneration(takeId, segmentId, (copyId) => {
+        const row = store.requireSegmentRow(segmentId)
+        this.sql()
+          .prepare('UPDATE segments SET selected_generation_id = ?, trim_start = ?, trim_end = 0 WHERE id = ?')
+          .run(copyId, store.clampTrims(trimStart, 0, take && store.takeLength(take), 'end').trimStart, row.id)
+      })
       return id
     })
     this.announceGenerations([id])
@@ -1587,12 +1718,73 @@ export class SequenceService {
     return id
   }
 
-  /** Copies `from` to the path `pick` returns, picking again when another writer takes that name meanwhile. */
+  /**
+   * Inserts a copy of a finished generation as a take of the segment, with a video (an APFS clone where possible)
+   * and poster of its own, and resolves its id. The copy is no new purchase, so it carries no price (the feed would
+   * count it twice). It keeps what the generation is (source, title, recipe; an import's untouched original, which
+   * the two rows then share) but not that it belongs to an edit (editId, parentId): it would otherwise show up as
+   * another version in Redigera. Its file goes where the home rule puts it (jobs.videoLocation): an import's copy
+   * next to the import in Egna klipp, any other into the sequence's Tagningar. `inTransaction` runs with the insert.
+   * Only inside withFiles.
+   */
+  private async copyGeneration(
+    takeId: string,
+    segmentId: string,
+    inTransaction?: (copyId: string) => void
+  ): Promise<string> {
+    const take = db.getGeneration(takeId)
+    if (!take || !store.isUsable(take)) throw new Error('Tagningen har ingen färdig video att kopiera.')
+    const sequence = store.sequenceOfSegment(segmentId)
+    const folder = sequence && this.ensureFolder(sequence.id)
+    if (!sequence || !folder) throw new Error('Klippet finns inte längre.')
+    const id = randomUUID()
+    const copy: db.StoredGeneration = {
+      ...take,
+      id,
+      queueId: undefined,
+      downloadUrl: undefined,
+      error: undefined,
+      quote: undefined,
+      editId: undefined,
+      parentId: undefined,
+      segmentId
+    }
+    const ext = extname(take.filePath).toLowerCase() || '.mp4'
+    const place = store.keepsOwnHome(copy)
+      ? videoLocation(copy)
+      : { dir: sequenceTakesDir(folder, store.kindOf(sequence)), base: store.takeFileBase(take) }
+    let video: string | undefined
+    let poster: string | undefined
+    try {
+      video = await this.copyToFreeName(take.filePath, () =>
+        join(place.dir, store.availableFileName(place.dir, place.base, ext))
+      )
+      if (take.thumbPath && existsSync(take.thumbPath)) {
+        const to = join(thumbsDir(), `${id}${extname(take.thumbPath).toLowerCase() || '.jpg'}`)
+        // Best effort: a missing poster is made again by the backfill.
+        poster = await clonePathVerified(take.thumbPath, to).then(
+          () => to,
+          () => undefined
+        )
+      }
+      this.sql().transaction(() => {
+        db.insertGeneration({ ...copy, filePath: video, thumbPath: poster })
+        inTransaction?.(id)
+      })()
+    } catch (err) {
+      // Nothing records the copies: they would only be clutter.
+      for (const file of [video, poster]) if (file) await rm(file, { force: true }).catch(() => {})
+      throw err
+    }
+    return id
+  }
+
+  /** Copies (clones) `from` to the path `pick` returns, picking again when another writer takes that name meanwhile. */
   private async copyToFreeName(from: string, pick: () => string): Promise<string> {
     for (let attempt = 1; ; attempt++) {
       const to = pick()
       try {
-        await copyPathVerified(from, to)
+        await clonePathVerified(from, to)
         return to
       } catch (err) {
         if (attempt < PLACE_ATTEMPTS && nameTaken(err, to)) continue
@@ -1636,10 +1828,12 @@ export class SequenceService {
 
   /**
    * Moves a take's video into its sequence's Tagningar/ (a transition's into its storyboard's Övergångar/), giving a
-   * sequence from before folders one.
+   * sequence from before folders one. A file with a home of its own (an import, anything of an edit; see
+   * store.keepsOwnHome) stays where it is: it is a take all the same.
    */
   private moveIntoSequence(id: string): Promise<string | undefined> {
     return this.relocate(id, (g) => {
+      if (store.keepsOwnHome(g)) return undefined
       const sequence = g.segmentId ? store.sequenceOfSegment(g.segmentId) : undefined
       const folder = sequence && this.ensureFolder(sequence.id)
       return folder && sequence
@@ -1649,17 +1843,19 @@ export class SequenceService {
   }
 
   /**
-   * Moves a video that lies in Sekvenser/ (or Storyboards/) back to Genereringar/<day>/. If the folder it left
-   * belongs to no sequence (storyboard) any more (deleted meanwhile), that folder is removed once empty.
+   * Moves a video that lies in Sekvenser/ (or Storyboards/) back to Genereringar/<day>/, or, for a file with a home
+   * of its own (store.keepsOwnHome), to that home (jobs.videoLocation). If the folder it left belongs to no
+   * sequence (storyboard) any more (deleted meanwhile), that folder is removed once empty.
    */
   private async moveOutOfSequences(id: string): Promise<string | undefined> {
     const before = db.getGeneration(id)?.filePath
     const left = before ? store.sequenceFolderOfPath(before) : undefined
     if (!left) return undefined
-    const moved = await this.relocate(id, (g) => ({
-      dir: generationsDayDir(new Date(g.createdAt)),
-      base: store.freeFileBase(g)
-    }))
+    const moved = await this.relocate(id, (g) =>
+      store.keepsOwnHome(g)
+        ? videoLocation(g)
+        : { dir: generationsDayDir(new Date(g.createdAt)), base: store.freeFileBase(g) }
+    )
     if (moved && !store.folderInUse(left.folder, left.kind)) await store.removeFolderIfEmpty(left.folder, left.kind)
     return moved
   }
@@ -1692,9 +1888,10 @@ export class SequenceService {
    * that is no take, 'in' to its sequence's Tagningar/ for a take. Undefined when it is fine where it is
    * (a sequence from before folders gets one from "Städa upp" or its next rename, not from here).
    */
-  private misplaced(g: Pick<Generation, 'filePath' | 'segmentId'>): 'in' | 'out' | undefined {
+  private misplaced(g: Pick<Generation, 'filePath' | 'segmentId' | 'source' | 'editId'>): 'in' | 'out' | undefined {
     if (!g.filePath) return undefined
-    if (!g.segmentId) return store.sequenceFolderOfPath(g.filePath) ? 'out' : undefined
+    // A file with a home of its own is only ever out of place inside a sequence's folder.
+    if (!g.segmentId || store.keepsOwnHome(g)) return store.sequenceFolderOfPath(g.filePath) ? 'out' : undefined
     const sequence = store.sequenceOfSegment(g.segmentId)
     if (!sequence?.folder) return undefined
     if (store.isUnder(g.filePath, store.takesPath(sequence.folder, store.kindOf(sequence)))) return undefined
@@ -1811,7 +2008,7 @@ export class SequenceService {
       const links = linksOf(rows, index)
       const params = takeParams(row, links)
       const waiting = stuck.includes(index)
-      const problem = waiting ? blocked : clipProblem(params, links)
+      const problem = waiting ? blocked : clipProblemAt(rows, index, params, links)
       return [
         {
           segmentId: row.id,
@@ -2038,16 +2235,24 @@ export class SequenceService {
       const takes = rows.map((r) => store.selectedTake(r))
       const missing = takes.flatMap((t, i) => (store.isUsable(t) ? [] : [i + 1]))
       if (missing.length) {
+        // An own film that is gone is said as such: there is no take to wait for, the file has to come back.
+        const own = storyboard ? undefined : missing.find((n) => store.isOwnClip(takes[n - 1]))
+        if (own !== undefined) throw new Error(store.ownClipMissingMessage(own))
         throw new Error(storyboard ? missingTransitionsMessage(missing) : missingTakesMessage(missing))
       }
+      // "Exportformat": the film's height (the width follows the first clip's aspect); none = the first clip's size.
+      const height = store.exportHeightOf(store.requireSequenceRow(sequenceId)) ?? undefined
 
       started = true
       emit({ progress: 0 })
       const usable = takes.filter(store.isUsable)
       const clips = storyboard ? await buildStoryboardClips(rows, usable) : await buildConcatClips(rows, usable)
+      // Where the clips meet in the film, recorded with it (Redigera's Klippgränser).
+      const cuts = await exportCuts(clips)
       rendered = join(tmpDir(), `export-${randomUUID()}.mp4`)
       let lastStep = 0
       await concatClips(clips, rendered, {
+        height,
         signal: controller.signal,
         onProgress: (fraction) => {
           progress = Math.min(1, Math.max(0, fraction))
@@ -2060,7 +2265,7 @@ export class SequenceService {
       })
       if (controller.signal.aborted) throw new Error('Exporten avbröts.')
       const film = rendered
-      const path = await this.withFiles(() => this.placeExport(sequenceId, film, startedAt, controller.signal))
+      const path = await this.withFiles(() => this.placeExport(sequenceId, film, startedAt, controller.signal, cuts))
       emit({ progress: 1, done: true, path })
       return path
     } catch (err) {
@@ -2076,8 +2281,17 @@ export class SequenceService {
     }
   }
 
-  /** Moves a rendered film into the sequence's folder under a free name and records it. Only inside withFiles. */
-  private async placeExport(sequenceId: string, rendered: string, at: Date, signal: AbortSignal): Promise<string> {
+  /**
+   * Moves a rendered film into the sequence's folder under a free name and records it with its cuts. Only inside
+   * withFiles.
+   */
+  private async placeExport(
+    sequenceId: string,
+    rendered: string,
+    at: Date,
+    signal: AbortSignal,
+    cuts?: number[]
+  ): Promise<string> {
     // Deleting the sequence cancels its export: don't recreate the folder that the delete removes.
     if (signal.aborted) throw new Error('Exporten avbröts.')
     const folder = this.ensureFolder(sequenceId)
@@ -2097,7 +2311,7 @@ export class SequenceService {
       }
       target.release()
       try {
-        store.recordExport(sequenceId, target.path)
+        store.recordExport(sequenceId, target.path, cuts)
       } catch (err) {
         // The film is in place either way; only "Städa upp" and library moves lose track of it.
         console.warn(`Could not record the export ${target.path}:`, err)
@@ -2133,7 +2347,11 @@ export function registerSequenceIpc(deps: Deps): SequenceService {
   ipcMain.handle('sequences:list', () => s.list())
   ipcMain.handle('sequences:get', (_e, id: string) => s.get(sequence(id)))
   ipcMain.handle('sequences:create', (_e, name: string) => s.create(name))
-  ipcMain.handle('sequences:update', (_e, id: string, patch: SequencePatch) => s.update(sequence(id), patch ?? {}))
+  ipcMain.handle('sequences:update', (e, id: string, patch: SequencePatch) => {
+    // The Exportformat is the user's choice, like exporting itself (agents can't export either).
+    if (isAgentCall(e) && patch && patch.exportHeight !== undefined) throw new Error(USER_ONLY)
+    return s.update(sequence(id), patch ?? {})
+  })
   ipcMain.handle('sequences:delete', (_e, id: string) => {
     // A storyboard deleted here would leave its runner and boards behind; nothing at all is refused silently.
     if (store.getSequenceRow(id)) sequence(id)
@@ -2146,8 +2364,12 @@ export function registerSequenceIpc(deps: Deps): SequenceService {
   ipcMain.handle('segments:update', (e, segmentId: string, patch: SegmentPatch) =>
     s.updateSegment(clip(segmentId), patch, { byAgent: isAgentCall(e) })
   )
-  ipcMain.handle('segments:delete', (e, segmentId: string) =>
-    s.deleteSegment(clip(segmentId), { byAgent: isAgentCall(e) })
+  ipcMain.handle('segments:delete', (e, segmentId: string, opts?: { onlyIfUntouched?: unknown }) =>
+    s.deleteSegment(
+      clip(segmentId),
+      { byAgent: isAgentCall(e) },
+      { onlyIfUntouched: !!opts && typeof opts === 'object' && opts.onlyIfUntouched === true }
+    )
   )
   ipcMain.handle('segments:move', (e, segmentId: string, toIndex: number) =>
     s.moveSegment(clip(segmentId), toIndex, { byAgent: isAgentCall(e) })
