@@ -20,14 +20,15 @@
   "author": "Jens Björk",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "STUDIO_DEV_PROFILE=1 electron-vite dev -w",
-    "dev:real": "electron-vite dev -w",
-    "build": "electron-vite build",
+    "dev": "node scripts/build-helpers.mjs && STUDIO_DEV_PROFILE=1 electron-vite dev -w",
+    "dev:real": "node scripts/build-helpers.mjs && electron-vite dev -w",
+    "build": "node scripts/build-helpers.mjs && electron-vite build",
+    "build:helpers": "node scripts/build-helpers.mjs",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "check": "npm run typecheck && npm run build",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
-    "app": "electron-vite build && NODE_OPTIONS=--experimental-require-module electron-builder --mac",
+    "app": "node scripts/build-helpers.mjs && electron-vite build && NODE_OPTIONS=--experimental-require-module electron-builder --mac",
     "app:install": "npm run app && rm -rf /Applications/Studio.app && cp -R dist/mac-arm64/Studio.app /Applications/ && echo \"Studio.app installed in /Applications\""
   },
   "dependencies": {

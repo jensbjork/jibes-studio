@@ -6,6 +6,8 @@ import { LAST_SEQUENCE_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
 import type { Intent, Navigate } from '../../lib/navigation'
 import ConsentDialog from '../ConsentDialog'
+import GenerationPickerDialog from '../feed/GenerationPickerDialog'
+import { useImportCards, useImportFlow, type ImportOutcome } from '../feed/ownClips'
 import { missingInput } from '../ParamsForm'
 import { ownEndImageRefused } from './clipChecks'
 import { CloseIcon, FilmIcon } from './icons'
@@ -14,7 +16,7 @@ import SegmentEditor, { type EditorHandle } from './SegmentEditor'
 import SequenceHeader, { type ExportState } from './SequenceHeader'
 import SequenceList from './SequenceList'
 import TakeList from './TakeList'
-import Timeline from './Timeline'
+import Timeline, { type ClipSource } from './Timeline'
 import TrimControls from './TrimControls'
 import {
   clipKey,
@@ -22,10 +24,14 @@ import {
   effectiveParams,
   fileName,
   isPending,
+  isUntouchedClip,
   needsTake,
   parseConsent,
   pendingTake,
+  isOwnTake,
   readyTake,
+  selectedTake,
+  sequenceAspect,
   totalLength
 } from './sequenceUtils'
 import type { FlushRegistry } from './useDraft'
@@ -77,6 +83,14 @@ function findRunProblem(sequence: Sequence, ffmpegOk: boolean): { segmentId: str
     // The run waits for a neighbour that is generated in the same run, so only what can never work is checked here.
     const endFromNext = s.endFromNext && i < sequence.segments.length - 1
     const params = effectiveParams(s, i)
+    // An own film that went missing isn't a clip waiting for a prompt: say what happened to it (as main does).
+    const chosen = selectedTake(s)
+    if (isOwnTake(chosen) && chosen?.fileMissing && missingInput(params, continuing)) {
+      return {
+        segmentId: s.id,
+        message: `Klipp ${i + 1}:s egna video saknas (flyttad eller raderad i Finder). Lägg till filen igen eller generera en AI-tagning.`
+      }
+    }
     const reason =
       missingInput(params, continuing) ??
       (continuing && !ffmpegOk ? 'ffmpeg krävs för att fortsätta från föregående klipp' : undefined) ??
@@ -94,6 +108,14 @@ interface Notice {
   text: string
   /** Only shown while this sequence is open; global when unset. */
   sequenceId?: string
+  /** Something worth knowing rather than a failure (e.g. a file imported before, used again). */
+  info?: boolean
+}
+
+/** "Från klippflödet…" / "Från Redigera…": a clip picked from the library, to add after a clip (or at the end). */
+interface PickRequest {
+  source: Exclude<ClipSource, 'file'>
+  afterSegmentId?: string
 }
 
 interface Props {
@@ -115,6 +137,12 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     (id: string) => {
       gone.current.add(id)
       setSelectedId((cur) => (cur === id ? undefined : cur))
+      // Not opened again next time (a remembered id of a sequence deleted elsewhere, or an old link to one).
+      try {
+        if (loadLastOpen() === id) localStorage.removeItem(LAST_SEQUENCE_KEY)
+      } catch {
+        // Ignore unavailable storage.
+      }
       void reload()
     },
     [reload]
@@ -138,6 +166,10 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   const [exportDismissed, setExportDismissed] = useState<Record<string, boolean>>({})
   // The clip "Gör om mellan grannarna" was just used on, so its editor says what to do next.
   const [bridgedId, setBridgedId] = useState<string>()
+  const [picking, setPicking] = useState<PickRequest>()
+  // Own films: inspected, asked about when there is something to decide, imported (cards show the progress).
+  const importFlow = useImportFlow()
+  const importCards = useImportCards()
 
   const flushers = useMemo<FlushRegistry>(() => new Set(), [])
   const editorHandle = useRef<EditorHandle | null>(null)
@@ -162,13 +194,14 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     if (first) setSelectedId(first.id)
   }, [selectedId, sequences])
 
+  // Remembered once it has loaded: an id that turns out to be gone is never written back.
   useEffect(() => {
     try {
-      if (selectedId) localStorage.setItem(LAST_SEQUENCE_KEY, selectedId)
+      if (sequenceId) localStorage.setItem(LAST_SEQUENCE_KEY, sequenceId)
     } catch {
       // Remembering the open sequence is only a convenience.
     }
-  }, [selectedId])
+  }, [sequenceId])
 
   useEffect(() => {
     if (intent?.type !== 'open-sequence') return
@@ -267,16 +300,21 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   }
 
   const deleteSequence = async (id: string) => {
+    // Let go of it first: main announces the change before it answers, and the open sequence would otherwise be
+    // fetched again in between and found gone ("Sekvensen finns inte längre" in the log on every delete).
+    const wasOpen = id === selectedId
+    gone.current.add(id)
+    if (wasOpen) setSelectedId(undefined)
     try {
       await window.studio.deleteSequence(id)
-      gone.current.add(id)
-      if (id === selectedId) setSelectedId(undefined)
       try {
         if (loadLastOpen() === id) localStorage.removeItem(LAST_SEQUENCE_KEY)
       } catch {
         // Ignore unavailable storage.
       }
     } catch (e) {
+      gone.current.delete(id)
+      if (wasOpen) setSelectedId(id)
       setNotice({ text: ipcErrorMessage(e) })
     }
     void reload()
@@ -396,6 +434,122 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     }
   }
 
+  /** Says what an import of own clips came to: what failed (an error) and what was reused (a note). */
+  const reportImport = (outcome: ImportOutcome, id: string) => {
+    if (outcome.errors.length) setNotice({ text: outcome.errors.join('\n'), sequenceId: id })
+    else if (outcome.notes.length) setNotice({ text: outcome.notes.join('\n'), sequenceId: id, info: true })
+  }
+
+  /**
+   * Own films into the sequence, one clip per file in name order, after `afterSegmentId` (default: at the end). With
+   * `toStart` they go first: main adds them at the end, and they are moved to the front in order.
+   */
+  const importClips = async (paths: string[], afterSegmentId?: string, toStart = false) => {
+    if (!sequence || !paths.length) return
+    const id = sequence.id
+    setNotice(undefined)
+    // A new clip takes the previous clip's settings as its template, so save edits first.
+    await flushAll()
+    // A sequence with nothing in it yet (the empty Klipp 1 of a new sequence): the films take the empty clip's place,
+    // and there is no shape to ask about – the first film gives the sequence its shape.
+    const placeholders = sequence.segments.every(isUntouchedClip) ? sequence.segments.map((s) => s.id) : []
+    const outcome = await importFlow.begin(
+      paths,
+      { kind: 'sequence', sequenceId: id, afterSegmentId },
+      { sequenceAspect: placeholders.length ? undefined : sequenceAspect(sequence) }
+    )
+    reportImport(outcome, id)
+    const added = outcome.result?.segmentIds ?? []
+    try {
+      if (toStart) {
+        for (const [i, segmentId] of added.entries()) await store.mutate(() => window.studio.moveSegment(segmentId, i))
+      }
+      if (added.length && placeholders.length) {
+        // The import may have taken minutes: what the clip editor holds is saved first, and main deletes the empty
+        // clip only if nothing has been put in it meanwhile (by the user or an agent).
+        await flushAll()
+        const present = new Set((await window.studio.getSequence(id)).segments.map((s) => s.id))
+        for (const segmentId of placeholders.filter((x) => present.has(x))) {
+          await store.mutate(() => window.studio.deleteSegment(segmentId, { onlyIfUntouched: true }))
+        }
+      }
+    } catch (e) {
+      setNotice({ text: ipcErrorMessage(e), sequenceId: id })
+    }
+    if (added.length) setSegmentChoice((m) => ({ ...m, [id]: added[0] }))
+    store.refresh()
+  }
+
+  /** Own films dropped on the timeline at gap `gap` (before clip `gap`). */
+  const dropFiles = (paths: string[], gap: number) => {
+    if (!sequence) return
+    const segments = sequence.segments
+    const after = gap > 0 ? segments[Math.min(gap, segments.length) - 1]?.id : undefined
+    void importClips(paths, after, gap === 0 && segments.length > 0)
+  }
+
+  const addFrom = async (source: ClipSource, afterSegmentId?: string) => {
+    if (!sequence) return
+    if (source !== 'file') {
+      setPicking({ source, afterSegmentId })
+      return
+    }
+    try {
+      const paths = await window.studio.pickVideos(true)
+      if (paths.length) await importClips(paths, afterSegmentId)
+    } catch (e) {
+      setNotice({ text: ipcErrorMessage(e), sequenceId: sequence.id })
+    }
+  }
+
+  /** A clip picked from the feed or Redigera becomes a new clip (its selected take), after the chosen one. */
+  const addPicked = async (generationId: string, request: PickRequest) => {
+    setPicking(undefined)
+    if (!sequence) return
+    const id = sequence.id
+    const before = new Set(sequence.segments.map((s) => s.id))
+    setAdding(true)
+    try {
+      await flushAll()
+      const updated = await store.mutate(() =>
+        window.studio.addSegment(id, {
+          fromGenerationId: generationId,
+          ...(request.afterSegmentId ? { afterSegmentId: request.afterSegmentId } : {})
+        })
+      )
+      const added = updated.segments.find((s) => !before.has(s.id))
+      if (added) setSegmentChoice((m) => ({ ...m, [id]: added.id }))
+    } catch (e) {
+      setNotice({ text: ipcErrorMessage(e), sequenceId: id })
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  /** Own films as takes of the open clip (the last one selected). */
+  const importTakes = async (paths: string[]) => {
+    if (!sequence || !segment || !paths.length) return
+    const id = sequence.id
+    setNotice(undefined)
+    const outcome = await importFlow.begin(
+      paths,
+      { kind: 'segment', segmentId: segment.id },
+      { sequenceAspect: sequenceAspect(sequence) }
+    )
+    reportImport(outcome, id)
+    store.refresh()
+  }
+
+  /** "Exportformat": the film's height, or null for Automatiskt (the first clip's own size). */
+  const setExportHeight = (exportHeight: number | null) => {
+    if (!sequenceId) return
+    store.update((s) => ({ ...s, exportHeight }))
+    store.mutate(() => window.studio.updateSequence(sequenceId, { exportHeight })).catch((e: unknown) => {
+      setNotice({ text: ipcErrorMessage(e), sequenceId })
+      store.refresh()
+    })
+  }
+
   const moveSegment = (id: string, toIndex: number) => {
     store.moveSegment(id, toIndex).catch((e: unknown) => setNotice({ text: ipcErrorMessage(e), sequenceId }))
   }
@@ -417,7 +571,13 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       }))
     }))
     try {
-      await window.studio.deleteGeneration(take.id)
+      // A version or an edit's original is only taken off this clip (Redigera keeps it): what the list's "Ta bort"
+      // said (release), and what main does for anything Redigera keeps by now.
+      const segmentId = segment?.id ?? take.segmentId
+      await window.studio.deleteGeneration(
+        take.id,
+        segmentId ? { segmentId, release: take.keptByEdit === true } : undefined
+      )
     } catch (e) {
       setNotice({ text: ipcErrorMessage(e), sequenceId })
     }
@@ -509,6 +669,10 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
         justBridged={bridgedId === segment.id}
       />
     )
+  const sequenceImports = sequenceId
+    ? importCards.filter((c) => c.target === 'sequence' && c.sequenceId === sequenceId)
+    : []
+  const takeImports = segment ? importCards.filter((c) => c.target === 'segment' && c.segmentId === segment.id) : []
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -526,10 +690,11 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
         </Banner>
       )}
       {visibleNotice && (
-        <Banner tone="error" onDismiss={() => setNotice(undefined)}>
-          {visibleNotice.text}
+        <Banner tone={visibleNotice.info ? 'info' : 'error'} onDismiss={() => setNotice(undefined)}>
+          <span className="whitespace-pre-line">{visibleNotice.text}</span>
         </Banner>
       )}
+      {importFlow.inspecting && <Banner tone="info">Läser filerna…</Banner>}
       {runError && runError !== dismissedRunError && !sequence?.running && (
         <Banner tone="error" onDismiss={() => setDismissedRunError(runError)}>
           {runConsent ? (
@@ -618,6 +783,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               onStop={() => void stopAll()}
               onPreview={() => void openPreview(sequence.segments.find((s) => readyTake(s))?.id)}
               onExport={() => void exportSequence()}
+              onExportHeight={setExportHeight}
+              onEditExport={(exportId) => navigate('editor', { type: 'open-editor', exportId })}
               onError={(text) => setNotice({ text, sequenceId: sequence.id })}
             />
             {banners}
@@ -627,6 +794,9 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               adding={adding}
               onSelect={selectSegment}
               onAdd={(after) => void addSegment(after)}
+              onAddFrom={(source, after) => void addFrom(source, after)}
+              onDropFiles={dropFiles}
+              importing={sequenceImports}
               onMove={moveSegment}
               onBridge={(id) => void bridge(id)}
             />
@@ -655,9 +825,20 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
                       number={segmentIndex + 1}
                       models={models}
                       currentPrompt={segment.params.prompt}
+                      importing={takeImports}
+                      navigate={navigate}
                       onSelect={selectTake}
                       onDelete={(take) => void deleteTake(take)}
                       onUsePrompt={reusePrompt}
+                      onImport={(paths) => void importTakes(paths)}
+                      onPickFile={async () => {
+                        try {
+                          const paths = await window.studio.pickVideos(true)
+                          if (paths.length) await importTakes(paths)
+                        } catch (e) {
+                          setNotice({ text: ipcErrorMessage(e), sequenceId })
+                        }
+                      }}
                     />
                   </div>
                 </section>
@@ -666,8 +847,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               sequence.segments.length === 0 && (
                 <div className="flex flex-1 items-center justify-center p-8">
                   <p className="max-w-sm text-center leading-relaxed text-muted">
-                    Lägg till ett första klipp ovan. Varje klipp är en egen generering, och nästa klipp kan
-                    fortsätta från det förras sista bildruta så att övergången blir sömlös.
+                    Lägg till ett första klipp ovan. Varje klipp är en egen generering – eller en egen film – och nästa
+                    klipp kan fortsätta från det förras sista bildruta så att övergången blir sömlös.
                   </p>
                 </div>
               )
@@ -695,6 +876,14 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       {preview && sequence && (
         <PreviewPlayer sequence={sequence} startSegmentId={preview.startSegmentId} onClose={() => setPreview(undefined)} />
       )}
+      {importFlow.dialog}
+      <GenerationPickerDialog
+        open={!!picking}
+        title={picking?.source === 'edit' ? 'Lägg till en version från Redigera' : 'Lägg till ett klipp från klippflödet'}
+        sources={picking?.source === 'edit' ? ['edit'] : ['generated', 'import', 'edit']}
+        onClose={() => setPicking(undefined)}
+        onPicked={(g) => picking && void addPicked(g.id, picking)}
+      />
       {runConsentOpen && runConsent && (
         <ConsentDialog
           request={runConsent}
@@ -712,14 +901,15 @@ function Banner({
   children,
   onDismiss
 }: {
-  tone: 'error' | 'warning' | 'success'
+  tone: 'error' | 'warning' | 'success' | 'info'
   children: ReactNode
   onDismiss?: () => void
 }) {
   const tones = {
     error: 'border-accent/30 bg-accent/10 text-[#ffb3b5]',
     warning: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-    success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+    success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+    info: 'border-line bg-raised text-text'
   }
   return (
     <div

@@ -25,6 +25,7 @@ import type {
   AgentReorderReferencesArgs,
   AgentSetFormArgs,
   AgentSetReferencesArgs,
+  Edit,
   GenerationParams,
   ReferenceAudio,
   Sequence,
@@ -193,7 +194,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get workspace',
       description:
-        "What the user is looking at in Studio right now (the view, and the sequence and clip open in the sequence editor or the storyboard open in Storyboards) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included) and whether it is in composed_prompt now (sent); include_descriptions and excluded_description_asset_ids are the form's switches, changed with set_form). Start here to see what the user is working on.",
+        "What the user is looking at in Studio right now (the view, and the sequence and clip open in the sequence editor, the storyboard open in Storyboards, or the edit open in Redigera – view \"editor\", edit_id) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included) and whether it is in composed_prompt now (sent); include_descriptions and excluded_description_asset_ids are the form's switches, changed with set_form). Start here to see what the user is working on.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'tittade på arbetsytan'
@@ -202,12 +203,24 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       requireLibrary()
       const state = await readForm(ctx)
       const index = await AssetIndex.load()
+      // The edit open in Redigera, named, so the agent knows which film the user is looking at.
+      const edit = state.editId
+        ? await callService<Edit>('edits:get', state.editId).catch(() => undefined)
+        : undefined
       return {
         data: {
           view: state.view,
           sequence_id: state.sequenceId,
           segment_id: state.segmentId,
           storyboard_id: state.storyboardId,
+          ...(state.editId
+            ? {
+                edit_id: state.editId,
+                ...(edit
+                  ? { edit_name: edit.name, current_version_id: edit.currentId, version_count: edit.versionCount }
+                  : {})
+              }
+            : {}),
           form: await formInfo(state, index, true)
         }
       }
@@ -590,19 +603,41 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Open in Studio',
       description:
-        "Brings a place in Studio to the front so the user sees it: the Generate view, a sequence (optionally with one clip selected) or a storyboard. Use it when you want the user to look at something you prepared.",
+        "Brings a place in Studio to the front so the user sees it: the Generate view, a sequence (optionally with one clip selected), a storyboard, or an edit in Redigera (view \"editor\" with edit_id; without it the list of edits). Use it when you want the user to look at something you prepared.",
       input: {
-        view: z.enum(['generate', 'sequence', 'storyboard']),
+        view: z.enum(['generate', 'sequence', 'storyboard', 'editor']),
         sequence_id: z.string().optional().describe('For view "sequence".'),
         segment_id: z.string().optional().describe('For view "sequence": the clip to select (its sequence is found automatically).'),
-        storyboard_id: z.string().optional().describe('For view "storyboard": the storyboard to open.')
+        storyboard_id: z.string().optional().describe('For view "storyboard": the storyboard to open.'),
+        edit_id: z.string().optional().describe('For view "editor": the edit to open (list_edits).')
       },
       annotations: { ...WRITE, idempotentHint: true },
       summary: ({ view }) =>
-        view === 'generate' ? 'visade Generera' : view === 'storyboard' ? 'visade en storyboard' : 'visade en sekvens'
+        view === 'generate'
+          ? 'visade Generera'
+          : view === 'storyboard'
+            ? 'visade en storyboard'
+            : view === 'editor'
+              ? 'visade Redigera'
+              : 'visade en sekvens'
     },
-    async ({ view, sequence_id, segment_id, storyboard_id }) => {
+    async ({ view, sequence_id, segment_id, storyboard_id, edit_id }) => {
       requireLibrary()
+      if (view === 'editor') {
+        // Checked here first, so a wrong id gets the service's own message rather than the window's.
+        const edit = edit_id ? await callService<Edit>('edits:get', edit_id) : undefined
+        const args: AgentOpenArgs = { view: 'editor', ...(edit ? { editId: edit.id } : {}) }
+        const shown: Partial<AgentOpenResult> = (await ctx.bridge.send<AgentOpenResult | undefined>('open', args)) ?? {}
+        ctx.bridge.showWindow()
+        return {
+          data: {
+            shown: 'editor',
+            ...(shown.editId ? { edit_id: shown.editId } : {}),
+            ...(shown.note ? { note: shown.note } : {})
+          },
+          summary: edit ? `visade redigeringen ${q(edit.name)}` : 'visade Redigera'
+        }
+      }
       if (view === 'generate') {
         const args: AgentOpenArgs = { view: 'generate' }
         await ctx.bridge.send('open', args)

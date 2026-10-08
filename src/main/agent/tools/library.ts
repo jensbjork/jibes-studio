@@ -2,10 +2,12 @@ import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { queryGenerations, summarizeGenerations } from '@shared/generation-filter'
+import { generationTitle } from '@shared/generation-label'
 import {
   ASSET_KINDS,
   type Asset,
   type AssetKind,
+  type EditRecipe,
   type Generation,
   type GenerationFilter,
   type GenerationReview,
@@ -40,6 +42,7 @@ import {
   seconds,
   usableModels
 } from '../studio'
+import { agentOpName, operationOutput } from './edit-input'
 import { READ_ONLY, WRITE, defineTool, priceValue, type LabeledAudio, type LabeledImage, type ToolContext } from './kit'
 
 // The library: the guide, assets (characters, environments, outfits, poses) with their photos and audio clips,
@@ -168,6 +171,60 @@ function sinceDays(days: number | undefined): number | undefined {
   return days === undefined ? undefined : Date.now() - days * 24 * 60 * 60 * 1000
 }
 
+/**
+ * Where a generation came from, and how it is named: Venice's generations by their prompt, the user's own clips
+ * (imports) by their file name and Redigera's versions by "<edit> v3" (generationTitle), so neither is listed as
+ * an empty prompt.
+ */
+export function sourceFields(g: Generation): Record<string, unknown> {
+  const source = g.source ?? 'generated'
+  return {
+    source,
+    ...(source !== 'generated' || g.title ? { title: generationTitle(g) } : {}),
+    ...(g.parentId ? { parent_id: g.parentId } : {}),
+    ...(g.editId ? { edit_id: g.editId } : {})
+  }
+}
+
+/** How an import or a version was made, as get_generation shows it (ids only, like the recipe itself). */
+export function recipeInfo(r: EditRecipe): Record<string, unknown> {
+  return {
+    op: r.op === 'original' || r.op === 'import' ? r.op : agentOpName(r.op),
+    label: r.label,
+    ...(r.number ? { version: `v${r.number}` } : {}),
+    ...(r.baseId ? { base_version_id: r.baseId } : {}),
+    ...(r.operation ? { operation: operationOutput(r.operation) } : {}),
+    ...(r.costUsd ? { cost_usd: priceValue(r.costUsd) } : {}),
+    timing: r.timing,
+    ...(r.takeId ? { ai_take_id: r.takeId } : {}),
+    ...(r.cuts?.length ? { cuts: r.cuts.map(seconds) } : {}),
+    // A version's added sound layers (the layer op's layer_id works on this version as its base).
+    ...(r.mix?.layers?.length
+      ? {
+          layers: r.mix.layers.map((l) => ({
+            layer_id: l.id,
+            kind: l.kind,
+            label: l.label,
+            start: seconds(l.at),
+            end: seconds(l.at + l.length),
+            gain_db: l.gainDb
+          }))
+        }
+      : {}),
+    ...(r.import
+      ? {
+          import: {
+            file_name: r.import.name,
+            megabytes: Math.round(r.import.bytes / 1e5) / 10,
+            ...(r.import.workingCopy.length ? { working_copy_because: r.import.workingCopy } : {}),
+            ...(r.import.fit ? { fit: r.import.fit } : {})
+          }
+        }
+      : {}),
+    ...(r.export ? { export: { export_id: r.export.exportId, sequence_name: r.export.sequenceName } } : {})
+  }
+}
+
 export function registerLibraryTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
     server,
@@ -176,7 +233,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Studio guide',
       description:
-        "How Studio works and how to write video prompts that work in it. Read this once at the start of a session, before you prepare anything: it explains assets (characters, environments, outfits, poses) and their voices, the three modes, how reference images and audio become @Image1… and @Audio1… tokens in the prompt, sequences and continuation clips, keyframes, storyboards (milestone pictures made with request_image_generation, with the transitions between them generated as clips) and replacing a clip between its neighbours, the approval flow for paid generations, a detailed prompt-writing guide for Seedance-class video models, the review loop for learning from results – and ends with the learnings recorded so far (pinned ones and the most recent).",
+        "How Studio works and how to write video prompts that work in it. Read this once at the start of a session, before you prepare anything: it explains assets (characters, environments, outfits, poses) and their voices, the three modes, how reference images and audio become @Image1… and @Audio1… tokens in the prompt, sequences and continuation clips, keyframes, storyboards (milestone pictures made with request_image_generation, with the transitions between them generated as clips), replacing a clip between its neighbours, the user's own clips, editing films into versions in Redigera (free operations, plans, paid voice, music and picture operations, designed and cloned voices), the approval flow for paid generations, a detailed prompt-writing guide for Seedance-class video models, the review loop for learning from results – and ends with the learnings recorded so far (pinned ones and the most recent).",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'läste guiden'
@@ -191,7 +248,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'List assets',
       description:
-        "Lists the user's library assets: characters (who is in the shot), environments (where it takes place), outfits (what a character wears) and poses (photos or sketches of how people stand and where, relative to each other). Each entry has its id, name, the user's description, how many photos it has and their image_ids (photo 1 first), for characters and environments their audio clips (a character's voice, an environment's soundscape: audio_id, duration and the reference window clip_start/clip_length that is sent), and for characters the default outfit. Use the ids with get_asset (to see the photos and hear the voice), set_references, add_segment and update_segment.",
+        "Lists the user's library assets: characters (who is in the shot), environments (where it takes place), outfits (what a character wears) and poses (photos or sketches of how people stand and where, relative to each other). Each entry has its id, name, the user's description, how many photos it has and their image_ids (photo 1 first), for characters and environments their audio clips (a character's voice, an environment's soundscape: audio_id, duration and the reference window clip_start/clip_length that is sent; for a character's voice also clone_consent – whether the user allows cloning it for new spoken lines in Redigera, which only they can switch on), and for characters the default outfit. Use the ids with get_asset (to see the photos and hear the voice), set_references, add_segment and update_segment.",
       input: {
         kind: assetKind.optional().describe('Only this kind: "character", "environment", "outfit" or "pose". All kinds when left out.'),
         query: z.string().optional().describe('Only assets whose name or description contains this text (case-insensitive).')
@@ -213,7 +270,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Get asset',
       description:
-        "One asset with its description and its photos as images (JPEG, at most 768 px), so you can see faces, garments, places and poses before choosing references. Each photo is labelled with its photo number and image_id; pass image_ids to set_references or add_segment to send only the best photos. Characters and environments list their audio clips (voice / soundscape) with the reference window that is sent to Venice; with include_audio you also get that window as audio (MP3) to listen to, if your client takes audio. For a character it also names the default outfit; for an outfit, the characters wearing it by default.",
+        "One asset with its description and its photos as images (JPEG, at most 768 px), so you can see faces, garments, places and poses before choosing references. Each photo is labelled with its photo number and image_id; pass image_ids to set_references or add_segment to send only the best photos. Characters and environments list their audio clips (voice / soundscape) with the reference window that is sent to Venice (and, for a voice, clone_consent); with include_audio you also get that window as audio (MP3) to listen to, if your client takes audio. For a character it also names the default outfit; for an outfit, the characters wearing it by default.",
       input: {
         asset_id: z.string().describe('The id from list_assets.'),
         include_images: z.boolean().default(true).describe('Return the photos as images. Default true.'),
@@ -472,9 +529,13 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'List generations',
       description:
-        "Generations (clips) from the user's feed, filtered and sorted the way Studio's clip feed does it, with paging. Each has its status (queued, processing, completed, failed), prompt, settings, price, the user's rating (1–5) and how many reviews it has, a one-line-per-token summary of its references (\"@Image1 Anna (character) photo 1\", \"@Audio1 Anna (voice)\") and which sequence clip or storyboard transition it is a take of. The answer also sums up the filtered set (count, cost, seconds). Use it to find clips to learn from: e.g. the best rated ones (sort \"rating\", min_rating 4), the ones of one character (asset_id), or completed clips nobody has reviewed (status \"completed\", has_reviews false) – then review_generation. get_generation and review_generation look at one.",
+        "Generations (clips) from the user's feed, filtered and sorted the way Studio's clip feed does it, with paging. Each has its source (generated by Venice, an import – the user's own film – or an edit version made in Redigera, named by title), its status (queued, processing, completed, failed), prompt, settings, price, the user's rating (1–5) and how many reviews it has, a one-line-per-token summary of its references (\"@Image1 Anna (character) photo 1\", \"@Audio1 Anna (voice)\") and which sequence clip or storyboard transition it is a take of. The answer also sums up the filtered set (count, cost, seconds). Use it to find clips to learn from: e.g. the best rated ones (sort \"rating\", min_rating 4), the ones of one character (asset_id), or completed clips nobody has reviewed (status \"completed\", has_reviews false) – then review_generation. get_generation and review_generation look at one.",
       input: {
-        query: z.string().optional().describe('Words that must all appear in the prompt (or negative prompt).'),
+        query: z.string().optional().describe("Words that must all appear in the prompt, the negative prompt or the title (an own clip's file name, a version's \"<edit> v3\")."),
+        source: z
+          .enum(['generated', 'import', 'edit'])
+          .optional()
+          .describe('"generated": made by Venice; "import": the user\'s own clips (Egna klipp) – and copies of exported films opened in Redigera, which get_generation marks with recipe.export (made in Studio, not the user\'s footage); "edit": versions made in Redigera.'),
         status: z.enum(['queued', 'processing', 'completed', 'failed', 'pending']).optional().describe('"pending" = queued or processing.'),
         model: z.string().optional().describe('Only this model id.'),
         asset_id: z.string().optional().describe("Only generations whose references use this asset's photos or audio."),
@@ -510,7 +571,8 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
         since: sinceDays(input.since_days),
         placement: input.placement,
         hasReviews: input.has_reviews,
-        sort: input.sort
+        sort: input.sort,
+        source: input.source
       }
       // The same filter and order as Studio's clip feed (generations:list carries the ratings and review counts).
       const list = queryGenerations(await callService<Generation[]>('generations:list'), filter, index.assets)
@@ -530,6 +592,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
           generations: page.map((g) => ({
             id: g.id,
             created: localTime(g.createdAt),
+            ...sourceFields(g),
             status: g.status,
             model: g.model,
             prompt: g.prompt,
@@ -558,7 +621,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Get generation',
       description:
-        "One generation: status, error, timing, price, its settings with the reference token maps (@ImageN and @AudioN), sent_prompt (the prompt exactly as Venice got it, with the descriptions of its referenced assets appended as a References legend – when that differs from the prompt), which sequence clip or storyboard transition it is a take of, the user's rating and every review, and – when completed – its poster frame as an image. Ask for `frames` to also get evenly spread frames from the video, captioned with their time (the last one is the clip's final frame, where a continuation clip would start). Poll this after an approval to follow progress. To judge a finished clip properly (frames next to the reference images, its sound), use review_generation.",
+        "One generation: its source (generated, import – the user's own film, with original_path when the file is a working copy – or edit, a version made in Redigera, with its edit_id, parent_id and recipe: the operation that made it), status, error, timing, price, its settings with the reference token maps (@ImageN and @AudioN), sent_prompt (the prompt exactly as Venice got it, with the descriptions of its referenced assets appended as a References legend – when that differs from the prompt), which sequence clip or storyboard transition it is a take of, the user's rating and every review, and – when completed – its poster frame as an image. Ask for `frames` to also get evenly spread frames from the video, captioned with their time (the last one is the clip's final frame, where a continuation clip would start). Poll this after an approval to follow progress. To judge a finished clip properly (frames next to the reference images, its sound), use review_generation.",
       input: {
         generation_id: z.string(),
         include_thumbnail: z.boolean().default(true).describe('Return the poster frame when completed. Default true.'),
@@ -582,6 +645,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
       const images: LabeledImage[] = []
       const data: Record<string, unknown> = {
         id: g.id,
+        ...sourceFields(g),
         status: g.status,
         created: localTime(g.createdAt),
         completed: localTime(g.completedAt),
@@ -589,6 +653,9 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
         price_usd: priceValue(g.quote),
         video_seconds: g.videoDuration,
         file: g.filePath ? basename(g.filePath) : undefined,
+        // An import with a working copy: the untouched original next to it (file is the working copy).
+        ...(g.originalPath ? { original_path: g.originalPath } : {}),
+        ...(g.recipe ? { recipe: recipeInfo(g.recipe) } : {}),
         ...(g.status === 'processing' && g.averageExecutionTime
           ? {
               progress: {

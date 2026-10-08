@@ -42,6 +42,7 @@ import {
   requireLibrary
 } from '../studio'
 import { READ_ONLY, defineTool, priceValue, quote, readForm, usd, type ToolContext } from './kit'
+import { editApprovalInfo } from './editor-paid'
 import { assertNotRunning, continues, endsOnNext, isUsableTake, loadClip, loadSequence, selectedTake } from './sequences'
 import {
   assertStoryboardIdle,
@@ -1165,7 +1166,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get approval status',
       description:
-        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence, for generate-storyboard the storyboard with get_storyboard; for an image, the still_id – look at it with get_still – and assigned when it went into its board or clip), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, or replaced by a newer request) or failed (the error). Poll every 15–30 seconds while pending.",
+        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence, for generate-storyboard the storyboard with get_storyboard; for an image, the still_id – look at it with get_still – and assigned when it went into its board or clip; for an edit operation, the job's progress and then result_version – review it with review_generation; for a designed voice, the new Röst clip's audio_id once it is made), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, or replaced by a newer request) or failed (the error). Poll every 15–30 seconds while pending, and while an approved edit or voice job is still running.",
       input: { approval_id: z.string() },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'kollade svaret på en förfrågan'
@@ -1205,7 +1206,9 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           : {}),
         ...(request.kind === 'image' && board ? { assign_to: { board_id: board.boardId, board_number: board.boardNumber } } : {}),
         ...(request.stillId ? { still_id: request.stillId } : {}),
-        ...(request.notice ? { notice: request.notice } : {})
+        ...(request.notice ? { notice: request.notice } : {}),
+        // Redigera's requests: the edit and version (or the character), the operation, and the job it started.
+        ...(request.kind === 'edit' || request.kind === 'voice-design' ? await editApprovalInfo(request) : {})
       }
       if (request.status === 'approved') {
         if (request.stillId) {

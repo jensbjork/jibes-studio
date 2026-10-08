@@ -9,6 +9,8 @@ export const LAST_PARAMS_IMAGE_IDS_KEY = 'generate:lastParamsImageIds:v1'
 export const LAST_SEQUENCE_KEY = 'sequences:lastOpen'
 /** The storyboard open in Storyboards. */
 export const LAST_STORYBOARD_KEY = 'storyboards:lastOpen'
+/** The edit open in Redigera (removed when the user goes back to the list of edits). */
+export const LAST_EDIT_KEY = 'editor:lastOpen'
 /** The asset selected in each library view. */
 export const SELECTED_ASSET_KEYS: Record<AssetKind, string> = {
   character: 'characters:selected',
@@ -210,6 +212,8 @@ const LIBRARY_FOLDERS = new Set([
   'Genereringar',
   'Sekvenser',
   'Storyboards',
+  'Egna klipp',
+  'Redigeringar',
   '.studio'
 ])
 /** An earlier Studio version's folders, reorganized into the ones above when such a library is adopted. */
@@ -285,6 +289,7 @@ export function rememberAfterSwitch(
     if (!carriesOver(m)) {
       localStorage.removeItem(LAST_SEQUENCE_KEY)
       localStorage.removeItem(LAST_STORYBOARD_KEY)
+      localStorage.removeItem(LAST_EDIT_KEY)
       for (const key of Object.values(SELECTED_ASSET_KEYS)) localStorage.removeItem(key)
     }
   } catch {

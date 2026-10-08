@@ -1,17 +1,29 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import type { ConsentRequest, GenerationParams, Segment, Sequence, VideoModel } from '@shared/types'
+import { generationTitle } from '@shared/generation-label'
+import type { ConsentRequest, Generation, GenerationParams, Segment, Sequence, VideoModel } from '@shared/types'
 import { ipcErrorMessage, useQuote } from '../../lib/hooks'
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import { useReportOpenSegment } from '../../lib/workspace'
 import ConsentDialog from '../ConsentDialog'
 import ParamsForm from '../ParamsForm'
+import { workingCopyNote } from '../feed/ownClips'
 import { clipBlocked } from './clipChecks'
 import ConfirmButton from './ConfirmButton'
-import { PlayIcon } from './icons'
+import { CameraIcon, ChevronDownIcon, PlayIcon } from './icons'
 import KeyframeBox from './KeyframeBox'
 import NotesField from './NotesField'
-import { clipKey, continues, parseConsent, readyTake, stableJson, takePromptsFor } from './sequenceUtils'
+import {
+  clipKey,
+  continues,
+  formatClock,
+  isOwnTake,
+  parseConsent,
+  readyTake,
+  selectedTake,
+  stableJson,
+  takePromptsFor
+} from './sequenceUtils'
 import { useDraft, useRegisterFlush, type DraftStatus, type FlushRegistry } from './useDraft'
 import type { SequenceStore } from './useSequence'
 
@@ -196,6 +208,12 @@ export default function SegmentEditor({
   }
 
   const anyReady = sequence.segments.slice(index).some((s) => readyTake(s))
+  // An own film (or a version from Redigera) as the clip's take: the clip is that film, and the form for an AI take
+  // instead stays folded away until asked for. It opens by itself whenever the selected take is a generated one.
+  const chosen = selectedTake(segment)
+  const ownTake = chosen && isOwnTake(chosen) ? chosen : undefined
+  const [aiAsked, setAiAsked] = useState(false)
+  const formOpen = !ownTake || aiAsked
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -211,6 +229,12 @@ export default function SegmentEditor({
       <div className="flex-1 overflow-y-auto px-5 pb-5">
         <div className="sticky top-0 z-10 -mx-5 mb-4 flex h-11 items-center gap-2 border-b border-line bg-bg/95 px-5 backdrop-blur">
           <h2 className="font-semibold">Klipp {index + 1}</h2>
+          {ownTake && (
+            <span className="flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-[11px] text-text">
+              <CameraIcon size={11} />
+              {ownTake.source === 'edit' ? 'Redigerad film' : 'Eget klipp'}
+            </span>
+          )}
           <SaveState status={draft.status} error={draft.error} />
           <div className="ml-auto flex items-center gap-1">
             <button
@@ -233,52 +257,137 @@ export default function SegmentEditor({
           </div>
         </div>
 
+        {ownTake && <OwnClipInfo take={ownTake} />}
+
         <NotesField segment={segment} store={store} flushers={flushers} className="mb-4" />
 
-        <KeyframeBox
-          sequence={sequence}
-          segment={segment}
-          index={index}
-          models={models}
-          model={params.model}
-          ffmpegOk={ffmpegOk}
-          busy={toggling}
-          justBridged={justBridged}
-          onContinue={(on) => void toggleContinue(on)}
-          onEndFromNext={(on) => void toggleEndFromNext(on)}
-          onBridge={() => void bridge()}
-        />
+        {!formOpen ? (
+          <div className="rounded-lg border border-dashed border-line p-3">
+            <button
+              type="button"
+              onClick={() => setAiAsked(true)}
+              className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-1 text-left transition hover:text-text"
+            >
+              <span>Generera en AI-tagning i stället…</span>
+              <ChevronDownIcon size={12} className="shrink-0 text-muted" />
+            </button>
+            <p className="mt-1 px-1 text-[11px] leading-snug text-muted">
+              Klippet är din egen film. Vill du prova en AI-tagning på samma plats öppnar du formuläret – filmen finns
+              kvar bland tagningarna och du väljer själv vilken som används.
+            </p>
+          </div>
+        ) : (
+          <>
+            {ownTake && (
+              <button
+                type="button"
+                onClick={() => setAiAsked(false)}
+                className="mb-3 flex items-center gap-1 text-[12px] text-muted transition hover:text-text"
+              >
+                <ChevronDownIcon size={11} className="rotate-180" />
+                Dölj formuläret för en AI-tagning
+              </button>
+            )}
+            <KeyframeBox
+              sequence={sequence}
+              segment={segment}
+              index={index}
+              models={models}
+              model={params.model}
+              ffmpegOk={ffmpegOk}
+              busy={toggling}
+              justBridged={justBridged}
+              onContinue={(on) => void toggleContinue(on)}
+              onEndFromNext={(on) => void toggleEndFromNext(on)}
+              onBridge={() => void bridge()}
+            />
 
-        <ParamsForm
-          models={models}
-          modelsError={modelsError}
-          params={params}
-          setParams={setParams}
-          // A frame from a neighbour makes the clip image-to-video.
-          kinds={continuing || endFromNext ? ['image-to-video'] : undefined}
-          continuing={continuing}
-          endImageRequired
-          startImageNote={continuing ? `Sista bildrutan från klipp ${index} används som startbild.` : undefined}
-          endImageNote={endFromNext ? `Första bildrutan från klipp ${index + 2} används som slutbild.` : undefined}
-          onSubmit={() => void generate()}
-          navigate={navigate}
-        />
+            <ParamsForm
+              models={models}
+              modelsError={modelsError}
+              params={params}
+              setParams={setParams}
+              // A frame from a neighbour makes the clip image-to-video.
+              kinds={continuing || endFromNext ? ['image-to-video'] : undefined}
+              continuing={continuing}
+              endImageRequired
+              startImageNote={continuing ? `Sista bildrutan från klipp ${index} används som startbild.` : undefined}
+              endImageNote={endFromNext ? `Första bildrutan från klipp ${index + 2} används som slutbild.` : undefined}
+              onSubmit={() => void generate()}
+              navigate={navigate}
+            />
+          </>
+        )}
       </div>
 
-      <div className="border-t border-line p-4">
-        {error && <p className="mb-3 max-h-32 overflow-y-auto text-accent select-text">{error}</p>}
-        <button
-          onClick={() => void generate()}
-          disabled={!!blocked || submitting}
-          className="flex w-full items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-        >
-          <span className="truncate" title={blocked}>
-            {submitting ? 'Skickar…' : (blocked ?? (segment.takes.length ? 'Generera ny tagning' : 'Generera tagning'))}
-          </span>
-          <span className="shrink-0 text-white/80">{formatUsd(quote)}</span>
-        </button>
-        <p className="mt-2 text-center text-[11px] text-muted">⌘ + Enter för att generera</p>
-      </div>
+      {formOpen && (
+        <div className="border-t border-line p-4">
+          {error && <p className="mb-3 max-h-32 overflow-y-auto text-accent select-text">{error}</p>}
+          <button
+            onClick={() => void generate()}
+            disabled={!!blocked || submitting}
+            className="flex w-full items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
+          >
+            <span className="truncate" title={blocked}>
+              {submitting ? 'Skickar…' : (blocked ?? (segment.takes.length ? 'Generera ny tagning' : 'Generera tagning'))}
+            </span>
+            <span className="shrink-0 text-white/80">{formatUsd(quote)}</span>
+          </button>
+          <p className="mt-2 text-center text-[11px] text-muted">⌘ + Enter för att generera</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Facts about a video file for the info line, read once per file (free: ffprobe in main). */
+interface FileFacts {
+  fps?: number
+  hasAudio?: boolean
+}
+
+/**
+ * An own film's name and info line: "0:31 · 1080p · 30 bilder/s · ljud · arbetskopia av 4K HDR". The frame rate and
+ * the sound are read from the file itself; the working copy's reasons from the import.
+ */
+function OwnClipInfo({ take }: { take: Generation }) {
+  const [facts, setFacts] = useState<FileFacts>()
+  const path = take.filePath
+  useEffect(() => {
+    if (!path || take.fileMissing) return
+    let current = true
+    setFacts(undefined)
+    window.studio.inspectVideoFiles([path]).then(
+      ([info]) => current && info?.ok && setFacts({ fps: info.fps, hasAudio: info.hasAudio }),
+      // Only the info line misses the frame rate and the sound then.
+      () => undefined
+    )
+    return () => {
+      current = false
+    }
+  }, [path, take.fileMissing])
+
+  const parts = [
+    take.videoDuration !== undefined ? formatClock(take.videoDuration) : undefined,
+    take.params.resolution,
+    facts?.fps ? `${Math.round(facts.fps)} bilder/s` : undefined,
+    facts ? (facts.hasAudio ? 'ljud' : 'utan ljud') : undefined,
+    workingCopyNote(take.recipe?.import?.workingCopy)
+  ].filter((p): p is string => !!p)
+
+  return (
+    <div className="mb-4 rounded-lg border border-line bg-panel px-3 py-2.5">
+      <p className="truncate font-medium" title={generationTitle(take)}>
+        {generationTitle(take, 80)}
+      </p>
+      {take.fileMissing ? (
+        <p className="mt-0.5 text-[11px] leading-snug text-amber-300">
+          Filmen finns inte längre där den låg (flyttad eller raderad i Finder). Lägg till filen igen eller generera en
+          AI-tagning.
+        </p>
+      ) : (
+        <p className="mt-0.5 text-[11px] text-muted tabular-nums">{parts.join(' · ')}</p>
+      )}
     </div>
   )
 }

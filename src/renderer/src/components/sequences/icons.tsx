@@ -164,3 +164,21 @@ export function SparkleIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** An own clip (the user's own film, not made by AI). */
+export function CameraIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="1.75" y="4.25" width="9" height="7.5" rx="1.5" />
+      <path d="M10.75 7l3.5-2v6l-3.5-2" />
+    </Icon>
+  )
+}
+
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 6l4 4 4-4" />
+    </Icon>
+  )
+}

@@ -8,6 +8,7 @@ IPC surface safely. For how the code is organised, see [ARCHITECTURE.md](ARCHITE
 - [Profiles](#profiles)
 - [Testing without spending money](#testing-without-spending-money) (test clips, voices, reviews, harnesses)
 - [Typecheck and build](#typecheck-and-build)
+- [Native helper](#native-helper) (voice separation)
 - [Packaging](#packaging)
 - [Database migrations](#database-migrations)
 - [Adding an IPC method](#adding-an-ipc-method)
@@ -18,7 +19,9 @@ IPC surface safely. For how the code is organised, see [ARCHITECTURE.md](ARCHITE
 - macOS on Apple Silicon.
 - Node.js from [`.nvmrc`](../.nvmrc) (24), at least 22.12.
 - ffmpeg with ffprobe: `brew install ffmpeg`.
-- Xcode Command Line Tools (`xcode-select --install`), in case `better-sqlite3` has to be compiled.
+- Xcode Command Line Tools (`xcode-select --install`), in case `better-sqlite3` has to be compiled, and for the
+  Swift compiler that builds the voice separation helper (optional: without it Studio runs without voice
+  separation; see [Native helper](#native-helper)).
 
 ```bash
 npm install
@@ -33,13 +36,14 @@ Electron's Node ABI. A consequence: plain `node` cannot load it — scripts that
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | electron-vite dev server with watch (`-w`), as **Studio Dev** (`STUDIO_DEV_PROFILE=1`). The renderer hot-reloads; main and preload changes rebuild and restart Electron. |
+| `npm run dev` | Builds the native helper if needed, then the electron-vite dev server with watch (`-w`), as **Studio Dev** (`STUDIO_DEV_PROFILE=1`). The renderer hot-reloads; main and preload changes rebuild and restart Electron. |
 | `npm run dev:real` | The same, with the real **Studio** profile. Quit Studio.app first. |
-| `npm run build` | Builds main, preload and renderer into `out/`. |
+| `npm run build` | Builds the native helper if needed, then main, preload and renderer into `out/`. |
+| `npm run build:helpers` | Builds the voice separation helper into `build/bin/` (see [Native helper](#native-helper)). |
 | `npm start` | Runs the built `out/` with electron-vite preview — **with the real profile**, like `dev:real`. |
 | `npm run typecheck` | `tsc --noEmit` for the Node side (`tsconfig.node.json`) and the web side (`tsconfig.web.json`). |
 | `npm run check` | `typecheck` + `build` — what CI runs, and what must pass before a pull request. |
-| `npm run app` | Builds and packages `dist/mac-arm64/Studio.app` with electron-builder. |
+| `npm run app` | Builds the native helper, then builds and packages `dist/mac-arm64/Studio.app` with electron-builder. |
 | `npm run app:install` | `npm run app`, then replaces `/Applications/Studio.app` with the new build. |
 
 Because the dev app reloads on every save, keep the code compiling while you work: a broken save restarts a
@@ -80,9 +84,13 @@ suite yet; changes are verified with the techniques below (contributions of a pr
 ### Ground rules
 
 - **Never trigger real generations while developing.** Don't press *Generera*, *Generera tagning*, *Generera
-  saknade*, *Skapa* in *Skapa bild…* or approve an agent request in a profile that has a real API key, and never
-  call Venice's paid endpoints (`/video/queue`, `/image/generate`, `/image/multi-edit`) from tests — stub the
-  `VeniceClient` or `fetch` instead.
+  saknade*, *Skapa* in *Skapa bild…*, a priced button in Redigera, *Fortsätt* on an edit job, *Skapa röst* or
+  approve an agent request in a profile that has a real API key, and never call Venice's paid endpoints from tests —
+  `/video/queue`, `/image/generate`, `/image/multi-edit`, `/audio/speech`, `/audio/queue`, `/audio/voices`,
+  `/audio/transcriptions`, `/video/transcriptions`, `/audio/voice-changer/queue`, `/augment/*`, and the retrieve and
+  complete endpoints (they need a key too). Stub the `VeniceClient`, `VeniceAudio` or `fetch` instead. Free calls
+  without a key are fine: `GET /models?type=…`, `/video/quote`, `/audio/quote` and `/audio/voice-changer/quote`
+  (Topaz upscale quotes need a key, so plans show *"Lägg till API-nyckeln under Inställningar."* without one).
 - **Use a profile without an API key** for UI work. The model list and price quotes work without a key, but
   queueing a generation fails with "Ingen API-nyckel är inställd" before anything is sent.
 - **Work in a throwaway profile and library** (`STUDIO_PROFILE_DIR`), not in `~/Movies/Studio*` or
@@ -101,6 +109,31 @@ done
 ```
 
 Drop `-f lavfi -i "sine=…"` and `-c:a aac -shortest` for a clip without audio (exports must pad it with silence).
+
+**Own clips.** Import these through *Importera egna klipp…* (or a drop) to exercise the working copy: each needs one
+for a different reason, and the copy must come out 8-bit BT.709, upright and at a constant frame rate.
+
+```bash
+cd /tmp/studio-clips
+# HDR (HLG), 10-bit HEVC, rotated: a phone film held upright (the rotation is added by a remux)
+ffmpeg -y -f lavfi -i "testsrc2=size=1920x1080:rate=30" -t 3 -c:v libx265 -pix_fmt yuv420p10le -tag:v hvc1 \
+  -x265-params "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc" \
+  -color_primaries bt2020 -color_trc arib-std-b67 -colorspace bt2020nc hlg-flat.mov
+ffmpeg -y -display_rotation 90 -i hlg-flat.mov -c copy hlg.mov
+# A variable frame rate without sound
+ffmpeg -y -f lavfi -i "testsrc2=size=854x480:rate=30" -t 3 -vf "setpts='PTS+0.02*sin(N)/TB'" -fps_mode vfr \
+  -c:v libx264 -pix_fmt yuv420p -an vfr.mp4
+# ProRes, which Chromium can't play
+ffmpeg -y -f lavfi -i "testsrc2=size=1280x720:rate=25" -t 3 -c:v prores_ks -profile:v 2 prores.mov
+```
+
+Importing the same file twice reuses the first import (same size and SHA-256).
+
+**Redigera.** Free operations (cuts, fades, volume, noise, loudness, added sound, and *Ta bort rösten* / *Bara
+rösten* with the [native helper](#native-helper)) run entirely on the Mac and can be tried on any test clip. A tone
+with pauses is enough to see where speech is found and how a waveform looks; the separation needs something
+voice-like to separate, so use a recording of speech you are allowed to use. Paid operations are tried only with a
+stubbed `fetch` (below), never by pressing a priced button with a key in the profile.
 
 ### Test voices and sounds
 
@@ -151,6 +184,9 @@ SQL
   preview and export then work on the test clips.
 - Only insert `completed` (or `failed`) rows. A `queued`/`processing` row with a `queue_id` would make Studio poll
   Venice for it.
+- Rows without `source` are Venice generations (`generated`). A fake own clip is a completed row with
+  `source = 'import'`, empty `model` and `prompt`, a `title` and its file in `Egna klipp/<day>/`; its params need
+  only `{"model":"","prompt":"","duration":"5s","resolution":"480p","aspectRatio":"16:9"}`.
 
 ### Fake reviews and learnings
 
@@ -293,6 +329,17 @@ yourself. The job manager needs the models' prompt limits for that: pass a model
 (`new JobManager(venice, async () => models)`, as `index.ts` passes its cached list), or serve `/models` — without
 either it composes without a limit.
 
+For Redigera's paid operations stub `/audio/*` and `/video/*` the same way, keeping the real `VeniceAudio` and
+`VeniceClient`: serve `/models?type=tts|music|asr` from saved lists (add a fake model with `voice_changer: true` and
+a short `max_source_audio_duration_seconds` to force chunking), answer `/audio/quote` and
+`/audio/voice-changer/quote` with a price, and parse multipart bodies (`/audio/voices`, `/audio/transcriptions`,
+`/audio/voice-changer/queue`) with `await new Response(init.body, { headers }).formData()`. Return converted audio
+at another sine frequency than the original, so a band-pass level shows where the voice was replaced. Useful
+assertions: every `/video/quote` body for a video-input model stays under 1 MB (the stand-in, not the film);
+voice-changer and audio quotes send whole seconds; the transcription form has `timestamps=true`; a step left
+`sending` is failed at the next `resume()` and never sent again, and a job with `pending` steps sends nothing until
+`resumeEditJob`.
+
 To check frames exactly — the start and end image a clip sends, or which frames an export keeps at each cut — make
 test videos whose every frame has its own colour (or two colour halves, for more than 64 frames), read the frames
 back with `ffmpeg -vf scale=8:8:flags=area -f rawvideo -pix_fmt rgb24 -` and map each colour back to its number.
@@ -348,9 +395,39 @@ npm run check       # both of the above
 ```
 
 `npm run check` must pass before a pull request (see [CONTRIBUTING.md](../CONTRIBUTING.md)); CI
-(`.github/workflows/ci.yml`) runs the same steps on macOS for every pull request and push to `main`.
+(`.github/workflows/ci.yml`) runs the same steps on macOS for every pull request and push to `main`, plus
+`npm run build:helpers` and the helper's `--probe`.
 `tsconfig.node.json` covers `src/main`, `src/preload` and `src/shared`; `tsconfig.web.json` covers
 `src/renderer`, the preload's type declaration and `src/shared`.
+
+## Native helper
+
+Voice and background separation (*Ta bort rösten*, *Bara rösten*, keeping the background under a new voice) uses
+macOS's own AUSoundIsolation audio unit through a small Swift command-line helper, `studio-voice-isolate`
+(`native/voice-isolate/main.swift`). `npm run build:helpers` (`scripts/build-helpers.mjs`) compiles it:
+
+- with `xcrun --sdk macosx swiftc -O -target arm64-apple-macos13` (the Xcode Command Line Tools; a bare toolchain
+  `swiftc` can't find the standard library without the SDK), into `build/bin/studio-voice-isolate`, which is
+  gitignored, then signs it ad hoc (Apple Silicon runs no unsigned code);
+- `npm run dev`, `dev:real`, `build` and `app` run it first. A stamp file next to the binary (a hash of the source,
+  the flags and the compiler version) skips an up-to-date helper in a fraction of a second; `--force` rebuilds
+  (`npm run build:helpers -- --force`);
+- without the Swift compiler, or off macOS, it prints a note and skips; `STUDIO_SKIP_HELPERS=1` skips it on purpose.
+  Studio then runs without voice separation: *Inställningar* says *"Röstseparering är inte byggd. Kör npm run
+  build:helpers …"*, and Redigera offers only what works without stems.
+
+`src/main/voice-separation.ts` looks for the helper in `<app>/Contents/Resources/bin/` when packaged (electron-builder
+copies it there through `extraResources`) and in `build/bin/` in development. Try it by hand:
+
+```bash
+build/bin/studio-voice-isolate --probe          # {"ok":true,"hq":true,"latency":0.1325} on macOS 15+
+build/bin/studio-voice-isolate in.wav voice.wav background.wav   # 32-bit float WAVs, progress=… on stdout
+```
+
+Studio runs the helper with a watchdog: no `progress=` line for two minutes, or a run longer than the sound itself
+(at least five minutes), kills it and fails the separation with a Swedish message. A new or changed helper must keep
+printing progress every few percent. Before it starts, `separateStems` checks that the scratch WAVs (the sound three
+times over as 32-bit float at 48 kHz) fit on the library's disk with 1 GB to spare.
 
 ## Packaging
 
@@ -363,6 +440,8 @@ npm run check       # both of the above
   may ask again whether Studio may use its Keychain entry; allow it, or the stored API key can't be read.
 - **Native module:** `*.node` files are unpacked from the asar archive; `better-sqlite3`'s sources and prebuilt
   binaries for other platforms are left out.
+- **Native helper:** `build/bin/studio-voice-isolate` is copied to `Contents/Resources/bin/` (`extraResources`). A
+  build without it only gets a warning from electron-builder, and that app runs without voice separation.
 - **Info.plist:** the folder-access usage descriptions (Documents, Desktop, Downloads, removable and network
   volumes) are in Swedish, like the UI; `electronLanguages` keeps `sv` and `en`.
 - **Node and `require(esm)`:** electron-builder 26 `require()`s ES-module-only dependencies. Node 22.12 and later
@@ -384,12 +463,20 @@ change the schema:
 3. If the new data holds **file paths**, store them relative to the base folder and teach every place that
    rewrites or looks for stored paths about it, or library moves, renames and *Städa upp* will break it (migration
    7 did this for `asset_audio.file_path` and `referenceAudios[].path`):
-   - a new **column**: `mapStoredPaths`, `isStoredPathRecorded` and `isStoredPrefixRecorded` in `db.ts`, and
-     `trackedFilePaths` in `library-root.ts` (and the reorganize/rename code if the files belong to an asset);
+   - a new **column**: `mapStoredPaths`, `isStoredPathRecorded`, `isStoredPrefixRecorded`, `rewriteStoredPrefix`,
+     `followRewrites` and `relativizeStoredPaths` in `db.ts`, and `trackedFilePaths` and *Städa upp* in
+     `library-root.ts` (and the reorganize/rename code if the files belong to an asset). Migration 11 did this for
+     `generations.original_path` (an import's original) and `edit_media.file_path`;
    - a new path **inside `params` JSON**: `mapParamPaths` (behind `toStoredParams` / `fromStoredParams`) in
      `paths.ts`, and
-     `paramFilePaths`, `mapParamsJson` and `followRewrites` in `db.ts` (and `generationFilePaths` in
-     `shared/generation-filter.ts` if the clip feed should find generations by it).
+     `paramFilePaths`, `mapParamsJson` and `followRewrites` in `db.ts`, `referencedFiles` in `references.ts`, the
+     file check before a submit in `venice.ts` (and `generationFilePaths` in `shared/generation-filter.ts` if the clip
+     feed should find generations by it). Migration 11 did this for `sourceVideo` and `referenceVideos`;
+   - other JSON columns (`recipe`, `details`, `request`, `segments`) hold ids only, never paths: a path there
+     would not follow a rename or a library move;
+   - a new kind of **file** also needs a home: `jobs.videoHome` decides the folder of every generation's video
+     (the [file home rule](ARCHITECTURE.md#the-file-home-rule)), and sequences, imports, edits and *Städa upp*
+     all go through it.
 4. Update the row types and mappers (`GenerationRow`, `generationFromRow`, `sequence-store.ts` …), the shared types
    if the data reaches the renderer, and the data-model section of [ARCHITECTURE.md](ARCHITECTURE.md#data-model).
 5. **Test on a copy.** Quit Studio (closing folds the WAL into `studio.db`), copy a library's folder into a
@@ -414,7 +501,10 @@ There are no down-migrations: once a newer Studio has migrated a library, older 
 5. **Agents** — handlers are recorded automatically, so agent tools can reach the new method with
    `callService('area:doThing', …)`. If agents must be treated differently, check `isAgentCall(event)` (as the
    review and learning handlers do: an agent passes its name as the last argument and may only change what it
-   wrote). A new user-facing capability also needs a tool (see below).
+   wrote). What only the user may do (import files, delete edits or versions, clone consent …) refuses an agent's
+   call with *"Det här kan bara du göra i Studio."* in the handler too, behind the tool list. Anything paid takes
+   the price the user saw and refuses when it rose (`expectedPriceUsd`, as `edits:run` does). A new user-facing
+   capability also needs a tool (see below).
 6. **Check** — `npm run check`, then try it in the dev profile; update [ARCHITECTURE.md](ARCHITECTURE.md#ipc-surface).
 
 ## Adding an agent tool
@@ -426,7 +516,10 @@ became `list_generations`' parameters through the shared `generation-filter.ts`;
 review tools.
 
 Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, `stills.ts`, `storyboards.ts`,
-`paid.ts`, `review.ts`) and are registered with `defineTool` (`kit.ts`):
+`paid.ts`, `editor.ts`, `editor-paid.ts` with `edit-input.ts`, `review.ts`) and are registered with `defineTool`
+(`kit.ts`). Redigera shows the pattern for a new area: read and free tools in `editor.ts`, the paid requests in
+`editor-paid.ts`, one snake_case input schema and converter for the operations (`edit-input.ts`), every check left
+to the service's own plan (`edits:plan`), and an approval panel in `components/agent/EditApproval.tsx`:
 
 - Give it a clear English `title` and `description` written for an LLM, a zod `input` schema with `.describe()`d
   fields, honest MCP `annotations` (`READ_ONLY`, `WRITE`, or destructive/open-world hints) and a short Swedish
@@ -441,8 +534,9 @@ Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, 
   what it is); `agent/images.ts` and `agent/media.ts` make them from files, frames and ffmpeg output. Only send
   sound when the agent asks for it (`include_audio`); `defineTool` already replaces it with a note for clients
   whose protocol version has no audio content.
-- Anything that costs money must go through `ApprovalStore` with a `verify` step, as in `tools/paid.ts`, and should
-  run the same checks the submit will (`prepareSubmission`) before the user is asked. Never add a tool that spends
-  money without the user's approval.
+- Anything that costs money must go through `ApprovalStore` with a `verify` step, as in `tools/paid.ts` and
+  `tools/editor-paid.ts`, and should run the same checks the submit will (`prepareSubmission`, or the service's own
+  plan) before the user is asked. `verify` must catch everything that changed since the request (files by identity,
+  plans by fingerprint, the price). Never add a tool that spends money without the user's approval.
 - Update the guide in `agent/guide.ts` (`studioGuide`, and `serverInstructions` if it changes how agents should
   work), the tool list and counts in [AGENTS.md](AGENTS.md#tools), and `CHANGELOG.md` under *Unreleased*.

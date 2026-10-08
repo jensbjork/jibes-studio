@@ -1,7 +1,11 @@
-import { Fragment, useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type RefObject } from 'react'
+import { generationTitle, sourceBadge } from '@shared/generation-label'
 import type { Segment, Sequence } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
-import { BridgeIcon, LinkIcon, PlusIcon } from './icons'
+import { carriesFiles, droppedVideoPaths, ImportCardView, type ImportCard } from '../feed/ownClips'
+import Popover from '../pickers/Popover'
+import { menuRow, onMenuKeyDown } from '../storyboards/ui'
+import { BridgeIcon, CameraIcon, ChevronDownIcon, LinkIcon, PlusIcon } from './icons'
 import {
   bridgeDescription,
   clipLength,
@@ -17,25 +21,50 @@ import {
 /** Drag payload of a clip being reordered (its id). */
 const SEGMENT_DRAG_TYPE = 'application/x-studio-segment'
 
+/** Where a clip that isn't an empty AI clip comes from: the user's own file, the clip feed, Redigera's versions. */
+export type ClipSource = 'file' | 'feed' | 'edit'
+
 interface Props {
   sequence: Sequence
   selectedId?: string
   adding: boolean
   onSelect: (segmentId: string) => void
-  /** Adds a segment after the given one, or at the end. */
+  /** Adds an empty clip (to generate) after the given one, or at the end. */
   onAdd: (afterSegmentId?: string) => void
+  /** "Eget klipp från fil…", "Från klippflödet…", "Från Redigera…": a clip from elsewhere, after the given one. */
+  onAddFrom: (source: ClipSource, afterSegmentId?: string) => void
+  /**
+   * Video files dropped on the strip, to become own clips at gap `gap` (before clip `gap`, 0-based; the number of
+   * clips is after the last one).
+   */
+  onDropFiles: (paths: string[], gap: number) => void
+  /** Own clips on their way into this sequence (shown after the last clip with their progress). */
+  importing: ImportCard[]
   onMove: (segmentId: string, toIndex: number) => void
   /** "Gör om mellan grannarna" on a card. */
   onBridge: (segmentId: string) => void
 }
 
-/** Horizontal strip of clips in cut order: select, insert, and reorder by drag and drop. */
-export default function Timeline({ sequence, selectedId, adding, onSelect, onAdd, onMove, onBridge }: Props) {
+/** Horizontal strip of clips in cut order: select, insert, reorder by drag and drop, and drop own films onto. */
+export default function Timeline({
+  sequence,
+  selectedId,
+  adding,
+  onSelect,
+  onAdd,
+  onAddFrom,
+  onDropFiles,
+  importing,
+  onMove,
+  onBridge
+}: Props) {
   const segments = sequence.segments
   const cards = useRef(new Map<string, HTMLDivElement>())
   const [dragId, setDragId] = useState<string>()
   // Gap g sits before segment g (g = segments.length is after the last one).
   const [dropGap, setDropGap] = useState<number>()
+  // Files from Finder over the strip: where they would go.
+  const [fileGap, setFileGap] = useState<number>()
 
   useEffect(() => {
     if (selectedId) cards.current.get(selectedId)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
@@ -53,7 +82,14 @@ export default function Timeline({ sequence, selectedId, adding, onSelect, onAdd
   }
 
   const onDragOver = (e: DragEvent) => {
-    if (dragFrom === -1) return
+    if (dragFrom === -1) {
+      // Files from Finder: own films, inserted where they are dropped.
+      if (!carriesFiles(e)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+      setFileGap(gapAt(e.clientX))
+      return
+    }
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     const gap = gapAt(e.clientX)
@@ -62,7 +98,15 @@ export default function Timeline({ sequence, selectedId, adding, onSelect, onAdd
   }
 
   const onDrop = (e: DragEvent) => {
-    if (dragFrom === -1 || !dragId) return
+    if (dragFrom === -1 || !dragId) {
+      if (!carriesFiles(e)) return
+      e.preventDefault()
+      const gap = gapAt(e.clientX)
+      setFileGap(undefined)
+      const { paths } = droppedVideoPaths(e)
+      if (paths.length) onDropFiles(paths, gap)
+      return
+    }
     e.preventDefault()
     const gap = gapAt(e.clientX)
     const to = gap > dragFrom ? gap - 1 : gap
@@ -88,31 +132,82 @@ export default function Timeline({ sequence, selectedId, adding, onSelect, onAdd
 
   if (!segments.length) {
     return (
-      <div className="shrink-0 border-b border-line p-4">
-        <button
-          onClick={() => onAdd()}
-          disabled={adding}
-          className="flex h-[143px] w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-muted transition hover:border-muted hover:text-text disabled:opacity-40"
-        >
-          <PlusIcon size={18} />
-          <span>Lägg till första klippet</span>
-        </button>
+      <div
+        className="relative shrink-0 border-b border-line p-4"
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFileGap(undefined)
+        }}
+      >
+        {importing.length > 0 ? (
+          <div className="flex h-[143px] gap-3">
+            {importing.map((card) => (
+              <div key={card.path} className="w-44 shrink-0 overflow-hidden rounded-lg border border-line bg-panel">
+                <ImportCardView card={card} compact />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div
+            className={`flex h-[143px] w-full flex-col items-center justify-center gap-2.5 rounded-lg border border-dashed transition ${
+              fileGap !== undefined ? 'border-accent/70 bg-accent/10' : 'border-line'
+            }`}
+          >
+            <button
+              onClick={() => onAdd()}
+              disabled={adding}
+              className="flex flex-col items-center gap-2 rounded-md px-4 py-1.5 text-muted transition hover:text-text disabled:opacity-40"
+            >
+              <PlusIcon size={18} />
+              <span>
+                {fileGap !== undefined ? (
+                  <span className="text-text">Släpp för att lägga till som egna klipp</span>
+                ) : (
+                  <>
+                    <span className="text-text">Lägg till första klippet</span>
+                    <span className="text-muted"> · eller släpp en egen film här</span>
+                  </>
+                )}
+              </span>
+            </button>
+            {fileGap === undefined && (
+              <div className="flex items-center gap-1 text-[12px] text-muted">
+                <SourceLink onClick={() => onAddFrom('file')}>Eget klipp från fil…</SourceLink>
+                <span aria-hidden>·</span>
+                <SourceLink onClick={() => onAddFrom('feed')}>Från klippflödet…</SourceLink>
+                <span aria-hidden>·</span>
+                <SourceLink onClick={() => onAddFrom('edit')}>Från Redigera…</SourceLink>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     )
   }
 
+  const marker = dropGap ?? fileGap
+
   return (
-    <div className="shrink-0 border-b border-line">
+    <div className="relative shrink-0 border-b border-line">
+      {fileGap !== undefined && (
+        <span className="pointer-events-none absolute right-4 top-1 z-10 rounded bg-accent px-2 py-0.5 text-[11px] font-medium text-white shadow">
+          Släpp för att lägga till som egna klipp
+        </span>
+      )}
       <div
         className="overflow-x-auto"
         onDragOver={onDragOver}
         onDrop={onDrop}
         onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropGap(undefined)
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setDropGap(undefined)
+            setFileGap(undefined)
+          }
         }}
       >
         <div className="flex w-max items-stretch px-3 py-3">
-          <EdgeGap active={dropGap === 0} />
+          <EdgeGap active={marker === 0} />
           {segments.map((s, i) => (
             <Fragment key={s.id}>
               {i > 0 && (
@@ -120,9 +215,10 @@ export default function Timeline({ sequence, selectedId, adding, onSelect, onAdd
                   segment={s}
                   previous={segments[i - 1]}
                   number={i + 1}
-                  dropHere={dropGap === i}
+                  dropHere={marker === i}
                   adding={adding}
                   onInsert={() => onAdd(segments[i - 1].id)}
+                  onInsertFrom={(source) => onAddFrom(source, segments[i - 1].id)}
                 />
               )}
               <SegmentCard
@@ -151,19 +247,152 @@ export default function Timeline({ sequence, selectedId, adding, onSelect, onAdd
               />
             </Fragment>
           ))}
-          <EdgeGap active={dropGap === segments.length} />
-          <button
-            onClick={() => onAdd()}
-            disabled={adding}
-            title="Lägg till ett klipp sist"
-            className="ml-1 flex w-28 shrink-0 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-line text-[12px] text-muted transition hover:border-muted hover:text-text disabled:opacity-40"
-          >
-            <PlusIcon size={16} />
-            Lägg till klipp
-          </button>
+          <EdgeGap active={marker === segments.length} />
+          {importing.map((card) => (
+            <div
+              key={card.path}
+              className="ml-1 w-44 shrink-0 overflow-hidden rounded-lg border border-line bg-panel"
+              title={card.note}
+            >
+              <ImportCardView card={card} compact />
+            </div>
+          ))}
+          <AddSplitButton adding={adding} onAdd={() => onAdd()} onAddFrom={(source) => onAddFrom(source)} />
         </div>
       </div>
     </div>
+  )
+}
+
+function SourceLink({ onClick, children }: { onClick: () => void; children: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded px-1.5 py-0.5 underline-offset-2 transition hover:bg-raised hover:text-text"
+    >
+      {children}
+    </button>
+  )
+}
+
+/** "Lägg till klipp ▾": the button adds an empty clip to generate; the ▾ part offers the other sources. */
+function AddSplitButton({
+  adding,
+  onAdd,
+  onAddFrom
+}: {
+  adding: boolean
+  onAdd: () => void
+  onAddFrom: (source: ClipSource) => void
+}) {
+  const anchor = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="ml-1 flex w-28 shrink-0 flex-col overflow-hidden rounded-lg border border-dashed border-line text-[12px] text-muted">
+      <button
+        onClick={onAdd}
+        disabled={adding}
+        title="Lägg till ett klipp att generera, sist"
+        className="flex flex-1 flex-col items-center justify-center gap-1.5 transition hover:bg-raised/60 hover:text-text disabled:opacity-40"
+      >
+        <PlusIcon size={16} />
+        Lägg till klipp
+      </button>
+      <button
+        ref={anchor}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={adding}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Eget klipp, från klippflödet eller från Redigera"
+        className={`flex h-7 shrink-0 items-center justify-center gap-1 border-t border-dashed border-line transition hover:bg-raised/60 hover:text-text disabled:opacity-40 ${
+          open ? 'bg-raised/60 text-text' : ''
+        }`}
+      >
+        Fler sätt
+        <ChevronDownIcon size={11} />
+      </button>
+      <AddMenu
+        anchorRef={anchor}
+        open={open}
+        onClose={() => setOpen(false)}
+        onPick={(source) => {
+          setOpen(false)
+          onAddFrom(source)
+        }}
+      />
+    </div>
+  )
+}
+
+/** The ways to add a clip besides an empty one: the user's own file, the clip feed, a version from Redigera. */
+function AddMenu({
+  anchorRef,
+  open,
+  onClose,
+  onPick,
+  onEmpty
+}: {
+  anchorRef: RefObject<HTMLElement | null>
+  open: boolean
+  onClose: () => void
+  onPick: (source: ClipSource) => void
+  /** Also offers an empty clip to generate (the + between two clips). */
+  onEmpty?: () => void
+}) {
+  return (
+    <Popover anchorRef={anchorRef} open={open} onClose={onClose} align="start" width={270} label="Lägg till klipp">
+      <div role="menu" aria-label="Lägg till klipp" onKeyDown={onMenuKeyDown} className="p-1">
+        {onEmpty && (
+          <button
+            type="button"
+            role="menuitem"
+            data-menu-item
+            autoFocus
+            onClick={onEmpty}
+            className={`${menuRow} flex-col items-start gap-0.5`}
+          >
+            <span>Nytt klipp att generera</span>
+            <span className="text-[11px] leading-snug text-muted">
+              Ett tomt klipp med föregående klipps inställningar.
+            </span>
+          </button>
+        )}
+        <button
+          type="button"
+          role="menuitem"
+          data-menu-item
+          autoFocus={!onEmpty}
+          onClick={() => onPick('file')}
+          className={`${menuRow} flex-col items-start gap-0.5`}
+        >
+          <span>Eget klipp från fil…</span>
+          <span className="text-[11px] leading-snug text-muted">En film du har filmat eller gjort själv.</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          data-menu-item
+          onClick={() => onPick('feed')}
+          className={`${menuRow} flex-col items-start gap-0.5`}
+        >
+          <span>Från klippflödet…</span>
+          <span className="text-[11px] leading-snug text-muted">Ett klipp du redan har i Generera.</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          data-menu-item
+          onClick={() => onPick('edit')}
+          className={`${menuRow} flex-col items-start gap-0.5`}
+        >
+          <span>Från Redigera…</span>
+          <span className="text-[11px] leading-snug text-muted">En version av en film du har ändrat i Redigera.</span>
+        </button>
+      </div>
+    </Popover>
   )
 }
 
@@ -182,7 +411,8 @@ function Joint({
   number,
   dropHere,
   adding,
-  onInsert
+  onInsert,
+  onInsertFrom
 }: {
   segment: Segment
   previous: Segment
@@ -190,7 +420,10 @@ function Joint({
   dropHere: boolean
   adding: boolean
   onInsert: () => void
+  onInsertFrom: (source: ClipSource) => void
 }) {
+  const plus = useRef<HTMLButtonElement>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
   // The two clips share a frame: this one starts on the previous clip's last frame, or the previous one ends on
   // this one's first (a clip redone between its neighbours).
   const continues = segment.continueFromPrevious
@@ -225,13 +458,31 @@ function Joint({
         )}
       </div>
       <button
-        onClick={onInsert}
+        ref={plus}
+        onClick={() => setMenuOpen((o) => !o)}
         disabled={adding}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
         title={`Infoga ett klipp mellan ${number - 1} och ${number}`}
-        className="mt-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-line bg-raised text-muted opacity-0 transition hover:border-muted hover:text-text focus:opacity-100 group-hover/joint:opacity-100 disabled:opacity-0"
+        className={`mt-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-line bg-raised text-muted transition hover:border-muted hover:text-text focus:opacity-100 group-hover/joint:opacity-100 disabled:opacity-0 ${
+          menuOpen ? 'border-muted text-text opacity-100' : 'opacity-0'
+        }`}
       >
         <PlusIcon size={11} />
       </button>
+      <AddMenu
+        anchorRef={plus}
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onEmpty={() => {
+          setMenuOpen(false)
+          onInsert()
+        }}
+        onPick={(source) => {
+          setMenuOpen(false)
+          onInsertFrom(source)
+        }}
+      />
       {dropHere && (
         <span className="pointer-events-none absolute inset-y-1 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-accent" />
       )}
@@ -269,6 +520,11 @@ function SegmentCard({
   const length = clipLength(segment)
   const trimmed = segment.trimStart > 0 || segment.trimEnd > 0
   const prompt = segment.params.prompt.trim()
+  // An own film (or a version from Redigera) as the clip's take: named by its title, marked "Egen".
+  const chosen = selectedTake(segment)
+  const badge = chosen ? sourceBadge(chosen) : undefined
+  const own = !!chosen && (badge?.kind === 'own' || badge?.kind === 'edited')
+  const text = own ? generationTitle(chosen, 80) : prompt
 
   return (
     <div
@@ -288,8 +544,17 @@ function SegmentCard({
     >
       <div className="relative aspect-video bg-black">
         <CardPreview segment={segment} />
-        <span className="absolute left-1.5 top-1.5 rounded bg-black/75 px-1.5 py-px text-[11px] font-semibold tabular-nums">
-          {number}
+        <span className="absolute left-1.5 top-1.5 flex items-center gap-1">
+          <span className="rounded bg-black/75 px-1.5 py-px text-[11px] font-semibold tabular-nums">{number}</span>
+          {own && badge && (
+            <span
+              title={badge.description}
+              className="flex items-center gap-1 rounded bg-black/75 px-1.5 py-px text-[10px] font-medium text-text"
+            >
+              <CameraIcon size={10} />
+              {badge.label}
+            </span>
+          )}
         </span>
         {takes > 0 && (
           <span className="absolute right-1.5 top-1.5 rounded bg-black/75 px-1.5 py-px text-[10px] text-muted">
@@ -314,8 +579,8 @@ function SegmentCard({
         )}
       </div>
       <div className="px-2 py-1.5">
-        <p className={`truncate text-[12px] ${prompt ? '' : 'italic text-muted'}`} title={prompt || undefined}>
-          {prompt || 'Ingen prompt än'}
+        <p className={`truncate text-[12px] ${text ? '' : 'italic text-muted'}`} title={text || undefined}>
+          {text || 'Ingen prompt än'}
         </p>
         <p className="mt-0.5 flex justify-between text-[11px] text-muted">
           <span className="tabular-nums">

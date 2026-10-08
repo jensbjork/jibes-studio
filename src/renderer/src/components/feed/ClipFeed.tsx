@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent,
   type ReactNode
 } from 'react'
 import { queryGenerations, summarizeGenerations } from '@shared/generation-filter'
@@ -33,6 +34,8 @@ import {
 } from './feedFilter'
 import { isPending, summaryText } from './feedText'
 import FeedToolbar from './FeedToolbar'
+import { ImportIcon } from './icons'
+import { carriesFiles, DropHint, droppedVideoPaths, ImportCardView, useImportCards, useImportFlow } from './ownClips'
 import { buildLibraryIndex } from './references'
 import type { GenerationsState } from './useGenerations'
 
@@ -67,6 +70,39 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
   const [selectedId, setSelectedId] = useState<string>()
   const [openId, setOpenId] = useState<string>()
   const [cardLimit, setCardLimit] = useState(CARD_PAGE)
+
+  // Own films brought into the feed ("Importera egna klipp…", or dropped on it).
+  const importFlow = useImportFlow()
+  const importing = useImportCards().filter((c) => c.target === 'feed')
+  const [dropping, setDropping] = useState(false)
+  const [importNotice, setImportNotice] = useState<{ text: string; error: boolean }>()
+
+  const importFiles = async (paths: string[]) => {
+    if (!paths.length) return
+    setImportNotice(undefined)
+    const outcome = await importFlow.begin(paths, { kind: 'feed' })
+    if (outcome.errors.length) setImportNotice({ text: outcome.errors.join('\n'), error: true })
+    else if (outcome.notes.length) setImportNotice({ text: outcome.notes.join('\n'), error: false })
+  }
+  const pickFiles = async () => {
+    try {
+      await importFiles(await window.studio.pickVideos(true))
+    } catch (e) {
+      setImportNotice({ text: e instanceof Error ? e.message : String(e), error: true })
+    }
+  }
+  const onDragOver = (e: DragEvent) => {
+    if (!carriesFiles(e)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setDropping(true)
+  }
+  const onDrop = (e: DragEvent) => {
+    if (!carriesFiles(e)) return
+    e.preventDefault()
+    setDropping(false)
+    void importFiles(droppedVideoPaths(e).paths)
+  }
 
   const searchRef = useRef<HTMLInputElement>(null)
   const tableRef = useRef<HTMLDivElement>(null)
@@ -236,8 +272,40 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
             scrollRef.current?.querySelector<HTMLElement>('[data-card-open]')?.focus()
           }
         }}
-        trailing={trailing}
+        trailing={
+          <>
+            <button
+              type="button"
+              onClick={() => void pickFiles()}
+              disabled={importFlow.inspecting}
+              title="Lägg till dina egna filmer i klippflödet (eller dra in dem hit)"
+              className="no-drag flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
+            >
+              <ImportIcon size={13} />
+              {importFlow.inspecting ? 'Läser filerna…' : 'Importera egna klipp…'}
+            </button>
+            {trailing}
+          </>
+        }
       />
+
+      {importNotice && (
+        <div
+          className={`flex items-start gap-2 border-b border-line/60 px-6 py-2 text-[12px] ${
+            importNotice.error ? 'bg-accent/10 text-accent' : 'bg-raised/50 text-text'
+          }`}
+        >
+          <span className="min-w-0 flex-1 whitespace-pre-line select-text">{importNotice.text}</span>
+          <button
+            type="button"
+            onClick={() => setImportNotice(undefined)}
+            className="shrink-0 hover:text-text"
+            title="Stäng"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {feed.error && (
         <div className="flex items-start gap-2 border-b border-line/60 bg-accent/10 px-6 py-2 text-[12px] text-accent">
@@ -263,9 +331,30 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
         </div>
       )}
 
-      <div className="relative min-h-0 flex-1">
+      {importing.length > 0 && (
+        <div className="flex shrink-0 gap-3 overflow-x-auto border-b border-line/60 px-6 py-3">
+          {importing.map((card) => (
+            <div key={card.path} className="h-24 w-72 shrink-0 overflow-hidden rounded-lg border border-line bg-panel">
+              <ImportCardView card={card} compact />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div
+        className="relative min-h-0 flex-1"
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false)
+        }}
+      >
+        {dropping && <DropHint text="Släpp för att importera som egna klipp" />}
         {!loaded ? null : generations.length === 0 ? (
-          <div className="flex h-full items-center justify-center px-6 text-muted">{emptyText}</div>
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted">
+            {emptyText}
+            <span className="text-[12px]">Har du egna filmer? Dra in dem hit eller välj Importera egna klipp.</span>
+          </div>
         ) : shown.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-muted">
             <p>Inga klipp matchar filtren.</p>
@@ -328,6 +417,7 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
             {shown.length > cardLimit && <div ref={sentinelRef} className="h-px" />}
           </div>
         )}
+        {importFlow.dialog}
 
         {openGeneration && (
           <ClipDrawer

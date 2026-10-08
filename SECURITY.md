@@ -71,12 +71,19 @@ prepare work but never spend money on its own, and so that nothing outside the u
 - **MagicDNS** names shown in Settings are resolved only through Tailscale's own resolver and must resolve back to
   the same address, so the local network's DNS can't choose where agents are pointed.
 - **Same rules as the UI.** Agent tools call the same services as the window, with the same validation; agents
-  cannot add photos, delete assets, generations, sequences or stills, export, change settings or switch the
-  library.
-- **Paid actions need approval in the app.** Paid tools (videos and pictures) only create a request. Studio shows
-  it with the prompt, the reference images and the price, and submits only after the user approves. Before
-  submitting, Studio checks that the clips and the image files are still exactly what was shown, and each take is
-  re-checked right before it is sent. Requests expire after 30 minutes and immediately when the token is replaced, the library is switched or
+  cannot add photos, import video or audio files from disk, delete assets, generations, sequences, stills, edits or
+  versions, give consent to clone a voice, export, change settings or switch the library. The handlers that import
+  files, delete or prune edits and versions, or record clone consent also refuse an agent's call themselves, behind
+  the tool list.
+- **Paid actions need approval in the app.** Paid tools (videos, pictures, paid edits in Redigera and designed
+  voices) only create a request. Studio shows it with the prompt, the reference images or frames and the price, and
+  submits only after the user approves. Before submitting, Studio checks that the clips, the image files and the
+  version to be edited are still exactly what was shown (an edit also re-plans and refuses a higher price), and each
+  take is re-checked right before it is sent. A paid edit job interrupted by quitting Studio never sends its
+  remaining parts by itself.
+- **Only library files are uploaded.** The video Redigera sends to Venice (a short proxy or a stand-in for a free
+  quote) is read only from inside the library; params that name any other file are refused before anything is
+  read. Requests expire after 30 minutes and immediately when the token is replaced, the library is switched or
   the connection is turned off; at most 10 can be pending.
 
 Plain HTTP is used on purpose: loopback traffic never leaves the Mac, and Tailscale traffic is encrypted end to end
@@ -102,4 +109,6 @@ welcome.
 - An `Origin: null` header (an opaque origin) is not refused by the `Origin` check; such requests still need the
   bearer token.
 - Builds are signed ad hoc, without hardened runtime or notarization, and are meant to be built and run on the same
-  Mac.
+  Mac. The voice separation helper (`studio-voice-isolate`, built from `native/voice-isolate/main.swift` by
+  `npm run build:helpers`) is signed the same way; it only reads and writes the audio files Studio passes it and
+  makes no network connections.

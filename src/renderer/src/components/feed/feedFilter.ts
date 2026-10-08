@@ -1,7 +1,7 @@
 // The clip feed's filters as the toolbar shows them, and how they translate into the shared GenerationFilter
 // (src/shared/generation-filter.ts), which the agents' list_generations tool applies the same way.
 
-import type { Asset, GenerationFilter, VideoModel } from '@shared/types'
+import type { Asset, GenerationFilter, GenerationSource, VideoModel } from '@shared/types'
 import { ASSET_COPY } from '../../lib/assets'
 
 export type FeedView = 'cards' | 'table'
@@ -14,6 +14,8 @@ export type PlacementChoice = NonNullable<GenerationFilter['placement']>
 
 export interface FeedFilters {
   query: string
+  /** "Källa": Venice's clips, the user's own clips, or versions from Redigera. */
+  source?: GenerationSource
   status?: StatusChoice
   model?: string
   assetId?: string
@@ -54,6 +56,12 @@ export const PERIOD_OPTIONS: { id: PeriodChoice; label: string }[] = [
   { id: '30d', label: 'Senaste 30 dagarna' }
 ]
 
+export const SOURCE_OPTIONS: { id: GenerationSource; label: string; text: string }[] = [
+  { id: 'generated', label: 'Genererade', text: 'Klipp som Venice har gjort' },
+  { id: 'import', label: 'Egna klipp', text: 'Dina egna filmer, importerade till biblioteket' },
+  { id: 'edit', label: 'Redigerade', text: 'Versioner gjorda i Redigera' }
+]
+
 export const PLACEMENT_OPTIONS: { id: PlacementChoice; label: string }[] = [
   { id: 'standalone', label: 'Fristående' },
   { id: 'sequence', label: 'Tagningar' }
@@ -74,6 +82,7 @@ export function toGenerationFilter(f: FeedFilters, sort: SortKey, now: number): 
   const filter: GenerationFilter = { sort }
   const query = f.query.trim()
   if (query) filter.query = query
+  if (f.source) filter.source = f.source
   if (f.status) filter.status = f.status
   if (f.model) filter.model = f.model
   if (f.assetId) filter.assetId = f.assetId
@@ -86,7 +95,7 @@ export function toGenerationFilter(f: FeedFilters, sort: SortKey, now: number): 
 }
 
 export function hasFilters(f: FeedFilters): boolean {
-  return !!(f.query.trim() || f.status || f.model || f.assetId || f.rating || f.period || f.placement)
+  return !!(f.query.trim() || f.source || f.status || f.model || f.assetId || f.rating || f.period || f.placement)
 }
 
 /** Filters that point at something that no longer exists (a deleted asset) count as not set. */
@@ -109,6 +118,7 @@ export function filterChips(f: FeedFilters, models: readonly VideoModel[], asset
   const chips: FilterChip[] = []
   const query = f.query.trim()
   if (query) chips.push({ key: 'query', label: `”${query}”` })
+  if (f.source) chips.push({ key: 'source', label: SOURCE_OPTIONS.find((o) => o.id === f.source)?.label ?? f.source })
   if (f.status) chips.push({ key: 'status', label: STATUS_OPTIONS.find((o) => o.id === f.status)?.label ?? f.status })
   if (f.model) chips.push({ key: 'model', label: modelName(f.model, models) })
   if (f.assetId) {

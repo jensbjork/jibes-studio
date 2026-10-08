@@ -5,8 +5,9 @@
 // is written to the library's scratch folder first and then moved into place under a free name.
 
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream, existsSync, type Stats } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, type Stats } from 'node:fs'
 import { constants, copyFile, readdir, rm, stat } from 'node:fs/promises'
+import { pipeline } from 'node:stream/promises'
 import { basename, extname, isAbsolute, join } from 'node:path'
 import type { GenerationParams } from '@shared/types'
 import { isInsideRoot, movePath, referencesDayDir, safeName, tmpDir, uniqueName } from './paths'
@@ -83,6 +84,92 @@ export async function copyInto(src: string, dir: string, base: string, ext: stri
   }
 }
 
+function abortError(): Error {
+  return Object.assign(new Error('Avbrutet.'), { name: 'AbortError' })
+}
+
+/**
+ * Copies src to dest (which must not exist) as a stream, reporting progress and stopping on `signal`; a partial
+ * dest is removed on failure. For multi-GB films, which fs.copyFile could neither report on nor stop.
+ */
+async function streamCopy(
+  src: string,
+  dest: string,
+  size: number,
+  opts: { signal?: AbortSignal; onProgress?: (fraction: number) => void }
+): Promise<void> {
+  let copied = 0
+  let reported = -1
+  const input = createReadStream(src)
+  input.on('data', (chunk) => {
+    copied += chunk.length
+    const fraction = size > 0 ? Math.min(1, copied / size) : 1
+    // At most every whole percent, so a big file doesn't flood the window with events.
+    if (opts.onProgress && Math.floor(fraction * 100) !== reported) {
+      reported = Math.floor(fraction * 100)
+      opts.onProgress(fraction)
+    }
+  })
+  try {
+    await pipeline(input, createWriteStream(dest, { flags: 'wx' }), { signal: opts.signal })
+  } catch (err) {
+    // 'wx' failing means dest belongs to someone else: leave it alone.
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') await rm(dest, { force: true }).catch(() => {})
+    if (opts.signal?.aborted) throw abortError()
+    throw err
+  }
+}
+
+/** Whether src lies on the same volume as the library (an APFS clone can't cross volumes). */
+async function onLibraryVolume(src: string): Promise<boolean> {
+  try {
+    const [a, b] = await Promise.all([stat(src), stat(tmpDir())])
+    return a.dev === b.dev
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Like copyInto, but as an APFS clone when the source is on the library's volume (instant, and it takes no extra
+ * space until one of the two changes). From another volume the file is copied as a stream, so a big film reports
+ * progress and stops on `signal` (the half-made copy is removed; the source is never touched). Resolves with the
+ * new absolute path, as copyInto.
+ */
+export async function cloneInto(
+  src: string,
+  dir: string,
+  base: string,
+  ext: string,
+  opts: { signal?: AbortSignal; onProgress?: (fraction: number) => void } = {}
+): Promise<string> {
+  if (opts.signal?.aborted) throw abortError()
+  const tmp = join(tmpDir(), `${randomUUID()}${ext}`)
+  try {
+    const from = await stat(src)
+    if (await onLibraryVolume(src)) {
+      // COPYFILE_FICLONE: macOS clones where the file system can (APFS) and copies where it can't. (FICLONE_FORCE,
+      // which would fail instead, isn't implemented on macOS: ENOSYS.)
+      await copyFile(src, tmp, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL)
+    } else {
+      await streamCopy(src, tmp, from.size, opts)
+    }
+    const to = await stat(tmp)
+    if (from.size !== to.size) throw new Error('kopian blev ofullständig')
+    if (opts.signal?.aborted) throw abortError()
+    opts.onProgress?.(1)
+    return await placeFile(tmp, dir, base, ext)
+  } finally {
+    // Gone already when the placement succeeded.
+    await rm(tmp, { force: true }).catch(() => {})
+  }
+}
+
+/** Whether a clone of src into the library would work: both on the same volume (VideoFileInfo.cloneable). */
+export function canCloneIntoLibrary(src: string): Promise<boolean> {
+  return onLibraryVolume(src)
+}
+
 // ── Content hashes ───────────────────────────────────────────────────────────
 
 const hashCache = new Map<string, { size: number; mtimeMs: number; hash: string }>()
@@ -129,7 +216,7 @@ async function findIdentical(dir: string, size: number, hash: string): Promise<s
 
 // ── Import ───────────────────────────────────────────────────────────────────
 
-type Material = 'image' | 'audio'
+type Material = 'image' | 'audio' | 'video'
 
 /** The library copy of one outside file: an identical file already in today's folder, or a new copy. */
 async function importFile(src: string, dir: string, material: Material): Promise<string> {
@@ -140,7 +227,7 @@ async function importFile(src: string, dir: string, material: Material): Promise
     const existing = await findIdentical(dir, info.size, await fileHash(src, info))
     if (existing) return existing
     const ext = extname(src)
-    const fallback = material === 'audio' ? 'Referensljud' : 'Referensbild'
+    const fallback = material === 'audio' ? 'Referensljud' : material === 'video' ? 'Referensvideo' : 'Referensbild'
     const copy = await copyInto(src, dir, safeName(basename(src, ext), { fallback }), ext.toLowerCase())
     // The copy has the same content; remember that so the next lookup doesn't read it again.
     const cached = hashCache.get(src)
@@ -148,19 +235,25 @@ async function importFile(src: string, dir: string, material: Material): Promise
     if (cached && copied) hashCache.set(copy, { size: copied.size, mtimeMs: copied.mtimeMs, hash: cached.hash })
     return copy
   } catch (err) {
-    const what = material === 'audio' ? 'ljudfilen' : 'bilden'
+    const what = material === 'audio' ? 'ljudfilen' : material === 'video' ? 'videon' : 'bilden'
     throw new Error(`Kunde inte kopiera ${what} ${name} till biblioteket: ${fileErrorReason(err)}.`)
   }
 }
 
-/** Every file the params send, with what it is (for the wording when it can't be copied). */
-function referencedFiles(params: GenerationParams): { path: string; material: Material }[] {
+/**
+ * Every file the params send, with what it is (for the wording when it can't be copied): images, reference audio,
+ * and the source and reference videos of video-to-video models.
+ */
+export function referencedFiles(params: GenerationParams): { path: string; material: Material }[] {
   const images = [params.startImage, params.endImage, ...(params.referenceImages ?? [])].map((path) => ({
     path,
     material: 'image' as const
   }))
   const audio = (params.referenceAudios ?? []).map((clip) => ({ path: clip?.path, material: 'audio' as const }))
-  return [...images, ...audio].filter(
+  const videos = [params.sourceVideo, ...(Array.isArray(params.referenceVideos) ? params.referenceVideos : [])].map(
+    (path) => ({ path, material: 'video' as const })
+  )
+  return [...images, ...audio, ...videos].filter(
     (f): f is { path: string; material: Material } => typeof f.path === 'string' && f.path !== ''
   )
 }
@@ -168,9 +261,10 @@ function referencedFiles(params: GenerationParams): { path: string; material: Ma
 const importing = serialized()
 
 /**
- * Copies every start/end/reference image and reference audio clip that lies outside the library into
- * Referensbilder/<today>/ (keeping its original name, made unique) and returns params pointing at the copies
- * (each audio clip keeps its window). Files already in the library (photos and voice clips of characters,
+ * Copies every start/end/reference image, reference audio clip and source/reference video that lies outside the
+ * library into Referensbilder/<today>/ (keeping its original name, made unique) and returns params pointing at the
+ * copies (each audio clip keeps its window). An edit's proxies are made in its Underlag/ folder, so in practice only
+ * images and audio are ever copied. Files already in the library (photos and voice clips of characters,
  * environments, outfits and poses, earlier references, continuation frames) are left as they are, and a file
  * whose exact content is already in today's folder is reused instead of copied again.
  */
@@ -195,6 +289,8 @@ export function importExternalReferences(params: GenerationParams): Promise<Gene
         clip?.path ? { ...clip, path: local(clip.path) } : clip
       )
     }
+    if (params.sourceVideo) result.sourceVideo = local(params.sourceVideo)
+    if (Array.isArray(params.referenceVideos)) result.referenceVideos = params.referenceVideos.map(local)
     return result
   })
 }

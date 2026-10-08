@@ -344,7 +344,9 @@ export function audioClipsInfo(asset: Asset): Record<string, unknown>[] {
     file: basename(a.path),
     duration: seconds(a.duration),
     clip_start: seconds(a.clipStart),
-    clip_length: seconds(a.clipLength)
+    clip_length: seconds(a.clipLength),
+    // Only a character's voice can be cloned for new lines, and only once the user ticked that they may use it.
+    ...(asset.kind === 'character' ? { clone_consent: a.cloneConsent === true } : {})
   }))
 }
 

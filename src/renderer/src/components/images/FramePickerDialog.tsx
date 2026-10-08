@@ -10,6 +10,7 @@ import {
   type Ref
 } from 'react'
 import { queryGenerations } from '@shared/generation-filter'
+import { generationTitle, isVeniceGeneration } from '@shared/generation-label'
 import { durationSeconds } from '@shared/models'
 import type { Generation, Segment, Sequence, Still } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
@@ -296,32 +297,44 @@ function TakeChooser({
 }) {
   return (
     <div className="max-h-[62vh] space-y-3 overflow-y-auto pr-1">
-      {clips.map(({ segment, clip, choices }) => (
-        <div key={segment.id}>
-          <p className="mb-1 truncate text-[12px]" title={segment.params.prompt || undefined}>
-            <span className="font-medium">Klipp {clip}</span>
-            {segment.params.prompt && <span className="text-muted"> · {plainImagePrompt(segment.params.prompt)}</span>}
-          </p>
-          {choices.length === 0 ? (
-            <p className="text-[11px] text-muted">Ingen färdig tagning</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-1.5">
-              {choices.map((c) => (
-                <TakeTile
-                  key={c.take.id}
-                  take={c.take}
-                  current={c.take.id === current}
-                  badge={c.inCut ? 'Vald' : undefined}
-                  title={c.inCut ? 'Tagningen som används i sekvensen' : 'En annan tagning av klippet'}
-                  onChoose={onChoose}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+      {clips.map(({ segment, clip, choices }) => {
+        // A clip that is an own film is named by it; any other by its prompt.
+        const chosen = segment.takes.find((t) => t.id === segment.selectedGenerationId)
+        const label =
+          chosen && !isVeniceGeneration(chosen) ? generationTitle(chosen) : plainImagePrompt(segment.params.prompt)
+        return (
+          <div key={segment.id}>
+            <p className="mb-1 truncate text-[12px]" title={label || undefined}>
+              <span className="font-medium">Klipp {clip}</span>
+              {label && <span className="text-muted"> · {label}</span>}
+            </p>
+            {choices.length === 0 ? (
+              <p className="text-[11px] text-muted">Ingen färdig tagning</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-1.5">
+                {choices.map((c) => (
+                  <TakeTile
+                    key={c.take.id}
+                    take={c.take}
+                    current={c.take.id === current}
+                    badge={c.inCut ? 'Vald' : undefined}
+                    title={c.inCut ? 'Tagningen som används i sekvensen' : 'En annan tagning av klippet'}
+                    onChoose={onChoose}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
+}
+
+/** What a video is called on its tile: an own film or a version by its title, a Venice clip by its prompt. */
+function takeLabel(take: Generation): string {
+  if (take.title?.trim()) return generationTitle(take)
+  return plainImagePrompt(take.prompt || take.params.prompt || '') || 'Klipp utan prompt'
 }
 
 /** How many videos the library chooser shows before "Visa fler" (a library can hold hundreds). */
@@ -341,7 +354,8 @@ function LibraryChooser({
   const deferred = useDeferredValue(query)
   const [limit, setLimit] = useState(LIBRARY_PAGE)
   useEffect(() => setLimit(LIBRARY_PAGE), [deferred])
-  // The same search as the clip feed's: every word in the prompt (or negative prompt), letter case ignored.
+  // The same search as the clip feed's: every word in the prompt (or negative prompt, or an own clip's name), letter
+  // case ignored.
   const found = useMemo(() => queryGenerations(takes, { query: deferred, sort: 'newest' }), [takes, deferred])
   const shown = found.slice(0, limit)
 
@@ -352,7 +366,7 @@ function LibraryChooser({
         autoFocus
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Sök i prompterna"
+        placeholder="Sök i prompter och namn"
         aria-label="Sök bland klippen"
         spellCheck={false}
         className="mb-2 w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted"
@@ -363,7 +377,7 @@ function LibraryChooser({
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {found.length === 0 ? (
           <p className="px-2 py-6 text-center text-[12px] leading-relaxed text-muted">
-            Inget klipp har de orden i prompten.
+            Inget klipp har de orden i prompten eller namnet.
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-1.5">
@@ -372,7 +386,7 @@ function LibraryChooser({
                 key={take.id}
                 take={take}
                 current={take.id === current}
-                title={plainImagePrompt(take.prompt || take.params.prompt || '') || 'Klipp utan prompt'}
+                title={takeLabel(take)}
                 onChoose={onChoose}
               />
             ))}

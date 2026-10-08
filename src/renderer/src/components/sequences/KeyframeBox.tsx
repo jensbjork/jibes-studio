@@ -1,10 +1,29 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { endImageVariant, supportsEndImage } from '@shared/models'
 import type { Segment, Sequence, VideoModel } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { BridgeIcon } from './icons'
-import { bridgeDescription, continuationMismatch, endMismatch, formatFrameTime, readyTake } from './sequenceUtils'
+import {
+  bridgeDescription,
+  continuationMismatch,
+  endMismatch,
+  formatFrameTime,
+  isOwnTake,
+  readyTake,
+  selectedTake
+} from './sequenceUtils'
 import { hasAutomaticFrames, useFramePreview } from './useFramePreview'
+
+/** Remembers that the note about real people in own films has been read (shown once, at the first such frame). */
+const PERSON_NOTICE_KEY = 'ownClips:personNotice:v1'
+
+function personNoticeRead(): boolean {
+  try {
+    return localStorage.getItem(PERSON_NOTICE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 interface Props {
   sequence: Sequence
@@ -78,6 +97,19 @@ export default function KeyframeBox({
 
   const start = preview?.start?.source === 'previous' ? preview.start : undefined
   const end = preview?.end?.source === 'next' ? preview.end : undefined
+  // A frame from the user's own film (not one Venice made): said so, and once that Venice may refuse real people.
+  const fromOwnStart = startOn && isOwnTake(previous && selectedTake(previous))
+  const fromOwnEnd = endOn && isOwnTake(next && selectedTake(next))
+  const [noticeRead, setNoticeRead] = useState(personNoticeRead)
+  const showPersonNotice = (fromOwnStart || fromOwnEnd) && !noticeRead
+  const dismissPersonNotice = () => {
+    setNoticeRead(true)
+    try {
+      localStorage.setItem(PERSON_NOTICE_KEY, '1')
+    } catch {
+      // Then it shows again next time; harmless.
+    }
+  }
   const startMismatch = continuationMismatch(segment, previous)
   const endChanged = endMismatch(segment, next)
   // A missing neighbour take is already said beside the frame it would give.
@@ -101,7 +133,9 @@ export default function KeyframeBox({
             loading={loading}
             caption={
               start
-                ? `Startbild: sista bildrutan från klipp ${start.fromClip ?? index}${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`
+                ? fromOwnStart
+                  ? `Fortsätter från sista bildrutan i ditt klipp${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`
+                  : `Startbild: sista bildrutan från klipp ${start.fromClip ?? index}${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`
                 : previous && !readyTake(previous)
                   ? `Klipp ${index} behöver en färdig vald tagning innan det här klippet kan genereras.`
                   : loading
@@ -127,7 +161,9 @@ export default function KeyframeBox({
             loading={loading}
             caption={
               end
-                ? `Slutbild: första bildrutan från klipp ${end.fromClip ?? index + 2}${end.time ? ` (${formatFrameTime(end.time)})` : ''}`
+                ? fromOwnEnd
+                  ? `Slutar på första bildrutan i ditt klipp${end.time ? ` (${formatFrameTime(end.time)})` : ''}`
+                  : `Slutbild: första bildrutan från klipp ${end.fromClip ?? index + 2}${end.time ? ` (${formatFrameTime(end.time)})` : ''}`
                 : next && !readyTake(next)
                   ? `Klipp ${index + 2} behöver en färdig vald tagning innan det här klippet kan genereras.`
                   : loading
@@ -137,6 +173,22 @@ export default function KeyframeBox({
           />
         )}
       </ToggleRow>
+
+      {showPersonNotice && (
+        <div className="flex items-start gap-2 border-t border-line p-3">
+          <p className="min-w-0 flex-1 text-[11px] leading-snug text-muted">
+            Venice kan vägra bilder och video med riktiga personer i vissa modeller. Nekas fortsättningen, prova en annan
+            modell.
+          </p>
+          <button
+            type="button"
+            onClick={dismissPersonNotice}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-text"
+          >
+            OK
+          </button>
+        </div>
+      )}
 
       {(problems.length > 0 || error || startMismatch || endChanged || justBridged || (bridge && !bridged)) && (
         <div className="space-y-2 border-t border-line p-3">

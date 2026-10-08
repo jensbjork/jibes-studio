@@ -6,11 +6,14 @@ text, a start image or a set of reference photos (and voices), keep a library of
 the prompts that work. Clips are chained into longer films that continue seamlessly from one clip's last frame into
 the next, and a clip in the middle that didn't turn out can be redone so it fits exactly between its neighbours. A
 film can also start as a **storyboard**: one picture for every milestone — made with Venice's image models or taken
-from what you already have — with the clips between the pictures generated for you. Everything lives in a plain
-folder you choose, with human-readable folder and file names, and your own AI agents can work in the app over
-[MCP](https://modelcontextprotocol.io) — preparing references, prompts, sequences and storyboards, and reviewing
-what the generations became to write better prompts next time — while every paid generation still waits for your
-approval.
+from what you already have — with the clips between the pictures generated for you. Your **own footage** can be
+brought in and continued with AI clips, and any finished film — a clip, a take, an exported film or your own — can
+be changed in **Redigera**, the editor: cut, faded, its sound cleaned up or its voice taken out, new lines spoken in
+another or a cloned voice, music and effects added, a stretch redone or changed with a prompt, every change a new
+version next to the untouched original. Everything lives in a plain folder you choose, with human-readable folder
+and file names, and your own AI agents can work in the app over [MCP](https://modelcontextprotocol.io) — preparing
+references, prompts, sequences and storyboards, editing films, and reviewing what the generations became to write
+better prompts next time — while every paid generation still waits for your approval.
 
 Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 
@@ -55,6 +58,34 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   from the first picture to the second (*Vad händer?*, length, price, takes). *Generera saknade* makes every missing
   one, *Förhandsvisa* plays them in order, *Exportera* cuts them into one film, and *Gör om till sekvens* carries
   them over to Sekvenser for further editing.
+- **Your own clips** (*Egna klipp*): bring your own video files into the library — *Importera egna klipp…* in the clip
+  feed, *Fler sätt → Eget klipp från fil…* under *Lägg till klipp* or a drop on a sequence's timeline, *Lägg till
+  tagning från fil…* on a clip — and use them like any clip: AI clips continue from their last frame, end on their
+  first, or redo a clip between them. Files are copied into `Egna klipp/<day>/` as an APFS clone where the disk allows
+  (no extra space); a phone or camera film that can't be used as it is (HDR, 10-bit, 4K, a variable frame
+  rate, rotation, ProRes, spatial audio, non-square pixels, sound and picture starting apart) gets an H.264 SDR
+  working copy next to the untouched original. A film already imported is reused. Agents can use your clips once
+  they are in, but never import files themselves.
+- **Redigera**, the editor: open a feed clip, a take, an exported film or your own film and change it. Every change
+  is a new **version** (*v1 Original*, *v2* …) in a tree you can go back and forth in, compare (*Jämför ⇄*) and send
+  to a sequence; the original is never touched. A player with in/out marks and frame stepping, and a timeline with
+  the picture, the sound's waveform, added sound layers and the transcript.
+  - **Free, on your Mac:** keep or cut out a marked range, fade in and out, volume (the whole film, the marked
+    range, or only the voice or the background), mute, *Ta bort rösten* / *Bara rösten* (voice and background
+    separated with macOS's own sound isolation), noise reduction, even loudness (−14 / −16 / −23 LUFS), and adding
+    sound from the library, from earlier results or from a file.
+  - **Paid, through Venice, with the price on the button:** *Transkribera* (lines with times, editable, saved as
+    `.srt`), *Byt röst* (speech to speech, when Venice lists a voice changer), *Läs in repliker på nytt* and *Ny
+    replik* (spoken lines in a preset voice or a character's cloned *Röst*, fitted to the old line's length),
+    music and sound effects on their own layers, *Gör om avsnittet* (a stretch regenerated between the frame before
+    and the frame after it), *Ändra med prompt* (video-to-video edits of a short stretch), *Förläng* and
+    *Uppskala* (2×/4×). Clicking the button is the approval; above $5, or when Venice can't price all of it, a
+    second question asks first. A job interrupted by quitting Studio never sends its remaining parts by itself, and
+    a paid AI take that couldn't be put into the film (a full disk) is put in again for free with *Fortsätt*.
+- **New voices for characters:** *Skapa röst med AI…* designs a voice from a description and adds it as a *Röst*
+  clip, and a character's *Röst* clip can be cloned for new lines once you tick *Får klonas för nya repliker*.
+- **Exportformat** per sequence: *Automatiskt* (the first clip's size) or 480p / 720p / 1080p, for films that mix
+  your own footage with AI clips. Every export records where its clips meet, which Redigera shows as cut markers.
 - **Redo a clip between its neighbours** (*Gör om mellan grannarna*): a clip in the middle that didn't turn out is
   set up to start exactly on the previous clip's last frame and end exactly on the next clip's first frame — both
   taken out automatically, with live previews — and a new take fits the cut without touching the neighbours.
@@ -62,9 +93,10 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   database are stored relative to it, so the library can be moved, switched or tidied up from Settings.
 - **Agent connection (MCP):** an optional Streamable HTTP MCP server (off by default, loopback + Tailscale only,
   bearer token) through which your own agents read the library, set references, voices and prompts, build sequences
-  and storyboards, *request* paid generations and pictures that you approve or decline in an in-app dialog, and
-  look back at finished clips and exported films (frames, sound, the references used) to review them and record
-  learnings for the next prompt.
+  and storyboards, edit films in Redigera (free operations directly, paid ones by request), *request* paid
+  generations, pictures, edits and voices that you approve or decline in an in-app dialog, and look back at
+  finished clips and exported films (frames, sound, the references used) to review them and record learnings for
+  the next prompt.
 - **Separate development profile** ("Studio Dev") so development never touches the library the installed app uses.
 
 ## Status
@@ -84,8 +116,12 @@ changes.
 - **ffmpeg** (with `ffprobe`) — `brew install ffmpeg`. Studio looks in `/opt/homebrew/bin`, `/usr/local/bin`,
   `/usr/bin` and then `PATH`. It is needed for posters, durations, the start and end frames clips take from their
   neighbours (and their previews), saving a frame as a still, exports, voice and sound clips (measuring them and
-  cutting out the part that is sent) and the frames agents review; generating without voices works without it.
+  cutting out the part that is sent), own clips, everything in Redigera and the frames agents review; generating
+  without voices works without it.
 - **A Venice.ai API key** — added under **Inställningar** (Settings). Generations cost money on your Venice account.
+- **Optional: the Xcode Command Line Tools** (`xcode-select --install`), to build the small Swift helper that
+  separates voice and background (`npm run build:helpers`, run automatically by `dev`, `build` and `app`). Without
+  it Studio works as before, and Redigera says that voice separation isn't available.
 
 ## Quick start
 
@@ -95,7 +131,9 @@ npm install        # also rebuilds better-sqlite3 for Electron (postinstall)
 npm run dev
 ```
 
-`npm run dev` starts **Studio Dev**, the development profile: its own settings
+`npm run dev` first builds the voice separation helper into `build/bin/` (skipped in a fraction of a second when it
+is up to date, and with a note when the Swift compiler isn't installed), then starts **Studio Dev**, the development
+profile: its own settings
 (`~/Library/Application Support/Studio Dev/`), its own suggested base folder (`~/Movies/Studio Dev`) and a yellow
 **Dev** badge in the sidebar. It never touches the library the installed Studio.app uses, and both can run at the
 same time. The first launch asks you to choose a base folder; then add your Venice API key under **Inställningar**.
@@ -115,9 +153,10 @@ npm run app           # builds dist/mac-arm64/Studio.app
 npm run app:install   # builds it and copies it to /Applications (replacing an earlier copy)
 ```
 
-The app is signed ad hoc (no Apple Developer ID, no notarization), which is enough to run it on the Mac that built
-it. Studio.app uses the real profile (`~/Library/Application Support/Studio/`). The icon is drawn in
-`build/icon.svg`.
+The voice separation helper is built first and bundled into the app (without the Swift compiler the app is built
+without it, and runs without voice separation). The app is signed ad hoc (no Apple Developer ID, no notarization),
+which is enough to run it on the Mac that built it. Studio.app uses the real profile
+(`~/Library/Application Support/Studio/`). The icon is drawn in `build/icon.svg`.
 
 ## Where things are stored
 
@@ -156,10 +195,22 @@ every file the library knows about back where it belongs.
 │   │                                       uploaded or dropped files, frames saved from clips
 │   └── <Storyboard name> <YYYY-MM-DD HH.MM>.mp4
 │                                           Exported films
+├── Egna klipp/<YYYY-MM-DD>/<file name>     Your own imported films (an APFS clone of the file where possible);
+│                                           "<name> (arbetskopia).mp4" next to the original when a working copy
+│                                           was needed
+├── Redigeringar/<Edit name>/               One folder per edit in Redigera:
+│   ├── <Edit name> v2 – <change>.mp4       its versions (v1 is the film it started from, used where it is;
+│   │                                       an exported film is copied in as v1)
+│   ├── Tagningar/                          AI takes made for picture operations
+│   ├── Ljud/                               spoken lines, converted voices, music, effects and added sound
+│   └── Underlag/                           the frames and short proxies that were sent to Venice
 └── .studio/                                Hidden app data:
     ├── studio.db                           the SQLite database
     ├── miniatyrer/                         poster frames (thumbnails)
     ├── bildrutor/                          extracted frames used to continue clips or end on the next one
+    ├── stammar/                            separated voice and background stems (a cache, at most 4 GB)
+    ├── redigering/                         paid edit jobs' downloaded parts while they are put together
+    ├── tidslinje/                          Redigera's filmstrips and waveforms (a cache)
     └── tmp/                                scratch files, cleared when the library is opened
 ```
 
@@ -315,15 +366,16 @@ switchable in the dialog) lets Venice blur adult content.
 
 Studio can run an MCP server so agents such as OpenClaw, Hermes Agent, Claude Desktop or Claude Code can work in
 the app: read the library and see its photos (and hear its voices), choose references, write and validate prompts,
-fill in the Generate form, build sequences, plan storyboards (boards, their pictures and the transitions' prompts),
-and set a clip up to be redone between its neighbours.
+fill in the Generate form, build sequences (also with your own clips), plan storyboards (boards, their pictures and
+the transitions' prompts), set a clip up to be redone between its neighbours, and edit films in Redigera.
 They can also look back: review finished clips and exported films frame by frame next to the references they were
 made from, record reviews, and save *learnings* that every later session reads before it writes a prompt. Agents
-**cannot generate anything on their own** — the paid tools (videos and pictures) only create a request that Studio
-shows you with the prompt, references, voices and price, and nothing is sent to Venice until you approve it.
+**cannot generate anything on their own** — the paid tools (videos, pictures, paid edits and designed voices) only
+create a request that Studio shows you with the prompt, references, voices and price, and nothing is sent to Venice
+until you approve it. They also cannot import files from disk or delete edits and versions.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 60
+Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 73
 tools, the review loop and troubleshooting.
 
 ## Security
@@ -355,10 +407,12 @@ Done:
 7. Start and end images (keyframes) and *Skapa bild…*, redoing a clip between its neighbours
 8. Asset descriptions appended to the prompt automatically, references reordered by drag and drop
 9. Storyboards as a workflow of their own: milestone pictures, with the clips between them generated
+10. Redigera (an AI editor for any finished film), own clips in sequences, designed and cloned voices
 
 Next:
 
-10. Cost overview, cancelling a running export, fades between clips
+11. Cost overview, cancelling a running export, fades between clips; continuing the motion of an own clip,
+    upscaling long films in parts, subtitles burned into the picture
 
 Ideas where help is welcome: an English UI (i18n), an automated test suite, signed and notarized builds.
 

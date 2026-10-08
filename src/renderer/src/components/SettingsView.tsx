@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FfmpegStatus, Settings } from '@shared/types'
-import { ipcErrorMessage } from '../lib/hooks'
+import { ipcErrorMessage, useSeparationStatus } from '../lib/hooks'
 import AgentSettingsSection from './agent/AgentSettingsSection'
 import LibrarySection from './library/LibrarySection'
 import { refreshPromptLanguage } from './prompt/usePromptLanguage'
@@ -79,6 +79,8 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
         <LibrarySection />
 
         <FfmpegSection />
+
+        <VoiceSeparationSection />
       </div>
     </div>
   )
@@ -288,6 +290,41 @@ function FfmpegSection() {
         >
           {checking ? 'Kontrollerar…' : 'Kontrollera igen'}
         </button>
+      )}
+    </section>
+  )
+}
+
+/**
+ * Röstseparering: whether this Mac can tell the voice from the background (Apple's built-in sound isolation, used
+ * by Redigera for Ta bort rösten, Bara rösten and keeping the background under a new voice).
+ */
+function VoiceSeparationSection() {
+  const status = useSeparationStatus()
+  return (
+    <section className="mb-8">
+      <h2 className="mb-1 font-medium">Röstseparering</h2>
+      <p className="mb-3 text-muted">
+        Används i Redigera för att ta bort rösten, behålla bara rösten, eller byta röst och behålla musik och effekter.
+      </p>
+      {!status ? (
+        <p className="text-muted">Kontrollerar…</p>
+      ) : (
+        <div className="rounded-md border border-line bg-raised px-3 py-2.5">
+          <p className="flex items-start gap-2">
+            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${status.available ? 'bg-emerald-400' : 'bg-muted'}`} />
+            <span className="select-text">
+              {status.available
+                ? `Röstseparering: Apple (inbyggd, ${status.quality === 'standard' ? 'standardkvalitet' : 'hög kvalitet'})`
+                : (status.message ?? 'Röstseparering saknas på den här datorn.')}
+            </span>
+          </p>
+          {!status.available && (
+            <p className="mt-1.5 pl-4 text-[11px] leading-relaxed text-muted">
+              Allt annat i Redigera fungerar ändå; där rösten byts sänks originalljudet i stället.
+            </p>
+          )}
+        </div>
       )}
     </section>
   )

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { generationTitle } from '@shared/generation-label'
 import type { Generation, Sequence, SequenceSummary } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
@@ -22,8 +23,11 @@ export default function SequencePicker({ generation, onAdded }: Props) {
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState<string>()
   const [creating, setCreating] = useState(false)
-  // Prefilled from the prompt so Enter alone gives a sensible name; selected on focus to type over.
-  const [name, setName] = useState(() => titleFromPrompt(generation.prompt, 4, 32))
+  // Prefilled from the prompt (an own film's or a version's title) so Enter alone gives a sensible name; selected on
+  // focus to type over.
+  const [name, setName] = useState(() =>
+    generation.title?.trim() ? generationTitle(generation, 32) : titleFromPrompt(generation.prompt, 4, 32)
+  )
 
   useEffect(() => {
     window.studio.listSequences().then(

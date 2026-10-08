@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { canUseAgain } from '@shared/generation-label'
 import { DEFAULT_MODEL } from '@shared/models'
 import { NEEDS_CONSENT, type ConsentRequest, type Generation, type GenerationParams } from '@shared/types'
 import { ASSET_COPY } from '../lib/assets'
@@ -156,8 +157,14 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
     await submit()
   }
 
-  // Stable, so the feed's memoized cards don't re-render for it.
-  const reuse = useCallback((g: Generation) => setParams({ ...g.params }), [setParams])
+  // Stable, so the feed's memoized cards don't re-render for it. Only a Venice generation's settings make a form: an
+  // own film's or a version's are placeholders, and a take made from a video in Redigera can't be made here.
+  const reuse = useCallback(
+    (g: Generation) => {
+      if (canUseAgain(g)) setParams({ ...g.params })
+    },
+    [setParams]
+  )
 
   return (
     <div className="flex h-full">

@@ -35,7 +35,8 @@
 #   prompt     the prompt editor and @ImageN reference checks
 #   library    characters, environments, outfits and the prompt library
 #   assets     reference images and asset folders on disk
-#   sequences  sequences, clips, takes, trims, preview and storyboards
+#   sequences  sequences, clips, takes, trims, preview, storyboards and own clips
+#   editor     Redigera: edits, versions, operations, voices and transcripts
 #   images     stills and Venice's image models (Skapa bild)
 #   export     ffmpeg export of sequences
 #   agent      agent connection: approvals, activity, the agent guide

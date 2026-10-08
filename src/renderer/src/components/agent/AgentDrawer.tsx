@@ -191,7 +191,11 @@ function PendingCard({ approval: a, now }: { approval: ApprovalRequest; now: num
         <span className="font-medium">{a.client}</span> {approvalVerb(a)} {lowerFirst(approvalTitle(a, a.sequenceName))}
       </p>
       <div className="mt-2 flex items-center gap-3 text-[12px]">
-        <span className="font-medium tabular-nums">{a.priceUsd !== undefined ? formatUsd(a.priceUsd) : 'Okänt pris'}</span>
+        <span className="font-medium tabular-nums">
+          {a.priceUsd !== undefined
+            ? `${a.edit?.partialPrice ? '≈ ' : ''}${formatUsd(a.priceUsd)}${a.edit?.partialPrice ? ' +' : ''}`
+            : 'Okänt pris'}
+        </span>
         <span className="min-w-0 flex-1 truncate text-muted">{expiresText(a.createdAt + APPROVAL_TTL_MS, now)}</span>
         <button
           onClick={() => showApproval(a.id)}

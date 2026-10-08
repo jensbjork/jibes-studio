@@ -1,10 +1,11 @@
 import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-label'
 import type { Generation, VideoModel } from '@shared/types'
 import { formatSeconds, formatUsd, mediaUrl } from '../lib/media'
 import type { Navigate } from '../lib/navigation'
 import { findTakeOwner, openTakeOwner } from '../lib/takes'
 import { isPending, progressOf, reviewCountText } from './feed/feedText'
-import { ExpandIcon, ReviewIcon } from './feed/icons'
+import { CameraIcon, ExpandIcon, ReviewIcon, ScissorsIcon } from './feed/icons'
 import { pauseOthers } from './feed/playback'
 import StarRating from './feed/StarRating'
 import Popover from './pickers/Popover'
@@ -128,6 +129,11 @@ function GenerationCard({
   const keepActionsVisible = pickerOpen || confirmingDelete
   // Agents' reviews only: the user's own (stars, or just a note or tags) isn't a "granskning" to read.
   const otherReviews = g.agentReviewCount
+  // Own films and versions from Redigera: named by their title, marked, without a model; their settings aren't a form.
+  const badge = sourceBadge(g)
+  const own = badge?.kind === 'own' || badge?.kind === 'edited'
+  const title = generationTitle(g)
+  const editable = g.status === 'completed' && !!g.filePath && !!navigate
 
   return (
     <div
@@ -200,19 +206,32 @@ function GenerationCard({
             {g.error ?? 'Misslyckades'}
           </div>
         )}
-        {g.segmentId && (
-          <button
-            onClick={navigate ? () => void openOwner() : undefined}
-            disabled={!navigate || openingSequence}
-            title={
-              navigate
-                ? 'Tagning i en sekvens eller storyboard – klicka för att öppna den'
-                : 'Tagning i en sekvens eller storyboard'
-            }
-            className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-text backdrop-blur transition enabled:hover:bg-black/90 disabled:cursor-default"
-          >
-            ▤ {openingSequence ? 'Öppnar…' : 'Tagning'}
-          </button>
+        {(g.segmentId || badge) && (
+          <div className="absolute left-2 top-2 flex items-center gap-1">
+            {badge && (
+              <span
+                title={badge.description}
+                className="flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-text backdrop-blur"
+              >
+                {own ? <CameraIcon size={10} /> : <ScissorsIcon size={10} />}
+                {badge.label}
+              </span>
+            )}
+            {g.segmentId && (
+              <button
+                onClick={navigate ? () => void openOwner() : undefined}
+                disabled={!navigate || openingSequence}
+                title={
+                  navigate
+                    ? 'Tagning i en sekvens eller storyboard – klicka för att öppna den'
+                    : 'Tagning i en sekvens eller storyboard'
+                }
+                className="rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-text backdrop-blur transition enabled:hover:bg-black/90 disabled:cursor-default"
+              >
+                ▤ {openingSequence ? 'Öppnar…' : 'Tagning'}
+              </button>
+            )}
+          </div>
         )}
 
         <div className="absolute right-2 top-2 flex items-center gap-1">
@@ -257,16 +276,16 @@ function GenerationCard({
             title="Visa detaljer"
             className="mb-2 line-clamp-2 w-full text-left outline-none transition hover:text-white focus-visible:underline"
           >
-            {g.prompt}
+            {title}
           </button>
         ) : (
-          <p className="mb-2 line-clamp-2 select-text" title={g.prompt}>
-            {g.prompt}
+          <p className="mb-2 line-clamp-2 select-text" title={title}>
+            {title}
           </p>
         )}
         <div className="relative flex items-center gap-2 text-[11px] text-muted">
-          <span className="truncate" title={g.model}>
-            {model?.name ?? g.model}
+          <span className="truncate" title={own ? undefined : g.model}>
+            {own ? (badge?.kind === 'edited' ? 'Redigerad film' : 'Eget klipp') : (model?.name ?? g.model)}
           </span>
           <span>·</span>
           <span className="shrink-0">{g.params.duration}</span>
@@ -276,8 +295,13 @@ function GenerationCard({
               <span className="shrink-0">{g.params.resolution}</span>
             </>
           )}
-          <span>·</span>
-          <span className="shrink-0">{formatUsd(g.quote)}</span>
+          {/* An import cost nothing; a version only what its own sound cost. */}
+          {(!own || g.quote !== undefined) && (
+            <>
+              <span>·</span>
+              <span className="shrink-0">{formatUsd(g.quote)}</span>
+            </>
+          )}
           {(g.params.referenceAudios?.length ?? 0) > 0 && (
             <span className="shrink-0" title="Med ljudreferens">
               · ♪
@@ -308,9 +332,20 @@ function GenerationCard({
               </>
             ) : (
               <>
-                <button onClick={() => onReuse(g)} className={action}>
-                  Använd igen
-                </button>
+                {canUseAgain(g) && (
+                  <button onClick={() => onReuse(g)} className={action}>
+                    Använd igen
+                  </button>
+                )}
+                {editable && (
+                  <button
+                    onClick={() => navigate?.('editor', { type: 'open-editor', generationId: g.id })}
+                    title="Ändra klippet med AI i Redigera (originalet lämnas orört)"
+                    className={action}
+                  >
+                    Redigera…
+                  </button>
+                )}
                 {g.status !== 'failed' && (
                   <button
                     ref={sequenceButton}
