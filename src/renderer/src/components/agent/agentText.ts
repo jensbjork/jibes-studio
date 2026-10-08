@@ -12,7 +12,7 @@ export type AgentTone = 'off' | 'waiting' | 'connected' | 'error'
 
 export interface AgentSummary {
   tone: AgentTone
-  /** Short, for the sidebar: "Agent: av", "Agent: på – väntar", "OpenClaw ansluten". */
+  /** Short, for the sidebar: "Agent: av", "Agent: på – väntar", "Agent ansluten". */
   label: string
   /** A sentence for the drawer and tooltips. */
   detail: string
@@ -37,9 +37,22 @@ export function agentSummary(status: AgentStatus | undefined): AgentSummary {
   if (!names.length) {
     return { tone: 'waiting', label: 'Agent: på – väntar', detail: 'Anslutningen är på och väntar på en agent.' }
   }
+  // The sidebar says what is there, an agent, whatever its client calls itself ("mcp", "OpenClaw"…); the name is in
+  // the detail and the drawer.
   const who = swedishList(names)
-  const verb = names.length === 1 ? 'ansluten' : 'anslutna'
-  return { tone: 'connected', label: `${who} ${verb}`, detail: `${who} är ${verb} till Studio.` }
+  const label = names.length === 1 ? 'Agent ansluten' : `${names.length} agenter anslutna`
+  return { tone: 'connected', label, detail: `Ansluten till Studio: ${who}.` }
+}
+
+/** "Satte prompten": what the agent just did, for the working indicator (without its name, capitalised). */
+export function presenceText(a: AgentActivity): string {
+  const summary = a.summary.trim()
+  const client = a.client.trim()
+  const own =
+    client && summary.toLocaleLowerCase('sv').startsWith(client.toLocaleLowerCase('sv'))
+      ? summary.slice(client.length).trim()
+      : summary
+  return own ? own.charAt(0).toLocaleUpperCase('sv') + own.slice(1) : 'Arbetar i Studio'
 }
 
 export const TONE_DOT: Record<AgentTone, string> = {

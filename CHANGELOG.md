@@ -10,6 +10,9 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **The agent's presence**: while a connected agent works, the sidebar reads *Agenten arbetar…* with a pulsing dot
+  and what it just did, and a small pill at the bottom of the window shows its latest steps; click to open the
+  activity drawer.
 - **Redigera**, an editor for any finished film (sidebar, after Storyboards): open a clip from the feed (*Redigera…*
   on its card or in its drawer), a take (*Redigera tagningen…*), a sequence's or storyboard's export (*Redigera
   senaste exporten*, *Från en export…*) or your own film (*Öppna en egen film…*, or drop it on the list). Every
@@ -215,6 +218,8 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- The sidebar says *Agent ansluten* (or *2 agenter anslutna*) instead of the client's own name, which can be
+  something technical like "mcp"; the name is in the tooltip and the activity drawer.
 - The library database is migrated to version 11: generations get a `source` (existing ones are `generated`), a
   title, a parent version, an edit, a recipe and an original file; new tables hold edits, their audio, paid jobs
   and their steps, transcripts and voice clones; voice clips get a clone consent, exports their cut times and

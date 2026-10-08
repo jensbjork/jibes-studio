@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { AgentActivity, AgentStatus, ApprovalRequest } from '@shared/types'
 import { ipcErrorMessage } from './hooks'
 
@@ -46,6 +46,35 @@ export function useAgentState(): AgentState {
 
 export function getAgentState(): AgentState {
   return state
+}
+
+/** How long after its latest tool call an agent counts as working. */
+export const AGENT_WORKING_MS = 12_000
+
+/**
+ * While an agent is working (a tool call in the last few seconds): its recent calls, newest first, the ones close
+ * together. Empty otherwise. Re-renders by itself when the agent goes quiet.
+ */
+export function useAgentWorking(): AgentActivity[] {
+  const { activity } = useAgentState()
+  const latest = activity[0]
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!latest) return
+    const left = latest.at + AGENT_WORKING_MS - Date.now()
+    if (left <= 0) return
+    const timer = setTimeout(() => setTick((n) => n + 1), left + 50)
+    return () => clearTimeout(timer)
+  }, [latest])
+  if (!latest || Date.now() - latest.at >= AGENT_WORKING_MS) return []
+  // One burst of work: calls no more than the working window apart.
+  const burst: AgentActivity[] = []
+  for (const a of activity) {
+    const previous = burst[burst.length - 1] ?? latest
+    if (previous.at - a.at > AGENT_WORKING_MS) break
+    burst.push(a)
+  }
+  return burst
 }
 
 // ── Merging what main sends ─────────────────────────────────────────────────
