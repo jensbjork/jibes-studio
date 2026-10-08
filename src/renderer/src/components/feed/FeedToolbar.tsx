@@ -9,6 +9,7 @@ import {
   PLACEMENT_OPTIONS,
   RATING_OPTIONS,
   SORT_OPTIONS,
+  SOURCE_OPTIONS,
   STATUS_OPTIONS,
   hasFilters,
   isSortKey,
@@ -77,14 +78,20 @@ export default function FeedToolbar({
     }
   }
 
-  // The models that made something, most used first; names from the model list when Venice still has it.
+  // The models that made something, most used first; names from the model list when Venice still has it. Own clips
+  // and versions have no model ('') and aren't one.
   const modelOptions = useMemo((): MenuOption<string>[] => {
     const counts = new Map<string, number>()
-    for (const g of generations) counts.set(g.model, (counts.get(g.model) ?? 0) + 1)
+    for (const g of generations) if (g.model) counts.set(g.model, (counts.get(g.model) ?? 0) + 1)
     return [...counts.entries()]
       .sort((a, b) => b[1] - a[1] || modelName(a[0], models).localeCompare(modelName(b[0], models), 'sv'))
       .map(([id, count]) => ({ id, label: modelName(id, models), text: id, hint: count }))
   }, [generations, models])
+  const sourceCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const g of generations) counts.set(g.source ?? 'generated', (counts.get(g.source ?? 'generated') ?? 0) + 1)
+    return counts
+  }, [generations])
 
   return (
     <div className="shrink-0 border-b border-line/60 px-6 pb-2.5">
@@ -125,9 +132,9 @@ export default function FeedToolbar({
             value={filters.query}
             onChange={(e) => set({ query: e.target.value })}
             onKeyDown={onSearchKey}
-            placeholder="Sök i prompterna…"
-            aria-label="Sök i prompterna"
-            title="Sök i prompterna (⌘ F)"
+            placeholder="Sök i prompter och namn…"
+            aria-label="Sök i prompter och namn"
+            title="Sök i prompter och namn (⌘ F)"
             className="h-7 w-full rounded-md border border-line bg-raised pl-7 pr-7 text-[12px] outline-none focus:border-muted"
           />
           {filters.query && (
@@ -150,6 +157,19 @@ export default function FeedToolbar({
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
+        <FilterMenu
+          title="Källa"
+          value={filters.source}
+          valueLabel={SOURCE_OPTIONS.find((o) => o.id === filters.source)?.label}
+          options={SOURCE_OPTIONS.map((o) => ({
+            id: o.id,
+            label: o.label,
+            text: o.text,
+            hint: sourceCounts.get(o.id)
+          }))}
+          onChange={(source) => set({ source })}
+          allLabel="Alla"
+        />
         <FilterMenu
           title="Status"
           value={filters.status}

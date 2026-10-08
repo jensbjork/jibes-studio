@@ -442,10 +442,11 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
       })
   }
 
-  const deleteTake = async (take: Generation) => {
+  const deleteTake = async (transitionId: string, take: Generation) => {
     store.update((s) => withoutTake(s, take.id))
     try {
-      await window.studio.deleteGeneration(take.id)
+      // A take Redigera keeps (an edit started from it) is only taken off the transition, as in a sequence's take list.
+      await window.studio.deleteGeneration(take.id, { segmentId: transitionId, release: take.keptByEdit === true })
     } catch (e) {
       setNotice({ text: ipcErrorMessage(e), storyboardId })
     }
@@ -727,6 +728,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               onExport={() => void exportFilm()}
               onConvert={() => void convert()}
               onDelete={() => void deleteStoryboard(storyboard.id)}
+              onEditExport={(exportId) => navigate('editor', { type: 'open-editor', exportId })}
               onError={(text) => setNotice({ text, storyboardId: storyboard.id })}
             />
             {banners}
@@ -790,7 +792,8 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
                     onDismissError={() => setErrors((m) => ({ ...m, [editorTransition.id]: undefined }))}
                     onGenerate={() => void generate(editorTransition.id)}
                     onSelectTake={(take) => selectTake(editorTransition.id, take)}
-                    onDeleteTake={(take) => void deleteTake(take)}
+                    onDeleteTake={(take) => void deleteTake(editorTransition.id, take)}
+                    onEditTake={(take) => navigate('editor', { type: 'open-editor', generationId: take.id })}
                     onClose={() => setEditorId(undefined)}
                   />
                 </section>

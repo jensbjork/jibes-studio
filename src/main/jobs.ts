@@ -10,6 +10,7 @@ import {
   promptLimitOf,
   rememberPromptLimits
 } from '@shared/prompt-compose'
+import { generationTitle } from '@shared/generation-label'
 import { blockingPromptError, canonicalizeParams } from '@shared/prompt-refs'
 import {
   NEEDS_CONSENT,
@@ -24,10 +25,14 @@ import * as db from './db'
 import { extractThumbnail, ffmpegStatus, probe } from './ffmpeg'
 import {
   dayStamp,
-  generationsDayDir,
+  EDIT_FOLDERS,
+  ensureLibraryDir,
+  FOLDERS,
+  KIND_FOLDERS,
+  libraryRoot,
   promptExcerpt,
+  safeName,
   sequenceKindOf,
-  sequenceTakesDir,
   thumbsDir,
   timeStamp,
   tmpDir
@@ -157,22 +162,97 @@ function sequenceFolderOf(segmentId: string): { folder: string; kind: string } |
   return row?.folder ? { folder: row.folder, kind: row.kind } : undefined
 }
 
+/** The folder of an edit (Redigeringar/<folder>), if the edit still exists and has a usable folder name. */
+function editFolderOf(editId: string): string | undefined {
+  const row = db.getDb().prepare('SELECT folder FROM edits WHERE id = ?').get(editId) as
+    | { folder: string | null }
+    | undefined
+  return isPlainFolderName(row?.folder) ? row.folder : undefined
+}
+
+/** A folder name from the database that stays inside its parent. */
+function isPlainFolderName(name: string | null | undefined): name is string {
+  return typeof name === 'string' && !!name && name !== '.' && name !== '..' && !/[/\\\0]/.test(name)
+}
+
+/** What videoLocation reads of a generation. Rows from before own clips existed have no source: Venice's. */
+export type LocatedGeneration = Pick<Generation, 'createdAt' | 'prompt' | 'segmentId'> &
+  Partial<Pick<Generation, 'source' | 'title' | 'editId' | 'originalPath'>>
+
+/** An import's or a version's file name (without extension): its title, made safe for Finder. */
+function titleBase(g: LocatedGeneration): string {
+  const fallback = g.source === 'edit' ? 'Version' : 'Eget klipp'
+  return safeName(typeof g.title === 'string' ? g.title : '', { max: 120, fallback })
+}
+
 /**
- * Where a generation's video belongs and what it is called (without ".mp4"): a take goes into its sequence's
- * Tagningar folder (a storyboard transition's into the storyboard's Övergångar) as "<YYYY-MM-DD HH.MM> <prompt>",
- * anything else into Genereringar/<day>/ as "<HH.MM> <prompt>". Times are when the generation was submitted.
+ * Where a generation's video belongs and what it is called (without its extension), by the file home rule:
+ * - an import with an edit (an export cloned in as an edit's v1) and an edit version: Redigeringar/<edit>/<title>;
+ * - any other import: Egna klipp/<day it was imported>/<title>, also when it is a take of a sequence clip (an
+ *   import with a working copy is "<title> (arbetskopia)", its untouched original sits next to it as "<title>");
+ * - an AI take made in Redigera: Redigeringar/<edit>/Tagningar/"<YYYY-MM-DD HH.MM> <prompt>";
+ * - anything else (and a version whose edit is gone): a take goes into its sequence's Tagningar folder (a storyboard
+ *   transition's into the storyboard's Övergångar) as "<YYYY-MM-DD HH.MM> <name>", anything else into
+ *   Genereringar/<day>/ as "<HH.MM> <name>", where the name is the prompt, or the title of a row without one.
+ * Times are when the generation was submitted (or imported). Pure: nothing is created (videoLocation creates the
+ * folder). The single source of truth for where files go: the job manager, sequence moves, "Städa upp" and the edit
+ * service all ask it.
  */
-export function videoLocation(g: Pick<Generation, 'createdAt' | 'prompt' | 'segmentId'>): { dir: string; base: string } {
+export function videoHome(g: LocatedGeneration): { dir: string; base: string } {
+  const root = libraryRoot()
   const created = new Date(g.createdAt)
-  const excerpt = promptExcerpt(g.prompt)
-  const owner = g.segmentId ? sequenceFolderOf(g.segmentId) : undefined
-  if (owner) {
+  const source = g.source ?? 'generated'
+  const editFolder = g.editId ? editFolderOf(g.editId) : undefined
+  if (editFolder && (source === 'import' || source === 'edit')) {
+    return { dir: join(root, FOLDERS.edits, editFolder), base: titleBase(g) }
+  }
+  if (source === 'import') {
+    const base = titleBase(g)
     return {
-      dir: sequenceTakesDir(owner.folder, sequenceKindOf(owner.kind)),
+      dir: join(root, FOLDERS.ownClips, dayStamp(created)),
+      base: g.originalPath ? `${base} (arbetskopia)` : base
+    }
+  }
+  if (editFolder && source === 'generated') {
+    return {
+      dir: join(root, FOLDERS.edits, editFolder, EDIT_FOLDERS.takes),
+      base: `${dayStamp(created)} ${timeStamp(created)} ${promptExcerpt(g.prompt)}`
+    }
+  }
+  // generationTitle names a version without a prompt by its title, so it never becomes "… Utan prompt".
+  const excerpt = promptExcerpt(source === 'generated' ? g.prompt : generationTitle({ ...g, source }))
+  const owner = g.segmentId ? sequenceFolderOf(g.segmentId) : undefined
+  if (owner && isPlainFolderName(owner.folder)) {
+    const layout = KIND_FOLDERS[sequenceKindOf(owner.kind)]
+    return {
+      dir: join(root, layout.parent, owner.folder, layout.takes),
       base: `${dayStamp(created)} ${timeStamp(created)} ${excerpt}`
     }
   }
-  return { dir: generationsDayDir(created), base: `${timeStamp(created)} ${excerpt}` }
+  return { dir: join(root, FOLDERS.generations, dayStamp(created)), base: `${timeStamp(created)} ${excerpt}` }
+}
+
+/** videoHome, with its folder created. */
+export function videoLocation(g: LocatedGeneration): { dir: string; base: string } {
+  const home = videoHome(g)
+  ensureLibraryDir(home.dir)
+  return home
+}
+
+/**
+ * Where an import's untouched original belongs when it has a working copy: next to the working copy, named after
+ * the title (the working copy is "<title> (arbetskopia)"). Undefined for rows without an original. Pure.
+ */
+export function originalHome(g: LocatedGeneration): { dir: string; base: string } | undefined {
+  if (!g.originalPath) return undefined
+  return { dir: videoHome(g).dir, base: titleBase(g) }
+}
+
+/** originalHome, with its folder created. */
+export function originalLocation(g: LocatedGeneration): { dir: string; base: string } | undefined {
+  const home = originalHome(g)
+  if (home) ensureLibraryDir(home.dir)
+  return home
 }
 
 interface JobEvents {
@@ -187,6 +267,11 @@ export interface SubmitOptions {
   quote?: number
   /** Makes the generation a take of this sequence segment. */
   segmentId?: string
+  /**
+   * Makes the generation an AI take of this edit (Redigera): its video goes into the edit's Tagningar folder. An
+   * edit deleted while the job was queued leaves an ordinary generation, as for a segment.
+   */
+  editId?: string
   /**
    * The prompt to send, composed by the caller from these params (composeSubmission) when it read them: a sequence
    * take composes it together with the reads its approval's check runs on, and an agent's approved form request
@@ -359,6 +444,7 @@ export class JobManager extends EventEmitter<JobEvents> {
     const g: db.StoredGeneration = {
       id: randomUUID(),
       createdAt: Date.now(),
+      source: 'generated',
       model: params.model,
       prompt: params.prompt,
       sentPrompt: composed.prompt,
@@ -368,16 +454,19 @@ export class JobManager extends EventEmitter<JobEvents> {
       downloadUrl: res.download_url,
       quote: opts.quote,
       segmentId: opts.segmentId,
+      editId: opts.editId,
       reviewCount: 0,
       agentReviewCount: 0
     }
     try {
       db.insertGeneration(g)
     } catch (err) {
-      // The segment was deleted while the job was being queued. The job is already paid for, so keep it
-      // in the feed rather than lose track of it.
-      if (!g.segmentId || (err as { code?: string }).code !== 'SQLITE_CONSTRAINT_FOREIGNKEY') throw err
-      g.segmentId = undefined
+      // The segment (or the edit) was deleted while the job was being queued. The job is already paid for, so
+      // keep it in the feed rather than lose track of it.
+      if ((!g.segmentId && !g.editId) || (err as { code?: string }).code !== 'SQLITE_CONSTRAINT_FOREIGNKEY') throw err
+      const conn = db.getDb()
+      if (g.segmentId && !conn.prepare('SELECT 1 FROM segments WHERE id = ?').get(g.segmentId)) g.segmentId = undefined
+      if (g.editId && !conn.prepare('SELECT 1 FROM edits WHERE id = ?').get(g.editId)) g.editId = undefined
       db.insertGeneration(g)
     }
     this.safeEmit('update', toPublic(g))

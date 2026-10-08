@@ -6,6 +6,8 @@ import type { GenerationParams, Learning } from '@shared/types'
 import { isLibraryReady } from '../../paths'
 import { promptWritingGuide, studioGuide } from '../guide'
 import { AssetIndex, asGenerated, audioTokenMap, takesAudio, tokenMap, type AudioTokenEntry, type TokenEntry } from '../studio'
+import { registerEditorTools } from './editor'
+import { registerEditorPaidTools } from './editor-paid'
 import { registerFormTools } from './form'
 import { readForm, type ToolContext } from './kit'
 import { learningsForGuide, registerLibraryTools } from './library'
@@ -150,6 +152,8 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
   registerStillTools(server, ctx)
   registerStoryboardTools(server, ctx)
   registerPaidTools(server, ctx)
+  registerEditorTools(server, ctx)
+  registerEditorPaidTools(server, ctx)
   registerReviewTools(server, ctx)
 
   server.registerPrompt(

@@ -1,9 +1,10 @@
 import { useEffect } from 'react'
-import { LAST_SEQUENCE_KEY, LAST_STORYBOARD_KEY } from './library'
+import { LAST_EDIT_KEY, LAST_SEQUENCE_KEY, LAST_STORYBOARD_KEY } from './library'
 
-// Where the user is in the sequence editor (and in Storyboards), so an agent asking "what are they looking at" gets
-// the open sequence and clip, or the open storyboard (see agentBridge's get_form). The segment editor reports itself
-// while it is mounted; the Storyboards view remembers the storyboard it shows.
+// Where the user is in the sequence editor (and in Storyboards and Redigera), so an agent asking "what are they
+// looking at" gets the open sequence and clip, the open storyboard, or the open edit and the version on screen (see
+// agentBridge's get_form). The segment editor and the edit workspace report themselves while they are mounted; the
+// Storyboards and Redigera views remember what they show.
 
 interface OpenSegment {
   sequenceId: string
@@ -39,5 +40,37 @@ export function openStoryboard(): string | undefined {
     return localStorage.getItem(LAST_STORYBOARD_KEY) ?? undefined
   } catch {
     return undefined
+  }
+}
+
+interface OpenEdit {
+  editId: string
+  /** The version in the player (the current one, or another one being compared with it). */
+  versionId?: string
+}
+
+let openEdit: OpenEdit | undefined
+
+/** Records the edit (and the version in its player) shown in Redigera while the calling component is mounted. */
+export function useReportOpenEdit(editId: string, versionId: string | undefined): void {
+  useEffect(() => {
+    const entry: OpenEdit = { editId, versionId }
+    openEdit = entry
+    return () => {
+      if (openEdit === entry) openEdit = undefined
+    }
+  }, [editId, versionId])
+}
+
+/**
+ * The edit open in Redigera and the version its player shows; the remembered edit (without a version) while the
+ * view isn't mounted; nothing while Redigera shows its list.
+ */
+export function openEditInEditor(): { editId?: string; versionId?: string } {
+  if (openEdit) return { ...openEdit }
+  try {
+    return { editId: localStorage.getItem(LAST_EDIT_KEY) ?? undefined }
+  } catch {
+    return {}
   }
 }

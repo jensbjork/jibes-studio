@@ -29,10 +29,11 @@ the pull request's title.
 
 ## Development setup
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). In short: Node from `.nvmrc`, `brew install ffmpeg`,
-`npm install`, `npm run dev`. `npm run dev` runs the separate **Studio Dev** profile; please develop and test there
-(or in a throwaway `STUDIO_PROFILE_DIR` profile), never against a library you care about, and **don't trigger real
-Venice generations while testing** — the guide shows how to test without spending money.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). In short: Node from `.nvmrc`, `brew install ffmpeg`, the Xcode Command
+Line Tools for the voice separation helper (optional), `npm install`, `npm run dev`. `npm run dev` runs the separate
+**Studio Dev** profile; please develop and test there (or in a throwaway `STUDIO_PROFILE_DIR` profile), never against
+a library you care about, and **don't trigger real Venice generations while testing** — the guide shows how to test
+without spending money.
 
 ## Branches
 
@@ -92,7 +93,8 @@ Optional, but please use one when a change clearly belongs to an area. Pick the 
 | `prompt` | The prompt editor and `@ImageN` / `@AudioN` reference checks | `components/prompt/`, `shared/prompt-refs.ts` |
 | `library` | Characters, environments, outfits and poses, the prompt library, reviews and learnings | `components/assets/`, `components/prompts/`, `library.ts`, `reviews.ts` |
 | `assets` | Reference images, audio clips and asset folders on disk | `assets.ts`, `references.ts` |
-| `sequences` | Sequences and storyboards: clips, boards, transitions, takes, trims, preview, keyframes | `components/sequences/`, `components/storyboards/`, `sequences.ts`, `storyboards.ts`, `sequence-store.ts` |
+| `sequences` | Sequences and storyboards: clips, boards, transitions, takes, trims, preview, keyframes, own clips (*Egna klipp*) | `components/sequences/`, `components/storyboards/`, `sequences.ts`, `storyboards.ts`, `sequence-store.ts`, `imports.ts` |
+| `editor` | Redigera: edits, versions, the free and paid operations, voices, transcripts and voice separation | `components/editor/`, `edits.ts`, `edit-ops.ts`, `edit-store.ts`, `edit-mix.ts`, `venice-audio.ts`, `voice-separation.ts`, `shared/edit-plan.ts`, `native/` |
 | `images` | Stills and Venice's image models (*Skapa bild…*, frames saved from takes) | `components/images/`, `images.ts`, `stills.ts` |
 | `export` | ffmpeg export of sequences and storyboards | `sequence-export.ts`, `ffmpeg.ts` |
 | `agent` | Agent connection: approvals, activity, the agent guide | `agent/approvals.ts`, `agent/guide.ts`, `components/agent/` |
@@ -168,7 +170,9 @@ request focused. Before asking for review, check that:
       `src/main/db.ts`, tested on a copy of a library (see
       [DEVELOPMENT.md](docs/DEVELOPMENT.md#database-migrations)).
 - [ ] **Money stays guarded**: every new path that sends a generation goes through `JobManager.submit` (and its
-      `@ImageN` / `@AudioN` check), and anything an agent triggers that costs money still needs approval in the app.
+      `@ImageN` / `@AudioN` check), every paid audio or edit request through Redigera's plan and its price check
+      (`expectedPriceUsd`), nothing paid is ever sent again or by itself after a restart, and anything an agent
+      triggers that costs money still needs approval in the app.
 - [ ] **Agents keep up**: a new user-facing capability gets matching agent tools and guide text in
       `src/main/agent/` (and a row in [docs/AGENTS.md](docs/AGENTS.md)).
 - [ ] **The agent connection stays local**: changes to the MCP server keep it bound to `127.0.0.1` and the

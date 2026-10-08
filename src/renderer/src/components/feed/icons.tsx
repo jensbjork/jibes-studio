@@ -128,3 +128,34 @@ export function SoundIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** An own clip (the user's own film, not made by AI). */
+export function CameraIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="1.75" y="4.25" width="9" height="7.5" rx="1.5" />
+      <path d="M10.75 7l3.5-2v6l-3.5-2" />
+    </Icon>
+  )
+}
+
+/** Redigera: changing a finished film. */
+export function ScissorsIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="4.25" cy="4.5" r="2" />
+      <circle cx="4.25" cy="11.5" r="2" />
+      <path d="M5.9 5.6L13.5 12M5.9 10.4L13.5 4" />
+    </Icon>
+  )
+}
+
+/** Bringing a file in ("Importera"). */
+export function ImportIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.5v7.5M5 7l3 3 3-3" />
+      <path d="M2.75 10.5v1.75a1.25 1.25 0 001.25 1.25h8a1.25 1.25 0 001.25-1.25V10.5" />
+    </Icon>
+  )
+}

@@ -3,6 +3,7 @@ import type { LibraryStatus, Settings } from '@shared/types'
 import AgentDrawer from './components/agent/AgentDrawer'
 import ApprovalDialog from './components/agent/ApprovalDialog'
 import AssetsView from './components/assets/AssetsView'
+import EditorView from './components/editor/EditorView'
 import GenerateView from './components/GenerateView'
 import LibrarySetup from './components/library/LibrarySetup'
 import SwitchingOverlay from './components/library/SwitchingOverlay'
@@ -142,6 +143,7 @@ function Workspace() {
         {view === 'storyboards' && (
           <StoryboardsView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />
         )}
+        {view === 'editor' && <EditorView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />}
         {view === 'settings' && settings && <SettingsView settings={settings} onChanged={refreshSettings} />}
       </main>
       <AgentDrawer open={agentOpen} onClose={closeAgent} navigate={navigate} />

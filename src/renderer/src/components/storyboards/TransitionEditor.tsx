@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { generationTitle } from '@shared/generation-label'
 import { audioForModel, pickOption, PREFERRED, supportsEndImage } from '@shared/models'
 import type { Generation, Storyboard, StoryboardTransition, VideoModel } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
+import { ScissorsIcon } from '../feed/icons'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { ArrowRightIcon, CloseIcon } from '../sequences/icons'
 import { useDraft, useRegisterFlush, type FlushRegistry } from '../sequences/useDraft'
@@ -63,6 +65,8 @@ interface Props {
   onGenerate: () => void
   onSelectTake: (take: Generation) => void
   onDeleteTake: (take: Generation) => void
+  /** "Redigera tagningen…": opens the take in Redigera. */
+  onEditTake?: (take: Generation) => void
   onClose: () => void
 }
 
@@ -85,6 +89,7 @@ export default function TransitionEditor({
   onGenerate,
   onSelectTake,
   onDeleteTake,
+  onEditTake,
   onClose
 }: Props) {
   const { mutate } = store
@@ -466,6 +471,7 @@ export default function TransitionEditor({
           onView={(g) => setViewingId(g.id)}
           onSelect={onSelectTake}
           onDelete={onDeleteTake}
+          onEdit={onEditTake}
         />
       </div>
     </div>
@@ -511,13 +517,15 @@ function TakeList({
   viewingId,
   onView,
   onSelect,
-  onDelete
+  onDelete,
+  onEdit
 }: {
   transition: StoryboardTransition
   viewingId?: string
   onView: (take: Generation) => void
   onSelect: (take: Generation) => void
   onDelete: (take: Generation) => void
+  onEdit?: (take: Generation) => void
 }) {
   if (!t.takes.length) return null
   return (
@@ -571,8 +579,8 @@ function TakeList({
                     Gjord med en tidigare bild
                   </p>
                 ) : (
-                  <p className="truncate text-muted" title={take.prompt}>
-                    {take.prompt || 'Ingen prompt'}
+                  <p className="truncate text-muted" title={generationTitle(take)}>
+                    {take.prompt || take.title ? generationTitle(take, 80) : 'Ingen prompt'}
                   </p>
                 )}
               </div>
@@ -590,14 +598,30 @@ function TakeList({
                     </button>
                   )
                 )}
+                {onEdit && canPlay && (
+                  <button
+                    type="button"
+                    onClick={() => onEdit(take)}
+                    title="Redigera tagningen… – ändra den med AI i Redigera (övergången rörs inte)"
+                    aria-label="Redigera tagningen"
+                    className="rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-text"
+                  >
+                    <ScissorsIcon size={12} />
+                  </button>
+                )}
+                {/* A take Redigera keeps (an edit started from it) only leaves the transition; main does the same. */}
                 {!pending && (
                   <ConfirmButton
-                    question="Radera?"
+                    question={take.keptByEdit ? 'Ta bort?' : 'Radera?'}
                     onConfirm={() => onDelete(take)}
-                    title="Radera tagningen och videofilen"
+                    title={
+                      take.keptByEdit
+                        ? 'Ta bort tagningen från övergången (filmen finns kvar i Redigera)'
+                        : 'Radera tagningen och videofilen'
+                    }
                     className="rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-accent"
                   >
-                    Radera
+                    {take.keptByEdit ? 'Ta bort' : 'Radera'}
                   </ConfirmButton>
                 )}
               </div>

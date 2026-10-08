@@ -7,6 +7,7 @@ export type View =
   | 'prompts'
   | 'sequences'
   | 'storyboards'
+  | 'editor'
   | 'settings'
 
 /** Cross-view requests, e.g. "generate with this character". Consumed once by the target view. */
@@ -23,5 +24,11 @@ export type Intent =
   | { type: 'open-sequence'; sequenceId: string; segmentId?: string }
   /** Storyboards view: open that storyboard. */
   | { type: 'open-storyboard'; storyboardId: string }
+  /**
+   * Redigera: open an edit. editId opens that one. generationId opens the edit made from that clip (asking
+   * "Öppna redigeringen" / "Ny redigering" when there already is one) or creates one; an id that is itself a
+   * version of an edit opens that edit. exportId does the same for an exported film (a new edit clones it in).
+   */
+  | { type: 'open-editor'; editId?: string; generationId?: string; exportId?: string }
 
 export type Navigate = (view: View, intent?: Intent) => void

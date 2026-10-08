@@ -50,6 +50,12 @@ const ENTRIES: Entry[] = [
     example: (day, time) => `${day}/${time} En katt på ett tak.mp4`
   },
   {
+    target: 'ownClips',
+    name: 'Egna klipp',
+    explanation: 'Dina egna filmer som du har importerat, per dag. Behövs en arbetskopia ligger originalet bredvid.',
+    example: (day) => `${day}/Semester.mov`
+  },
+  {
     target: 'sequences',
     name: 'Sekvenser',
     explanation: 'En mapp per sekvens med tagningarna och de färdiga, exporterade filmerna.',
@@ -60,6 +66,12 @@ const ENTRIES: Entry[] = [
     name: 'Storyboards',
     explanation: 'En mapp per storyboard med bilderna, klippen mellan dem och de färdiga, exporterade filmerna.',
     example: () => 'Min storyboard/Bilder/, Övergångar/ och färdiga filmer'
+  },
+  {
+    target: 'edits',
+    name: 'Redigeringar',
+    explanation: 'En mapp per redigering med versionerna, nytt ljud och AI-tagningarna. Originalet lämnas orört.',
+    example: () => 'Min film/Min film v2 – Klippte bort.mp4, Ljud/, Tagningar/'
   }
 ]
 

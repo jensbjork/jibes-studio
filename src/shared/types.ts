@@ -23,6 +23,12 @@ export interface VideoModel {
   audioInput: boolean
   promptCharacterLimit?: number
   modelSets: string[]
+  /**
+   * Takes a source video (`video_url`): Venice's `constraints.video_input`. These are the video-to-video edit
+   * models and the upscalers; their kind is 'video-to-video'. Only Redigera uses them: the Generate form never
+   * offers them.
+   */
+  videoInput: boolean
 }
 
 export interface GenerationParams {
@@ -51,6 +57,20 @@ export interface GenerationParams {
   includeDescriptions?: boolean
   /** Assets (ids) whose description is left out of the legend, each switched off in the editor on its own. */
   excludedDescriptionAssetIds?: string[]
+  /**
+   * Video-to-video edit and upscale models: the source clip (an H.264 proxy ≤22 MB in the edit's Underlag/),
+   * sent as `video_url`. Absolute over IPC, stored relative like the images.
+   */
+  sourceVideo?: string
+  /**
+   * Seedance 2.x reference-to-video: reference videos, "<Video 1>"… in the prompt; sent as
+   * `reference_video_urls`. Absolute over IPC, stored relative like the images.
+   */
+  referenceVideos?: string[]
+  /** Seedance 2.5 R2V `omni_reference_task_type`. */
+  referenceTask?: 'edit' | 'extend' | 'reference' | 'auto'
+  /** Upscale models: `upscale_factor` on the queue, `resolution: "<n>x"` (and upscale_factor) on the quote. */
+  upscaleFactor?: 1 | 2 | 4
 }
 
 /** One reference audio clip of a generation: the part of the file from `start` that lasts `length` seconds. */
@@ -68,9 +88,29 @@ export interface ReferenceAudio {
 
 export type GenerationStatus = 'queued' | 'processing' | 'completed' | 'failed'
 
+/**
+ * Where a generation's video came from. generated: made by Venice (the only kind that is ever pending). import:
+ * the user's own file ("Egna klipp"). edit: a version made in Redigera from another one.
+ */
+export type GenerationSource = 'generated' | 'import' | 'edit'
+
 export interface Generation {
   id: string
   createdAt: number
+  source: GenerationSource
+  /**
+   * Imports: the file's name; versions: "<edit name> v3". The feed/take/frame-picker title (generationTitle in
+   * src/shared/generation-label.ts). Undefined for Venice generations, which are named by their prompt.
+   */
+  title?: string
+  /** A version's base version. */
+  parentId?: string
+  /** Versions and AI takes made in Redigera: the edit they belong to. */
+  editId?: string
+  /** How an import or a version was made (ids only, never file paths). */
+  recipe?: EditRecipe
+  /** Imports with a working copy: the untouched original (absolute). `filePath` is then the working copy. */
+  originalPath?: string
   model: string
   /** The user's prompt (canonical tokens), as params.prompt: what "Använd igen" puts back in the editor. */
   prompt: string
@@ -101,6 +141,11 @@ export interface Generation {
    * Finder). Such a take can't be cut or continued from, so "generate all" makes a new one.
    */
   fileMissing?: boolean
+  /**
+   * Set on the takes of a loaded sequence or storyboard when Redigera keeps the film (a version of an edit, or the film
+   * an edit started from): the take list's "Ta bort" then only takes it off the clip, and that is what main does.
+   */
+  keptByEdit?: boolean
   /** The user's own rating (1–5 stars), if they have rated it. */
   rating?: number
   /** Reviews recorded for it: the user's (when it has a rating, note or tags) and agents'. */
@@ -171,6 +216,11 @@ export interface ExportSummary {
   duration?: number
   /** The file is still on disk. */
   exists: boolean
+  /**
+   * Where the clips meet in the film (seconds; the start of every clip after the first), recorded at export.
+   * Undefined for exports made before they were recorded.
+   */
+  cuts?: number[]
 }
 
 /** Which generations the clip feed (and the agents' list_generations) shows, and in what order. */
@@ -194,6 +244,8 @@ export interface GenerationFilter {
   hasReviews?: boolean
   /** Default 'newest'. */
   sort?: 'newest' | 'oldest' | 'rating' | 'cost' | 'length'
+  /** Only generations of this source ("Källa"): Venice's, the user's own clips, or versions made in Redigera. */
+  source?: GenerationSource
 }
 
 export interface Settings {
@@ -287,6 +339,10 @@ export type LibraryFolderTarget =
   | 'generations'
   | 'sequences'
   | 'storyboards'
+  /** Egna klipp: the user's own imported films. */
+  | 'ownClips'
+  /** Redigeringar; with an id, that edit's own folder. */
+  | 'edits'
 
 export interface FfmpegStatus {
   ok: boolean
@@ -337,6 +393,11 @@ export interface AssetAudio {
   clipStart: number
   /** Seconds; always resolved (the default is min(duration, 10)), 2–15 and inside the file where possible. */
   clipLength: number
+  /**
+   * "Får klonas för nya repliker": the user has confirmed they may use this voice, so Redigera may clone it for
+   * new spoken lines. Set only by the user in Studio (never by an agent).
+   */
+  cloneConsent: boolean
 }
 
 export interface Asset {
@@ -500,6 +561,11 @@ export interface Sequence {
   /** Params used to seed new segments (model, duration, resolution, aspect ratio, audio). */
   defaults: Partial<GenerationParams>
   segments: Segment[]
+  /**
+   * "Exportformat": the exported film's height in pixels (480, 720 or 1080); the width follows the first clip's
+   * aspect. null/undefined: Automatiskt (the first clip's own size).
+   */
+  exportHeight?: number | null
   /** "Generate all" is running for this sequence. */
   running: boolean
   /** Last error from "generate all", cleared when a new run starts. */
@@ -751,6 +817,587 @@ export interface ExportProgress {
   error?: string
 }
 
+// ── Own clips (Egna klipp): the user's own films imported into the library ───
+
+/** What inspectVideoFiles found out about a file before it is imported (free; nothing is copied yet). */
+export interface VideoFileInfo {
+  /** Absolute, as given. */
+  path: string
+  /** The file's name with its extension. */
+  name: string
+  bytes: number
+  /** It can be imported. */
+  ok: boolean
+  /** Swedish refusal naming the file, e.g. "<namn>: Filen innehåller inget videospår." */
+  error?: string
+  /** Seconds. */
+  duration?: number
+  /** As displayed (rotation applied). */
+  width?: number
+  height?: number
+  fps?: number
+  hasAudio?: boolean
+  /** E.g. "hevc", "h264", "prores". */
+  codec?: string
+  hdr?: boolean
+  bitDepth?: number
+  variableFrameRate?: boolean
+  /** Reduced "w:h", e.g. "16:9". */
+  aspect?: string
+  /** Why a working copy will be made (Swedish, e.g. "HDR", "4K → 1080p"); [] = none needed. */
+  workingCopy: string[]
+  /** On the same APFS volume as the library: it is cloned (no extra space) instead of copied. */
+  cloneable: boolean
+  /** Generation id of an earlier import of the same file (same SHA-256) whose file still exists: it is reused. */
+  duplicateOf?: string
+}
+
+/** Where imported files go. */
+export type ImportTarget =
+  /** The clip feed only. */
+  | { kind: 'feed' }
+  /** One new clip per file, in name order, after `afterSegmentId` (default: at the end). */
+  | { kind: 'sequence'; sequenceId: string; afterSegmentId?: string; fit?: 'pad' | 'crop' }
+  /** A take of that clip, selected. */
+  | { kind: 'segment'; segmentId: string; fit?: 'pad' | 'crop' }
+
+export interface ImportResult {
+  /** The import rows (or the earlier ones reused), in the order the files were given. */
+  generationIds: string[]
+  /** Files that couldn't be imported (Swedish messages); the others were. */
+  errors: { path: string; message: string }[]
+  sequenceId?: string
+  /** 'sequence' and 'segment' targets: the clips the files went to. */
+  segmentIds?: string[]
+}
+
+export interface ImportProgress {
+  path: string
+  /** 0–1 */
+  fraction: number
+  sequenceId?: string
+  segmentId?: string
+  generationId?: string
+  done?: boolean
+  /** Swedish. */
+  error?: string
+}
+
+// ── Audio models (GET /models?type=tts|music|asr, with the key when one is set) ─
+
+/** A text-to-speech model: /audio/speech ('speech', synchronous) or /audio/queue ('queue', e.g. ElevenLabs). */
+export interface SpeechModel {
+  id: string
+  name: string
+  endpoint: 'speech' | 'queue'
+  voices: string[]
+  defaultVoice?: string
+  /** Takes a provider voice id of the user's own. */
+  customVoiceId: boolean
+  /** Can clone a voice from a sample (/audio/voices). */
+  cloning?: { minSampleSeconds: number; formats: string[]; retentionDays: number }
+  /** Response formats it can give (Chatterbox: wav only). */
+  formats: string[]
+  maxCharacters: number
+  usdPerThousandChars?: number
+  /** Takes a style/tone prompt. */
+  stylePrompt: boolean
+  /** Takes language_code. */
+  languageCode: boolean
+  speed?: { min: number; max: number; default: number }
+}
+
+/** A music or sound-effect model (/audio/queue). */
+export interface AudioGenModel {
+  id: string
+  name: string
+  kind: 'music' | 'effect'
+  minSeconds: number
+  maxSeconds: number
+  /** Only these durations are accepted (ACE-Step: 60…210). */
+  durationOptions?: number[]
+  defaultSeconds: number
+  loop: boolean
+  /** Takes force_instrumental. */
+  instrumental: boolean
+  promptLimit: number
+  minPromptLength: number
+  /** false: the model takes no duration_seconds (Lyria); min/max are then Studio's assumption (1–180 s). */
+  durationControl: boolean
+}
+
+/** A speech-to-text model with timestamps (parakeet, which gives none, is left out). */
+export interface AsrModel {
+  id: string
+  name: string
+  usdPerSecond: number
+  timestamps: 'word' | 'segment'
+}
+
+/** A speech-to-speech model (/audio/voice-changer/*): keeps the performance, changes the voice. */
+export interface VoiceChangerModel {
+  id: string
+  name: string
+  voices: string[]
+  defaultVoice?: string
+  customVoiceId: boolean
+  /** Longest upload one request takes. */
+  maxSourceSeconds: number
+  /** accepted_audio_formats. */
+  formats: string[]
+  backgroundNoiseRemoval: boolean
+  seed: boolean
+}
+
+export interface AudioCatalog {
+  speech: SpeechModel[]
+  music: AudioGenModel[]
+  effects: AudioGenModel[]
+  transcription: AsrModel[]
+  /** Empty while Venice lists no voice changer (for this account). */
+  voiceChangers: VoiceChangerModel[]
+  /** Models that make a voice from a description (seed-audio, voice "Describe in prompt"). */
+  voiceDesign: SpeechModel[]
+  /** The list was fetched with the API key (some models are only listed to keyed accounts). */
+  keyed: boolean
+  fetchedAt: number
+}
+
+/** Whether this Mac can separate voice and background (the built-in AUSoundIsolation helper). */
+export interface SeparationStatus {
+  available: boolean
+  quality?: 'high' | 'standard'
+  /** Swedish, when not available. */
+  message?: string
+}
+
+// ── Transcripts ──────────────────────────────────────────────────────────────
+
+export interface TranscriptWord {
+  text: string
+  start: number
+  end: number
+}
+
+export interface TranscriptSegment {
+  id: string
+  /** Seconds in the generation's own video. */
+  start: number
+  end: number
+  text: string
+  words?: TranscriptWord[]
+  /** The text was changed by hand (or an agent). */
+  edited?: boolean
+}
+
+export interface Transcript {
+  generationId: string
+  /** Inherited from this ancestor version (the timing is the same), not stored for this one. */
+  inheritedFrom?: string
+  language?: string
+  model?: string
+  segments: TranscriptSegment[]
+  costUsd?: number
+  createdAt: number
+  updatedAt: number
+}
+
+// ── Edits (Redigera): one film changed into versions ─────────────────────────
+
+/** Seconds in the base version. */
+export interface EditRange {
+  start: number
+  end: number
+}
+
+export type VoiceChoice =
+  | { kind: 'preset'; voice: string }
+  /** A provider voice id (customVoiceId models). */
+  | { kind: 'custom'; voiceId: string }
+  /** A character's Röst clip (asset_audio id), cloned with tts-chatterbox-hd. */
+  | { kind: 'clone'; audioId: string }
+
+/** keep needs separation; duck = the original at −18 dB where the voice is replaced; remove = silence there. */
+export type BackgroundChoice = 'keep' | 'duck' | 'remove'
+
+/** Replaces that transcript line (segmentId), or a new line at `at` seconds. */
+export interface SpeakLine {
+  segmentId?: string
+  at?: number
+  text: string
+}
+
+export type EditOperation =
+  // free, local
+  | { op: 'trim'; keep: EditRange }
+  | { op: 'cut'; range: EditRange }
+  | { op: 'fade'; inSeconds?: number; outSeconds?: number }
+  | { op: 'volume'; gainDb: number; range?: EditRange; target?: 'all' | 'voice' | 'background' }
+  | { op: 'mute'; range?: EditRange; target: 'all' | 'voice' | 'background' }
+  | { op: 'denoise'; strength: 'mild' | 'strong' }
+  | { op: 'loudness'; lufs: -14 | -16 | -23 }
+  | {
+      op: 'add-audio'
+      source: { mediaId: string } | { assetAudioId: string }
+      at: number
+      gainDb?: number
+      duck?: boolean
+      loop?: boolean
+      length?: number
+      fadeInSeconds?: number
+      fadeOutSeconds?: number
+      replaceBed?: boolean
+    }
+  | { op: 'layer'; layerId: string; gainDb?: number; at?: number; remove?: boolean }
+  // paid
+  | { op: 'transcribe'; model?: string; language?: string }
+  | {
+      op: 'change-voice'
+      model: string
+      voice: Exclude<VoiceChoice, { kind: 'clone' }>
+      range?: EditRange
+      segmentIds?: string[]
+      background: BackgroundChoice
+      removeNoise?: boolean
+    }
+  | {
+      op: 'speak-lines'
+      model: string
+      voice: VoiceChoice
+      lines: SpeakLine[]
+      background: BackgroundChoice
+      fit: 'tempo' | 'overlap'
+      style?: string
+      language?: string
+    }
+  | {
+      op: 'music'
+      model: string
+      prompt: string
+      range?: EditRange
+      instrumental?: boolean
+      gainDb?: number
+      duck?: boolean
+      fadeSeconds?: number
+    }
+  | { op: 'effect'; model: string; prompt: string; at: number; seconds: number; gainDb?: number }
+  | { op: 'regenerate'; range: EditRange; prompt: string; model: string; resolution?: string; audio: 'keep' | 'model' }
+  | {
+      op: 'prompt-edit'
+      range: EditRange
+      prompt: string
+      model: string
+      resolution?: string
+      referenceImageIds?: string[]
+      audio: 'keep' | 'model'
+    }
+  | { op: 'extend'; seconds: number; prompt: string; model: string; resolution?: string; audio: 'model' | 'silence' }
+  | { op: 'upscale'; factor: 2 | 4 }
+
+/** What an operation would do and cost on a base version (planEditOperation; free). */
+export interface EditPlan {
+  /** Normalized: range snapped, defaults filled. */
+  operation: EditOperation
+  baseId: string
+  paid: boolean
+  /** USD, the total of the parts Venice prices; undefined = none of it can be priced. */
+  priceUsd?: number
+  /** true: priceUsd leaves out a part Venice doesn't price (a voice clone); the UI confirms. */
+  partialPrice?: boolean
+  /** Swedish, e.g. "debiteras per påbörjad minut: 3 min", "Röstkloning: pris anges inte av Venice". */
+  priceNote?: string
+  steps: { label: string; seconds?: number; priceUsd?: number }[]
+  /** Picture ops: cached PNG paths (absolute; free). */
+  frames?: { start?: string; end?: string }
+  resultSeconds?: number
+  estimatedBytes?: number
+  /** Swedish. */
+  notes: string[]
+  warnings: string[]
+  /** Non-empty: it cannot run. */
+  problems: string[]
+  /** Base file identity + normalized op + price inputs: equal fingerprints mean the same work at the same price. */
+  fingerprint: string
+}
+
+export interface EditRunOptions {
+  /** Default: the edit's current version. */
+  baseId?: string
+  /** The price the user (or the approval) saw; the run refuses when it rose by more than $0.01. */
+  expectedPriceUsd?: number
+  /**
+   * Whether that price was unknown or left a part out (a voice clone) when the user confirmed it. When it wasn't, a plan
+   * that has become unknown or partial since (a clone handle that ran out meanwhile adds an unpriced clone) is refused
+   * like a price that rose, so the extra question is asked first.
+   */
+  expectedPartial?: boolean
+}
+
+export interface EditRunResult {
+  /** Paid (and long) operations run as a job. */
+  jobId?: string
+  /** Free operations: the version made. */
+  versionId?: string
+  /** Picture operations: the AI take submitted. */
+  takeId?: string
+}
+
+export type GainSpan = {
+  start: number
+  end: number
+  gainDb?: number
+  mute?: boolean
+  /** Seconds, default 0.02. */
+  fade?: number
+}
+
+export type AudioSourceRef = { kind: 'generation'; id: string } | { kind: 'media'; id: string }
+
+export interface AudioBed {
+  source: AudioSourceRef | null
+  gains: GainSpan[]
+  stems?: {
+    voice: AudioSourceRef | 'separated' | null
+    voiceGains: GainSpan[]
+    background: 'separated' | null
+    backgroundGains: GainSpan[]
+  }
+}
+
+export interface AudioLayer {
+  id: string
+  kind: 'speech' | 'voice' | 'music' | 'effect' | 'audio'
+  mediaId?: string
+  /** Kept only as a label: layers always play edit media (a library clip is copied into Ljud/ first). */
+  assetAudioId?: string
+  label: string
+  /** Seconds in the film where it starts. */
+  at: number
+  /** Seconds into the media. */
+  offset: number
+  length: number
+  gainDb: number
+  fadeIn: number
+  fadeOut: number
+  duck: boolean
+  loop: boolean
+}
+
+/** A version's sound as it was built, so later audio operations rebuild it instead of stacking on a mixdown. */
+export interface AudioMix {
+  bed: AudioBed
+  layers: AudioLayer[]
+  denoise?: 'mild' | 'strong'
+  loudness?: number
+  fadeIn?: number
+  fadeOut?: number
+}
+
+/** How an import or a version was made. Ids only, never file paths. */
+export interface EditRecipe {
+  op: EditOperation['op'] | 'original' | 'import'
+  operation?: EditOperation
+  baseId?: string
+  /** Swedish, e.g. "Bytte röst → Aria". */
+  label: string
+  costUsd?: number
+  /**
+   * Versions: N of "vN", stored at insert = 1 + the highest N among the edit's versions (v1 = 1), so deleting a
+   * middle version renumbers nothing.
+   */
+  number?: number
+  timing: 'same' | 'changed'
+  /** timing 'changed': base [from, to) appears at `at`. */
+  spans?: { from: number; to: number; at: number }[]
+  /** The sound as built, for later audio ops to rebuild from. */
+  mix: AudioMix
+  /** Picture ops: the AI take spliced in. */
+  takeId?: string
+  /** Klippgränser carried along. */
+  cuts?: number[]
+  import?: { name: string; bytes: number; sha256: string; workingCopy: string[]; fit?: 'pad' | 'crop' }
+  export?: { exportId: string; sequenceName?: string }
+}
+
+/** What an edit was opened from. */
+export interface EditOrigin {
+  kind: 'generation' | 'take' | 'export' | 'import'
+  generationId?: string
+  exportId?: string
+  sequenceId?: string
+  sequenceName?: string
+  segmentId?: string
+  clipNumber?: number
+  /** The origin is gone (deleted). */
+  missing?: boolean
+}
+
+export interface EditSummary {
+  id: string
+  name: string
+  origin: EditOrigin
+  /** The current version's generation id. */
+  currentId?: string
+  posterPath?: string
+  versionCount: number
+  /** Seconds, of the current version. */
+  duration?: number
+  /** A job is running. */
+  running: boolean
+  totalCostUsd: number
+  /** Every generation of the edit: its versions and AI takes. */
+  generationIds: string[]
+  updatedAt: number
+}
+
+export interface EditVersion {
+  /** The generation id. */
+  id: string
+  number: number
+  parentId?: string
+  label: string
+  op: EditRecipe['op']
+  costUsd?: number
+  current: boolean
+  createdAt: number
+  generation: Generation
+  /** Sequence clips that use it (as a take). */
+  usedBy: { sequenceId: string; sequenceName: string; segmentId: string; clipNumber: number }[]
+}
+
+export interface EditJob {
+  id: string
+  op: EditOperation['op'] | 'design-voice'
+  label: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  baseId?: string
+  /** 0–1 */
+  fraction?: number
+  stepsDone: number
+  stepsTotal: number
+  /** Swedish, e.g. "del 2 av 3". */
+  currentStep?: string
+  /** USD sent so far. */
+  costUsd: number
+  quoteUsd?: number
+  /** Swedish. */
+  error?: string
+  takeId?: string
+  resultId?: string
+  canCancel: boolean
+  /**
+   * "Fortsätt": unsent or failed parts can be sent (paid again for those), or a picture operation's paid take can be
+   * put into the film again after its finish failed (free).
+   */
+  canResume: boolean
+  /** What "Fortsätt" costs: the priced parts (0 when nothing is sent again); undefined when no part has a price. */
+  resumePriceUsd?: number
+  /** A part without a price (a voice clone, or a part whose quote failed) is left out of resumePriceUsd. */
+  resumePartialPrice?: boolean
+  /** Swedish: why resumePriceUsd leaves a part out, when every such part is a voice clone. */
+  resumePriceNote?: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** Paid or added audio of an edit (Redigeringar/<namn>/Ljud/). */
+export interface EditMedia {
+  id: string
+  kind: 'voice' | 'speech' | 'music' | 'effect' | 'audio' | 'bake'
+  label: string
+  /** Absolute. */
+  path: string
+  durationSeconds?: number
+  model?: string
+  costUsd?: number
+  createdAt: number
+}
+
+export interface Edit extends EditSummary {
+  /** In creation order (v1 first). */
+  versions: EditVersion[]
+  /** Newest first. */
+  jobs: EditJob[]
+  media: EditMedia[]
+  /** The AI takes made for picture operations. */
+  takes: Generation[]
+  createdAt: number
+}
+
+/** What the editor's timeline draws for a version (editTimeline; free, cached). */
+export interface EditTimeline {
+  generationId: string
+  duration: number
+  fps: number
+  width: number
+  height: number
+  hasAudio: boolean
+  /** Absolute JPEG paths. */
+  filmstrip: { time: number; path: string }[]
+  /** 0–1 peaks. */
+  waveform: number[]
+  /** Klippgränser, seconds. */
+  cuts: number[]
+  cutsSource: 'export' | 'scenes' | 'none'
+  layers: { id: string; kind: AudioLayer['kind']; label: string; start: number; end: number; gainDb: number }[]
+  muted: { start: number; end: number; target: 'all' | 'voice' | 'background' }[]
+  transcript?: Transcript
+}
+
+export interface EditProgress {
+  editId?: string
+  /** Voice design: the character. */
+  assetId?: string
+  jobId?: string
+  /** 0–1 */
+  fraction?: number
+  /** Swedish. */
+  label: string
+  done?: boolean
+  error?: string
+}
+
+/** "Skapa röst med AI…": a new voice for a character from a description. */
+export interface VoiceDesignRequest {
+  assetId: string
+  description: string
+  sampleText: string
+  /** Default seed-audio-1-0. */
+  model?: string
+}
+
+/** Where a version goes: a new take of that clip, or a new clip in that sequence (after `afterSegmentId`). */
+export type SendTarget = { segmentId: string } | { sequenceId: string; afterSegmentId?: string }
+
+/** What an 'edit' or 'voice-design' approval request asks for. */
+export interface ApprovalEditRequest {
+  editId?: string
+  editName?: string
+  baseId?: string
+  baseNumber?: number
+  assetId?: string
+  assetName?: string
+  operation?: EditOperation
+  voiceDesign?: VoiceDesignRequest
+  /** Swedish one-liner. */
+  summary: string
+  /** Picture ops: the start and end frames (absolute). */
+  frames?: { start?: string; end?: string }
+  /** speak-lines: old → new text, at seconds. */
+  lines?: { old?: string; new: string; at: number }[]
+  /** change-voice on chosen lines (segmentIds): the transcript lines that get the new voice, at seconds. */
+  voiceLines?: { text: string; at: number }[]
+  steps?: { label: string; priceUsd?: number }[]
+  priceNote?: string
+  /** A part has no price (a voice clone, a quote that failed): the request's price is what the other parts cost. */
+  partialPrice?: boolean
+  /** The voice must be cloned and the user hasn't confirmed they may use it: the dialog asks first. */
+  needsCloneConsent?: { audioId: string; assetName: string }
+  /** Once approved: the job it started and the version it made. */
+  jobId?: string
+  resultId?: string
+}
+
 // ── Agent connection (MCP server for the user's own agents) ──────────────────
 
 /** An MCP client (e.g. an OpenClaw or Hermes Agent agent, or Claude Desktop) with an open session. */
@@ -838,9 +1485,10 @@ export interface ApprovalRequest {
   note?: string
   /**
    * generation: the Generate form. segment: one sequence clip. generate-all: every clip still missing a take.
-   * image: one still for a storyboard ("Skapa bild").
+   * image: one still for a storyboard ("Skapa bild"). edit: a paid operation in Redigera. voice-design: a new
+   * voice for a character ("Skapa röst med AI").
    */
-  kind: 'generation' | 'segment' | 'generate-all' | 'image'
+  kind: 'generation' | 'segment' | 'generate-all' | 'image' | 'edit' | 'voice-design'
   /**
    * What will be generated: the form for 'generation', the clip's settings for 'segment' (a clip continuing
    * from the previous one gets that clip's last frame as its start image when it is generated).
@@ -848,6 +1496,8 @@ export interface ApprovalRequest {
   params?: GenerationParams
   /** 'image': what will be made. */
   image?: ApprovalImageRequest
+  /** 'edit' and 'voice-design': what will be done. */
+  edit?: ApprovalEditRequest
   /** 'image', once approved: the still it made. */
   stillId?: string
   /** Approved, but something after the paid step didn't work out (Swedish), e.g. the clip was gone. */
@@ -951,6 +1601,8 @@ export interface AgentFormState {
   segmentId?: string
   /** The storyboard open in Storyboards, if any (view 'storyboards'). */
   storyboardId?: string
+  /** The edit open in Redigera, if any (view 'editor'). */
+  editId?: string
   /** The Generate form. */
   params: GenerationParams
   references: AgentFormReference[]
@@ -1015,16 +1667,18 @@ export interface AgentReorderReferencesArgs {
 
 /** open: brings a place in Studio to the front. */
 export interface AgentOpenArgs {
-  view: 'generate' | 'sequences' | 'storyboards'
+  view: 'generate' | 'sequences' | 'storyboards' | 'editor'
   sequenceId?: string
   segmentId?: string
   /** For 'storyboards': the storyboard to open. */
   storyboardId?: string
+  /** For 'editor': the edit to open (none: the list of edits). */
+  editId?: string
 }
 
 /** What the window shows after an open command. */
 export interface AgentOpenResult {
-  view: 'generate' | 'sequences' | 'storyboards'
+  view: 'generate' | 'sequences' | 'storyboards' | 'editor'
   sequenceId?: string
   sequenceName?: string
   /** The clip actually on screen (normally the one asked for). */
@@ -1032,6 +1686,9 @@ export interface AgentOpenResult {
   /** The storyboard on screen (view 'storyboards'). */
   storyboardId?: string
   storyboardName?: string
+  /** The edit on screen (view 'editor'). */
+  editId?: string
+  editName?: string
   /** Swedish, when the window couldn't show exactly what was asked for. */
   note?: string
 }
@@ -1057,7 +1714,14 @@ export interface StudioApi {
   acceptConsent(flow: string, version: string): Promise<void>
   /** Newest first, with the user's rating and the review count filled in. */
   listGenerations(): Promise<Generation[]>
-  deleteGeneration(id: string): Promise<void>
+  /**
+   * Deletes the generation and its files. From a take list (`from.segmentId`: a sequence clip or a storyboard
+   * transition), a film Redigera keeps (a version, an edit's original) is only taken off that clip instead, and so is
+   * one the list offered "Ta bort" for (`from.release`: it showed the take as kept by Redigera). Refused (Swedish) when
+   * Redigera's rules keep it: a running operation works on it, an edit started from it, a version Redigera wouldn't
+   * delete, or a stopped job that has already paid for parts builds on it.
+   */
+  deleteGeneration(id: string, from?: { segmentId: string; release?: boolean }): Promise<void>
   onGenerationUpdate(cb: (g: Generation) => void): () => void
   /** Fires with the id of a generation that was deleted (from any view), so every list can drop it. */
   onGenerationDelete(cb: (id: string) => void): () => void
@@ -1122,11 +1786,19 @@ export interface StudioApi {
   listSequences(): Promise<SequenceSummary[]>
   getSequence(id: string): Promise<Sequence>
   createSequence(name: string): Promise<Sequence>
-  updateSequence(id: string, patch: { name?: string; defaults?: Partial<GenerationParams> }): Promise<Sequence>
+  /** exportHeight: the "Exportformat" (480/720/1080, null = Automatiskt). */
+  updateSequence(
+    id: string,
+    patch: { name?: string; defaults?: Partial<GenerationParams>; exportHeight?: number | null }
+  ): Promise<Sequence>
   deleteSequence(id: string): Promise<void>
   addSegment(sequenceId: string, init?: SegmentInit): Promise<Sequence>
   updateSegment(segmentId: string, patch: SegmentPatch): Promise<Sequence>
-  deleteSegment(segmentId: string): Promise<Sequence>
+  /**
+   * `onlyIfUntouched`: deleted only when nothing has been put in it (no takes or one on its way, prompt, pictures,
+   * sounds, frame links or notes) – the empty first clip an import replaces, which may have been filled meanwhile.
+   */
+  deleteSegment(segmentId: string, opts?: { onlyIfUntouched?: boolean }): Promise<Sequence>
   moveSegment(segmentId: string, toIndex: number): Promise<Sequence>
   /** Queues a new take for the segment (extracting the previous segment's last frame if continuing). */
   generateSegment(segmentId: string): Promise<Generation>
@@ -1272,6 +1944,75 @@ export interface StudioApi {
   /** The renderer's side of the agent bridge: apply the command and answer with replyAgentCommand. */
   onAgentCommand(cb: (cmd: AgentCommand) => void): () => void
   replyAgentCommand(id: string, reply: AgentCommandReply): void
+
+  // Own clips (Egna klipp)
+  /** File dialog for video files (mp4, mov, m4v, webm, mkv); [] when cancelled. */
+  pickVideos(multiple: boolean): Promise<string[]>
+  /** Probes the files before importing (free; nothing is copied). */
+  inspectVideoFiles(paths: string[]): Promise<VideoFileInfo[]>
+  /**
+   * Copies the files into Egna klipp/<dag>/ (an APFS clone when possible), makes working copies where needed and
+   * adds them to the feed, a sequence (one new clip per file) or a clip (a selected take). User only.
+   */
+  importVideoFiles(paths: string[], target: ImportTarget): Promise<ImportResult>
+  /**
+   * "Avbryt" on a file's card (`path`): stops that file (or skips it when it hasn't started), the half-made file is
+   * removed and the other files go on. Without a path every running and queued import stops.
+   */
+  cancelImports(path?: string): Promise<void>
+  onImportProgress(cb: (p: ImportProgress) => void): () => void
+
+  // Redigera (edits and versions)
+  /** Newest first. */
+  listEdits(): Promise<EditSummary[]>
+  getEdit(id: string): Promise<Edit>
+  /** Free. A generation is used where it is as v1; an export is cloned into the edit's folder as v1. */
+  createEdit(source: { generationId: string } | { exportId: string }, name?: string): Promise<Edit>
+  /** Renames the edit and its folder. */
+  renameEdit(id: string, name: string): Promise<Edit>
+  /** User only. Versions in use elsewhere are kept; the rest goes to the Trash. Refused while a job runs. */
+  deleteEdit(id: string): Promise<void>
+  setCurrentVersion(editId: string, versionId: string): Promise<Edit>
+  /** User only. Refused for v1 and versions in use; its children move up to its parent. */
+  deleteVersion(versionId: string): Promise<Edit>
+  /** "Rensa versioner…" (user only): dryRun counts what would go to the Trash. */
+  pruneVersions(editId: string, dryRun: boolean): Promise<{ count: number; bytes: number }>
+  /** Filmstrip, waveform, cuts, layers and transcript of a version (free, cached). */
+  editTimeline(generationId: string): Promise<EditTimeline>
+  /** What the operation would do and cost (free); baseId defaults to the current version. */
+  planEditOperation(editId: string, op: EditOperation, baseId?: string): Promise<EditPlan>
+  /**
+   * Runs it (paid when the plan is). Refuses when the price rose above opts.expectedPriceUsd + $0.01. Rejects
+   * with "NEEDS_CONSENT:…" when Venice asks for consent.
+   */
+  runEditOperation(editId: string, op: EditOperation, opts?: EditRunOptions): Promise<EditRunResult>
+  /** "Avbryt": parts not yet sent are cancelled; parts already sent finish. */
+  cancelEditJob(jobId: string): Promise<void>
+  /**
+   * "Fortsätt": sends the unsent or failed parts again (paid again for those) at a fresh price. Refused (PRICE_CHANGED)
+   * when it rose above expectedPriceUsd + $0.01, or turned unknown or partial when `expectedPartial` was false.
+   */
+  resumeEditJob(jobId: string, expectedPriceUsd?: number, expectedPartial?: boolean): Promise<EditJob>
+  /** The version's transcript, inherited from ancestors with the same timing; null when there is none. */
+  getTranscript(generationId: string): Promise<Transcript | null>
+  updateTranscript(generationId: string, patch: { segmentId: string; text: string }[]): Promise<Transcript>
+  /** User only: a save dialog for the .srt; resolves with the path, or '' when cancelled. */
+  saveSubtitles(generationId: string): Promise<string>
+  /** User only: copies audio files into the edit's Ljud/. */
+  addEditAudio(editId: string, paths: string[]): Promise<EditMedia[]>
+  sendEditToSequence(versionId: string, target: SendTarget): Promise<{ sequenceId: string; segmentId: string }>
+  /** Venice's speech, music, effect, transcription and voice models (free; cached 10 minutes). */
+  listAudioModels(force?: boolean): Promise<AudioCatalog>
+  /** Whether this Mac can separate voice and background. */
+  separationStatus(): Promise<SeparationStatus>
+  planVoiceDesign(req: VoiceDesignRequest): Promise<EditPlan>
+  /** Paid: the result becomes a new Röst clip of the character. */
+  designVoice(req: VoiceDesignRequest, expectedPriceUsd?: number): Promise<EditJob>
+  /** "Får klonas för nya repliker" (user only). */
+  setVoiceCloneConsent(audioId: string, consent: boolean): Promise<Asset>
+  /** Fires with the edit id whenever an edit, its versions, jobs or media change. */
+  onEditChange(cb: (editId: string) => void): () => void
+  onEditProgress(cb: (p: EditProgress) => void): () => void
 
   // Files
   revealFile(path: string): Promise<void>

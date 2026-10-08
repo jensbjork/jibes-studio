@@ -14,6 +14,7 @@ import {
   pickOption,
   supportsEndImage
 } from '@shared/models'
+import { generationTitle } from '@shared/generation-label'
 import { audioToken, findAudioTokens, findImageTokens, imageToken } from '@shared/prompt-refs'
 import { reorderReferences } from '@shared/prompt-remap'
 import type {
@@ -214,16 +215,26 @@ export function clipInfo(
     selected_take: take
       ? {
           generation_id: take.id,
+          source: take.source ?? 'generated',
+          ...(ownTake(take) ? { title: generationTitle(take) } : {}),
           status: take.status,
           error: take.error,
           video_seconds: take.videoDuration,
           ...(take.fileMissing ? { file_missing: true } : {})
         }
       : null,
+    // The selected take is the user's own film (or a version made in Redigera), not a generation of the clip's
+    // prompt: the clip needs no prompt to be in the cut, and the next clip can still continue from its last frame.
+    ...(take && ownTake(take) ? { own_clip: true } : {}),
     take_count: segment.takes.length,
     ...(hasPendingTake(segment) ? { rendering: true } : {}),
     ...(trimmed ? { trim_start: segment.trimStart, trim_end: segment.trimEnd } : {})
   }
+}
+
+/** A take that Venice didn't make from the clip: an import (Egna klipp) or a version from Redigera. */
+export function ownTake(take: Generation): boolean {
+  return !!take.source && take.source !== 'generated'
 }
 
 /** Seconds of the cut: the selected finished takes after trims. */
@@ -246,6 +257,8 @@ export function sequenceInfo(sequence: Sequence, assets: AssetIndex, stills: Sti
     clip_count: sequence.segments.length,
     cut_seconds: cutSeconds(sequence),
     clips_without_finished_take: missing,
+    // "Exportformat" (set by the user only): the exported film's height, or null = the first clip's own size.
+    export_height: sequence.exportHeight ?? null,
     generate_all_running: sequence.running,
     ...(sequence.runError ? { last_run_error: readableRunError(sequence.runError) } : {}),
     still_count: stills.stills.filter((s) => s.sequenceId === sequence.id).length,
@@ -718,6 +731,54 @@ const clipFields = {
   end_image: slotInput.describe(`The clip's end image (last frame): "next" (the next clip's first frame),${SLOT_HELP}`)
 }
 
+/**
+ * add_segment with from_generation_id: a clip whose selected take is a finished video that already exists – the
+ * user's own film, a version from Redigera, or another generation – the way "Lägg i sekvens" makes one. The
+ * sequence service seeds its settings like a new clip's (never from an import's empty params), so only the notes
+ * go along; everything else is changed afterwards with update_segment.
+ */
+async function addClipFrom(
+  sequence: Sequence,
+  previous: Segment | undefined,
+  generationId: string,
+  notes: string | undefined,
+  input: Record<string, unknown>,
+  assets: AssetIndex,
+  stills: StillIndex
+): Promise<ToolOutput> {
+  const extra = Object.entries(input).filter(([, v]) => v !== undefined).map(([k]) => k)
+  if (extra.length) {
+    throw new Error(
+      `Med from_generation_id får klippet sin video därifrån, så ${extra.join(', ')} kan inte anges samtidigt. Lägg till klippet först och ändra det sedan med update_segment.`
+    )
+  }
+  const take = db.getGeneration(generationId)
+  if (!take) throw new Error(`Genereringen ${generationId} finns inte (längre). list_generations visar vilka som finns.`)
+  if (take.status !== 'completed' || !take.filePath) {
+    throw new Error('Bara en färdig video kan bli ett klipp i sekvensen.')
+  }
+  if (take.fileMissing || !existsSync(take.filePath)) {
+    throw new Error('Videofilen finns inte längre på disken (flyttad eller raderad i Finder?).')
+  }
+  const before = new Set(sequence.segments.map((s) => s.id))
+  const updated = await callService<Sequence>('segments:add', sequence.id, {
+    afterSegmentId: previous?.id,
+    fromGenerationId: take.id,
+    notes: notes ?? ''
+  })
+  const index = updated.segments.findIndex((s) => !before.has(s.id))
+  const title = generationTitle(take, 50)
+  return {
+    data: {
+      ...(index >= 0 ? clipInfo(updated, index, assets, stills) : {}),
+      clip_count: updated.segments.length,
+      // `notes` is the clip's own "Vad händer" text here; this says what was done.
+      note: `${ownTake(take) ? 'The video' : 'The generation'} ${q(title)} is the clip's selected take. The next clip can continue from its last frame (continue_from_previous).`
+    },
+    summary: `lade till ${q(title)} som klipp ${index + 1} i ${q(updated.name)}`
+  }
+}
+
 export function registerSequenceTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
     server,
@@ -757,7 +818,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Get sequence',
       description:
-        "One sequence with its clips in order (for a storyboard use get_storyboard). Each clip has its notes (\"Vad händer\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error). With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
+        "One sequence with its clips in order (for a storyboard use get_storyboard). Each clip has its notes (\"Vad händer\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error, source; own_clip: true when it is the user's own film or a version from Redigera rather than a generation of the clip's prompt). The sequence's export_height is its Exportformat (null = the first clip's own size; only the user sets it). With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
       input: {
         sequence_id: z.string(),
         include_thumbnails: z.boolean().default(true)
@@ -812,16 +873,23 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Add clip to sequence',
       description:
-        "Adds a clip (a shot) to a sequence, at the end or after after_segment_id, with its notes (\"Vad händer\") and prompt. Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false. A continuing clip starts from the previous clip's last frame: it is image-to-video and takes no references or tokens – describe what happens next. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The descriptions of its referenced assets are appended to its prompt when it is generated (include_descriptions / excluded_description_asset_ids choose which; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
+        "Adds a clip (a shot) to a sequence, at the end or after after_segment_id, with its notes (\"Vad händer\") and prompt – or, with from_generation_id, a clip whose selected take is a finished video that already exists (the user's own film, a version from Redigera). Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false. A continuing clip starts from the previous clip's last frame: it is image-to-video and takes no references or tokens – describe what happens next. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The descriptions of its referenced assets are appended to its prompt when it is generated (include_descriptions / excluded_description_asset_ids choose which; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
       input: {
         sequence_id: z.string(),
         after_segment_id: z.string().optional().describe('Insert after this clip; at the end when left out.'),
-        ...clipFields
+        from_generation_id: z
+          .string()
+          .optional()
+          .describe(
+            "Make the clip from an existing finished video instead – the user's own clip (list_generations source \"import\"), a version from Redigera (source \"edit\") or any finished generation – as its selected take. Only notes may go along; the clip's settings start like a new clip's (change them later with update_segment), and it doesn't continue from the previous clip."
+          ),
+        ...clipFields,
+        prompt: clipFields.prompt.optional().describe(`${clipFields.prompt.description} Required unless from_generation_id is given.`)
       },
       annotations: WRITE,
       summary: () => 'lade till ett klipp'
     },
-    async ({ sequence_id, after_segment_id, notes, ...input }) => {
+    async ({ sequence_id, after_segment_id, from_generation_id, notes, ...input }) => {
       const sequence = await loadSequence(sequence_id)
       assertNotRunning(sequence)
       const [assets, stills] = await Promise.all([AssetIndex.load(), StillIndex.load()])
@@ -831,6 +899,8 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       if (after_segment_id && afterIndex < 0) throw new Error('after_segment_id är inget klipp i den här sekvensen.')
       const previous = afterIndex >= 0 ? sequence.segments[afterIndex] : undefined
       const clipNumber = afterIndex + 2
+      if (from_generation_id) return addClipFrom(sequence, previous, from_generation_id, notes, input, assets, stills)
+      if (input.prompt === undefined) throw new Error('Ange prompt (vad som händer i klippet), eller from_generation_id för en färdig video.')
       const base: GenerationParams = previous
         ? { ...previous.params, prompt: '', startImage: undefined, endImage: undefined }
         : { ...DEFAULT_PARAMS, ...sequence.defaults, prompt: '' }

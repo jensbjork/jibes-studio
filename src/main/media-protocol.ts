@@ -11,8 +11,11 @@ export const MEDIA_SCHEME = 'media'
 
 const MIME: Record<string, string> = {
   '.mp4': 'video/mp4',
+  // Own clips keep the container they came in (a working copy is made only where Chromium can't play the file).
+  '.m4v': 'video/mp4',
   '.mov': 'video/quicktime',
   '.webm': 'video/webm',
+  '.mkv': 'video/x-matroska',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',

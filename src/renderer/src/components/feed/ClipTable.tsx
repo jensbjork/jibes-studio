@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { generationTitle, sourceBadge } from '@shared/generation-label'
 import type { Generation, VideoModel } from '@shared/types'
 import { formatUsd, mediaUrl } from '../../lib/media'
 import AssetAvatar from '../assets/AssetAvatar'
@@ -51,7 +52,7 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { id: 'thumb', label: '', width: '76px' },
-  { id: 'prompt', label: 'Prompt', width: 'minmax(160px, 1fr)' },
+  { id: 'prompt', label: 'Prompt / namn', width: 'minmax(160px, 1fr)' },
   { id: 'assets', label: 'Tillgångar', width: '88px', minTable: 720 },
   { id: 'model', label: 'Modell', width: '136px', minTable: 980 },
   { id: 'length', label: 'Längd', width: '60px', minTable: 640, align: 'right', sort: 'length' },
@@ -365,10 +366,20 @@ function Cell({
       return <RowThumb g={g} />
     case 'prompt': {
       const others = g.agentReviewCount
+      const badge = sourceBadge(g)
+      const title = generationTitle(g)
       return (
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className={`min-w-0 truncate ${failed ? 'text-muted' : ''}`} title={g.prompt}>
-            {g.prompt || <span className="text-muted">Ingen prompt</span>}
+          {badge && (
+            <span
+              title={badge.description}
+              className="shrink-0 rounded bg-raised px-1 py-px text-[10px] text-muted"
+            >
+              {badge.label}
+            </span>
+          )}
+          <span className={`min-w-0 truncate ${failed ? 'text-muted' : ''}`} title={title}>
+            {g.prompt || g.title ? title : <span className="text-muted">Ingen prompt</span>}
           </span>
           {others > 0 && (
             <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-muted" title={reviewCountText(others)}>
@@ -383,8 +394,8 @@ function Cell({
       return <AssetStack g={g} index={index} />
     case 'model':
       return (
-        <span className="truncate text-[12px] text-muted" title={g.model}>
-          {modelName}
+        <span className="truncate text-[12px] text-muted" title={g.model || undefined}>
+          {g.model ? modelName : g.source === 'edit' ? 'Redigerad film' : 'Eget klipp'}
         </span>
       )
     case 'length':

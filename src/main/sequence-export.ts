@@ -4,7 +4,7 @@
 import { join } from 'node:path'
 import { endsOnFirstFrameOf, startsOnLastFrameOf, type SeamTake } from '@shared/seams'
 import type { Generation } from '@shared/types'
-import { probe, type ConcatClip, type ProbeResult } from './ffmpeg'
+import { frameSpan, probe, type ConcatClip, type ProbeResult } from './ffmpeg'
 import { dayStamp, timeStamp } from './paths'
 import { firstFreeName, folderBaseName, pathTaken, type SegmentRow } from './sequence-store'
 
@@ -121,6 +121,39 @@ export async function buildConcatClips(
     clips.push({ path: takes[i].filePath, start, end })
   }
   return clips
+}
+
+/**
+ * Where the clips meet in the film concatClips renders from `clips` (seconds; the start of every clip after the
+ * first), recorded with the export so Redigera knows the film's Klippgränser exactly rather than guessing them from
+ * scene changes. Worked out the way concatClips renders: each clip keeps the frames `trim=start:end` keeps on its own
+ * frame grid (frameSpan), which is exactly how long its sound is; its picture is then made into round(length · fps)
+ * frames on the film's grid (the fps filter), so a clip of another frame rate (an own clip at 29.97 or 25 among 24 fps
+ * takes) can come out up to half a frame longer or shorter than its sound. concat starts the next clip after the
+ * longer of the two, and its first frame lands on the film's frame nearest to that. Rounded to the millisecond.
+ * Undefined when a clip can't be probed (the export itself then fails on it anyway).
+ */
+export async function exportCuts(clips: readonly ConcatClip[]): Promise<number[] | undefined> {
+  if (!clips.length) return []
+  let probes: ProbeResult[]
+  try {
+    probes = await Promise.all(clips.map((c) => probe(c.path)))
+  } catch {
+    return undefined
+  }
+  const outFps = Math.round(probes[0].fps) || FALLBACK_FPS
+  const cuts: number[] = []
+  let at = 0
+  clips.forEach((clip, i) => {
+    const p = probes[i]
+    if (i > 0) cuts.push(Math.round((Math.round(at * outFps) / outFps) * 1000) / 1000)
+    const start = Math.min(p.duration, Math.max(0, clip.start))
+    const end = Math.min(p.duration, Math.max(start, clip.end))
+    const span = frameSpan(start, end, p.fps > 0 ? p.fps : outFps, p.duration)
+    const frames = Math.max(1, Math.round(span.length * outFps))
+    at += Math.max(frames / outFps, span.length)
+  })
+  return cuts
 }
 
 /** Two picture paths name the same file (letter case and Unicode form ignored, like the disk). */

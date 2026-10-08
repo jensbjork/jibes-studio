@@ -4,7 +4,9 @@
 // characters, environments, outfits and poses (assets) in Karaktärer/, Miljöer/, Kläder/ and Poser/, one folder
 // each holding the asset's photos and audio clips; a sequence's takes, stills and exports in its folder in
 // Sekvenser/ (Tagningar/, Storyboard/ and the folder itself), and a storyboard's in its folder in Storyboards/
-// (Övergångar/, Bilder/ and the folder itself).
+// (Övergångar/, Bilder/ and the folder itself); the user's own films in Egna klipp/<day>/, and an edit's versions,
+// AI takes and audio in its folder in Redigeringar/ (the folder itself, Tagningar/ and Ljud/). Where a generation's
+// file belongs is decided by its row (the file home rule, jobs.videoHome).
 
 import { randomUUID } from 'node:crypto'
 import {
@@ -35,6 +37,7 @@ import type {
 } from '@shared/types'
 import * as db from './db'
 import { removeLeftoverPartialFiles } from './ffmpeg'
+import { originalHome, videoHome } from './jobs'
 import { assetFolderPath } from './library'
 import {
   APP_DATA,
@@ -45,6 +48,7 @@ import {
   DB_FILE_NAME,
   dayStamp,
   dbFile,
+  EDIT_FOLDERS,
   FOLDERS,
   folderRecordedInDb,
   fromStoredPath,
@@ -58,13 +62,11 @@ import {
   libraryRoot,
   moveFileInto,
   movePath,
-  promptExcerpt,
   renameLibraryFolder,
   safeName,
   sequenceKindOf,
   setActiveRoot,
   setRootLostHandler,
-  timeStamp,
   toStoredPath,
   uniqueName
 } from './paths'
@@ -89,9 +91,15 @@ const DESCRIPTION_FILE = 'Beskrivning.txt'
 const UNNAMED_ASSET = 'Namnlös'
 const UNNAMED_SEQUENCE = 'Namnlös sekvens'
 const UNNAMED_STORYBOARD = 'Namnlös storyboard'
+const UNNAMED_EDIT = 'Namnlös redigering'
 /** Finder's own files don't make a folder "non-empty". */
 const IGNORABLE = new Set(['.DS_Store', '.localized'])
 const DAY_FOLDER = /^\d{4}-\d{2}-\d{2}$/
+/**
+ * The library's visible folders: created when a library is opened (ensureStructure), taken along by 'move'
+ * (LIBRARY_FOLDERS), and the only places tracked files may lie in for a move (strandedFiles). A folder left out
+ * here would make a library using it impossible to move.
+ */
 const VISIBLE_FOLDERS = [
   FOLDERS.characters,
   FOLDERS.environments,
@@ -100,7 +108,9 @@ const VISIBLE_FOLDERS = [
   FOLDERS.references,
   FOLDERS.generations,
   FOLDERS.sequences,
-  FOLDERS.storyboards
+  FOLDERS.storyboards,
+  FOLDERS.ownClips,
+  FOLDERS.edits
 ]
 /** Everything 'move' takes along. */
 const LIBRARY_FOLDERS = [...VISIBLE_FOLDERS, FOLDERS.appData]
@@ -516,12 +526,15 @@ const ADDED_FOLDERS: readonly { name: string; since: number; what: string }[] = 
   { name: FOLDERS.environments, since: db.ASSETS_SCHEMA_VERSION, what: 'miljöer' },
   { name: FOLDERS.outfits, since: db.ASSETS_SCHEMA_VERSION, what: 'kläder' },
   { name: FOLDERS.poses, since: db.POSES_SCHEMA_VERSION, what: 'poser' },
-  { name: FOLDERS.storyboards, since: db.STORYBOARDS_SCHEMA_VERSION, what: 'storyboards' }
+  { name: FOLDERS.storyboards, since: db.STORYBOARDS_SCHEMA_VERSION, what: 'storyboards' },
+  { name: FOLDERS.ownClips, since: db.EDITS_SCHEMA_VERSION, what: 'egna klipp' },
+  { name: FOLDERS.edits, since: db.EDITS_SCHEMA_VERSION, what: 'redigeringar' }
 ]
 
 /**
  * A library from before one of those folders whose base folder already holds a folder of the user's own by
- * that name, e.g. Miljöer, Kläder, Poser or Storyboards (the setup screen promised that files already there are
+ * that name, e.g. Miljöer, Kläder, Poser, Storyboards, Egna klipp or Redigeringar (the setup screen promised that
+ * files already there are
  * left alone): opening it would make it the library's – its paths stored relative, "Flytta" taking it along,
  * submits using its files in place instead of copying them into Referensbilder. Refused, before anything
  * changes, until they have renamed it.
@@ -541,7 +554,7 @@ function refuseOwnAssetFolders(root: string): void {
   )
 }
 
-/** The visible folders and the hidden app data folders. */
+/** The visible folders and the hidden app data folders (every APP_DATA folder; only tmp is cleared at open). */
 function ensureStructure(root: string, report?: ReorganizeReport): void {
   for (const name of VISIBLE_FOLDERS) ensureDirCounted(join(root, name), report)
   for (const name of Object.values(APP_DATA)) ensureDirCounted(join(root, FOLDERS.appData, name))
@@ -561,13 +574,32 @@ function clearTmp(root: string): void {
 /**
  * Half-written exports (written next to the finished film), posters, frames and stills left by a crash or a
  * force quit. Takes are never written in place (they arrive through .studio/tmp), so Tagningar is left alone.
+ * Imports write their working copies next to the original in Egna klipp/<day>/, and the edit service renders
+ * versions, audio and proxies in place in Redigeringar/<edit>/ (and its Ljud/ and Underlag/), so those are
+ * scanned too, as are the stem and timeline caches.
  */
 function removePartials(root: string): void {
   const dirs = [
     join(root, FOLDERS.appData, APP_DATA.thumbs),
     join(root, FOLDERS.appData, APP_DATA.frames),
+    join(root, FOLDERS.appData, APP_DATA.stems),
+    join(root, FOLDERS.appData, APP_DATA.timeline),
     ...Object.values(LEGACY).map((name) => join(root, name))
   ]
+  const ownClips = join(root, FOLDERS.ownClips)
+  for (const name of listEntries(ownClips) ?? []) {
+    const dir = join(ownClips, name)
+    if (isDir(dir)) dirs.push(dir)
+  }
+  const edits = join(root, FOLDERS.edits)
+  for (const name of listEntries(edits) ?? []) {
+    const dir = join(edits, name)
+    if (!isDir(dir)) continue
+    dirs.push(dir)
+    for (const sub of [EDIT_FOLDERS.audio, EDIT_FOLDERS.inputs, EDIT_FOLDERS.takes]) {
+      if (isDir(join(dir, sub))) dirs.push(join(dir, sub))
+    }
+  }
   // Sequences' and storyboards' folders hold their exports, and their Storyboard/ and Bilder/ their stills.
   for (const layout of Object.values(KIND_FOLDERS)) {
     const parent = join(root, layout.parent)
@@ -936,15 +968,17 @@ async function moveLibraryFolders(source: string, target: string): Promise<Moved
 }
 
 /**
- * Every stored path to a file the database tracks itself: videos, posters, asset photos and audio, stills,
- * storyboard board images, exports.
+ * Every stored path to a file the database tracks itself: videos, imports' originals, posters, asset photos and
+ * audio, edit media, stills, storyboard board images, exports.
  */
 function trackedFilePaths(): string[] {
   return db
     .getDb()
     .prepare(
       `SELECT file_path FROM generations WHERE file_path IS NOT NULL
+       UNION ALL SELECT original_path FROM generations WHERE original_path IS NOT NULL
        UNION ALL SELECT thumb_path FROM generations WHERE thumb_path IS NOT NULL
+       UNION ALL SELECT file_path FROM edit_media
        UNION ALL SELECT file_path FROM asset_images
        UNION ALL SELECT file_path FROM asset_audio
        UNION ALL SELECT file_path FROM stills
@@ -1297,15 +1331,19 @@ async function relocate(
 
 /**
  * What owns a folder: an asset (in the folder of its kind: Karaktärer, Miljöer, Kläder or Poser), a sequence (in
- * Sekvenser) or a storyboard (in Storyboards). Folder names only have to be unique among owners that share a parent
- * folder.
+ * Sekvenser), a storyboard (in Storyboards) or an edit (in Redigeringar). Folder names only have to be unique among
+ * owners that share a parent folder.
  */
-type FolderOwner = { table: 'assets'; kind: AssetKind } | { table: 'sequences'; kind: SequenceKind }
+type FolderOwner =
+  | { table: 'assets'; kind: AssetKind }
+  | { table: 'sequences'; kind: SequenceKind }
+  | { table: 'edits' }
 
 const sequenceOwner = (kind: unknown): FolderOwner => ({ table: 'sequences', kind: sequenceKindOf(kind) })
 
 /** The folder that holds the owners' own folders. */
 function ownerParent(owner: FolderOwner): string {
+  if (owner.table === 'edits') return join(libraryRoot(), FOLDERS.edits)
   return join(libraryRoot(), owner.table === 'assets' ? ASSET_FOLDERS[owner.kind] : KIND_FOLDERS[owner.kind].parent)
 }
 
@@ -1327,17 +1365,19 @@ function followsName(folder: string, desired: string): boolean {
 function claimedFolders(owner: FolderOwner, selfId: string): Set<string> {
   const conn = db.getDb()
   const names =
-    owner.table === 'assets'
-      ? conn
-          .prepare('SELECT folder FROM assets WHERE kind = ? AND folder IS NOT NULL AND id != ?')
-          .pluck()
-          .all(owner.kind, selfId)
-      : (conn.prepare('SELECT folder, kind FROM sequences WHERE folder IS NOT NULL AND id != ?').all(selfId) as {
-          folder: string
-          kind: string
-        }[])
-          .filter((r) => sequenceKindOf(r.kind) === owner.kind)
-          .map((r) => r.folder)
+    owner.table === 'edits'
+      ? conn.prepare('SELECT folder FROM edits WHERE folder IS NOT NULL AND id != ?').pluck().all(selfId)
+      : owner.table === 'assets'
+        ? conn
+            .prepare('SELECT folder FROM assets WHERE kind = ? AND folder IS NOT NULL AND id != ?')
+            .pluck()
+            .all(owner.kind, selfId)
+        : (conn.prepare('SELECT folder, kind FROM sequences WHERE folder IS NOT NULL AND id != ?').all(selfId) as {
+            folder: string
+            kind: string
+          }[])
+            .filter((r) => sequenceKindOf(r.kind) === owner.kind)
+            .map((r) => r.folder)
   return new Set((names as string[]).map(lower))
 }
 
@@ -1364,7 +1404,13 @@ async function ensureEntityFolder(owner: FolderOwner, row: EntityRow, report: Re
   const parent = ownerParent(owner)
   ensureDirCounted(parent, report)
   const fallback =
-    owner.table === 'assets' ? UNNAMED_ASSET : owner.kind === 'storyboard' ? UNNAMED_STORYBOARD : UNNAMED_SEQUENCE
+    owner.table === 'edits'
+      ? UNNAMED_EDIT
+      : owner.table === 'assets'
+        ? UNNAMED_ASSET
+        : owner.kind === 'storyboard'
+          ? UNNAMED_STORYBOARD
+          : UNNAMED_SEQUENCE
   const desired = safeName(row.name, { fallback })
   const record = (folder: string) => (): void => {
     conn.prepare(`UPDATE ${owner.table} SET folder = ? WHERE id = ?`).run(folder, row.id)
@@ -1472,39 +1518,30 @@ async function tidyAsset(id: string, report: ReorganizeReport): Promise<string |
 }
 
 /**
- * Takes (into Tagningar, a transition's into its storyboard's Övergångar, or back to Genereringar when free) and
- * posters; `only` limits it to some ids.
+ * Every file of the generations to its home by the file home rule (jobs.videoHome): Venice's takes into Tagningar
+ * (a transition's into its storyboard's Övergångar) or back to Genereringar when free; the user's own clips into
+ * Egna klipp/<day>/ (the untouched original next to its working copy), even when they are takes; edit versions
+ * and AI takes made in Redigera into the edit's folder (and its Tagningar). Imports and versions are never named
+ * after an empty prompt or moved into Tagningar. Then posters; `only` limits it to some ids.
  */
 async function tidyGenerations(report: ReorganizeReport, only?: Set<string>): Promise<void> {
   const conn = db.getDb()
   const root = libraryRoot()
-  // Looked up per generation, not once up front: folder names must be the ones current at each move.
-  const folderOfSegment = conn.prepare(
-    'SELECT q.folder, q.kind FROM segments s JOIN sequences q ON q.id = s.sequence_id WHERE s.id = ?'
-  )
   const ids = conn.prepare('SELECT id FROM generations ORDER BY created_at').pluck().all() as string[]
   const stillTracked = (id: string) => (): boolean => !!db.getGeneration(id)
 
   for (const id of ids) {
     if (only && !only.has(id)) continue
-    // Re-read: an earlier move may have rewritten this row's paths too.
-    const g = db.getGeneration(id)
+    // Re-read: an earlier move may have rewritten this row's paths too. Folder names are looked up per
+    // generation (in videoHome), not once up front: they must be the ones current at each move.
+    let g = db.getGeneration(id)
     if (!g) continue
     if (g.filePath && isInsideRoot(g.filePath)) {
       if (!isFile(g.filePath)) {
         if (g.status === 'completed') report.missing++
       } else {
         try {
-          const created = new Date(g.createdAt)
-          const excerpt = promptExcerpt(g.prompt)
-          const owner = g.segmentId
-            ? (folderOfSegment.get(g.segmentId) as { folder: string | null; kind: string } | undefined)
-            : undefined
-          const layout = KIND_FOLDERS[sequenceKindOf(owner?.kind)]
-          const folder = owner?.folder
-          const [dir, base] = isPlainName(folder)
-            ? [join(root, layout.parent, folder, layout.takes), `${dayStamp(created)} ${timeStamp(created)} ${excerpt}`]
-            : [join(root, FOLDERS.generations, dayStamp(created)), `${timeStamp(created)} ${excerpt}`]
+          const { dir, base } = videoHome(g)
           if (dirname(g.filePath) !== dir) ensureDirCounted(dir, report)
           await relocate(g.filePath, dir, report, { base, stillTracked: stillTracked(g.id) })
         } catch (err) {
@@ -1512,6 +1549,24 @@ async function tidyGenerations(report: ReorganizeReport, only?: Set<string>): Pr
         }
       }
     }
+    // An import's untouched original (its file is then a working copy) lives next to the working copy.
+    g = db.getGeneration(id)
+    if (g?.originalPath && isInsideRoot(g.originalPath)) {
+      if (!isFile(g.originalPath)) {
+        report.missing++
+      } else {
+        try {
+          const home = originalHome(g)
+          if (home) {
+            if (dirname(g.originalPath) !== home.dir) ensureDirCounted(home.dir, report)
+            await relocate(g.originalPath, home.dir, report, { base: home.base, stillTracked: stillTracked(g.id) })
+          }
+        } catch (err) {
+          report.errors.push(`${basename(g.originalPath)}: ${message(err)}`)
+        }
+      }
+    }
+    if (!g) continue
     if (g.thumbPath && isInsideRoot(g.thumbPath) && isFile(g.thumbPath)) {
       try {
         const dir = join(root, FOLDERS.appData, APP_DATA.thumbs)
@@ -1520,6 +1575,42 @@ async function tidyGenerations(report: ReorganizeReport, only?: Set<string>): Pr
       } catch (err) {
         report.errors.push(`${basename(g.thumbPath)}: ${message(err)}`)
       }
+    }
+  }
+}
+
+/**
+ * Each edit's audio (converted voices, spoken lines, music, effects, added files, rendered beds) into its Ljud/
+ * folder, keeping their names; `editId` limits it to one edit's.
+ */
+async function tidyEditMedia(report: ReorganizeReport, editId?: string): Promise<void> {
+  const conn = db.getDb()
+  const rows = conn
+    .prepare(
+      `SELECT m.id, e.folder FROM edit_media m JOIN edits e ON e.id = m.edit_id
+       WHERE ? IS NULL OR m.edit_id = ? ORDER BY m.created_at`
+    )
+    .all(editId ?? null, editId ?? null) as { id: string; folder: string | null }[]
+  const mediaExists = conn.prepare('SELECT 1 FROM edit_media WHERE id = ?')
+  for (const r of rows) {
+    // Re-read: an earlier move may have rewritten this row's path.
+    const stored = conn.prepare('SELECT file_path FROM edit_media WHERE id = ?').pluck().get(r.id) as
+      | string
+      | undefined
+    if (!stored) continue
+    const abs = fromStoredPath(stored)
+    if (!isInsideRoot(abs)) continue
+    if (!isFile(abs)) {
+      report.missing++
+      continue
+    }
+    if (!isPlainName(r.folder)) continue
+    try {
+      const dir = join(libraryRoot(), FOLDERS.edits, r.folder, EDIT_FOLDERS.audio)
+      if (dirname(abs) !== dir) ensureDirCounted(dir, report)
+      await relocate(abs, dir, report, { stillTracked: () => !!mediaExists.get(r.id) })
+    } catch (err) {
+      report.errors.push(`${basename(abs)}: ${message(err)}`)
     }
   }
 }
@@ -1647,14 +1738,24 @@ async function reorganizeTracked(report: ReorganizeReport): Promise<void> {
       report.errors.push(`${storyboard ? 'Storyboarden' : 'Sekvensen'} ”${r.name}”: ${message(err)}`)
     }
   }
+  // Edits get their folders before their versions, takes and audio are put in them.
+  const edits = conn.prepare('SELECT id, name, folder FROM edits ORDER BY created_at').all() as EntityRow[]
+  for (const r of edits) {
+    try {
+      await ensureEntityFolder({ table: 'edits' }, r, report)
+    } catch (err) {
+      report.errors.push(`Redigeringen ”${r.name}”: ${message(err)}`)
+    }
+  }
   await tidyGenerations(report)
+  await tidyEditMedia(report)
   await tidyStills(report)
   await tidyExports(report)
 }
 
 /** Day folders that moves have emptied, and phase-2 folders with nothing left in them. */
 async function removeEmptyFolders(root: string): Promise<void> {
-  for (const parent of [FOLDERS.generations, FOLDERS.references]) {
+  for (const parent of [FOLDERS.generations, FOLDERS.references, FOLDERS.ownClips]) {
     const dir = join(root, parent)
     for (const name of listEntries(dir) ?? []) {
       if (DAY_FOLDER.test(name)) await removeIfEmpty(join(dir, name))
@@ -1730,7 +1831,9 @@ const REVEAL_FOLDERS: Readonly<Record<Exclude<LibraryFolderTarget, 'root'>, stri
   references: FOLDERS.references,
   generations: FOLDERS.generations,
   sequences: FOLDERS.sequences,
-  storyboards: FOLDERS.storyboards
+  storyboards: FOLDERS.storyboards,
+  ownClips: FOLDERS.ownClips,
+  edits: FOLDERS.edits
 }
 
 const ASSET_TARGETS: ReadonlySet<LibraryFolderTarget> = new Set<LibraryFolderTarget>([
@@ -1751,8 +1854,25 @@ function isAssetId(id: string): boolean {
 }
 
 /**
+ * An edit's folder (Redigeringar/<folder>); one without a folder gets one now, unless something is running (its
+ * files would move under a job), in which case Redigeringar opens.
+ */
+async function editFolderPath(id: string): Promise<string> {
+  const row = db.getDb().prepare('SELECT id, name, folder FROM edits WHERE id = ?').get(id) as EntityRow | undefined
+  if (!row) throw new Error('Redigeringen finns inte längre.')
+  const parent = join(libraryRoot(), FOLDERS.edits)
+  if (isPlainName(row.folder)) return join(parent, row.folder)
+  if (operation || deps.busy()) return parent
+  const report = newReport()
+  const folder = await exclusive(() => ensureEntityFolder({ table: 'edits' }, row, report))
+  if (report.errors.length) console.warn(`Giving edit ${id} a folder:`, report.errors)
+  return join(parent, folder)
+}
+
+/**
  * Opens a library folder in Finder, creating it if needed. With an id: an asset's folder whatever the target
- * (a character, environment, outfit or pose), a sequence's folder for 'sequences', a storyboard's for 'storyboards'.
+ * (a character, environment, outfit or pose), a sequence's folder for 'sequences', a storyboard's for 'storyboards',
+ * an edit's for 'edits'.
  */
 export async function revealLibraryFolder(target: LibraryFolderTarget, id?: string): Promise<void> {
   if (!isRevealTarget(target)) throw new Error('Okänd mapp.')
@@ -1764,6 +1884,8 @@ export async function revealLibraryFolder(target: LibraryFolderTarget, id?: stri
     dir = await assetFolderPath(entityId)
   } else if (entityId && (target === 'sequences' || target === 'storyboards')) {
     dir = await sequenceFolderPath(entityId, target === 'storyboards' ? 'storyboard' : 'sequence')
+  } else if (entityId && target === 'edits') {
+    dir = await editFolderPath(entityId)
   } else {
     dir = target === 'root' ? root : join(root, REVEAL_FOLDERS[target])
   }
@@ -1785,14 +1907,15 @@ function reloadWindows(): void {
   }, 300)
 }
 
-/** Stored file and poster path of every generation, to tell which ones a clean-up moved. */
+/** Stored file, original and poster path of every generation, to tell which ones a clean-up moved. */
 function generationPaths(): Map<string, string> {
-  const rows = db.getDb().prepare('SELECT id, file_path, thumb_path FROM generations').all() as {
+  const rows = db.getDb().prepare('SELECT id, file_path, thumb_path, original_path FROM generations').all() as {
     id: string
     file_path: string | null
     thumb_path: string | null
+    original_path: string | null
   }[]
-  return new Map(rows.map((r) => [r.id, `${r.file_path ?? ''}\n${r.thumb_path ?? ''}`]))
+  return new Map(rows.map((r) => [r.id, `${r.file_path ?? ''}\n${r.thumb_path ?? ''}\n${r.original_path ?? ''}`]))
 }
 
 /** The folder a dialog starts in: the given one, or its nearest existing parent. */

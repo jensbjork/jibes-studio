@@ -10,6 +10,80 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Redigera**, an editor for any finished film (sidebar, after Storyboards): open a clip from the feed (*Redigera…*
+  on its card or in its drawer), a take (*Redigera tagningen…*), a sequence's or storyboard's export (*Redigera
+  senaste exporten*, *Från en export…*) or your own film (*Öppna en egen film…*, or drop it on the list). Every
+  change is a new **version** in `Redigeringar/<name>/` (*v1 Original*, *v2* …, a tree you can step back and forth
+  in with ⌘Z / ⌘⇧Z, compare with *Jämför ⇄* and send to a sequence as a new clip or a take); the original is never
+  touched. A player with *Markera in / ut*, *Spela markeringen*, frame steps and J/K/L; a timeline with the
+  picture and its cut markers (*Klippgränser*), the sound's waveform, added sound layers and the transcript.
+  - **Free:** *Behåll bara markeringen*, *Klipp bort markeringen*, *Tona in / ut*, *Volym* (the film, the marked
+    range, or only the voice or the background), *Tysta markeringen*, *Ta bort rösten* / *Bara rösten*, *Ta bort
+    brus*, *Jämna ut ljudnivån* (−14 / −16 / −23 LUFS), *Lägg till ljud…* (from the library, earlier results or a
+    file) and changing or removing a sound layer.
+  - **Paid, with the price on the button:** *Transkribera* (editable lines, *Spara undertexter (.srt)*), *Byt röst*
+    (speech to speech; shown when Venice lists a voice changer), *Läs in repliker på nytt* and *Ny replik* (a preset
+    voice or a character's cloned voice, fitted to the old line with up to 15 % tempo), *Skapa musik* and *Skapa
+    ljudeffekt* (on their own layer, music lowered under speech), *Gör om avsnittet* (a range regenerated between
+    the frame before and the frame after it), *Ändra med prompt* (Seedance, Gemini, Wan or HappyHorse
+    video-to-video), *Förläng* (after the end) and *Uppskala* (2× / 4×, Topaz). Plans are free and show the price
+    (`$0.51`, as everywhere in Studio), per-minute billing and Venice's unknown prices before anything is sent; above
+    $5, with an unknown price or with a part Venice doesn't price (*≈ $0.45 +*) a second question asks first, and
+    after Venice's consent dialog the price you confirmed stays the ceiling. Long voices are cut into as few billed
+    minutes as possible and put back sample-exactly; *Byt röst* on chosen lines changes only those lines, also when a
+    part spans a line between them. A paid job interrupted by quitting Studio never sends its remaining parts by
+    itself: parts already sent are fetched, and the rest waits for *Fortsätt* at a fresh price (the button shows what
+    is checked; a price that rose, or a voice clone that has to be made again since the price was shown, is refused
+    once and shown). A paid AI take whose finish failed (a full disk) is put into the film again for free with
+    *Fortsätt*; one that would fail the same way again is not offered it, and its row can be hidden.
+  - *Radera versionen*, *Rensa versioner…* (says how many and how big first) and *Radera redigeringen* keep every
+    version a sequence or another edit still uses, hand a transcript to the versions built on it, and keep files in
+    the edit's folder that a clip still uses (moved to `Referensbilder/`). *Rensa versioner…* also leaves a version a
+    stopped, partly paid job builds on, and *Radera versionen* says what such a job has paid. *Radera* in the clip feed
+    follows the same rules (nothing a running or partly paid operation works on, no edit's original), and on a clip's
+    or a storyboard transition's takes a film Redigera keeps shows *Ta bort* and only leaves the clip. Versions are named readably in Finder (`Strand v3 – Klippte bort 0m00.5s–0m09s.mp4`). *Jämför* on the
+    original compares with the newest version made from it, version rows are buttons (Space and Enter show them when
+    reached with the keyboard; after a click, Space still plays), and the *Åtgärder* tabs follow ← → when reached with
+    the keyboard.
+- **Own clips** (*Egna klipp*): bring your own films into the library and continue them with AI clips. *Lägg till
+  klipp* in Sekvenser gets a *Fler sätt* menu (*Eget klipp från fil…*, *Från klippflödet…*, *Från Redigera…*; also on
+  the `+` between clips), video files can be dropped between clips, on a clip's takes (*Lägg till tagning från fil…*)
+  and on the clip feed (*Importera egna klipp…*). Files are copied into `Egna klipp/<day>/` as an APFS clone where the
+  disk allows (APFS only: on exFAT, FAT or HFS+ the space check and the large-copy question count a full copy); HDR,
+  10-bit, 4K, variable frame rate, rotated, ProRes, spatial-audio and anamorphic films and films whose sound and
+  picture start apart get an H.264 SDR working copy next to the untouched original (mono sound on both sides at full
+  level), with progress and *Avbryt* per file. A film already imported is reused. A film of
+  another shape than the sequence is fitted with borders or cropped (*Fyll bilden*); the first film in a new, empty
+  sequence takes the place of its empty first clip (unless something was put in it while the film was imported). An own clip's card shows *Egen*
+  and its title, its clip editor shows what it is (*0:31 · 1080p · 30 bilder/s · ljud · arbetskopia av 4K HDR*) with
+  the AI form folded away, and the next clip continues from its last frame (*Fortsätter från sista bildrutan i ditt
+  klipp*).
+- **Exportformat** per sequence (⋯ in the header): *Automatiskt* (the first clip's size) or 480p / 720p / 1080p.
+  Every sequence and storyboard export records where its clips meet (on the film's own frame grid, also when clips
+  of different frame rates are mixed), which Redigera shows as cut markers.
+- **New voices:** *Skapa röst med AI…* under a character's *Röst* designs a voice from a description and a sample
+  text (about $0.35) and adds it as a new clip, marked *Ny*. *Får klonas för nya repliker* on a voice clip allows
+  Redigera to clone it for new lines (your consent, per clip; withdrawn, no further line is said in that voice).
+- **Voice separation** on the Mac with macOS's own sound isolation, through a small Swift helper built from source
+  (`npm run build:helpers`; run first by `dev`, `build` and `app`). *Inställningar* shows whether it is available. A
+  separation checks the disk for its scratch files first and is stopped by a watchdog if the helper stalls.
+- **The clip feed** gets a *Källa* filter (*Genererade*, *Egna klipp*, *Redigerade*), *Egen* / *Redigerad* /
+  *Redigering* badges, titles instead of empty prompts for own clips and versions, and the drawer shows an import's
+  original file or the version and edit a film came from (*Öppna i Redigera*).
+- **Agent tools for Redigera, own clips and voices** (13 new, 73 tools in all): `list_edits`, `get_edit`,
+  `get_transcript`, `plan_edit_operation` (with the frames a picture operation works from),
+  `list_audio_models`, `create_edit`, `apply_edit` (free operations), `set_current_version`, `rename_edit`,
+  `update_transcript`, `send_edit_to_sequence` and the paid `request_edit_operation` and `request_voice_design`,
+  approved in the app (the dialog shows the version, the frames, old → new lines or the lines a change of voice
+  changes, the parts and the price — `≈ $X +` when a part has none — and asks for clone consent when it is missing
+  and for a second OK above $5 or for an unknown or partial price). `get_edit` and `get_generation` list every
+  version's sound layers. `list_generations` filters by `source` and
+  returns titles, `get_generation` the recipe and original file, `add_segment` takes `from_generation_id`,
+  `get_sequence` marks own clips and shows the *Exportformat*, `list_exports` returns `cuts`, assets show each voice
+  clip's `clone_consent`, `review_generation` takes `audio_start`, and `open_in_studio` / `get_workspace` know
+  Redigera. The guide has sections on editing films and on own clips. Agents cannot import files, add their own
+  audio files, delete edits or versions, give clone consent or set the *Exportformat*.
+
 - **Descriptions in the prompt.** The descriptions of the characters, places, outfits and poses whose photos or
   voices a generation sends are appended to its prompt automatically when it is sent, as a *References* legend
   with each asset's tokens (`- Anna (@Image1, @Image2; voice @Audio1): …`; `Referenser:` and `röst` with the
@@ -140,6 +214,21 @@ breaking changes; they are called out under **Changed** or **Removed**.
   prompt.
 
 ### Changed
+
+- The library database is migrated to version 11: generations get a `source` (existing ones are `generated`), a
+  title, a parent version, an edit, a recipe and an original file; new tables hold edits, their audio, paid jobs
+  and their steps, transcripts and voice clones; voice clips get a clone consent, exports their cut times and
+  sequences an *Exportformat*. From this version `Egna klipp` and `Redigeringar` belong to the library; an older
+  library whose base folder already holds a folder of your own by either name is not opened until it is renamed.
+- *Städa upp* follows a file home rule: own clips stay in `Egna klipp/<day>/` (also when they are takes), versions
+  and AI takes of an edit in its `Redigeringar/` folder; neither is ever renamed "… Utan prompt" or moved into a
+  sequence's `Tagningar/`. Deleting an own clip also moves its original to the Trash, unless a copy in another clip
+  still uses it.
+- *Använd igen* (feed) and *Använd prompt* (takes) are hidden for own clips and versions, which have no prompt.
+- `npm run dev`, `dev:real`, `build` and `app` build the voice separation helper first (skipped when up to date or
+  without the Swift compiler); CI builds and probes it.
+- `media://` also serves `.m4v` and `.mkv` films.
+- Contributing: a new `editor` commit scope covers Redigera.
 
 - **Storyboards moved out of Sekvenser** into their own view, as a workflow of their own (milestone pictures with
   the clips between them generated; see *Added*). Sekvenser no longer has the *Tidslinje / Storyboard* switch, the

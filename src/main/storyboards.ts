@@ -23,6 +23,7 @@ import {
   PREFERRED,
   supportsEndImage
 } from '@shared/models'
+import { isVeniceGeneration } from '@shared/generation-label'
 import { blockingPromptError } from '@shared/prompt-refs'
 import {
   DEFAULT_STORYBOARD_ASPECT_RATIO,
@@ -802,6 +803,11 @@ export class StoryboardService {
       if (take.segmentId && take.segmentId !== row.id) {
         throw new Error('Tagningen hör till en annan övergång eller ett annat klipp.')
       }
+      // A transition goes from one board's picture to the next: an own film or a version from Redigera was made from
+      // neither, so it can't stand in for one (sequences take them as clips of their own).
+      if (!isVeniceGeneration(take)) {
+        throw new Error('Egna klipp och versioner från Redigera kan inte väljas till en övergång. Lägg dem i en sekvens.')
+      }
       selection = take.id
     }
 
@@ -950,7 +956,11 @@ export class StoryboardService {
 
   // ── Export and "Gör om till sekvens" ───────────────────────────────────────
 
-  /** Renders the selected takes into Storyboards/<namn>/ (see SequenceService.export); resolves the film's path. */
+  /**
+   * Renders the selected takes into Storyboards/<namn>/ (see SequenceService.export, which also records where the
+   * transitions meet in the film, its cuts); resolves the film's path. A storyboard has no Exportformat: the film
+   * keeps the first transition's size.
+   */
   export(storyboardId: string): Promise<string> {
     requireStoryboardRow(storyboardId)
     return this.deps.sequences.export(storyboardId)

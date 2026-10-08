@@ -1,8 +1,12 @@
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
 import {
+  isUpscaleModel,
+  isVideoInputModel,
   MAX_AUDIO_CLIP_SECONDS,
   MAX_REFERENCE_AUDIO_SECONDS,
+  MAX_REQUEST_MEDIA_BYTES,
   MIN_AUDIO_CLIP_SECONDS,
   referenceAudioWindow,
   rememberModelKinds
@@ -10,8 +14,9 @@ import {
 import { rememberPromptLimits } from '@shared/prompt-compose'
 import { audioToken } from '@shared/prompt-refs'
 import type { GenerationParams, ReferenceAudio, VideoModel, VideoModelType } from '@shared/types'
-import { encodeAudioClip, probeAudio } from './ffmpeg'
+import { encodeAudioClip, probe, probeAudio } from './ffmpeg'
 import { decodeImageFile } from './input-image'
+import { isInsideRoot } from './paths'
 
 const BASE_URL = 'https://api.venice.ai/api/v1'
 
@@ -41,6 +46,8 @@ interface RawModel {
       audio_configurable?: boolean
       /** Takes `reference_audio_urls` (with reference-to-video models: voices and sound to follow). */
       audio_input?: boolean
+      /** Takes a source video (`video_url`): the video-to-video edit models and the upscalers. */
+      video_input?: boolean
       prompt_character_limit?: number
     }
   }
@@ -48,6 +55,8 @@ interface RawModel {
 
 function modelKind(raw: RawModel): VideoModelType {
   const id = raw.id
+  // Before the id: Recast and Kling Motion Control take a source video but their ids don't say so.
+  if (raw.model_spec.constraints?.video_input === true) return 'video-to-video'
   if (id.includes('reference-to-video')) return 'reference-to-video'
   if (id.includes('video-to-video') || id.includes('upscale')) return 'video-to-video'
   if (id.includes('image-to-video') || id.includes('first-last-frame') || id.includes('transition')) return 'image-to-video'
@@ -72,7 +81,8 @@ function toVideoModel(raw: RawModel): VideoModel {
     audioConfigurable: c.audio_configurable ?? false,
     audioInput: c.audio_input === true,
     promptCharacterLimit: c.prompt_character_limit,
-    modelSets: raw.model_spec.model_sets ?? []
+    modelSets: raw.model_spec.model_sets ?? [],
+    videoInput: c.video_input === true
   }
 }
 
@@ -112,6 +122,78 @@ export function ensureImagesExist(params: GenerationParams): void {
       )
     }
   })
+  const video = (path: string | undefined, what: string): void => {
+    if (path && !existsSync(path)) {
+      throw new Error(`${what} finns inte längre: ${basename(path)}. Gör om markeringen och försök igen.`)
+    }
+  }
+  video(params.sourceVideo, 'Källvideon')
+  for (const path of params.referenceVideos ?? []) video(path, 'En referensvideo')
+}
+
+/** The MIME type a video file is sent as in a data URL (the proxies Studio makes are MP4). */
+function videoMime(path: string): string {
+  switch (extname(path).toLowerCase()) {
+    case '.mov':
+      return 'video/quicktime'
+    case '.webm':
+      return 'video/webm'
+    case '.mkv':
+      return 'video/x-matroska'
+    default:
+      return 'video/mp4'
+  }
+}
+
+/**
+ * A video file as a data URL, as is: the caller has made it small enough (a proxy or a stand-in). Only files in
+ * the library (an edit's Underlag/, a stand-in in .studio/tmp, a copy a submit made in Referensbilder) are ever
+ * read, so params that name some other file on disk can't send it anywhere.
+ */
+async function videoToDataUrl(path: string): Promise<string> {
+  if (!isInsideRoot(path)) throw new Error(`Videon ${basename(path)} ligger inte i biblioteket och skickas inte.`)
+  return `data:${videoMime(path)};base64,${(await readFile(path)).toString('base64')}`
+}
+
+/** Swedish refusal when one request would carry more raw media than Venice takes (MAX_REQUEST_MEDIA_BYTES). */
+export const REQUEST_TOO_LARGE = 'Underlaget är för stort för Venice (högst ~22 MB). Välj en kortare markering.'
+
+/** Raw bytes behind a base64 data URL (without decoding it). */
+function dataUrlBytes(url: unknown): number {
+  if (typeof url !== 'string' || !url.startsWith('data:')) return 0
+  const comma = url.indexOf(',')
+  const b64 = comma < 0 ? '' : url.slice(comma + 1)
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0
+  return Math.max(0, Math.floor((b64.length * 3) / 4) - padding)
+}
+
+/** The raw media in a request body: every data URL in it, also inside arrays. */
+export function requestMediaBytes(body: Record<string, unknown>): number {
+  let total = 0
+  for (const value of Object.values(body)) {
+    if (Array.isArray(value)) for (const v of value) total += dataUrlBytes(v)
+    else total += dataUrlBytes(value)
+  }
+  return total
+}
+
+/**
+ * Refuses before anything is read when the source and reference videos alone are already too large for one
+ * request: a multi-GB file must never be loaded into memory to find that out.
+ */
+function checkVideoSizes(params: GenerationParams): void {
+  const paths = [params.sourceVideo, ...(params.referenceVideos ?? [])].filter(
+    (p): p is string => typeof p === 'string' && p !== ''
+  )
+  let total = 0
+  for (const path of paths) {
+    try {
+      total += statSync(path).size
+    } catch {
+      // ensureImagesExist reports a missing file.
+    }
+  }
+  if (total > MAX_REQUEST_MEDIA_BYTES) throw new Error(REQUEST_TOO_LARGE)
 }
 
 /** A failure about one clip, named by its token and file: "@Audio2 (röst.m4a): Filen innehåller inget ljud." */
@@ -261,21 +343,44 @@ async function imageToDataUrl(path: string): Promise<string> {
   return `data:image/jpeg;base64,${scaled.toJPEG(92).toString('base64')}`
 }
 
+/** The raw bytes a picture adds to a request, encoded exactly as buildRequestBody encodes it (for size budgets). */
+export async function imageRequestBytes(path: string): Promise<number> {
+  return dataUrlBytes(await imageToDataUrl(path))
+}
+
 /**
  * The /video/queue body: images as JPEG data URLs, and each reference audio clip's window cut out with ffmpeg
  * as an MP3 data URL, in the params' order (@Audio1 first; see encodeReferenceAudios). Clips are sent with the
  * window they have; those without one are measured first (resolveReferenceAudios), which a submit has normally
- * done already.
+ * done already. Video-input models get their source video as `video_url` (the file as is: the caller made the
+ * proxy) and duration "Auto" (the result follows the source); an upscaler gets only that, its factor and the model.
+ * Seedance reference-to-video gets its reference videos and task. Refused (Swedish) when the raw media would pass
+ * MAX_REQUEST_MEDIA_BYTES.
  */
 export async function buildRequestBody(params: GenerationParams): Promise<Record<string, unknown>> {
   ensureImagesExist(params)
+  checkVideoSizes(params)
+  if (isVideoInputModel(params.model) && isUpscaleModel(params.model)) {
+    if (!params.sourceVideo) throw new Error('Källvideon saknas.')
+    // Topaz: no prompt, resolution, aspect or audio (Venice refuses them on the queue).
+    const body: Record<string, unknown> = {
+      model: params.model,
+      video_url: await videoToDataUrl(params.sourceVideo),
+      upscale_factor: params.upscaleFactor ?? 2,
+      duration: 'Auto'
+    }
+    if (requestMediaBytes(body) > MAX_REQUEST_MEDIA_BYTES) throw new Error(REQUEST_TOO_LARGE)
+    return body
+  }
   if (params.referenceAudios?.some((a) => a.start === undefined || a.length === undefined)) {
     params = await resolveReferenceAudios(params)
   }
+  const videoInput = isVideoInputModel(params.model)
+  if (videoInput && !params.sourceVideo) throw new Error('Källvideon saknas.')
   const body: Record<string, unknown> = {
     model: params.model,
     prompt: params.prompt,
-    duration: params.duration
+    duration: videoInput ? 'Auto' : params.duration
   }
   if (params.negativePrompt) body.negative_prompt = params.negativePrompt
   if (params.resolution) body.resolution = params.resolution
@@ -290,7 +395,26 @@ export async function buildRequestBody(params: GenerationParams): Promise<Record
     const mp3s = await encodeReferenceAudios(params.referenceAudios)
     body.reference_audio_urls = mp3s.map((mp3) => `data:audio/mpeg;base64,${mp3.toString('base64')}`)
   }
+  if (videoInput && params.sourceVideo) body.video_url = await videoToDataUrl(params.sourceVideo)
+  if (params.referenceVideos?.length) {
+    body.reference_video_urls = await Promise.all(params.referenceVideos.map(videoToDataUrl))
+  }
+  if (params.referenceTask) body.omni_reference_task_type = params.referenceTask
+  if (requestMediaBytes(body) > MAX_REQUEST_MEDIA_BYTES) throw new Error(REQUEST_TOO_LARGE)
   return body
+}
+
+/** How long a video-input quote (made on a stand-in) is reused. */
+const VIDEO_QUOTE_TTL_MS = 10 * 60_000
+
+/** The reference videos' total length in seconds (ffprobe), rounded to milliseconds, for a Seedance quote. */
+async function referenceVideoSeconds(paths: readonly string[]): Promise<number> {
+  let total = 0
+  for (const path of paths) {
+    if (!existsSync(path)) throw new Error(`En referensvideo finns inte längre: ${basename(path)}.`)
+    total += (await probe(path)).duration
+  }
+  return Math.round(total * 1000) / 1000
 }
 
 export type RetrieveResult =
@@ -331,6 +455,17 @@ export class VeniceClient {
     return (await res.json()) as T
   }
 
+  /**
+   * The raw entries of GET /models?type=<type> (free), sent with the API key when one is set: some models (the
+   * voice changers) are only listed to keyed accounts. `keyed` says whether the key went along.
+   */
+  async listRawModels(type: string): Promise<{ data: unknown[]; keyed: boolean }> {
+    const keyed = !!this.getKey()
+    const res = await this.request(`/models?type=${encodeURIComponent(type)}`, {}, false)
+    const json = (await res.json()) as { data?: unknown }
+    return { data: Array.isArray(json.data) ? json.data : [], keyed }
+  }
+
   async listVideoModels(): Promise<VideoModel[]> {
     const res = await this.request('/models?type=video', {}, false)
     const json = (await res.json()) as { data: RawModel[] }
@@ -349,13 +484,57 @@ export class VeniceClient {
     return json.data?.balances ?? {}
   }
 
-  /** Price in USD. Only pricing-relevant fields are sent, so images aren't encoded for this. */
+  /**
+   * Price in USD. Only pricing-relevant fields are sent, so images aren't encoded for this. Video-input models need
+   * their source as `video_url`: the caller passes a few-KB stand-in of the same length (and, for an upscaler, the
+   * same size and frame rate), never the real proxy, since Venice prices them by length, resolution and factor only.
+   * An upscaler's quote carries the factor both as `resolution: "<n>x"` and `upscale_factor`, and needs the API key.
+   * Seedance reference-to-video with reference videos sends their total length, measured here. Video-input quotes
+   * are cached for 10 minutes per model, resolution, factor and stand-in file.
+   */
   async quote(params: GenerationParams): Promise<number> {
+    if (isVideoInputModel(params.model)) return this.quoteVideoInput(params)
     const body: Record<string, unknown> = { model: params.model, duration: params.duration }
     if (params.resolution) body.resolution = params.resolution
     if (params.aspectRatio) body.aspect_ratio = params.aspectRatio
     if (params.audio !== undefined) body.audio = params.audio
+    if (params.referenceVideos?.length) {
+      body.reference_video_total_duration = await referenceVideoSeconds(params.referenceVideos)
+    }
     const res = await this.post<{ quote: number }>('/video/quote', body, false)
+    return res.quote
+  }
+
+  private readonly videoQuotes = new Map<string, { at: number; price: number }>()
+
+  private async quoteVideoInput(params: GenerationParams): Promise<number> {
+    const source = params.sourceVideo
+    if (!source) throw new Error('Källvideon saknas.')
+    if (!existsSync(source)) throw new Error(`Källvideon finns inte längre: ${basename(source)}.`)
+    const info = await stat(source)
+    if (info.size > MAX_REQUEST_MEDIA_BYTES) throw new Error(REQUEST_TOO_LARGE)
+    const upscale = isUpscaleModel(params.model)
+    const factor = upscale ? (params.upscaleFactor ?? 2) : undefined
+    const key = JSON.stringify([
+      params.model,
+      upscale ? null : (params.resolution ?? null),
+      factor ?? null,
+      `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`
+    ])
+    const cached = this.videoQuotes.get(key)
+    if (cached && Date.now() - cached.at < VIDEO_QUOTE_TTL_MS) return cached.price
+    const body: Record<string, unknown> = { model: params.model, duration: 'Auto' }
+    if (upscale) {
+      body.resolution = `${factor}x`
+      body.upscale_factor = factor
+    } else if (params.resolution) {
+      body.resolution = params.resolution
+    }
+    body.video_url = await videoToDataUrl(source)
+    // Topaz's quote answers 403 without a key: say so in Swedish before asking.
+    const res = await this.post<{ quote: number }>('/video/quote', body, upscale)
+    if (this.videoQuotes.size > 200) this.videoQuotes.clear()
+    this.videoQuotes.set(key, { at: Date.now(), price: res.quote })
     return res.quote
   }
 

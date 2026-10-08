@@ -6,7 +6,7 @@ import {
   MIN_AUDIO_CLIP_SECONDS,
   maxReferenceAudios
 } from '@shared/models'
-import type { Asset, AssetAudio } from '@shared/types'
+import type { Asset, AssetAudio, EditJob } from '@shared/types'
 import { ASSET_COPY, ASSET_FOLDER, assetAudio, type AudioCopy } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import OpenFolderButton from '../library/OpenFolderButton'
@@ -28,10 +28,23 @@ import {
 import { insertIndex, type DropTarget } from './imageUtils'
 import { useClipPlayer, type ClipPlayer } from './useClipPlayer'
 import { useWindowDraft } from './useWindowDraft'
+import VoiceDesignDialog from './VoiceDesignDialog'
 
 /** In-app drags carry this type, so they can't be mistaken for files dropped from Finder. */
 const DRAG_TYPE = 'application/x-studio-asset-audio'
 const MAX_AUDIOS = maxReferenceAudios(DEFAULT_MODEL['reference-to-video'])
+
+/** Clips made with "Skapa röst med AI" while Studio has been open: marked "Ny" until the window reloads. */
+const designedClips = new Set<string>()
+
+/** A voice being made for this character ("Skapa röst med AI"). */
+interface DesignJob {
+  id: string
+  label: string
+  fraction?: number
+  /** The clips the character had when it started; any clip beyond them afterwards is the new voice. */
+  before: ReadonlySet<string>
+}
 
 interface Props {
   /** A character or an environment (the kinds with sound clips). */
@@ -63,6 +76,68 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
   const [target, setTarget] = useState<DropTarget>()
   const dragRef = useRef<string | undefined>(undefined)
   const reorderSeq = useRef(0)
+  // Characters only: voices made with AI ("Skapa röst med AI"), and the dialog that starts one.
+  const voices = asset.kind === 'character'
+  const [designing, setDesigning] = useState(false)
+  const [designs, setDesigns] = useState<DesignJob[]>([])
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set(designedClips))
+  const latestAsset = useRef(asset)
+  latestAsset.current = asset
+
+  // A designed voice reports its progress per character; when it is done the new clip is fetched and marked "Ny".
+  const designsRef = useRef(designs)
+  designsRef.current = designs
+  useEffect(() => {
+    if (!voices) return
+    return window.studio.onEditProgress((p) => {
+      if (p.assetId !== asset.id) return
+      const list = designsRef.current
+      const job = list.find((d) => d.id === p.jobId) ?? (list.length === 1 && !p.jobId ? list[0] : undefined)
+      if (!p.done) {
+        if (job) {
+          setDesigns((l) => l.map((d) => (d.id === job.id ? { ...d, fraction: p.fraction, label: p.label || d.label } : d)))
+        }
+        return
+      }
+      if (job) setDesigns((l) => l.filter((d) => d.id !== job.id))
+      if (p.error) onError(p.error)
+      // A job started before this view mounted is still collected; its clip is new compared with what is shown now.
+      else void collect(job?.before ?? new Set(latestAsset.current.audio.map((c) => c.id)))
+    })
+  }, [voices, asset.id])
+
+  /** Fetches the character again after a voice was made and marks the clips that weren't there before. */
+  const collect = async (before: ReadonlySet<string>) => {
+    try {
+      const updated = (await window.studio.listAssets('character')).find((a) => a.id === latestAsset.current.id)
+      if (!updated) return
+      const added = updated.audio.filter((c) => !before.has(c.id)).map((c) => c.id)
+      for (const id of added) designedClips.add(id)
+      if (added.length) setFresh(new Set(designedClips))
+      onUpdated(updated)
+    } catch (e) {
+      onError(ipcErrorMessage(e))
+    }
+  }
+
+  const designStarted = (job: EditJob) =>
+    setDesigns((list) => [
+      ...list,
+      {
+        id: job.id,
+        label: job.label || 'Skapar röst med AI',
+        fraction: job.fraction,
+        before: new Set(latestAsset.current.audio.map((c) => c.id))
+      }
+    ])
+
+  const toggleConsent = async (clip: AssetAudio, consent: boolean) => {
+    try {
+      onUpdated(await window.studio.setVoiceCloneConsent(clip.id, consent))
+    } catch (e) {
+      onError(ipcErrorMessage(e))
+    }
+  }
 
   const clips = useMemo(() => {
     const visible = assetAudio(asset).filter((c) => !removing.has(c.id))
@@ -184,7 +259,7 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
   }
 
   if (!copy) return null
-  const empty = clips.length === 0 && adding === 0
+  const empty = clips.length === 0 && adding === 0 && designs.length === 0
 
   return (
     <div>
@@ -201,6 +276,15 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
             onError={onError}
             className="rounded-md px-2.5 py-1 text-muted hover:bg-raised hover:text-text disabled:opacity-40"
           />
+          {voices && (
+            <button
+              onClick={() => setDesigning(true)}
+              className="rounded-md px-2.5 py-1 text-muted hover:bg-raised hover:text-text"
+              title="Beskriv en röst – Venice skapar den och den sparas som ett nytt röstklipp"
+            >
+              Skapa röst med AI…
+            </button>
+          )}
           {!empty && (
             <button
               onClick={() => void pick()}
@@ -250,6 +334,9 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
                 dropAt === undefined || target?.id !== clip.id ? undefined : target.after ? 'after' : 'before'
               }
               onUpdated={onUpdated}
+              voice={voices}
+              fresh={fresh.has(clip.id)}
+              onConsent={(on) => void toggleConsent(clip, on)}
               onBusy={(on) => setClipBusy(clip.id, on)}
               onRemove={() => void remove(clip.id)}
               onMove={(to) => move(clip.id, to)}
@@ -266,7 +353,17 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
               Lägger till ljud…
             </li>
           ))}
+          {designs.map((d) => (
+            <li key={d.id} className="flex h-16 items-center gap-3 rounded-lg bg-raised px-4 text-[11px] text-muted">
+              <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+              <span className="min-w-0 flex-1 truncate">{d.label}…</span>
+              {d.fraction !== undefined && <span className="tabular-nums">{Math.round(d.fraction * 100)} %</span>}
+            </li>
+          ))}
         </ul>
+      )}
+      {designing && (
+        <VoiceDesignDialog asset={asset} onClose={() => setDesigning(false)} onStarted={designStarted} />
       )}
 
       {!empty && (
@@ -290,6 +387,11 @@ interface RowProps {
   /** Side on which the drop marker is drawn. */
   indicator?: 'before' | 'after'
   onUpdated: (a: Asset) => void
+  /** A character's voice: it can be marked as allowed to clone ("Får klonas för nya repliker"). */
+  voice: boolean
+  /** Made with "Skapa röst med AI" just now. */
+  fresh: boolean
+  onConsent: (consent: boolean) => void
   onBusy: (busy: boolean) => void
   onRemove: () => void
   /** Moves the clip to this index. */
@@ -309,6 +411,9 @@ function ClipRow({
   dragging,
   indicator,
   onUpdated,
+  voice,
+  fresh,
+  onConsent,
   onBusy,
   onRemove,
   onMove,
@@ -383,6 +488,14 @@ function ClipRow({
               <span className="truncate" title={clip.path}>
                 {name}
               </span>
+              {fresh && (
+                <span
+                  title="Skapad med AI just nu"
+                  className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent"
+                >
+                  Ny
+                </span>
+              )}
               {index === 0 && copy.firstBadge && (
                 <span title={copy.firstBadge.title} className="shrink-0 rounded bg-raised px-1.5 py-0.5 text-[10px] font-medium text-muted">
                   {copy.firstBadge.label}
@@ -477,6 +590,22 @@ function ClipRow({
               )}
             </span>
           </div>
+
+          {voice && (
+            <label
+              className="mt-2.5 flex w-fit cursor-pointer items-center gap-2 text-[12px]"
+              title="Redigera får då klona rösten för nya repliker (Läs in repliker på nytt). Bocka bara i om du har rätt att använda rösten."
+            >
+              <input
+                type="checkbox"
+                checked={clip.cloneConsent}
+                onChange={(e) => onConsent(e.target.checked)}
+                className="accent-accent"
+              />
+              <span>Får klonas för nya repliker</span>
+              <span className="text-[11px] text-muted">– jag har rätt att använda den här rösten</span>
+            </label>
+          )}
 
           {(tooShort || long || failed) && (
             <div className="mt-2 space-y-1 text-[11px] leading-relaxed">

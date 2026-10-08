@@ -35,6 +35,20 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # The Swift voice separation helper (macos-latest has the Swift toolchain). Without swiftc the script skips
+      # with a note instead of failing; a compile error fails the job.
+      - name: Build native helpers
+        run: npm run build:helpers
+
+      - name: Check the voice separation helper
+        run: |
+          if [ -x build/bin/studio-voice-isolate ]; then
+            build/bin/studio-voice-isolate --probe || echo "AUSoundIsolation is not available on this runner."
+          else
+            echo "No helper was built (no Swift compiler); skipping its check."
+          fi
+
+      # Runs build:helpers again first, which finds the helper up to date.
       - name: Build
         run: npm run build
 

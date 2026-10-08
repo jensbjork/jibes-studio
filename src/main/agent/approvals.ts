@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import {
   NEEDS_CONSENT,
+  type ApprovalEditRequest,
   type ApprovalImageRequest,
   type ApprovalRequest,
   type GenerationParams,
@@ -11,8 +12,18 @@ import { errorText } from './studio'
 // Paid generations an agent asked for. Nothing reaches Venice until the user approves the request in Studio;
 // main then submits exactly what the request describes, through the same code paths as the window.
 
-/** What submitting an approved request led to: the generations it started, or the still it made. */
-export type ApprovalOutcome = string[] | { generationIds?: string[]; stillId?: string; notice?: string }
+/**
+ * What submitting an approved request led to: the generations it started, or the still it made – or, for a
+ * Redigera request, the job it started and the version it made (merged into the request's `edit`).
+ */
+export type ApprovalOutcome =
+  | string[]
+  | {
+      generationIds?: string[]
+      stillId?: string
+      notice?: string
+      edit?: Pick<ApprovalEditRequest, 'jobId' | 'resultId'>
+    }
 
 /** How long a request waits for the user before it lapses. */
 export const APPROVAL_TTL_MS = 30 * 60 * 1000
@@ -41,6 +52,8 @@ export interface ApprovalPlan {
    */
   clipLegends?: Record<string, string>
   image?: ApprovalImageRequest
+  /** 'edit' and 'voice-design': what Redigera (or Karaktärer → Röst) will do, as the dialog shows it. */
+  edit?: ApprovalEditRequest
   sequenceId?: string
   /** 'storyboard' when sequenceId is a storyboard (a 'segment' request is then one of its transitions). */
   sequenceKind?: SequenceKind
@@ -131,6 +144,7 @@ export class ApprovalStore {
         : {}),
       ...(plan.clipLegends ? { clipLegends: plan.clipLegends } : {}),
       image: plan.image,
+      ...(plan.edit ? { edit: plan.edit } : {}),
       sequenceId: plan.sequenceId,
       ...(plan.sequenceKind ? { sequenceKind: plan.sequenceKind } : {}),
       sequenceName: plan.sequenceName,
@@ -194,12 +208,16 @@ export class ApprovalStore {
     try {
       await entry.plan.verify?.()
       const outcome = await entry.plan.execute()
-      const { generationIds, stillId, notice } = Array.isArray(outcome) ? { generationIds: outcome } : outcome
+      const { generationIds, stillId, notice, edit } = Array.isArray(outcome)
+        ? { generationIds: outcome, edit: undefined }
+        : outcome
       this.finish(entry, {
         status: 'approved',
         generationIds: generationIds?.length ? generationIds : undefined,
         stillId,
-        notice
+        notice,
+        // The job it started and the version it made, for get_approval and the dialog.
+        ...(edit && entry.request.edit ? { edit: { ...entry.request.edit, ...edit } } : {})
       })
     } catch (err) {
       const message = errorText(err)

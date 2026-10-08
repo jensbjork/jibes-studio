@@ -35,10 +35,11 @@ import { ipcErrorMessage, loadModels } from './hooks'
 import { followAssetImages, readRememberedImageIds } from './library'
 import type { Intent, Navigate, View } from './navigation'
 import { promptIssuesOf } from './promptIssues'
-import { openInSequenceEditor, openStoryboard } from './workspace'
+import { openEditInEditor, openInSequenceEditor, openStoryboard } from './workspace'
 
 // The renderer half of the agent connection. Tools that read or fill the Generate form (get_workspace,
-// set_form, set_references, reorder_references, open_in_studio) reach main's MCP server as an 'agent:command';
+// set_form, set_references, reorder_references) and open_in_studio (Generate, a sequence, a storyboard or an edit
+// in Redigera) reach main's MCP server as an 'agent:command';
 // this applies them to the form store with the same rules the form itself uses (mode switching, model options,
 // the reference caps for images and audio, tokens following a reorder) and answers with 'agent:reply'.
 // Everything else the agent does goes straight to main's services. Error messages are Swedish: they are shown
@@ -642,7 +643,7 @@ function audioReferences(audios: readonly ReferenceAudio[], assets: readonly Ass
 export function describeForm(
   params: GenerationParams,
   assets: readonly Asset[],
-  where: { view: View; sequenceId?: string; segmentId?: string; storyboardId?: string },
+  where: { view: View; sequenceId?: string; segmentId?: string; storyboardId?: string; editId?: string },
   notes: string[] = []
 ): FormSnapshot {
   const sent = paramsForSubmit(params)
@@ -705,12 +706,22 @@ async function assetsFollowingForm(): Promise<Asset[]> {
   return assets
 }
 
-/** Where the user is: the view, and the sequence and clip or the storyboard open in it. */
-export function whereNow(view: View): { view: View; sequenceId?: string; segmentId?: string; storyboardId?: string } {
+/** Where the user is: the view, and the sequence and clip, the storyboard or the edit open in it. */
+export function whereNow(view: View): {
+  view: View
+  sequenceId?: string
+  segmentId?: string
+  storyboardId?: string
+  editId?: string
+} {
   if (view === 'sequences') return { view, ...openInSequenceEditor() }
   if (view === 'storyboards') {
     const storyboardId = openStoryboard()
     return storyboardId ? { view, storyboardId } : { view }
+  }
+  if (view === 'editor') {
+    const { editId } = openEditInEditor()
+    return editId ? { view, editId } : { view }
   }
   return { view }
 }
@@ -739,8 +750,9 @@ export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<A
     return { view: 'generate' }
   }
   if (args.view === 'storyboards' || args.view === 'storyboard') return openStoryboardView(args, ctx)
+  if (args.view === 'editor') return openEditorView(args, ctx)
   if (args.view !== 'sequences' && args.view !== 'sequence') {
-    throw new BridgeError('view ska vara ”generate”, ”sequences” eller ”storyboards”.')
+    throw new BridgeError('view ska vara ”generate”, ”sequences”, ”storyboards” eller ”editor”.')
   }
   const segmentId = optionalId(field(args, 'segment_id'))
   const sequenceId = optionalId(field(args, 'sequence_id')) ?? (segmentId && (await findSequenceOfSegment(segmentId)))
@@ -788,6 +800,27 @@ async function openStoryboardView(args: Args, ctx: BridgeContext): Promise<Agent
     storyboardId,
     storyboardName: storyboard.name,
     ...(shown ? {} : { note: 'Storyboards visas, men storyboarden öppnades inte i tid – be användaren välja den i listan.' })
+  }
+}
+
+/** Shows Redigera, with the edit asked for open (or its list of edits). */
+async function openEditorView(args: Args, ctx: BridgeContext): Promise<AgentOpenResult> {
+  const editId = optionalId(field(args, 'edit_id'))
+  if (!editId) {
+    ctx.show('editor')
+    const shown = openEditInEditor().editId
+    return shown ? { view: 'editor', editId: shown } : { view: 'editor' }
+  }
+  const edit = await window.studio.getEdit(editId).catch(() => undefined)
+  if (!edit) throw new BridgeError('Redigeringen finns inte (längre).')
+  ctx.show('editor', { type: 'open-editor', editId })
+  // The view reports the edit it shows as soon as it has taken the intent.
+  const shown = await settled(() => openEditInEditor().editId === editId)
+  return {
+    view: 'editor',
+    editId,
+    editName: edit.name,
+    ...(shown ? {} : { note: 'Redigera visas, men redigeringen öppnades inte i tid – be användaren välja den i listan.' })
   }
 }
 

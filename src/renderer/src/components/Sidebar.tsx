@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import DevBadge from './DevBadge'
 import AgentIndicator from './agent/AgentIndicator'
 import AssetIcon from './assets/AssetIcon'
+import { ScissorsIcon } from './editor/icons'
 import { StoryboardIcon } from './storyboards/icons'
 import type { View } from '../lib/navigation'
 
@@ -19,7 +20,8 @@ const items: Item[] = [
   { id: 'poses', label: 'Poser', icon: <AssetIcon kind="pose" /> },
   { id: 'prompts', label: 'Prompter', icon: '❝' },
   { id: 'sequences', label: 'Sekvenser', icon: '▤' },
-  { id: 'storyboards', label: 'Storyboards', icon: <StoryboardIcon /> }
+  { id: 'storyboards', label: 'Storyboards', icon: <StoryboardIcon /> },
+  { id: 'editor', label: 'Redigera', icon: <ScissorsIcon /> }
 ]
 
 interface Props {
