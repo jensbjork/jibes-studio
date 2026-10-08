@@ -32,8 +32,11 @@ until you click *Godkänn och generera* (approve and generate) — *Godkänn och
 1. Open **Inställningar → Agentanslutning** (Settings → Agent connection).
 2. Switch on **Tillåt agenter att ansluta** (allow agents to connect). It is **off by default**, and the setting is
    per profile: Studio Dev and Studio.app each have their own switch, port and token.
-3. The status line shows where Studio listens. The indicator at the bottom of the sidebar shows whether an agent is
-   connected; click it to open the activity drawer with every tool call and the pending requests.
+3. The status line shows where Studio listens. The indicator at the bottom of the sidebar reads *Agent ansluten*
+   when an agent is connected (the client's own name is in its tooltip and the drawer). While the agent works — a
+   tool call within the last 12 seconds — it reads *Agenten arbetar…* with a pulsing dot and the latest step, and a
+   small pill at the bottom of the window shows the same. Click either to open the activity drawer with every tool
+   call and the pending requests.
 
 The first time Studio listens on the Tailscale address, the macOS firewall may ask whether to allow incoming
 connections — answer *Allow*.

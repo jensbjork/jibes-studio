@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { LibraryStatus, Settings } from '@shared/types'
 import AgentDrawer from './components/agent/AgentDrawer'
+import AgentPresence from './components/agent/AgentPresence'
 import ApprovalDialog from './components/agent/ApprovalDialog'
 import AssetsView from './components/assets/AssetsView'
 import EditorView from './components/editor/EditorView'
@@ -147,6 +148,7 @@ function Workspace() {
         {view === 'settings' && settings && <SettingsView settings={settings} onChanged={refreshSettings} />}
       </main>
       <AgentDrawer open={agentOpen} onClose={closeAgent} navigate={navigate} />
+      <AgentPresence hidden={agentOpen} onOpen={() => setAgentOpen(true)} />
       <ApprovalDialog />
     </div>
   )
