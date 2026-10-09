@@ -34,8 +34,8 @@ interface Props {
 }
 
 /**
- * Popover content: the library's characters, environments, outfits and poses under one tab each. Pick a whole
- * asset or a single photo.
+ * Popover content: the library's characters, environments, products, outfits and poses under one tab each. Pick a
+ * whole asset or a single photo.
  */
 export default function AssetPicker({
   assets,
@@ -53,8 +53,8 @@ export default function AssetPicker({
   const [query, setQuery] = useState('')
   const byId = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
   const counts = useMemo(() => {
-    const n: Record<AssetKind, number> = { character: 0, environment: 0, outfit: 0, pose: 0 }
-    for (const a of assets) n[a.kind] += 1
+    const n: Record<AssetKind, number> = { character: 0, environment: 0, product: 0, outfit: 0, pose: 0 }
+    for (const a of assets) if (a.kind in n) n[a.kind] += 1
     return n
   }, [assets])
 
@@ -98,7 +98,12 @@ export default function AssetPicker({
       <div className="border-b border-line px-3 py-2.5">
         <p className="font-medium">{title}</p>
         {hint && <p className="mt-0.5 text-[11px] text-muted">{hint}</p>}
-        <div role="tablist" onKeyDown={onTabKeyDown} className="mt-2 grid grid-cols-4 gap-1 rounded-md bg-raised p-0.5">
+        {/* Five kinds share the popover's width: icon and count above, the name below, so no name is cut. */}
+        <div
+          role="tablist"
+          onKeyDown={onTabKeyDown}
+          className="mt-2 grid grid-cols-5 gap-0.5 rounded-md bg-raised p-0.5"
+        >
           {ASSET_KINDS.map((k) => (
             <button
               key={k}
@@ -107,16 +112,18 @@ export default function AssetPicker({
               aria-selected={k === kind}
               tabIndex={k === kind ? 0 : -1}
               onClick={() => showTab(k)}
-              title={ASSET_COPY[k].plural}
-              className={`flex min-w-0 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] transition ${
+              title={counts[k] ? `${ASSET_COPY[k].plural} (${counts[k]})` : ASSET_COPY[k].plural}
+              className={`flex min-w-0 flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 text-[10.5px] ${
                 k === kind ? 'bg-line text-text' : 'text-muted hover:text-text'
-              }`}
+              } leading-none transition`}
             >
-              <span className={`flex ${KIND_TONE[k].text}`}>
-                <AssetIcon kind={k} />
+              <span className="flex items-center gap-1">
+                <span className={`flex text-[13px] ${KIND_TONE[k].text}`}>
+                  <AssetIcon kind={k} />
+                </span>
+                {counts[k] > 0 && <span className="text-[10px] tabular-nums text-muted">{counts[k]}</span>}
               </span>
-              <span className="truncate">{ASSET_COPY[k].plural}</span>
-              {counts[k] > 0 && <span className="text-[10px] text-muted">{counts[k]}</span>}
+              <span className="max-w-full truncate">{ASSET_COPY[k].plural}</span>
             </button>
           ))}
         </div>

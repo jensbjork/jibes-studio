@@ -42,6 +42,7 @@ import {
   requireLibrary
 } from '../studio'
 import { READ_ONLY, defineTool, priceValue, quote, readForm, usd, type ToolContext } from './kit'
+import { deleteApprovalInfo } from './delete'
 import { editApprovalInfo } from './editor-paid'
 import { assertNotRunning, continues, endsOnNext, isUsableTake, loadClip, loadSequence, selectedTake } from './sequences'
 import {
@@ -295,7 +296,7 @@ async function imageReferences(input: {
   for (const id of assetIds) {
     const asset = assets.require(id)
     const cover = asset.images[0]
-    if (!cover) throw new Error(`${q(asset.name)} har inga bilder än. Användaren behöver lägga till bilder i Studio först.`)
+    if (!cover) throw new Error(`${q(asset.name)} har inga bilder än. Lägg till bilder med add_asset_images först.`)
     refs.push({ path: cover.path, label: `${asset.name} (foto 1)`, name: asset.name, kind: asset.kind })
   }
   return dedupeReferences(refs)
@@ -1015,6 +1016,11 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           : undefined
       const identity = referenceIdentity(params.referenceImages)
       const owner = storyboard ?? sequence
+      const stillTarget: StillParams['target'] = boardShown
+        ? { boardId: boardShown.id }
+        : assignTo
+          ? { segmentId: assignTo.segmentId, slot: assignTo.slot }
+          : undefined
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'image',
         client: ctx.clientName(),
@@ -1088,7 +1094,9 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         execute: async () => {
           const still = await callService<Still>('images:generate', {
             ...params,
-            referenceImages: followReferences(params.referenceImages, mark)
+            referenceImages: followReferences(params.referenceImages, mark),
+            // Where the picture goes, for its label in Pågår och klart while it is made (never sent or stored).
+            ...(stillTarget ? { target: stillTarget } : {})
           })
           if (boardShown) {
             // Checked again now that the picture is made, which takes a while: as verify says, a picture the user
@@ -1166,12 +1174,14 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get approval status',
       description:
-        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence, for generate-storyboard the storyboard with get_storyboard; for an image, the still_id – look at it with get_still – and assigned when it went into its board or clip; for an edit operation, the job's progress and then result_version – review it with review_generation; for a designed voice, the new Röst clip's audio_id once it is made), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, or replaced by a newer request) or failed (the error). Poll every 15–30 seconds while pending, and while an approved edit or voice job is still running.",
+        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence, for generate-storyboard the storyboard with get_storyboard; for an image, the still_id – look at it with get_still – and assigned when it went into its board or clip; for an edit operation, the job's progress and then result_version – review it with review_generation; for a designed voice, the new Röst clip's audio_id once it is made; for request_delete, every item with its outcome – deleted, gone (already removed) or failed with its error – and a notice when some didn't go), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, replaced by a newer request, or – for a removal – something in it changed before the user answered) or failed (the error; a removal where nothing could be removed keeps its items' outcomes). Poll every 15–30 seconds while pending, and while an approved edit or voice job is still running.",
       input: { approval_id: z.string() },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'kollade svaret på en förfrågan'
     },
     async ({ approval_id }) => {
+      // A removal whose items changed since it was asked for lapses as soon as anyone looks (the dialog, this call).
+      if (ctx.approvals.get(approval_id)?.kind === 'delete') await ctx.approvals.check(approval_id)
       const request = ctx.approvals.get(approval_id)
       if (!request) throw new Error('Förfrågan finns inte. Förfrågningar glöms när Studio startas om.')
       const storyboardId = request.sequenceKind === 'storyboard' ? request.sequenceId : undefined
@@ -1208,7 +1218,9 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         ...(request.stillId ? { still_id: request.stillId } : {}),
         ...(request.notice ? { notice: request.notice } : {}),
         // Redigera's requests: the edit and version (or the character), the operation, and the job it started.
-        ...(request.kind === 'edit' || request.kind === 'voice-design' ? await editApprovalInfo(request) : {})
+        ...(request.kind === 'edit' || request.kind === 'voice-design' ? await editApprovalInfo(request) : {}),
+        // A removal: every item, and once approved what became of each (deleted, gone or failed).
+        ...(request.kind === 'delete' ? deleteApprovalInfo(request) : {})
       }
       if (request.status === 'approved') {
         if (request.stillId) {

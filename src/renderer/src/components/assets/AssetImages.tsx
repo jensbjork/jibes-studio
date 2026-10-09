@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState, type DragEvent } from 'react'
 import { DEFAULT_MODEL, maxReferenceImages } from '@shared/models'
 import type { Asset, AssetImage, AssetKind } from '@shared/types'
-import { ASSET_COPY } from '../../lib/assets'
+import { ASSET_COPY, originText } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import ImagePreview from './ImagePreview'
@@ -11,10 +11,12 @@ import { imageIssues, insertIndex, type DropTarget, type Size } from './imageUti
 const DRAG_TYPE = 'application/x-studio-asset-image'
 const MAX_REFERENCES = maxReferenceImages(DEFAULT_MODEL['reference-to-video'])
 
-// Places, and poses with people side by side, are mostly photographed wide; people and clothes upright.
+// Places, and poses with people side by side, are mostly photographed wide; people and clothes upright; products
+// as packshots, square.
 const LAYOUT: Record<AssetKind, { grid: string; tile: string }> = {
   character: { grid: 'grid-cols-[repeat(auto-fill,minmax(140px,1fr))]', tile: 'aspect-[3/4]' },
   environment: { grid: 'grid-cols-[repeat(auto-fill,minmax(190px,1fr))]', tile: 'aspect-[4/3]' },
+  product: { grid: 'grid-cols-[repeat(auto-fill,minmax(150px,1fr))]', tile: 'aspect-square' },
   outfit: { grid: 'grid-cols-[repeat(auto-fill,minmax(140px,1fr))]', tile: 'aspect-[3/4]' },
   pose: { grid: 'grid-cols-[repeat(auto-fill,minmax(190px,1fr))]', tile: 'aspect-[4/3]' }
 }
@@ -296,6 +298,8 @@ function ImageTile({
 }: TileProps) {
   const [broken, setBroken] = useState(false)
   const issues = size ? imageIssues(size) : []
+  // Who added it, when an agent did, then what Venice might refuse about it.
+  const tooltip = [originText(image.origin), ...issues.map((i) => i.detail)].filter(Boolean).join('\n')
 
   return (
     <div className="relative" onDragOver={onDragOver}>
@@ -319,7 +323,7 @@ function ImageTile({
             onOpen()
           }
         }}
-        title={issues.length ? issues.map((i) => i.detail).join('\n') : undefined}
+        title={tooltip || undefined}
         className={`group relative ${aspect} cursor-pointer overflow-hidden rounded-md border bg-raised outline-none transition focus-visible:border-muted ${
           issues.length ? 'border-amber-400/50' : 'border-line'
         } ${dragging ? 'opacity-30' : ''}`}

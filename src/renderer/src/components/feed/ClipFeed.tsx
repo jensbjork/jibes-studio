@@ -12,8 +12,10 @@ import { queryGenerations, summarizeGenerations } from '@shared/generation-filte
 import type { Generation, VideoModel } from '@shared/types'
 import { useAssetsState } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
+import { useFreshGenerationIds } from '../../lib/work'
 import GenerationCard from '../GenerationCard'
 import { CloseIcon } from '../sequences/icons'
+import { Spinner } from '../work/StatusMark'
 import ClipDrawer from './ClipDrawer'
 import ClipTable from './ClipTable'
 import {
@@ -49,6 +51,12 @@ interface Props {
   emptyText: ReactNode
   /** Right end of the toolbar's first row (e.g. the folder button). */
   trailing?: ReactNode
+  /** A row under the toolbar (Generera's new pictures with no place of their own). */
+  banner?: ReactNode
+  /** Open this clip in the drawer (Pågår och klart, an agent's open_in_studio); `source: 'agent'` marks nothing seen. */
+  openRequest?: { generationId: string; source?: 'agent' }
+  /** The request was carried out (or the clip no longer exists). */
+  onOpenRequestHandled?: () => void
 }
 
 /** Cards rendered at first; more are added as the list scrolls towards its end. */
@@ -59,7 +67,17 @@ const CARD_PAGE = 60
  * what is shown and a detail drawer for one clip. Filtering follows the shared rules the agents'
  * list_generations tool uses, so "the 4-star clips with Anna" means the same thing to both.
  */
-export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, trailing }: Props) {
+export default function ClipFeed({
+  feed,
+  models,
+  navigate,
+  onReuse,
+  emptyText,
+  trailing,
+  banner,
+  openRequest,
+  onOpenRequestHandled
+}: Props) {
   const { generations, loaded, rate, remove, patch } = feed
   const { assets, loaded: assetsLoaded } = useAssetsState()
   const index = useMemo(() => buildLibraryIndex(assets), [assets])
@@ -69,6 +87,8 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
   const [filters, setFiltersState] = useState<FeedFilters>(loadSessionFilters)
   const [selectedId, setSelectedId] = useState<string>()
   const [openId, setOpenId] = useState<string>()
+  // Who opened the drawer: an agent's request shows the clip without counting as the user looking at it.
+  const [openSource, setOpenSource] = useState<'agent'>()
   const [cardLimit, setCardLimit] = useState(CARD_PAGE)
 
   // Own films brought into the feed ("Importera egna klipp…", or dropped on it).
@@ -125,10 +145,29 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
   // Typing in the search field stays responsive with thousands of clips: the list catches up a moment later.
   const deferredFilters = useDeferredValue(filters)
   const active = effectiveFilters(deferredFilters, assets, assetsLoaded)
-  const shown = useMemo(
-    () => queryGenerations(generations, toGenerationFilter(active, sort, Date.now()), index.paths),
-    [generations, active, sort, index]
-  )
+
+  // Pågår och klart: the finished clips the user hasn't looked at yet ("Nya") – every one, also past the 200 that
+  // the panel lists in full.
+  const unseenIds = useFreshGenerationIds()
+  // While "Nya" is on, a clip stays listed after it was watched (it would otherwise vanish a second into playing
+  // it); the list forgets them when the filter goes off. The rule is the shared filter's (unseen), applied here so
+  // the cards keep their identity.
+  const keptNew = useRef<Set<string>>(new Set())
+  const newIds = useMemo(() => {
+    if (!active.unseen) {
+      keptNew.current = new Set()
+      return undefined
+    }
+    for (const id of unseenIds) keptNew.current.add(id)
+    return new Set(keptNew.current)
+  }, [active.unseen, unseenIds])
+
+  const shown = useMemo(() => {
+    const pool = newIds ? generations.filter((g) => newIds.has(g.id)) : generations
+    return queryGenerations(pool, toGenerationFilter({ ...active, unseen: undefined }, sort, Date.now()), index.paths)
+  }, [generations, newIds, active, sort, index])
+  const pendingCount = useMemo(() => generations.filter(isPending).length, [generations])
+  const unseenCount = useMemo(() => generations.filter((g) => unseenIds.has(g.id)).length, [generations, unseenIds])
   const filtering = hasFilters(active)
 
   const summary = useMemo(() => {
@@ -180,7 +219,28 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
   const open = useCallback((id: string) => {
     setSelectedId(id)
     setOpenId(id)
+    setOpenSource(undefined)
   }, [])
+
+  // "Gå dit" from Pågår och klart, or an agent showing the user a clip: open it in the drawer. A filter that hides
+  // it is lifted, with a note, rather than opening a clip the list doesn't show.
+  const handledRequest = useRef<typeof openRequest>(undefined)
+  useEffect(() => {
+    if (!openRequest || !loaded || handledRequest.current === openRequest) return
+    handledRequest.current = openRequest
+    const g = generations.find((x) => x.id === openRequest.generationId)
+    if (!g) {
+      setImportNotice({ text: 'Klippet finns inte längre i biblioteket.', error: false })
+    } else {
+      if (!shown.some((x) => x.id === g.id) && hasFilters(filters)) {
+        setFilters({ query: '' })
+        setImportNotice({ text: 'Filtren dolde klippet, så de är borttagna.', error: false })
+      }
+      open(g.id)
+      if (openRequest.source === 'agent') setOpenSource('agent')
+    }
+    onOpenRequestHandled?.()
+  }, [openRequest, loaded])
   const close = useCallback(() => setOpenId(undefined), [])
 
   const step = (delta: 1 | -1): (() => void) | undefined => {
@@ -264,6 +324,8 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
         assets={assets}
         index={index}
         searchRef={searchRef}
+        pendingCount={pendingCount}
+        unseenCount={unseenCount}
         onSearchArrowDown={() => {
           if (view === 'table') {
             tableRef.current?.focus()
@@ -288,6 +350,7 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
           </>
         }
       />
+      {banner}
 
       {importNotice && (
         <div
@@ -317,7 +380,7 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
       )}
       {hiddenPending > 0 && (
         <div className="flex items-center gap-2 border-b border-line/60 bg-raised/50 px-6 py-1.5 text-[12px] text-muted">
-          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-400" />
+          <Spinner />
           <span className="min-w-0 flex-1">
             {hiddenPending === 1 ? 'Ett klipp genereras' : `${hiddenPending} klipp genereras`} men döljs av filtren.
           </span>
@@ -433,6 +496,7 @@ export default function ClipFeed({ feed, models, navigate, onReuse, emptyText, t
             onChange={patch}
             onRate={rate}
             navigate={navigate}
+            openedByAgent={openSource === 'agent'}
           />
         )}
       </div>

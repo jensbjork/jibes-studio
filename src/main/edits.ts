@@ -32,7 +32,7 @@ import { isAgentCall } from './agent/local-ipc'
 import { AUDIO_FILE_TYPES, setVoiceCloneConsent } from './assets'
 import * as db from './db'
 import * as mixes from './edit-mix'
-import { EditOps, isPictureOp, transcriptFor, versionParams, type OpsDeps } from './edit-ops'
+import { EditOps, isPictureOp, transcriptFor, versionParams, type EditActiveWork, type OpsDeps } from './edit-ops'
 import * as store from './edit-store'
 import { extractThumbnail, filmstrip, probe, probeAudio, sceneCuts, waveform } from './ffmpeg'
 import { toPublic, videoLocation } from './jobs'
@@ -55,6 +55,7 @@ import {
 import { cloneInto, placeFile, serialized } from './references'
 import { attachReviewSummary } from './reviews'
 import type { SequenceService } from './sequences'
+import { assertAgentFiles } from './upload-paths'
 import { separationStatus } from './voice-separation'
 
 export const USER_ONLY = 'Det här kan bara du göra i Studio.'
@@ -87,6 +88,10 @@ export interface EditServiceHandle {
    * else hands on its transcript.
    */
   beforeGenerationDelete(id: string): void
+  /** Why Redigera's rules keep the generation from being deleted (Swedish), or null: the check alone, no changes. */
+  deleteRefusal(id: string): string | null
+  /** Running paid jobs and free renders, for the status summary (work.ts). */
+  activeWork(): EditActiveWork
   resume(): void
   /**
    * A generation was deleted (generations:delete): an edit whose current version it was falls back on its parent
@@ -220,7 +225,8 @@ class EditService {
       ...(poster ? { posterPath: poster } : {}),
       versionCount: versions.length,
       ...(current?.videoDuration !== undefined ? { duration: current.videoDuration } : {}),
-      running: jobs.some((j) => j.status === 'running'),
+      // A free render (a cut, a fade …) works on the edit as much as a paid job does.
+      running: jobs.some((j) => j.status === 'running') || this.ops.isRendering(edit.id),
       totalCostUsd: roundUsd(audioCost + takeCost),
       generationIds: [...versions, ...takes].map((g) => g.id),
       updatedAt: edit.updated_at
@@ -632,38 +638,47 @@ class EditService {
 
   /**
    * Before a generation is deleted outside Redigera (the feed's Radera, a take list's): throws (Swedish) when
-   * Redigera's rules keep it – a running operation works on it (or is putting it, a paid take, into a film), an edit
-   * started from it, it is a version Redigera itself wouldn't delete, or a stopped job that has paid for parts builds on
-   * it – and otherwise hands its transcript to the versions that inherit it.
+   * Redigera's rules keep it (see deleteRefusal), and otherwise hands its transcript to the versions that inherit it.
    */
   beforeGenerationDelete(id: string): void {
-    const g = db.getGeneration(id)
-    if (!g) return
+    const refused = this.deleteRefusal(id)
+    if (refused) throw new Error(refused)
+    if (!db.getGeneration(id)) return
+    this.keepInheritedTranscripts(new Set([id]), store.childrenOf(id))
+  }
+
+  /**
+   * Why Redigera's rules keep a generation from being deleted outside Redigera (Swedish), or null: a running operation
+   * works on it (or is putting it, a paid take, into a film), an edit started from it, it is a version Redigera itself
+   * wouldn't delete, or a stopped job that has paid for parts builds on it. Reads only, so an agent's delete request
+   * can ask it while planning (edits:deleteRefusal) without anything being handed on.
+   */
+  deleteRefusal(id: string): string | null {
+    const g = typeof id === 'string' ? db.getGeneration(id) : undefined
+    if (!g) return null
     if (store.runningJobsOnBase(id).length) {
-      throw new Error('En pågående åtgärd i Redigera utgår från filmen. Vänta tills den är klar och försök igen.')
+      return 'En pågående åtgärd i Redigera utgår från filmen. Vänta tills den är klar och försök igen.'
     }
     // A paid AI take being put into its edit's film right now.
     if (g.status === 'completed' && store.jobForTake(id)?.status === 'running') {
-      throw new Error('Tagningen sätts in i en redigering just nu. Vänta tills den är klar och försök igen.')
+      return 'Tagningen sätts in i en redigering just nu. Vänta tills den är klar och försök igen.'
     }
     const startedFrom = store.editsStartedFrom(id)[0]
-    if (startedFrom) {
-      throw new Error(`Filmen är originalet i redigeringen ”${startedFrom.name}”. Radera redigeringen först.`)
-    }
+    if (startedFrom) return `Filmen är originalet i redigeringen ”${startedFrom.name}”. Radera redigeringen först.`
     const edit = g.editId && g.source !== 'generated' ? store.getEditRow(g.editId) : undefined
     if (edit) {
       const refused = this.keepReason(edit, g)
-      if (refused) throw new Error(refused)
+      if (refused) return refused
     }
     // Outside Redigera nothing says so: the version is deleted there, where its confirm names what is lost.
     const paused = this.pausedPaidJob(id)
     if (paused) {
-      throw new Error(
+      return (
         `Ett avbrutet jobb i Redigera (”${paused.label}”) utgår från filmen och har redan betalat ` +
-          `${formatPrice(paused.costUsd)}. Tryck Fortsätt på jobbet, eller radera versionen i Redigera.`
+        `${formatPrice(paused.costUsd)}. Tryck Fortsätt på jobbet, eller radera versionen i Redigera.`
       )
     }
-    this.keepInheritedTranscripts(new Set([id]), store.childrenOf(id))
+    return null
   }
 
   /**
@@ -1095,7 +1110,9 @@ function createKey(text: string): string {
 
 /**
  * Registers every edits:*, audio:* and voices:* channel. Handlers that only the user may use refuse an agent's call
- * (a second line of defence behind the agents' tool list).
+ * (a second line of defence behind the agents' tool list); an agent removes edits and versions only through a delete
+ * request the user approved, which reaches these handlers with the user's authority. 'edits:deleteRefusal' isn't part
+ * of StudioApi: the agents' delete planning asks it.
  */
 export function registerEditIpc(deps: EditDeps): EditServiceHandle {
   const service = new EditService(deps)
@@ -1120,9 +1137,14 @@ export function registerEditIpc(deps: EditDeps): EditServiceHandle {
     return service.deleteVersion(versionId)
   })
   ipcMain.handle('edits:prune', (e, editId: unknown, dryRun: unknown): Promise<{ count: number; bytes: number }> => {
-    userOnly(e)
+    // What a clean-up would remove (count and size) is only a reading; agents ask it to plan a delete request. Only an
+    // explicit false prunes (see prune), and that stays the user's.
+    if (dryRun === false) userOnly(e)
     return service.prune(editId, dryRun)
   })
+  ipcMain.handle('edits:deleteRefusal', (_e, generationId: unknown): string | null =>
+    service.deleteRefusal(generationId as string)
+  )
   ipcMain.handle('edits:timeline', (_e, generationId: unknown): Promise<EditTimeline> => service.timeline(generationId))
   ipcMain.handle('edits:plan', (_e, editId: unknown, op: unknown, baseId?: unknown): Promise<EditPlan> =>
     ops.plan(editId, op, baseId)
@@ -1147,7 +1169,8 @@ export function registerEditIpc(deps: EditDeps): EditServiceHandle {
     return service.saveSubtitles(e, generationId)
   })
   ipcMain.handle('edits:addAudio', (e, editId: unknown, paths: unknown): Promise<EditMedia[]> => {
-    userOnly(e)
+    // An agent's sound is an upload staged in the library or a file the library records, never a path of its own.
+    assertAgentFiles(e, Array.isArray(paths) ? paths : [paths])
     return service.addAudio(editId, paths)
   })
   ipcMain.handle('edits:send', (_e, versionId: unknown, target: unknown) => service.send(versionId, target))
@@ -1177,6 +1200,8 @@ export function registerEditIpc(deps: EditDeps): EditServiceHandle {
     isBusy: () => service.isBusy(),
     keeps: (id) => service.keeps(id),
     beforeGenerationDelete: (id) => service.beforeGenerationDelete(id),
+    deleteRefusal: (id) => service.deleteRefusal(id),
+    activeWork: () => ops.activeWork(),
     resume: () => service.resume(),
     onGenerationDeleted: (id, deleted) => service.onGenerationDeleted(id, deleted),
     stop: () => service.stop()

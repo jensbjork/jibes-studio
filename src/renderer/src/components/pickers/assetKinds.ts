@@ -41,6 +41,17 @@ export const PICKER_COPY: Record<AssetKind, PickerCopy> = {
     noMatch: 'Ingen miljö matchar',
     needsImages: 'Lägg till bilder på miljön först'
   },
+  product: {
+    add: 'Produkt',
+    addTitle: 'Lägg till en sparad produkts bilder',
+    search: 'Sök produkt…',
+    emptyTitle: 'Inga produkter än.',
+    emptyText: 'Spara produkter med bilder så kan du ta med dem i klippen.',
+    create: 'Skapa en produkt',
+    manage: 'Hantera produkter →',
+    noMatch: 'Ingen produkt matchar',
+    needsImages: 'Lägg till bilder på produkten först'
+  },
   outfit: {
     add: 'Kläder',
     addTitle: 'Lägg till en sparad klädsels bilder',
@@ -94,6 +105,13 @@ export const KIND_TONE: Record<AssetKind, KindTone> = {
     ring: 'ring-emerald-400/70',
     caption: 'bg-emerald-700/85',
     token: 'bg-emerald-400/15 text-emerald-300'
+  },
+  product: {
+    text: 'text-orange-400',
+    chip: 'border-orange-400/30 bg-orange-400/10 hover:border-orange-400/60',
+    ring: 'ring-orange-400/70',
+    caption: 'bg-orange-700/85',
+    token: 'bg-orange-400/15 text-orange-300'
   },
   outfit: {
     text: 'text-violet-400',

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AssetAudio } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { watchMediaElement } from '../../lib/work'
 import type { ClipWindow } from './audioUtils'
 
 /** file: the whole recording. window: exactly the part that is sent to Venice, then stop. */
@@ -41,10 +42,12 @@ function ignoreAbort(e: unknown): void {
 /**
  * One <audio> element shared by every clip of an asset, so only one plays at a time. The playhead is
  * followed with requestAnimationFrame while playing: smooth on the track, and a window preview stops within
- * a frame of its end instead of the quarter second timeupdate allows.
+ * a frame of its end instead of the quarter second timeupdate allows. The element is never in the document, so
+ * Pågår och klart's playback rule (a designed voice counts as heard after a second of it) watches it directly.
  */
 export function useClipPlayer(): ClipPlayer {
   const element = useRef<HTMLAudioElement | null>(null)
+  const unwatch = useRef<(() => void) | undefined>(undefined)
   const loaded = useRef<{ clipId?: string; path?: string; mode: PlayMode; window?: ClipWindow }>({ mode: 'file' })
   const [state, setState] = useState<PlayerState>({ mode: 'file', playing: false, time: 0 })
   const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set())
@@ -61,6 +64,7 @@ export function useClipPlayer(): ClipPlayer {
       if (id) setFailed((f) => (f.has(id) ? f : new Set(f).add(id)))
       setState((s) => ({ ...s, playing: false }))
     })
+    unwatch.current = watchMediaElement(a)
     element.current = a
     return a
   }, [])
@@ -160,6 +164,8 @@ export function useClipPlayer(): ClipPlayer {
       const a = element.current
       element.current = null
       loaded.current = { mode: 'file' }
+      unwatch.current?.()
+      unwatch.current = undefined
       if (!a) return
       a.pause()
       a.removeAttribute('src')

@@ -88,8 +88,8 @@ export default function TokenMenu({
             {query ? <p>Inget heter ”@{query}”.</p> : <p>Inget att hänvisa till än.</p>}
             {noReferences && (
               <p className="mt-1 text-[11px]">
-                Lägg till bilder med ＋ Karaktär, ＋ Miljö, ＋ Kläder eller ＋ Pose ovanför – de får nummer @Image1,
-                @Image2 … och röster @Audio1 …
+                Lägg till bilder med ＋ Karaktär, ＋ Miljö, ＋ Produkt, ＋ Kläder eller ＋ Pose ovanför – de får
+                nummer @Image1, @Image2 … och röster @Audio1 …
               </p>
             )}
           </div>
@@ -163,7 +163,7 @@ function Option({ id, item, active, refCallback, onHover, onChoose }: OptionProp
 
 function OptionContent({ item }: { item: MenuItem }) {
   if (item.type === 'group') {
-    const { asset, indices, outfits, audios, people } = item.group
+    const { asset, indices, outfits, audios, people, holder } = item.group
     const tone = KIND_TONE[asset.kind]
     return (
       <>
@@ -175,6 +175,7 @@ function OptionContent({ item }: { item: MenuItem }) {
             {audios?.length ? (asset.kind === 'character' ? ' · med röst' : ' · med ljud') : ''}
             {outfits?.length ? ` · bär ${promptList(outfits.map((o) => o.name), 'sv')}` : ''}
             {asset.kind === 'pose' && people?.length ? ` · ${promptList(people.map((p) => p.name), 'sv')}` : ''}
+            {asset.kind === 'product' && holder ? ` · hålls av ${holder.name}` : ''}
           </span>
         </span>
         <span className={`shrink-0 text-[11px] ${tone.text}`}>

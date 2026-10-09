@@ -4,14 +4,29 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import type { AgentClientInfo } from '@shared/types'
-import { isAllowedPeer, normalizeAddress } from './network'
+import { isAllowedPeer, LOOPBACK, normalizeAddress } from './network'
 
 // The agent connection's HTTP side: MCP over Streamable HTTP at /mcp, one transport and MCP server per client
-// session. Only this Mac and the tailnet get in, only with Studio's bearer token, and never a web page.
+// session, and PUT /uploads/<id> for the raw bytes of a file an agent announced with begin_upload. Only this Mac and
+// the tailnet get in, only with Studio's bearer token, and never a web page.
 
 export const MCP_PATH = '/mcp'
 /** Tool calls are small; anything bigger than this is refused unread. */
 export const MAX_BODY_BYTES = 1024 * 1024
+/** An /mcp request body must have arrived within this long (the server itself has no overall limit: PUTs are long). */
+const BODY_TIMEOUT_MS = 60_000
+/** How long a connection answered mid-upload may still drain the client's bytes before it is closed for good. */
+const LINGER_MS = 2000
+/** Where an upload's bytes go: /uploads/<upload id>. */
+export const UPLOAD_PATH = /^\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+
+/** What the server needs of the upload store for PUT /uploads/<id> (agent/uploads.ts). */
+export interface UploadReceiver {
+  /** Undefined when a PUT of `length` bytes from `peer` may start, else its status and Swedish reason. */
+  checkPut(id: string, peer: string, length: number): Promise<{ status: number; error: string } | undefined>
+  /** Reads the body into the upload and answers with the status and JSON body to send. */
+  receive(id: string, req: IncomingMessage): Promise<{ status: number; body: Record<string, unknown> }>
+}
 /** Clients that never close their session are dropped after this long without a request… */
 const IDLE_SESSION_MS = 12 * 60 * 60 * 1000
 /** …and the least recently seen one goes when there are more sessions than this. */
@@ -34,6 +49,11 @@ export class AgentSession {
    * header it sends with every later request); undefined until known.
    */
   protocolVersion: string | undefined
+  /**
+   * "http://<host>:<port>" as the client reached Studio (the Host of its initialize request, when that names an
+   * address Studio listens on or its MagicDNS name), for the put_url of its uploads; undefined when unknown.
+   */
+  baseUrl: string | undefined
 
   constructor(
     /** Where the client connects from. */
@@ -61,6 +81,10 @@ export interface AgentServerOptions {
   createMcpServer: (session: AgentSession) => McpServer
   /** A session opened, closed or was dropped. */
   onSessionsChanged: () => void
+  /** Takes the bytes of PUT /uploads/<id>; without it that path is unknown. */
+  uploads?: UploadReceiver
+  /** Names this Mac answers to besides its addresses (its MagicDNS name), for a session's base URL. */
+  hostNames?: () => string[]
 }
 
 export interface ListenResult {
@@ -86,24 +110,59 @@ function rpcError(res: ServerResponse, status: number, code: number, message: st
 }
 
 class BodyTooLarge extends Error {}
+class BodyTimeout extends Error {}
 
-/** Reads the request body, refusing more than MAX_BODY_BYTES. */
+/**
+ * Reads the request body, refusing more than MAX_BODY_BYTES; a body that hasn't arrived within BODY_TIMEOUT_MS
+ * ends the request (the socket is destroyed, there is no one left to answer).
+ */
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
+    const timer = setTimeout(() => {
+      reject(new BodyTimeout())
+      req.destroy()
+    }, BODY_TIMEOUT_MS)
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
       if (size > MAX_BODY_BYTES) {
+        clearTimeout(timer)
         reject(new BodyTooLarge())
         req.pause()
         return
       }
       chunks.push(chunk)
     })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
+    req.on('end', () => {
+      clearTimeout(timer)
+      resolve(Buffer.concat(chunks).toString('utf8'))
+    })
+    req.on('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
   })
+}
+
+/** A JSON answer (the upload route speaks JSON both ways). */
+function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
+  if (res.headersSent) return
+  const text = JSON.stringify(body)
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': String(Buffer.byteLength(text)),
+    ...headers
+  })
+  res.end(text)
+}
+
+/** "host" and "port" of a Host header ("127.0.0.1:8787", "[fd7a::1]:8787", "<your-mac>.<tailnet>.ts.net:8787"). */
+function splitHost(header: string | undefined): { host: string; port?: number } | undefined {
+  if (!header) return undefined
+  const m = /^(?:\[([^\]]+)\]|([^:]+))(?::(\d+))?$/.exec(header.trim())
+  if (!m) return undefined
+  return { host: (m[1] ?? m[2]).toLowerCase(), ...(m[3] ? { port: Number(m[3]) } : {}) }
 }
 
 function isInitialize(body: unknown): boolean {
@@ -192,15 +251,20 @@ export class AgentServer {
 
   private open(host: string): Promise<Server> {
     return new Promise((resolve, reject) => {
-      const server = createServer((req, res) => {
-        this.handle(req, res).catch((err: unknown) => {
+      const serve = (req: IncomingMessage, res: ServerResponse, expectContinue: boolean): void => {
+        this.handle(req, res, expectContinue).catch((err: unknown) => {
           console.error('Agent request failed:', err)
           if (!res.headersSent) rpcError(res, 500, -32603, 'Internal server error')
           else res.end()
         })
-      })
-      // Generous for a body of at most 1 MB; the time a streamed response takes is not limited by this.
-      server.requestTimeout = 60_000
+      }
+      const server = createServer((req, res) => serve(req, res, false))
+      // With a listener, Node hands requests that send "Expect: 100-continue" (curl -T of a larger file) here instead
+      // of answering "100 Continue" on its own: the client only starts sending once every check has passed.
+      server.on('checkContinue', (req, res) => serve(req, res, true))
+      // No overall limit: an upload of a large video takes long. /mcp bodies have their own 60 s (readBody), a PUT
+      // its idle and total timeouts (uploads.ts); headers must still arrive within 20 s.
+      server.requestTimeout = 0
       server.headersTimeout = 20_000
       const onError = (err: Error): void => reject(err)
       server.once('error', onError)
@@ -220,27 +284,40 @@ export class AgentServer {
     return timingSafeEqual(sha256(match[1]), sha256(token))
   }
 
-  private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async handle(req: IncomingMessage, res: ServerResponse, expectContinue = false): Promise<void> {
     const peer = req.socket.remoteAddress
-    if (!isAllowedPeer(peer, req.socket.localAddress)) return plain(res, 403, 'Forbidden')
     const path = (req.url ?? '/').split('?')[0]
-    if (path !== MCP_PATH) return plain(res, 404, 'Not found')
+    const upload = UPLOAD_PATH.exec(path)
+    // A refused upload (or a request still waiting for "100 Continue") must never be read: the connection is closed
+    // once the answer is out, so a refused 4 GB body isn't taken in just to be thrown away.
+    const closing = !!upload || req.method === 'PUT' || expectContinue
+    const refuse = (status: number, text: string, headers: Record<string, string> = {}): void => {
+      if (closing) this.closeAfter(req, res)
+      plain(res, status, text, closing ? { ...headers, Connection: 'close' } : headers)
+    }
+    if (!isAllowedPeer(peer, req.socket.localAddress)) return refuse(403, 'Forbidden')
+    if (path !== MCP_PATH && !upload) return refuse(404, 'Not found')
     // Browsers always say where a request comes from; agents don't. No web page gets to talk to Studio.
     const origin = req.headers.origin
-    if (origin !== undefined && origin !== 'null') return plain(res, 403, 'Browser access is not allowed')
+    if (origin !== undefined && origin !== 'null') return refuse(403, 'Browser access is not allowed')
     if (!this.authorized(req.headers.authorization)) {
-      return plain(res, 401, 'Unauthorized', { 'WWW-Authenticate': 'Bearer realm="Studio"' })
+      return refuse(401, 'Unauthorized', { 'WWW-Authenticate': 'Bearer realm="Studio"' })
     }
+    if (upload) return this.handleUpload(req, res, upload[1], normalizeAddress(peer), expectContinue)
 
     let body: unknown
     if (req.method === 'POST') {
       const declared = Number(req.headers['content-length'])
-      if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return plain(res, 413, 'Request too large')
+      if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return refuse(413, 'Request too large')
+      // Every check this request can fail before its body has passed: the client may send it now.
+      if (expectContinue) res.writeContinue()
       let text: string
       try {
         text = await readBody(req)
       } catch (err) {
         if (err instanceof BodyTooLarge) return plain(res, 413, 'Request too large', { Connection: 'close' })
+        // The socket is gone already: nobody to answer.
+        if (err instanceof BodyTimeout) return
         throw err
       }
       try {
@@ -249,7 +326,9 @@ export class AgentServer {
         return rpcError(res, 400, -32700, 'Parse error')
       }
     } else if (req.method !== 'GET' && req.method !== 'DELETE') {
-      return plain(res, 405, 'Method not allowed', { Allow: 'GET, POST, DELETE' })
+      return refuse(405, 'Method not allowed', { Allow: 'GET, POST, DELETE' })
+    } else if (expectContinue) {
+      res.writeContinue()
     }
 
     const header = req.headers['mcp-session-id']
@@ -263,6 +342,7 @@ export class AgentServer {
       const name = req.headers['x-studio-agent-name']
       session = await this.start(normalizeAddress(peer), typeof name === 'string' ? name.trim().slice(0, 60) : undefined)
       session.protocolVersion = requestedVersion(body)
+      session.baseUrl = this.baseUrlFor(req.headers.host)
     } else {
       return rpcError(res, 400, -32000, 'Bad Request: No valid session ID provided')
     }
@@ -275,6 +355,95 @@ export class AgentServer {
       // The initialize was refused; nothing refers to this session.
       await session.mcp?.close().catch(() => {})
     }
+  }
+
+  /**
+   * PUT /uploads/<id>: same peer, Origin and token checks as /mcp (done by handle), then PUT only, a declared length
+   * that matches what begin_upload said (no chunked bodies), and an upload that is waiting for its bytes from this
+   * very machine. Only then is "100 Continue" sent and the body read.
+   */
+  private async handleUpload(
+    req: IncomingMessage,
+    res: ServerResponse,
+    id: string,
+    peer: string,
+    expectContinue: boolean
+  ): Promise<void> {
+    const refuse = (status: number, error: string, headers: Record<string, string> = {}): void => {
+      this.closeAfter(req, res)
+      json(res, status, { error }, { ...headers, Connection: 'close' })
+    }
+    if (req.method !== 'PUT') return refuse(405, 'Bara PUT tas emot här.', { Allow: 'PUT' })
+    const uploads = this.opts.uploads
+    if (!uploads) return refuse(404, 'Okänd uppladdning.')
+    if (req.headers['transfer-encoding'] !== undefined) {
+      return refuse(411, 'Skicka filen med Content-Length (inte chunked), som curl -T gör.')
+    }
+    const header = req.headers['content-length']
+    if (header === undefined) return refuse(411, 'Content-Length saknas.')
+    const length = Number(header)
+    if (!/^\d+$/.test(header) || !Number.isSafeInteger(length)) return refuse(400, 'Content-Length går inte att läsa.')
+    const problem = await uploads.checkPut(id, peer, length)
+    if (problem) return refuse(problem.status, problem.error)
+    // Nothing may wait between the check and receive(), which marks the upload as sending.
+    if (expectContinue) res.writeContinue()
+    const answer = await uploads.receive(id, req)
+    if (answer.status >= 400) {
+      // The client may still be sending (a transfer Studio stopped): the answer goes out first, and the connection
+      // closes once it has been read rather than resetting under it.
+      this.lingerClose(req, res)
+      return json(res, answer.status, answer.body, { Connection: 'close' })
+    }
+    json(res, answer.status, answer.body)
+  }
+
+  /**
+   * Ends the connection after an answer sent while the request body may still be arriving: our side is closed once
+   * the answer is out and what still comes in is discarded unread, so the client reads the answer instead of a reset;
+   * the socket goes when the client closes, or after LINGER_MS.
+   */
+  private lingerClose(req: IncomingMessage, res: ServerResponse): void {
+    const socket = req.socket
+    const destroy = (): void => {
+      clearTimeout(timer)
+      socket.destroy()
+    }
+    let timer: NodeJS.Timeout | undefined
+    res.once('finish', () => {
+      req.resume()
+      socket.end()
+      timer = setTimeout(destroy, LINGER_MS)
+      timer.unref?.()
+      socket.once('close', () => clearTimeout(timer))
+    })
+    res.once('close', () => {
+      if (!res.writableFinished) destroy()
+    })
+  }
+
+  /** Destroys the connection once the answer has gone out (or at once, if it never can). */
+  private closeAfter(req: IncomingMessage, res: ServerResponse): void {
+    const destroy = (): void => {
+      req.socket.destroy()
+    }
+    res.once('finish', destroy)
+    res.once('close', destroy)
+  }
+
+  /**
+   * "http://<host>:<port>" for a session, from the Host its initialize request named: an address Studio listens on,
+   * "localhost" (as 127.0.0.1, which Studio listens on) or one of its names, on Studio's own port. Anything else is
+   * not trusted to lead back here (a proxy, a made-up name), and the agent gets only put_path then.
+   */
+  private baseUrlFor(header: string | undefined): string | undefined {
+    const parsed = splitHost(header)
+    if (!parsed || parsed.port !== this.port) return undefined
+    const listening = this.hosts()
+    let host = parsed.host
+    if (host === 'localhost' && listening.includes(LOOPBACK)) host = LOOPBACK
+    const names = (this.opts.hostNames?.() ?? []).map((n) => n.toLowerCase())
+    if (!listening.includes(host) && !names.includes(host)) return undefined
+    return `http://${host.includes(':') ? `[${host}]` : host}:${this.port}`
   }
 
   /** A new session for a client's initialize request. */

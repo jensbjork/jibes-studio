@@ -8,13 +8,14 @@ import { DEFAULT_AUDIO_CLIP_SECONDS, MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECO
 import type {
   Asset,
   AssetAudio,
+  AssetFileOrigin,
   AssetImage,
   AssetInput,
   AssetKind,
   DescribedAsset,
   GenerationParams
 } from '@shared/types'
-import { getDb, isStoredPathRecorded, rewriteStoredPrefix } from './db'
+import { addUnseen, getDb, isStoredPathRecorded, rewriteStoredPrefix } from './db'
 import { probeAudio } from './ffmpeg'
 import {
   assetsDir,
@@ -33,13 +34,14 @@ import {
 } from './paths'
 import { copyInto, fileErrorReason, placeFile, serialized } from './references'
 
-// Assets: characters (Karaktärer), environments (Miljöer), outfits (Kläder) and poses (Poser) — each a name, a
-// description and reference photos. Characters and environments can also have audio clips: a voice ("Röst")
-// or a soundscape ("Ljudmiljö"), of which a window of 2–15 s is sent to Venice as reference audio. Every asset
-// has a folder <kind folder>/<name>/ with copies of its photos and audio (under their original names) and
-// Beskrivning.txt, so an asset keeps working when the originals are moved or deleted, and the folder reads
-// well in Finder. The database is the source of truth; the folder follows renames and deletes. A character may
-// have a default outfit (assets.default_outfit_id, cleared by the FK when the outfit goes).
+// Assets: characters (Karaktärer), environments (Miljöer), products (Produkter), outfits (Kläder) and poses
+// (Poser) — each a name, a description and reference photos. Characters and environments can also have audio
+// clips: a voice ("Röst") or a soundscape ("Ljudmiljö"), of which a window of 2–15 s is sent to Venice as
+// reference audio. Every asset has a folder <kind folder>/<name>/ with copies of its photos and audio (under their
+// original names) and Beskrivning.txt, so an asset keeps working when the originals are moved or deleted, and the
+// folder reads well in Finder. The database is the source of truth; the folder follows renames and deletes. A
+// character may have a default outfit (assets.default_outfit_id, cleared by the FK when the outfit goes). A photo or
+// clip an agent added records which agent (and the host a fetched file came from) in its `origin` column.
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp'])
 /** The audio formats an asset accepts (also the file dialog's filter). */
@@ -66,6 +68,7 @@ const nameCollator = new Intl.Collator('sv')
 const THE: Record<AssetKind, string> = {
   character: 'Karaktären',
   environment: 'Miljön',
+  product: 'Produkten',
   outfit: 'Klädseln',
   pose: 'Posen'
 }
@@ -100,7 +103,9 @@ function assetTask<T>(task: () => Promise<T>): Promise<T> {
 
 /** Why the library can't be switched or tidied right now (Swedish), or undefined when no asset work runs. */
 export function assetWorkBusy(): string | undefined {
-  return assetTasks > 0 ? 'Bilder eller ljud till en karaktär, miljö, klädsel eller pose sparas just nu.' : undefined
+  return assetTasks > 0
+    ? 'Bilder eller ljud till en karaktär, miljö, produkt, klädsel eller pose sparas just nu.'
+    : undefined
 }
 
 interface AssetRow {
@@ -123,6 +128,8 @@ interface AssetImageRow {
   file_path: string
   position: number
   created_at: number
+  /** JSON AssetFileOrigin when an agent added it; NULL for the user (schema 12). */
+  origin?: string | null
 }
 
 interface AssetAudioRow {
@@ -142,6 +149,8 @@ interface AssetAudioRow {
    * lines; NULL: not confirmed. Set only by the user in Studio (schema 11).
    */
   clone_consent_at?: number | null
+  /** JSON AssetFileOrigin when an agent added it; NULL for the user and for Studio's own clips (schema 12). */
+  origin?: string | null
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -160,6 +169,47 @@ function safeId(id: unknown): string {
 function requireKind(value: unknown): AssetKind {
   if (!isAssetKind(value)) throw new Error('Okänd sorts bibliotekspost.')
   return value
+}
+
+/** Longest agent name kept in an origin (a client's name is free text). */
+const MAX_ORIGIN_AGENT = 60
+/** The name recorded when an agent's call names no agent. */
+const UNNAMED_AGENT = 'en agent'
+/** A host name or an IP address, nothing more: an origin must never carry a URL (it may hold tokens). */
+const HOST_PATTERN = /^(?:[a-z0-9-]+\.)*[a-z0-9-]+$|^\[?[0-9a-f:.]+\]?$/i
+
+/**
+ * What an agent's call says about who added a file, as it is stored: the agent's name (one line, at most 60
+ * characters) and the host a fetched file came from (only a host name or an address; anything else is dropped).
+ * `at` is now. undefined: the user added it (the handler passes an origin only for an agent's call).
+ */
+function originFrom(value: unknown, at: number): AssetFileOrigin | undefined {
+  if (value === undefined || value === null) return undefined
+  const v = (typeof value === 'object' ? value : {}) as { agent?: unknown; host?: unknown }
+  const name = text(v.agent).replace(/[\p{Cc}\s]+/gu, ' ').trim()
+  const agent = Array.from(name).slice(0, MAX_ORIGIN_AGENT).join('').trim()
+  const host = text(v.host).trim().toLowerCase()
+  return {
+    agent: agent || UNNAMED_AGENT,
+    ...(host && host.length <= 253 && HOST_PATTERN.test(host) ? { host } : {}),
+    at
+  }
+}
+
+/** An origin column read back; anything malformed counts as the user's (it is only ever informative). */
+function parseOrigin(json: string | null | undefined): AssetFileOrigin | undefined {
+  if (typeof json !== 'string' || !json) return undefined
+  try {
+    const value = JSON.parse(json) as { agent?: unknown; host?: unknown; at?: unknown } | null
+    if (!value || typeof value !== 'object' || typeof value.agent !== 'string' || !value.agent) return undefined
+    return {
+      agent: value.agent,
+      ...(typeof value.host === 'string' && value.host ? { host: value.host } : {}),
+      at: typeof value.at === 'number' && Number.isFinite(value.at) ? value.at : 0
+    }
+  } catch {
+    return undefined
+  }
 }
 
 /** To the millisecond, rounded down so a window never ends past the file it was clamped into. */
@@ -483,19 +533,22 @@ function groupImages(rows: AssetImageRow[]): Map<string, AssetImage[]> {
   const byAsset = new Map<string, AssetImage[]>()
   for (const r of rows) {
     const images = byAsset.get(r.asset_id) ?? []
-    images.push({ id: r.id, path: fromStoredPath(r.file_path) })
+    const origin = parseOrigin(r.origin)
+    images.push({ id: r.id, path: fromStoredPath(r.file_path), ...(origin ? { origin } : {}) })
     byAsset.set(r.asset_id, images)
   }
   return byAsset
 }
 
 function audioFromRow(r: AssetAudioRow): AssetAudio {
+  const origin = parseOrigin(r.origin)
   return {
     id: r.id,
     path: fromStoredPath(r.file_path),
     duration: r.duration,
     ...resolveAudioWindow(r.duration, r.clip_start, r.clip_length),
-    cloneConsent: typeof r.clone_consent_at === 'number'
+    cloneConsent: typeof r.clone_consent_at === 'number',
+    ...(origin ? { origin } : {})
   }
 }
 
@@ -757,7 +810,7 @@ async function remove(id: unknown): Promise<void> {
   notifyChange()
 }
 
-async function addImages(assetId: unknown, paths: unknown): Promise<Asset> {
+async function addImages(assetId: unknown, paths: unknown, from?: unknown): Promise<Asset> {
   const row = requireAssetRow(assetId)
   const sources = [
     ...new Set((Array.isArray(paths) ? paths : []).filter((p): p is string => typeof p === 'string' && p !== ''))
@@ -796,10 +849,12 @@ async function addImages(assetId: unknown, paths: unknown): Promise<Asset> {
         .get(row.id) as number | null
       let position = (last ?? -1) + 1
       const now = Date.now()
+      const origin = originFrom(from, now)
       const insert = db.prepare(
-        'INSERT INTO asset_images (id, asset_id, file_path, position, created_at) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO asset_images (id, asset_id, file_path, position, created_at, origin) VALUES (?, ?, ?, ?, ?, ?)'
       )
-      for (const c of copied) insert.run(c.id, row.id, toStoredPath(c.dest), position++, now)
+      const stored = origin ? JSON.stringify(origin) : null
+      for (const c of copied) insert.run(c.id, row.id, toStoredPath(c.dest), position++, now, stored)
       touchAsset(row.id, now)
       return true
     })()
@@ -885,7 +940,7 @@ async function audioDuration(src: string): Promise<number> {
   return duration
 }
 
-async function addAudio(assetId: unknown, paths: unknown): Promise<Asset> {
+async function addAudio(assetId: unknown, paths: unknown, from?: unknown): Promise<Asset> {
   const row = requireAssetRow(assetId)
   const refused = noAudioReason(row.kind)
   if (refused) throw new Error(refused)
@@ -931,12 +986,15 @@ async function addAudio(assetId: unknown, paths: unknown): Promise<Asset> {
         .get(row.id) as number | null
       let position = (last ?? -1) + 1
       const now = Date.now()
+      const origin = originFrom(from, now)
+      const stored = origin ? JSON.stringify(origin) : null
       // clip_length NULL: the default window, which follows the file's length.
       const insert = db.prepare(
-        `INSERT INTO asset_audio (id, asset_id, file_path, position, duration, clip_start, clip_length, created_at)
-         VALUES (?, ?, ?, ?, ?, 0, NULL, ?)`
+        `INSERT INTO asset_audio (id, asset_id, file_path, position, duration, clip_start, clip_length, created_at,
+           origin)
+         VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)`
       )
-      for (const c of copied) insert.run(c.id, row.id, toStoredPath(c.dest), position++, c.duration, now)
+      for (const c of copied) insert.run(c.id, row.id, toStoredPath(c.dest), position++, c.duration, now, stored)
       touchAsset(row.id, now)
       return true
     })()
@@ -1038,6 +1096,7 @@ async function addGenerated(assetId: unknown, file: unknown, baseName: unknown):
     throw new Error(`Kunde inte spara ljudet: ${fileErrorReason(err)}.`)
   }
   const db = getDb()
+  const audioId = randomUUID()
   let inserted: boolean
   try {
     inserted = db.transaction((): boolean => {
@@ -1049,7 +1108,7 @@ async function addGenerated(assetId: unknown, file: unknown, baseName: unknown):
       db.prepare(
         `INSERT INTO asset_audio (id, asset_id, file_path, position, duration, clip_start, clip_length, created_at)
          VALUES (?, ?, ?, ?, ?, 0, NULL, ?)`
-      ).run(randomUUID(), row.id, toStoredPath(dest), (last ?? -1) + 1, duration, now)
+      ).run(audioId, row.id, toStoredPath(dest), (last ?? -1) + 1, duration, now)
       touchAsset(row.id, now)
       return true
     })()
@@ -1061,6 +1120,8 @@ async function addGenerated(assetId: unknown, file: unknown, baseName: unknown):
     await rm(dest, { force: true }).catch(() => {})
     throw new Error(`${THE[row.kind]} finns inte längre.`)
   }
+  // A designed voice is news (Pågår och klart): announced with the change that shows it, in the same tick.
+  addUnseen({ audioId, context: { assetId: row.id } })
   notifyChange()
   return getAsset(row.id)
 }
@@ -1096,9 +1157,16 @@ export function deleteAsset(id: string): Promise<void> {
   return assetTask(() => remove(id))
 }
 
-/** Copies JPG/PNG/WebP files into the asset's folder (under their own names) and appends them in order. */
-export function addAssetImages(assetId: string, paths: string[]): Promise<Asset> {
-  return assetTask(() => addImages(assetId, paths))
+/**
+ * Copies JPG/PNG/WebP files into the asset's folder (under their own names) and appends them in order. `origin`:
+ * the agent that added them (only for an agent's call; the IPC handler decides), recorded with each photo.
+ */
+export function addAssetImages(
+  assetId: string,
+  paths: string[],
+  origin?: { agent?: string; host?: string }
+): Promise<Asset> {
+  return assetTask(() => addImages(assetId, paths, origin))
 }
 
 /** Removes the image (its copy goes to the Trash); the remaining images close up. */
@@ -1114,10 +1182,14 @@ export function reorderAssetImages(assetId: string, imageIds: string[]): Promise
 /**
  * Copies audio files (MP3, WAV, M4A, AAC, AIFF, FLAC, OGG) into the asset's folder under their own names and
  * appends them in order, each with the default reference window. Characters and environments only; files
- * without sound or shorter than a second are refused.
+ * without sound or shorter than a second are refused. `origin` as for addAssetImages.
  */
-export function addAssetAudio(assetId: string, paths: string[]): Promise<Asset> {
-  return assetTask(() => addAudio(assetId, paths))
+export function addAssetAudio(
+  assetId: string,
+  paths: string[],
+  origin?: { agent?: string; host?: string }
+): Promise<Asset> {
+  return assetTask(() => addAudio(assetId, paths, origin))
 }
 
 /** Removes the clip: its copy goes to the Trash, or to Referensbilder/<today>/ while generations still use it. */
@@ -1137,8 +1209,8 @@ export function reorderAssetAudio(assetId: string, audioIds: string[]): Promise<
 
 /**
  * Adds a clip made for the asset (a voice designed with AI in Redigera) under `baseName`, e.g. "Skapad röst
- * 2026-10-07": copied into the asset's folder after its clips, with the default reference window. Characters and
- * environments only.
+ * 2026-10-07": copied into the asset's folder after its clips, with the default reference window, and announced as
+ * new in Pågår och klart (an unseen row). Characters and environments only.
  */
 export function addGeneratedAudio(assetId: string, file: string, baseName: string): Promise<Asset> {
   return assetTask(() => addGenerated(assetId, file, baseName))

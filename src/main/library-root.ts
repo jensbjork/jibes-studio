@@ -1,12 +1,12 @@
 // The base folder (grundmapp): opening it at startup, switching to another folder or moving the library
 // there, converting a phase-2 library (~/Movies/Studio with studio.db, generations/, thumbs/, …) to the
 // new layout, and "Städa upp", which puts every file the library knows about in its proper folder:
-// characters, environments, outfits and poses (assets) in Karaktärer/, Miljöer/, Kläder/ and Poser/, one folder
-// each holding the asset's photos and audio clips; a sequence's takes, stills and exports in its folder in
-// Sekvenser/ (Tagningar/, Storyboard/ and the folder itself), and a storyboard's in its folder in Storyboards/
-// (Övergångar/, Bilder/ and the folder itself); the user's own films in Egna klipp/<day>/, and an edit's versions,
-// AI takes and audio in its folder in Redigeringar/ (the folder itself, Tagningar/ and Ljud/). Where a generation's
-// file belongs is decided by its row (the file home rule, jobs.videoHome).
+// characters, environments, products, outfits and poses (assets) in Karaktärer/, Miljöer/, Produkter/, Kläder/ and
+// Poser/, one folder each holding the asset's photos and audio clips; a sequence's takes, stills and exports in its
+// folder in Sekvenser/ (Tagningar/, Storyboard/ and the folder itself), and a storyboard's in its folder in
+// Storyboards/ (Övergångar/, Bilder/ and the folder itself); the user's own films in Egna klipp/<day>/, and an edit's
+// versions, AI takes and audio in its folder in Redigeringar/ (the folder itself, Tagningar/ and Ljud/). Where a
+// generation's file belongs is decided by its row (the file home rule, jobs.videoHome).
 
 import { randomUUID } from 'node:crypto'
 import {
@@ -103,6 +103,7 @@ const DAY_FOLDER = /^\d{4}-\d{2}-\d{2}$/
 const VISIBLE_FOLDERS = [
   FOLDERS.characters,
   FOLDERS.environments,
+  FOLDERS.products,
   FOLDERS.outfits,
   FOLDERS.poses,
   FOLDERS.references,
@@ -126,6 +127,11 @@ export interface LibraryRootDeps {
   busy: () => string | undefined
   /** A library has just been opened: at startup or after a switch. */
   onOpened: () => void
+  /**
+   * The open library was closed (its folder went missing, a switch, a failed open): what was told about it – the Dock
+   * badge, Pågår och klart – must not outlive it.
+   */
+  onClosed?: () => void
   /** "Städa upp" finished; these generations' files or posters moved (assets and sequences may too). */
   onReorganized: (movedGenerationIds: string[]) => void
   /**
@@ -482,6 +488,11 @@ function closeLibrary(): void {
     db.closeDb()
   } finally {
     setActiveRoot(undefined)
+    try {
+      deps.onClosed?.()
+    } catch (err) {
+      console.warn('Announcing the closed library failed:', err)
+    }
   }
 }
 
@@ -528,16 +539,16 @@ const ADDED_FOLDERS: readonly { name: string; since: number; what: string }[] = 
   { name: FOLDERS.poses, since: db.POSES_SCHEMA_VERSION, what: 'poser' },
   { name: FOLDERS.storyboards, since: db.STORYBOARDS_SCHEMA_VERSION, what: 'storyboards' },
   { name: FOLDERS.ownClips, since: db.EDITS_SCHEMA_VERSION, what: 'egna klipp' },
-  { name: FOLDERS.edits, since: db.EDITS_SCHEMA_VERSION, what: 'redigeringar' }
+  { name: FOLDERS.edits, since: db.EDITS_SCHEMA_VERSION, what: 'redigeringar' },
+  { name: FOLDERS.products, since: db.PRODUCTS_SCHEMA_VERSION, what: 'produkter' }
 ]
 
 /**
  * A library from before one of those folders whose base folder already holds a folder of the user's own by
- * that name, e.g. Miljöer, Kläder, Poser, Storyboards, Egna klipp or Redigeringar (the setup screen promised that
- * files already there are
- * left alone): opening it would make it the library's – its paths stored relative, "Flytta" taking it along,
- * submits using its files in place instead of copying them into Referensbilder. Refused, before anything
- * changes, until they have renamed it.
+ * that name, e.g. Miljöer, Kläder, Poser, Storyboards, Egna klipp, Redigeringar or Produkter (the setup screen
+ * promised that files already there are left alone): opening it would make it the library's – its paths stored
+ * relative, "Flytta" taking it along, submits using its files in place instead of copying them into
+ * Referensbilder. Refused, before anything changes, until they have renamed it.
  */
 function refuseOwnAssetFolders(root: string): void {
   const occupied = ADDED_FOLDERS.filter((f) => isOccupied(join(root, f.name)))
@@ -1330,9 +1341,9 @@ async function relocate(
 }
 
 /**
- * What owns a folder: an asset (in the folder of its kind: Karaktärer, Miljöer, Kläder or Poser), a sequence (in
- * Sekvenser), a storyboard (in Storyboards) or an edit (in Redigeringar). Folder names only have to be unique among
- * owners that share a parent folder.
+ * What owns a folder: an asset (in the folder of its kind: Karaktärer, Miljöer, Produkter, Kläder or Poser), a
+ * sequence (in Sekvenser), a storyboard (in Storyboards) or an edit (in Redigeringar). Folder names only have to be
+ * unique among owners that share a parent folder.
  */
 type FolderOwner =
   | { table: 'assets'; kind: AssetKind }
@@ -1450,12 +1461,13 @@ async function writeDescriptionIfMissing(dir: string, description: string): Prom
 const ASSET_LABELS: Readonly<Record<AssetKind, string>> = {
   character: 'Karaktären',
   environment: 'Miljön',
+  product: 'Produkten',
   outfit: 'Klädseln',
   pose: 'Posen'
 }
 
 /**
- * Folder, photos, audio clips and description file of one character, environment, outfit or pose: everything
+ * Folder, photos, audio clips and description file of one character, environment, product, outfit or pose: everything
  * goes into <folder of its kind>/<its folder>/. Returns its folder name; undefined when the row is gone, or of
  * a kind this version doesn't know (a library opened by a newer Studio), whose files are left where they are.
  */
@@ -1767,10 +1779,9 @@ async function removeEmptyFolders(root: string): Promise<void> {
 }
 
 /**
- * "Städa upp": moves every tracked file to its canonical location, gives characters, environments, outfits,
- * poses and sequences their folders, rewrites stored paths and removes emptied day folders and empty phase-2
- * folders. Idempotent, never overwrites anything; files missing on disk are counted, not errors. Refused
- * while the library is busy.
+ * "Städa upp": moves every tracked file to its canonical location, gives assets of every kind and sequences their
+ * folders, rewrites stored paths and removes emptied day folders and empty phase-2 folders. Idempotent, never
+ * overwrites anything; files missing on disk are counted, not errors. Refused while the library is busy.
  */
 export async function reorganizeLibrary(): Promise<ReorganizeReport> {
   return exclusive(async () => {
@@ -1826,6 +1837,7 @@ async function sequenceFolderPath(id: string, kind: SequenceKind): Promise<strin
 const REVEAL_FOLDERS: Readonly<Record<Exclude<LibraryFolderTarget, 'root'>, string>> = {
   characters: FOLDERS.characters,
   environments: FOLDERS.environments,
+  products: FOLDERS.products,
   outfits: FOLDERS.outfits,
   poses: FOLDERS.poses,
   references: FOLDERS.references,
@@ -1839,6 +1851,7 @@ const REVEAL_FOLDERS: Readonly<Record<Exclude<LibraryFolderTarget, 'root'>, stri
 const ASSET_TARGETS: ReadonlySet<LibraryFolderTarget> = new Set<LibraryFolderTarget>([
   'characters',
   'environments',
+  'products',
   'outfits',
   'poses'
 ])
@@ -1871,8 +1884,8 @@ async function editFolderPath(id: string): Promise<string> {
 
 /**
  * Opens a library folder in Finder, creating it if needed. With an id: an asset's folder whatever the target
- * (a character, environment, outfit or pose), a sequence's folder for 'sequences', a storyboard's for 'storyboards',
- * an edit's for 'edits'.
+ * (a character, environment, product, outfit or pose), a sequence's folder for 'sequences', a storyboard's for
+ * 'storyboards', an edit's for 'edits'.
  */
 export async function revealLibraryFolder(target: LibraryFolderTarget, id?: string): Promise<void> {
   if (!isRevealTarget(target)) throw new Error('Okänd mapp.')

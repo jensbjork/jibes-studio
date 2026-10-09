@@ -18,6 +18,7 @@ import {
   clipCount,
   imageCount,
   poseReference,
+  productReference,
   referenceTokens,
   wearingText
 } from '../pickers/text'
@@ -115,7 +116,8 @@ export function unusedAudios(prompt: string, audios: readonly FormAudio[]): Form
 
 /**
  * An asset among the references, as the prompt names it: "Anna (@Image1, @Image2, voice @Audio1) wearing …",
- * or for a pose "Anna (@Image1) and Erik (@Image3) posed as in Kram (@Image5)".
+ * for a pose "Anna (@Image1) and Erik (@Image3) posed as in Kram (@Image5)", for a product held by a character
+ * "Anna (@Image1) holding Kaffeburken (@Image4)".
  */
 export interface ReferenceGroup {
   name: string
@@ -129,6 +131,8 @@ export interface ReferenceGroup {
   outfits?: { name: string; indices: number[] }[]
   /** For a pose: the characters that take it (their names and @ImageN numbers). */
   people?: { name: string; indices: number[] }[]
+  /** For a product: the character holding it ("hålls av"); undefined: nobody. */
+  holder?: { name: string; indices: number[] }
 }
 
 export interface AssetGroup extends ReferenceGroup {
@@ -141,19 +145,21 @@ function groupTokens(group: ReferenceGroup, language: PromptLanguage): string {
 }
 
 /**
- * The whole reference for a group: "Anna (@Image1, @Image2, voice @Audio1) wearing Röd klänning (@Image3)", or
- * for a pose the characters that take it and the pose ("Anna (@Image1) and Erik (@Image3) posed as in Kram
- * (@Image5)").
+ * The whole reference for a group: "Anna (@Image1, @Image2, voice @Audio1) wearing Röd klänning (@Image3)", for
+ * a pose the characters that take it and the pose ("Anna (@Image1) and Erik (@Image3) posed as in Kram
+ * (@Image5)"), for a product the character holding it, if any ("Anna (@Image1) holding Kaffeburken (@Image4)").
  */
 export function groupText(group: ReferenceGroup, language: PromptLanguage): string {
   if (group.kind === 'pose') return poseReference(group, group.people ?? [], language)
+  if (group.kind === 'product') return productReference(group, group.holder, language)
   return `${group.name} (${groupTokens(group, language)})${wearingText(group.outfits ?? [], language)}`
 }
 
 /**
  * What choosing a group inserts, given the text in front of the insertion point:
  * - after "(" only the tokens ("@Image1, @Image2, voice @Audio1"): the brackets are being written by hand;
- * - right after the name ("Anna ") the bracketed tokens and the clothes;
+ * - right after the name ("Anna ") the bracketed tokens and the clothes (a pose's people and a product's holder
+ *   come before its name, so there they are left out);
  * - otherwise the whole reference (see groupText).
  */
 export function groupInsertText(group: ReferenceGroup, language: PromptLanguage, before: string): string {
@@ -163,7 +169,9 @@ export function groupInsertText(group: ReferenceGroup, language: PromptLanguage,
   if (name && head.toLocaleLowerCase('sv').endsWith(name.toLocaleLowerCase('sv'))) {
     const prev = head.slice(0, head.length - name.length)
     if (!prev || /[^\p{L}\p{N}]$/u.test(prev)) {
-      const outfits = group.kind === 'pose' ? '' : wearingText(group.outfits ?? [], language)
+      // A pose's people and a product's holder are written before its name, which is already in the text.
+      const clothed = group.kind !== 'pose' && group.kind !== 'product'
+      const outfits = clothed ? wearingText(group.outfits ?? [], language) : ''
       return `(${groupTokens(group, language)})${outfits}`
     }
   }

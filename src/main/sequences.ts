@@ -29,6 +29,7 @@ import {
   findAudioTokens,
   findImageTokens
 } from '@shared/prompt-refs'
+import { NEEDS_CONSENT } from '@shared/types'
 import type {
   ComposedPrompt,
   ExportProgress,
@@ -66,7 +67,8 @@ import {
   sequenceTakesDir,
   thumbsDir,
   tmpDir,
-  toStoredPath
+  toStoredPath,
+  withoutLocalPaths
 } from './paths'
 import { placeFile } from './references'
 import {
@@ -78,6 +80,7 @@ import {
   reserveExportPath
 } from './sequence-export'
 import * as store from './sequence-store'
+import { assertAgentFiles } from './upload-paths'
 import { ensureImagesExist, type VeniceClient } from './venice'
 
 /**
@@ -106,12 +109,40 @@ interface Deps {
   stills?: StillsAccess
   /** The stills of a sequence were moved, kept or removed (undefined: possibly any sequence's). */
   stillsChanged?: (sequenceId?: string) => void
+  /**
+   * Work this service keeps in memory started or stopped (a take on its way to Venice, a "Generera saknade" run, an
+   * export): the status summary (work.ts) reads activeWork() again. Nothing else announces a take's upload.
+   */
+  workChanged?: () => void
 }
+
+/** What runs in the sequence service right now, for the status summary (work.ts). */
+export interface SequenceActiveWork {
+  /** Takes on their way to Venice (frames, quote, upload), by clip or transition. */
+  sending: { segmentId: string; sequenceId: string; startedAt: number }[]
+  /**
+   * "Generera saknade" runs: `total` clips were missing (done ones included), `done` have finished in this run, and
+   * `currentSegmentId` is the clip it works on. `approved`: started by an agent's request the user approved.
+   */
+  runs: {
+    sequenceId: string
+    startedAt: number
+    total: number
+    done: number
+    currentSegmentId?: string
+    approved?: boolean
+  }[]
+  /** Exports rendering (a storyboard's too), with their progress 0–1. */
+  exports: { sequenceId: string; startedAt: number; progress: number }[]
+}
+
+/** Said when an export is cancelled, which only deleting its sequence does: then there is no failure to report. */
+const EXPORT_CANCELLED = 'Exporten avbröts.'
 
 interface SequencePatch {
   name?: string
   defaults?: Partial<GenerationParams>
-  /** "Exportformat": 480, 720 or 1080; null = Automatiskt (the first clip's own size). The user's only. */
+  /** "Exportformat": 480, 720 or 1080; null = Automatiskt (the first clip's own size). */
   exportHeight?: number | null
 }
 
@@ -141,10 +172,27 @@ interface Run {
   error?: string
   /** Set for a run the user approved through an agent: it pays only for the clips they were shown. */
   guard?: SubmitGuard
+  startedAt: number
+  /** Clips missing a finished take, counting those done in this run ("Klipp 2 av 5"). */
+  total: number
+  /** Clips this run has finished. */
+  done: number
+  /** The clip the run is working on. */
+  currentSegmentId?: string
 }
 
-/** Said when an agent's call reaches something only the user may do in Studio. */
-const USER_ONLY = 'Det här kan bara du göra i Studio.'
+/**
+ * A run's error as the user reads it once its view is closed: a consent Venice asks for is only a question, and its
+ * raw form (the JSON the view turns into the consent dialog) means nothing in a list.
+ */
+export function runFailureText(error: string, kind: SequenceKind): string {
+  const consent = error.indexOf(NEEDS_CONSENT)
+  if (consent < 0) return error
+  const where = error.slice(0, consent).replace(/[:\s]+$/u, '')
+  const place = kind === 'storyboard' ? 'storyboarden' : 'sekvensen'
+  const ask = `Venice vill att du godkänner modellens villkor. Öppna ${place} och starta Generera saknade igen.`
+  return where ? `${where}: ${ask}` : ask
+}
 
 /** Thrown inside a run when the user pressed stop before the next take was submitted. */
 class RunStopped extends Error {}
@@ -559,6 +607,10 @@ export class SequenceService {
    * then this is the only sign that the clip is already being paid for.
    */
   private readonly submitting = new Map<string, Promise<Generation>>()
+  /** When each take in `submitting` started on its way (the status panel's "Skickas till Venice"). */
+  private readonly submitStarted = new Map<string, number>()
+  /** Exports rendering, with when they started and how far they are (0–1), by sequence or storyboard id. */
+  private readonly exportState = new Map<string, { startedAt: number; progress: number }>()
   /**
    * File work (creating and renaming sequence folders, moving takes, placing exports) runs one task at a
    * time: each task picks free names and reads folder names from the database, so two interleaving could put
@@ -575,6 +627,47 @@ export class SequenceService {
 
   constructor(private readonly deps: Deps) {
     deps.jobs.on('settled', (g: db.StoredGeneration) => this.onSettled(g))
+  }
+
+  /** Tells the status summary that work kept in memory here started or stopped; never throws into the work. */
+  private workChanged(): void {
+    try {
+      this.deps.workChanged?.()
+    } catch (err) {
+      console.warn('Announcing a change of running work failed:', err)
+    }
+  }
+
+  /**
+   * What runs here right now: takes on their way to Venice, "Generera saknade" runs (a storyboard's run is its own
+   * service's, see StoryboardService.activeRuns) and exports. Read by the status summary (work.ts); a library that
+   * went away (closed under a take) leaves takes out whose clip can't be read.
+   */
+  activeWork(): SequenceActiveWork {
+    const sending: SequenceActiveWork['sending'] = []
+    for (const [segmentId, startedAt] of this.submitStarted) {
+      let sequenceId: string | undefined
+      try {
+        sequenceId = store.getSegmentRow(segmentId)?.sequence_id
+      } catch {
+        sequenceId = undefined
+      }
+      if (sequenceId) sending.push({ segmentId, sequenceId, startedAt })
+    }
+    const runs: SequenceActiveWork['runs'] = []
+    for (const [sequenceId, run] of this.runs) {
+      if (!run.running) continue
+      runs.push({
+        sequenceId,
+        startedAt: run.startedAt,
+        total: Math.max(run.total, run.done),
+        done: run.done,
+        ...(run.currentSegmentId ? { currentSegmentId: run.currentSegmentId } : {}),
+        ...(run.guard ? { approved: true } : {})
+      })
+    }
+    const exports = [...this.exportState].map(([sequenceId, e]) => ({ sequenceId, ...e }))
+    return { sending, runs, exports }
   }
 
   /** Why the library can't be switched or tidied up right now (Swedish), or undefined when it can. */
@@ -808,7 +901,7 @@ export class SequenceService {
   private refuseWhileRunning(sequenceId: string, caller: Caller): void {
     if (!caller.byAgent || !this.runs.get(sequenceId)?.running) return
     throw new Error(
-      '”Generera saknade” pågår för sekvensen. Vänta tills körningen är klar (eller be användaren stoppa den) innan du ändrar klippen.'
+      '”Generera saknade” pågår för sekvensen. Vänta tills körningen är klar (eller stoppa den med stop_generation_run) innan du ändrar klippen.'
     )
   }
 
@@ -993,6 +1086,8 @@ export class SequenceService {
           // A transition falls back on another of its takes, as when its take is deleted.
           if (current.from_board_id) store.reselectTransitionTake(current.id)
         }
+        // Off the clip: the trims it had there are no longer anybody's.
+        store.forgetTrims(current.id, g.id)
       })()
       await this.releaseTakes([g.id])
     })
@@ -1050,10 +1145,12 @@ export class SequenceService {
     }
 
     const take = selectedId ? db.getGeneration(selectedId) : undefined
-    // Another take selected: a side it was made to meet exactly starts untrimmed (see store.seamTrims).
+    const switching = selectedId !== row.selected_generation_id
+    // Another take selected: it gets back the trims it had here before (else the clip's, except at a side it was made
+    // to meet exactly, which starts untrimmed; see store.trimsFor). Trims in the same patch still win.
     const kept =
-      take && selectedId !== row.selected_generation_id
-        ? store.seamTrims({ ...row, continue_from_previous: continuing ? 1 : 0, end_from_next: ending ? 1 : 0 }, take)
+      take && switching
+        ? store.trimsFor({ ...row, continue_from_previous: continuing ? 1 : 0, end_from_next: ending ? 1 : 0 }, take)
         : { trimStart: row.trim_start, trimEnd: row.trim_end }
     const editingStartOnly = patch.trimStart !== undefined && patch.trimEnd === undefined
     const { trimStart, trimEnd } = store.clampTrims(
@@ -1064,6 +1161,8 @@ export class SequenceService {
     )
 
     this.sql().transaction(() => {
+      // The take that was selected keeps the trims it had, for when it is selected again.
+      if (switching) store.rememberTrims(row)
       this.sql()
         .prepare(
           `UPDATE segments SET params = ?, continue_from_previous = ?, end_from_next = ?, notes = ?,
@@ -1416,8 +1515,14 @@ export class SequenceService {
   private submit(segmentId: string, cancelled?: () => boolean, guard?: SubmitGuard): Promise<Generation> {
     const pending = this.submitTake(segmentId, cancelled, guard)
     this.submitting.set(segmentId, pending)
+    this.submitStarted.set(segmentId, Date.now())
+    this.workChanged()
     const clear = (): void => {
-      if (this.submitting.get(segmentId) === pending) this.submitting.delete(segmentId)
+      if (this.submitting.get(segmentId) === pending) {
+        this.submitting.delete(segmentId)
+        this.submitStarted.delete(segmentId)
+        this.workChanged()
+      }
       // A folder rename waits while a take is on its way; this may have been the last one.
       try {
         this.requestFolderSync(store.getSegmentRow(segmentId)?.sequence_id)
@@ -2025,9 +2130,13 @@ export class SequenceService {
   startGenerateAll(sequenceId: string, guard?: SubmitGuard): void {
     store.requireSequenceRow(sequenceId)
     if (this.runs.get(sequenceId)?.running) return
-    const run: Run = { running: true, stopped: false, guard }
+    // "Klipp 1 av 5" from the first summary on: the clips missing now (the loop recounts as it goes).
+    const { order, stuck } = generationOrder(store.listSegmentRows(sequenceId))
+    const total = order.length + stuck.length
+    const run: Run = { running: true, stopped: false, guard, startedAt: Date.now(), total, done: 0 }
     this.runs.set(sequenceId, run)
     this.deps.notify(sequenceId)
+    this.workChanged()
     void this.runLoop(sequenceId, run)
   }
 
@@ -2041,6 +2150,27 @@ export class SequenceService {
     run.stopped = true
     run.running = false
     if (notify) this.deps.notify(sequenceId)
+    this.workChanged()
+  }
+
+  /**
+   * A run that stopped on a problem keeps it in memory only (shown while its sequence is open); nobody awaits a run,
+   * so the problem is also recorded as a failure the user hasn't seen, for "Pågår och klart" and the sidebar. A run
+   * the user (or a deleted sequence) stopped leaves nothing.
+   */
+  private recordRunFailure(sequenceId: string, run: Run): void {
+    if (!run.error || run.stopped) return
+    try {
+      const row = store.getSequenceRow(sequenceId)
+      if (!row) return
+      db.addUnseen({
+        error: runFailureText(run.error, store.kindOf(row)),
+        label: `Generera saknade i ”${row.name}”`,
+        context: { sequenceId, failureOf: 'run' }
+      })
+    } catch (err) {
+      console.warn('Could not record a failed generate-all run:', err)
+    }
   }
 
   private clipNumber(segmentId: string | undefined, fallback: number): number {
@@ -2075,6 +2205,8 @@ export class SequenceService {
         const rows = store.listSegmentRows(sequenceId)
         // The next clip whose neighbours' frames are there (or will be: their takes come first).
         const { order, stuck } = generationOrder(rows)
+        // "Klipp 2 av 5": what is done in this run and what is still missing now (clips may be added meanwhile).
+        run.total = run.done + order.length + stuck.length
         if (!order.length) {
           // Clips changed while the run went on (it checked before it started) so that two wait on each other.
           if (stuck.length) run.error = waitingMessage(rows, stuck)
@@ -2084,6 +2216,10 @@ export class SequenceService {
         const row = rows[index]
         clip = index + 1
         segmentId = row.id
+        if (run.currentSegmentId !== row.id) {
+          run.currentSegmentId = row.id
+          this.workChanged()
+        }
 
         let takeId = this.pendingTake(row)?.id
         const inFlight = takeId ? undefined : this.submitting.get(row.id)
@@ -2121,6 +2257,7 @@ export class SequenceService {
         // The 'settled' handler normally did this already; doing it here too removes any ordering doubt.
         const owner = take.segmentId ? store.getSegmentRow(take.segmentId) : undefined
         if (owner) this.autoSelect(owner, take)
+        run.done++
       }
     } catch (err) {
       if (!(err instanceof RunStopped) && !run.stopped) {
@@ -2139,6 +2276,8 @@ export class SequenceService {
       const wasRunning = run.running
       run.running = false
       try {
+        // Recorded before the views hear of the end, so the summary they read with it has the failure.
+        if (this.runs.get(sequenceId) === run) this.recordRunFailure(sequenceId, run)
         // A stopped or superseded run has already been reported as not running.
         if (wasRunning && this.runs.get(sequenceId) === run && store.getSequenceRow(sequenceId)) {
           this.deps.notify(sequenceId)
@@ -2146,6 +2285,7 @@ export class SequenceService {
       } catch (err) {
         console.warn('Could not report the end of a generate-all run', err)
       }
+      this.workChanged()
     }
   }
 
@@ -2217,7 +2357,14 @@ export class SequenceService {
     const controller = new AbortController()
     this.exports.set(sequenceId, controller)
     const startedAt = new Date()
-    const emit = (p: Omit<ExportProgress, 'sequenceId'>): void => this.deps.exportProgress({ sequenceId, ...p })
+    // Kept for the status summary until the film is placed (or the export failed), however its view comes and goes.
+    const state = { startedAt: startedAt.getTime(), progress: 0 }
+    this.exportState.set(sequenceId, state)
+    this.workChanged()
+    const emit = (p: Omit<ExportProgress, 'sequenceId'>): void => {
+      if (!p.done) state.progress = p.progress
+      this.deps.exportProgress({ sequenceId, ...p })
+    }
     let progress = 0
     let started = false
     let rendered: string | undefined
@@ -2263,21 +2410,48 @@ export class SequenceService {
           emit({ progress })
         }
       })
-      if (controller.signal.aborted) throw new Error('Exporten avbröts.')
+      if (controller.signal.aborted) throw new Error(EXPORT_CANCELLED)
       const film = rendered
       const path = await this.withFiles(() => this.placeExport(sequenceId, film, startedAt, controller.signal, cuts))
+      // Done before the views hear of it: the summary they read then lists the film as finished, not as running.
+      this.exportState.delete(sequenceId)
       emit({ progress: 1, done: true, path })
       return path
     } catch (err) {
-      const message = controller.signal.aborted ? 'Exporten avbröts.' : errorText(err)
+      // ffmpeg names its files by their full paths: only the file names are kept, as the message is stored for Pågår
+      // och klart (which agents read) and answered to an agent that started the export.
+      const message = controller.signal.aborted ? EXPORT_CANCELLED : withoutLocalPaths(errorText(err))
+      // A failure once it had started rendering is kept for "Pågår och klart" (the view that started it may be gone);
+      // one refused before that (no clips, a missing take) is answered to the click right away. Only deleting the
+      // sequence cancels an export, and then there is nothing left to report it on.
+      if (started && message !== EXPORT_CANCELLED) this.recordExportFailure(sequenceId, message)
       if (started) emit({ progress, done: true, error: message })
       throw new Error(message)
     } finally {
+      // No longer running (a failure is listed among what finished unseen instead).
+      this.exportState.delete(sequenceId)
       // Only still there when the export failed or was cancelled; the scratch folder is the app's own.
       if (rendered) await rm(rendered, { force: true }).catch(() => {})
       this.exports.delete(sequenceId)
+      this.workChanged()
       // A folder rename waits for a running export.
       this.requestFolderSync(sequenceId)
+    }
+  }
+
+  /** An export that failed while rendering or saving, as a failure the user hasn't seen. */
+  private recordExportFailure(sequenceId: string, error: string): void {
+    try {
+      const row = store.getSequenceRow(sequenceId)
+      if (!row) return
+      const storyboard = store.kindOf(row) === 'storyboard'
+      db.addUnseen({
+        error,
+        label: `Export av ”${row.name}”`,
+        context: { sequenceId, ...(storyboard ? { storyboardId: sequenceId } : {}), failureOf: 'export' }
+      })
+    } catch (err) {
+      console.warn('Could not record a failed export:', err)
     }
   }
 
@@ -2311,7 +2485,9 @@ export class SequenceService {
       }
       target.release()
       try {
-        store.recordExport(sequenceId, target.path, cuts)
+        const exportId = store.recordExport(sequenceId, target.path, cuts)
+        // A finished film is news until the user acts on its banner (or plays it), wherever they are by then.
+        db.addUnseen({ exportId })
       } catch (err) {
         // The film is in place either way; only "Städa upp" and library moves lose track of it.
         console.warn(`Could not record the export ${target.path}:`, err)
@@ -2347,11 +2523,8 @@ export function registerSequenceIpc(deps: Deps): SequenceService {
   ipcMain.handle('sequences:list', () => s.list())
   ipcMain.handle('sequences:get', (_e, id: string) => s.get(sequence(id)))
   ipcMain.handle('sequences:create', (_e, name: string) => s.create(name))
-  ipcMain.handle('sequences:update', (e, id: string, patch: SequencePatch) => {
-    // The Exportformat is the user's choice, like exporting itself (agents can't export either).
-    if (isAgentCall(e) && patch && patch.exportHeight !== undefined) throw new Error(USER_ONLY)
-    return s.update(sequence(id), patch ?? {})
-  })
+  // Agents set the Exportformat too (update_sequence), as they export films (export_film).
+  ipcMain.handle('sequences:update', (_e, id: string, patch: SequencePatch) => s.update(sequence(id), patch ?? {}))
   ipcMain.handle('sequences:delete', (_e, id: string) => {
     // A storyboard deleted here would leave its runner and boards behind; nothing at all is refused silently.
     if (store.getSequenceRow(id)) sequence(id)
@@ -2376,8 +2549,11 @@ export function registerSequenceIpc(deps: Deps): SequenceService {
   )
   ipcMain.handle(
     'segments:setImage',
-    (e, segmentId: string, slot: SegmentImageSlot, source: SegmentImageSource | null) =>
-      s.setSegmentImage(clip(segmentId), slot, source ?? null, { byAgent: isAgentCall(e) })
+    (e, segmentId: string, slot: SegmentImageSlot, source: SegmentImageSource | null) => {
+      // An agent's file is an upload staged in the library or a file the library records, never a path of its own.
+      if (source && typeof source === 'object' && source.kind === 'file') assertAgentFiles(e, [source.path])
+      return s.setSegmentImage(clip(segmentId), slot, source ?? null, { byAgent: isAgentCall(e) })
+    }
   )
   ipcMain.handle('segments:previewFrames', (_e, segmentId: string) => s.previewSegmentFrames(segmentId))
   ipcMain.handle('segments:bridge', (e, segmentId: string) =>

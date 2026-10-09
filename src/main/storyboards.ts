@@ -46,7 +46,14 @@ import { jpegOrientation } from './input-image'
 import { fromStoredPath, toStoredPath } from './paths'
 import { repeatsBoardImage } from './sequence-export'
 import * as store from './sequence-store'
-import { isCancelledSubmit, type SequenceService, type StillsAccess, type SubmitGuard } from './sequences'
+import {
+  isCancelledSubmit,
+  runFailureText,
+  type SequenceService,
+  type StillsAccess,
+  type SubmitGuard
+} from './sequences'
+import { assertAgentFiles } from './upload-paths'
 
 // The formats a storyboard can have live in the shared types (the window offers them too); re-exported for main.
 export { DEFAULT_STORYBOARD_ASPECT_RATIO, STORYBOARD_ASPECT_RATIOS }
@@ -207,6 +214,61 @@ function newTransitionParams(storyboard: store.SequenceRow): GenerationParams {
 }
 
 const pairKey = (from: string, to: string): string => `${from}→${to}`
+
+/**
+ * The storyboard's board ids in the order moving `board` to `toIndex` gives (0-based, clamped; anything but a number
+ * leaves it where it is). moveBoard writes this order; moveLoss reads what it would remove.
+ */
+function movedOrder(boards: readonly BoardRow[], board: BoardRow, toIndex: unknown): string[] {
+  const order = boards.map((b) => b.id).filter((id) => id !== board.id)
+  const wanted = typeof toIndex === 'number' && Number.isFinite(toIndex) ? Math.round(toIndex) : board.position
+  order.splice(Math.min(Math.max(0, wanted), order.length), 0, board.id)
+  return order
+}
+
+/**
+ * The storyboard's transitions whose two boards would no longer be neighbours with the boards in `order` (what
+ * syncTransitions then deletes, with their prompt and settings; their takes become ordinary generations). Read-only.
+ */
+function transitionsLostIn(storyboardId: string, order: readonly string[]): LostTransition[] {
+  const kept = new Set(order.slice(1).map((to, i) => pairKey(order[i], to)))
+  const takes = conn().prepare('SELECT COUNT(*) FROM generations WHERE segment_id = ?').pluck()
+  return store.listSegmentRows(storyboardId).flatMap((row, i): LostTransition[] => {
+    if (!row.from_board_id || !row.to_board_id || kept.has(pairKey(row.from_board_id, row.to_board_id))) return []
+    const params = store.parseParams(row.params)
+    return [
+      {
+        id: row.id,
+        number: i + 1,
+        prompt: params.prompt,
+        ...(params.negativePrompt ? { negativePrompt: params.negativePrompt } : {}),
+        takeCount: takes.get(row.id) as number,
+        selected: !!row.selected_generation_id
+      }
+    ]
+  })
+}
+
+/**
+ * An agent never removes a transition with a prompt, a negative prompt or takes on its own: a board put between two
+ * boards or moved elsewhere that would drop one is refused (the user approves such a move through request_delete,
+ * whose call isn't an agent's). The tools check first; this check runs inside the change's transaction, so a prompt
+ * the user writes in between can't slip through.
+ */
+function refuseAgentLoss(lost: readonly LostTransition[], caller: Caller): void {
+  if (!caller.byAgent) return
+  const numbers = lost
+    .filter((t) => t.prompt.trim() !== '' || !!t.negativePrompt?.trim() || t.takeCount > 0)
+    .map((t) => t.number)
+  if (!numbers.length) return
+  const which =
+    numbers.length === 1
+      ? `övergång ${numbers[0]}`
+      : `övergångarna ${numbers.slice(0, -1).join(', ')} och ${numbers[numbers.length - 1]}`
+  throw new Error(
+    `Ändringen tar bort ${which} med prompt eller tagningar. Be om lov med request_delete {board_move: …}, eller lägg till rutan sist.`
+  )
+}
 
 /**
  * Brings the storyboard's transitions in step with its boards, in one transaction: for every two adjacent boards
@@ -398,6 +460,21 @@ export interface StoryboardDeps {
   stills: StillsAccess
   /** The video model list (cached in main), for a transition's model and its options. */
   models?: () => Promise<VideoModel[]>
+  /** A "Generera saknade" run started or stopped: the status summary (work.ts) reads activeRuns() again. */
+  workChanged?: () => void
+}
+
+/** A transition a board move would remove (StoryboardService.moveLoss), with what goes with it. */
+export interface LostTransition {
+  id: string
+  /** 1-based, as Studio shows it ("Övergång 2"). */
+  number: number
+  prompt: string
+  /** Its negative prompt, when it has one (also lost with it). */
+  negativePrompt?: string
+  takeCount: number
+  /** One of its takes is selected (the transition has a take in the film). */
+  selected: boolean
 }
 
 /** Where a new board goes and what it starts with (StudioApi.addBoard). */
@@ -421,6 +498,11 @@ interface Run {
   error?: string
   /** Set for a run the user approved through an agent: every take it pays for is checked against the approval. */
   guard?: SubmitGuard
+  startedAt: number
+  /** Transitions missing a take when it started (more may be found as it goes). */
+  total: number
+  /** Transitions it has sent to Venice. */
+  sent: number
 }
 
 /** A transition "Generera saknade" would pay for (also what an agent's approval for it shows). */
@@ -440,6 +522,31 @@ export class StoryboardService {
   private readonly loops = new Set<Run>()
 
   constructor(private readonly deps: StoryboardDeps) {}
+
+  /** Tells the status summary that a run started or stopped; never throws into the run. */
+  private workChanged(): void {
+    try {
+      this.deps.workChanged?.()
+    } catch (err) {
+      console.warn('Announcing a change of running work failed:', err)
+    }
+  }
+
+  /**
+   * "Generera saknade" runs going on now, for the status summary (work.ts): `sent` of `total` transitions are at
+   * Venice. `approved`: started by an agent's request the user approved.
+   */
+  activeRuns(): { storyboardId: string; startedAt: number; total: number; sent: number; approved?: boolean }[] {
+    return [...this.runs]
+      .filter(([, run]) => run.running)
+      .map(([storyboardId, run]) => ({
+        storyboardId,
+        startedAt: run.startedAt,
+        total: Math.max(run.total, run.sent),
+        sent: run.sent,
+        ...(run.guard ? { approved: true } : {})
+      }))
+  }
 
   /** Why the library can't be switched or tidied right now (Swedish), or undefined. */
   isBusy(): string | undefined {
@@ -618,6 +725,8 @@ export class StoryboardService {
     const freed = conn().transaction(() => {
       const index = this.insertIndex(storyboardId, init)
       const order = listBoardRows(storyboardId).map((b) => b.id)
+      // A board put between two boards replaces the transition between them (checked before anything is written).
+      refuseAgentLoss(transitionsLostIn(storyboardId, order.toSpliced(index, 0, '')), caller)
       order.splice(index, 0, insertBoard(storyboardId, order.length, { note: cleanNote(init.note), image: placed }))
       renumberBoards(order)
       return syncTransitions(storyboardId)
@@ -676,15 +785,22 @@ export class StoryboardService {
     const board = requireBoardRow(boardId)
     this.refuseWhileRunning(board.sequence_id, caller)
     const freed = conn().transaction(() => {
-      const order = listBoardRows(board.sequence_id)
-        .map((b) => b.id)
-        .filter((id) => id !== board.id)
-      const wanted = typeof toIndex === 'number' && Number.isFinite(toIndex) ? Math.round(toIndex) : board.position
-      order.splice(Math.min(Math.max(0, wanted), order.length), 0, board.id)
+      const order = movedOrder(listBoardRows(board.sequence_id), board, toIndex)
+      refuseAgentLoss(transitionsLostIn(board.sequence_id, order), caller)
       renumberBoards(order)
       return syncTransitions(board.sequence_id)
     })()
     return this.settle(board.sequence_id, freed)
+  }
+
+  /**
+   * The transitions moving the board to `toIndex` would remove, without moving it: those between boards that would no
+   * longer be neighbours (syncTransitions deletes them, with their prompt and settings; their takes become ordinary
+   * generations). Read-only; an agent's move_board and a delete approval's board move ask it first.
+   */
+  moveLoss(boardId: string, toIndex: unknown): { transitions: LostTransition[] } {
+    const board = requireBoardRow(boardId)
+    return { transitions: transitionsLostIn(board.sequence_id, movedOrder(listBoardRows(board.sequence_id), board, toIndex)) }
   }
 
   /** Removes the board; one transition between its neighbours replaces its two. Its picture stays a still. */
@@ -890,9 +1006,12 @@ export class StoryboardService {
   start(storyboardId: string, guard?: SubmitGuard): void {
     requireStoryboardRow(storyboardId)
     if (this.runs.get(storyboardId)?.running) return
-    const run: Run = { running: true, stopped: false, guard }
+    // "Övergång 1 av 3" from the first summary on: the transitions missing now (the loop recounts as it goes).
+    const total = this.missingTransitions(storyboardId).length
+    const run: Run = { running: true, stopped: false, guard, startedAt: Date.now(), total, sent: 0 }
     this.runs.set(storyboardId, run)
     this.deps.notify(storyboardId)
+    this.workChanged()
     void this.runLoop(storyboardId, run)
   }
 
@@ -903,6 +1022,26 @@ export class StoryboardService {
     run.stopped = true
     run.running = false
     if (notify) this.deps.notify(storyboardId)
+    this.workChanged()
+  }
+
+  /**
+   * A run that stopped on a problem keeps it in memory only (shown while the storyboard is open); nobody awaits a run,
+   * so the problem is also recorded as a failure the user hasn't seen. A run the user stopped leaves nothing.
+   */
+  private recordRunFailure(storyboardId: string, run: Run): void {
+    if (!run.error || run.stopped) return
+    try {
+      const row = store.getSequenceRow(storyboardId)
+      if (!row) return
+      db.addUnseen({
+        error: runFailureText(run.error, 'storyboard'),
+        label: `Generera saknade i ”${row.name}”`,
+        context: { sequenceId: storyboardId, storyboardId, failureOf: 'run' }
+      })
+    } catch (err) {
+      console.warn('Could not record a failed generate-all run:', err)
+    }
   }
 
   private async runLoop(storyboardId: string, run: Run): Promise<void> {
@@ -912,7 +1051,9 @@ export class StoryboardService {
       // A take being moved is briefly missing from its recorded path; don't take it for a missing transition.
       await this.deps.sequences.whenFilesSettled()
       if (run.stopped || !store.getSequenceRow(storyboardId)) return
-      const blocked = this.missingTransitions(storyboardId).find((m) => m.problem)
+      const missing = this.missingTransitions(storyboardId)
+      run.total = missing.length
+      const blocked = missing.find((m) => m.problem)
       if (blocked) {
         run.error = `Övergång ${blocked.number}: ${blocked.problem}`
         return
@@ -920,7 +1061,10 @@ export class StoryboardService {
       // Re-read every step: the user may change boards and transitions while this runs.
       const sent = new Set<string>()
       while (!run.stopped && store.getSequenceRow(storyboardId)) {
-        const next = this.missingTransitions(storyboardId).find((m) => !sent.has(m.transitionId))
+        const left = this.missingTransitions(storyboardId).filter((m) => !sent.has(m.transitionId))
+        // "Övergång 2 av 5": sent so far and still missing now (transitions may be added meanwhile).
+        run.total = run.sent + left.length
+        const next = left[0]
         if (!next) break
         number = next.number
         if (next.problem) {
@@ -933,6 +1077,7 @@ export class StoryboardService {
           this.transitionGuard(storyboardId, run.guard),
           () => run.stopped
         )
+        run.sent++
       }
     } catch (err) {
       if (!isCancelledSubmit(err) && !run.stopped) {
@@ -945,12 +1090,15 @@ export class StoryboardService {
       const wasRunning = run.running
       run.running = false
       try {
+        // Recorded before the view hears of the end, so the summary read with it has the failure.
+        if (this.runs.get(storyboardId) === run) this.recordRunFailure(storyboardId, run)
         if (wasRunning && this.runs.get(storyboardId) === run && store.getSequenceRow(storyboardId)) {
           this.deps.notify(storyboardId)
         }
       } catch (err) {
         console.warn('Could not report the end of a storyboard run', err)
       }
+      this.workChanged()
     }
   }
 
@@ -1029,7 +1177,7 @@ export class StoryboardService {
   private refuseWhileRunning(storyboardId: string, caller: Caller): void {
     if (!caller.byAgent || !this.runs.get(storyboardId)?.running) return
     throw new Error(
-      '”Generera saknade” pågår för storyboarden. Vänta tills den är klar (eller be användaren stoppa den) ' +
+      '”Generera saknade” pågår för storyboarden. Vänta tills den är klar (eller stoppa den med stop_generation_run) ' +
         'innan du ändrar rutor eller övergångar.'
     )
   }
@@ -1178,6 +1326,13 @@ function followImage(path: string, mark: number): string {
 /** Who made an IPC call. */
 const callerOf = (e: IpcMainInvokeEvent): Caller => ({ byAgent: isAgentCall(e) })
 
+/** A board picture given as a file: an agent's must be one it uploaded or one the library records. */
+function guardImageFile(e: IpcMainInvokeEvent, image: unknown): void {
+  if (image && typeof image === 'object' && (image as { kind?: unknown }).kind === 'file') {
+    assertAgentFiles(e, [(image as { path?: unknown }).path])
+  }
+}
+
 /**
  * Registers the storyboard IPC handlers and returns the service behind them. 'transitions:generate' and
  * 'storyboards:generateAll' take an approval's submit guard as an extra argument (in-process calls only), and
@@ -1193,13 +1348,18 @@ export function registerStoryboardIpc(deps: StoryboardDeps): StoryboardService {
   )
   ipcMain.handle('storyboards:delete', (_e, id: string) => s.delete(id))
 
-  ipcMain.handle('boards:add', (e, storyboardId: string, init?: BoardInit) =>
-    s.addBoard(storyboardId, init ?? {}, callerOf(e))
-  )
-  ipcMain.handle('boards:update', (e, boardId: string, patch: { note?: unknown; image?: BoardImageSource | null }) =>
-    s.updateBoard(boardId, patch ?? {}, callerOf(e))
-  )
+  // A picture file from an agent is an upload staged in the library or a file the library records, never its own path.
+  ipcMain.handle('boards:add', (e, storyboardId: string, init?: BoardInit) => {
+    guardImageFile(e, init?.image)
+    return s.addBoard(storyboardId, init ?? {}, callerOf(e))
+  })
+  ipcMain.handle('boards:update', (e, boardId: string, patch: { note?: unknown; image?: BoardImageSource | null }) => {
+    guardImageFile(e, patch?.image)
+    return s.updateBoard(boardId, patch ?? {}, callerOf(e))
+  })
   ipcMain.handle('boards:move', (e, boardId: string, toIndex: unknown) => s.moveBoard(boardId, toIndex, callerOf(e)))
+  // Read-only, not part of StudioApi: what a move would remove (agents' move_board and delete approvals ask it).
+  ipcMain.handle('boards:moveLoss', (_e, boardId: string, toIndex: unknown) => s.moveLoss(boardId, toIndex))
   ipcMain.handle('boards:delete', (e, boardId: string) => s.deleteBoard(boardId, callerOf(e)))
 
   ipcMain.handle('transitions:update', (e, transitionId: string, patch: TransitionPatch) =>

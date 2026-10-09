@@ -1,8 +1,11 @@
-import type { KeyboardEvent, ReactNode } from 'react'
+import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import type { Storyboard, StoryboardTransition } from '@shared/types'
 import { formatUsd, mediaUrl } from '../../lib/media'
+import { useSeenWhenVisible } from '../../lib/work'
 import { useClipQuote } from '../sequences/useTotalQuote'
 import { PlayIcon, PlusIcon } from '../sequences/icons'
+import type { SegmentNews } from '../takes/takeText'
+import { Spinner } from '../work/StatusMark'
 import {
   boardNumber,
   durationLabel,
@@ -26,8 +29,10 @@ interface Props {
   offsetTop: number
   /** Its editor is open. */
   selected: boolean
-  /** A take of it is being sent to Venice from here or the editor. */
+  /** A take of it is being sent to Venice from here, the editor or an agent. */
   submitting: boolean
+  /** Its takes that finished (or failed) and haven't been looked at yet. */
+  news?: SegmentNews
   /** A dragged board would land here. */
   dropHere: boolean
   /** Insert a board between the two. */
@@ -50,6 +55,7 @@ export default function TransitionConnector({
   offsetTop,
   selected,
   submitting,
+  news,
   dropHere,
   adding,
   onOpen,
@@ -65,6 +71,11 @@ export default function TransitionConnector({
   // Generera where there is nothing usable yet, or the take in use was made from earlier pictures.
   const offerGenerate =
     !!status && (status.kind === 'empty' || status.kind === 'failed' || (status.kind === 'done' && status.stale))
+  // A finished take nobody has looked at yet (chosen or not): "Klart · ny tagning" until it is played or clicked.
+  const fresh = !!news?.fresh.length
+  // A failure counts as seen once the card has been on screen a moment (D4); the card keeps saying it failed.
+  const cardRef = useRef<HTMLDivElement>(null)
+  useSeenWhenVisible(cardRef, news?.failed[0])
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
@@ -102,6 +113,7 @@ export default function TransitionConnector({
 
         {t && status ? (
           <div
+            ref={cardRef}
             role="button"
             tabIndex={0}
             onClick={onOpen}
@@ -118,7 +130,7 @@ export default function TransitionConnector({
                 <p className="truncate text-[11px] text-muted">
                   {transitionLabel(storyboard, t)}
                 </p>
-                <StatusLine status={status} />
+                <StatusLine status={status} fresh={fresh} />
               </div>
             </div>
 
@@ -193,7 +205,17 @@ function StatusThumb({ status }: { status: TransitionStatus }) {
   return <span className="relative flex h-[30px] w-[54px] shrink-0 overflow-hidden rounded bg-black">{content}</span>
 }
 
-function StatusLine({ status }: { status: TransitionStatus }) {
+function StatusLine({ status, fresh }: { status: TransitionStatus; fresh: boolean }) {
+  if (fresh && status.kind !== 'generating') {
+    return (
+      <p
+        className="truncate text-[11px] font-medium text-emerald-300"
+        title="En ny tagning är klar. Öppna övergången och klicka på den för att titta på den."
+      >
+        {status.kind === 'done' ? 'Klart · ny tagning' : 'Ny tagning'}
+      </p>
+    )
+  }
   switch (status.kind) {
     case 'done':
       return status.stale ? (
@@ -205,7 +227,8 @@ function StatusLine({ status }: { status: TransitionStatus }) {
       )
     case 'generating':
       return (
-        <p className="truncate text-[11px] text-text">
+        <p className="flex items-center gap-1 truncate text-[11px] text-text">
+          <Spinner size={10} />
           {status.take.status === 'queued'
             ? 'I kö…'
             : `Genererar${status.progress ? ` ${Math.round(status.progress * 100)} %` : '…'}`}

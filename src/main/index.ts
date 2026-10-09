@@ -8,14 +8,15 @@ import type {
   Generation,
   GenerationParams,
   ImportProgress,
-  VideoModel
+  VideoModel,
+  WorkSummary
 } from '@shared/types'
 import { AgentService, recordIpcHandlers, registerAgentIpc } from './agent'
 import { isAgentCall } from './agent/local-ipc'
 import * as db from './db'
 import { registerEditIpc, type EditServiceHandle } from './edits'
 import { ffmpegStatus, stopAllFfmpeg } from './ffmpeg'
-import { registerImportIpc, VIDEO_FILE_TYPES } from './imports'
+import { registerImportIpc, VIDEO_FILE_TYPES, type ImportService } from './imports'
 import { JobManager, prepareSubmission, toPublic } from './jobs'
 import { assetWorkBusy, AUDIO_FILE_TYPES, registerLibraryIpc } from './library'
 import { prepareLibrary, registerLibraryRootIpc } from './library-root'
@@ -24,12 +25,20 @@ import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
 import { attachReviewSummary, registerReviewIpc } from './reviews'
 import { reselectTransitionTake } from './sequence-store'
 import { registerSequenceIpc, type SequenceService } from './sequences'
-import { registerStoryboardIpc } from './storyboards'
+import { registerStoryboardIpc, type StoryboardService } from './storyboards'
 import { acceptConsent, getApiKey, getSettings, setApiKey, setImageSafeMode, setPromptLanguage } from './settings'
-import { importStillFile, registerStillsIpc, saveFrameAsStill, stillWorkBusy } from './stills'
+import {
+  activeStills,
+  importStillFile,
+  registerStillsIpc,
+  saveFrameAsStill,
+  setStillWorkListener,
+  stillWorkBusy
+} from './stills'
 import { VeniceClient } from './venice'
 import { VeniceAudio } from './venice-audio'
 import { separationStatus } from './voice-separation'
+import { registerWorkIpc, WorkStatus } from './work'
 
 // `npm run dev` runs as "Studio Dev": its own settings (API key, chosen base folder) and suggested base folder
 // (~/Movies/Studio Dev), so what we try out while developing never touches the library Studio.app uses — and both
@@ -70,11 +79,20 @@ let modelCache: { at: number; models: VideoModel[] } | undefined
 /** Exports and "generate all" runs (of sequences and storyboards); set once their handlers are registered. */
 let sequencesBusy: () => string | undefined = () => undefined
 /** Imports of own clips (Egna klipp); set once their handlers are registered. */
-let importsService: { isBusy(): string | undefined; stop(): void } | undefined
+let importsService: { isBusy(): string | undefined; stop(): void; service: ImportService } | undefined
 /** Redigera: edits, versions and their paid jobs; set once its handlers are registered. */
 let editsService: EditServiceHandle | undefined
 /** Sequences (their clips and takes); set once their handlers are registered. */
 let sequenceService: SequenceService | undefined
+/** Storyboards (their boards, transitions and runs); set once their handlers are registered. */
+let storyboardService: StoryboardService | undefined
+/**
+ * "Pågår och klart": what runs and what finished unseen, pushed to the windows. Created once every service it reads
+ * is registered; until then (and the agent connection, made before it, reads it lazily) nothing is observed.
+ */
+let work: WorkStatus | undefined
+/** The number on the Dock icon: finished and failed work the user hasn't looked at. */
+let dockBadge = 0
 
 /** Second line of defence behind the agents' tool list: what only the user may do in Studio. */
 const USER_ONLY = 'Det här kan bara du göra i Studio.'
@@ -111,9 +129,26 @@ function createWindow(): BrowserWindow {
   return win
 }
 
-/** Sends an event to every open window. */
+/**
+ * Sends an event to every open window. Every service announces its changes here, so the status summary hears of them
+ * here too (it pushes its own 'work:change' through it as well).
+ */
 function broadcast(channel: string, payload?: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
+  if (channel !== 'work:change') work?.observe(channel, payload)
+}
+
+/** A new status summary: to the windows, and its count of new and failed work onto the Dock icon. */
+function sendWork(summary: WorkSummary): void {
+  broadcast('work:change', summary)
+  const count = summary.total.unseen + summary.total.failed
+  if (count === dockBadge) return
+  dockBadge = count
+  try {
+    app.dock?.setBadge(count ? String(count) : '')
+  } catch (err) {
+    console.warn('Could not set the Dock badge:', err)
+  }
 }
 
 /**
@@ -134,8 +169,11 @@ function generationChanged(g: Generation | string): void {
   if (row) broadcastGeneration(toPublic(row))
 }
 
-/** The MCP server the user's own agents connect to (off until they switch it on in Settings). */
-const agent = new AgentService({ broadcast })
+/**
+ * The MCP server the user's own agents connect to (off until they switch it on in Settings). Uploads coming in and
+ * approved requests being carried out broadcast nothing of their own: they tell the status summary directly.
+ */
+const agent = new AgentService({ broadcast, workChanged: (kind) => work?.touch(kind) })
 
 /**
  * Why the library folder can't be switched or tidied right now, in Swedish; undefined when idle. Files of
@@ -143,6 +181,10 @@ const agent = new AgentService({ broadcast })
  */
 function libraryBusyReason(): string | undefined {
   if (jobs.hasActiveJobs()) return 'Det pågår genereringar. Vänta tills de är klara och försök igen.'
+  // An approved request (a batch of deletes, say) works through the library item by item: never across a switch.
+  if (agent.approvals.executing().length) {
+    return 'En agents förfrågan genomförs just nu. Vänta tills den är klar och försök igen.'
+  }
   // An import copying a film in, or an edit job (a half-sent paid job's runner must never be carried into another
   // library), would otherwise write into the wrong folder.
   return sequencesBusy() ?? importsService?.isBusy() ?? editsService?.isBusy() ?? assetWorkBusy() ?? stillWorkBusy()
@@ -202,6 +244,14 @@ function broadcastLibraryReorganized(movedGenerationIds: string[]): void {
 }
 
 function registerIpc(): void {
+  // A finished or failed video is news until the user looks at it (Pågår och klart). An edit's AI take isn't: the
+  // version its job makes of it is. Registered before any library opens, so a job settled at resume counts too.
+  jobs.on('settled', (g: Generation) => {
+    if (!g.editId) db.addUnseen({ generationId: g.id })
+  })
+  // A take uploading to Venice broadcasts nothing until Venice has it.
+  jobs.on('sending', () => work?.touch('structure'))
+  setStillWorkListener(() => work?.touch('structure'))
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:setApiKey', (_e, key: string) => setApiKey(key))
   ipcMain.handle('settings:setPromptLanguage', (_e, lang: unknown) => setPromptLanguage(lang))
@@ -332,7 +382,7 @@ function registerIpc(): void {
     })
     return res.canceled ? [] : res.filePaths
   })
-  // Own clips: only the user picks files from disk (agents can't import, D10).
+  // Own clips: only the user picks files from disk (an agent imports what it uploaded, never a dialog's choice).
   ipcMain.handle('file:pickVideos', async (e, multiple: boolean) => {
     if (isAgentCall(e)) throw new Error(USER_ONLY)
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -374,7 +424,9 @@ function registerIpc(): void {
       importFile: (path, sequenceId) => importStillFile(path, sequenceId),
       saveFrame: (generationId, time, sequenceId) => saveFrameAsStill(generationId, time, sequenceId)
     },
-    stillsChanged: (sequenceId) => broadcast('stills:change', sequenceId)
+    stillsChanged: (sequenceId) => broadcast('stills:change', sequenceId),
+    // A take on its way to Venice, a run or an export started or stopped (nothing else announces a take's upload).
+    workChanged: () => work?.touch('structure')
   })
   // Storyboards: boards and their transitions, which are segments the sequence service generates, keeps and exports.
   const storyboards = registerStoryboardIpc({
@@ -385,10 +437,12 @@ function registerIpc(): void {
       importFile: (path, storyboardId) => importStillFile(path, storyboardId),
       saveFrame: (generationId, time, storyboardId) => saveFrameAsStill(generationId, time, storyboardId)
     },
-    models: () => loadVideoModels()
+    models: () => loadVideoModels(),
+    workChanged: () => work?.touch('structure')
   })
   sequencesBusy = () => sequences.isBusy() ?? storyboards.isBusy()
   sequenceService = sequences
+  storyboardService = storyboards
   // Own clips: films copied into Egna klipp and added to the feed, a sequence or a clip.
   importsService = registerImportIpc({
     sequences,
@@ -428,6 +482,21 @@ function registerIpc(): void {
     }
   )
 
+  // Pågår och klart: reads every service above (and the agent connection's requests and uploads).
+  const status = new WorkStatus({
+    jobs,
+    sequences: () => sequenceService,
+    storyboards: () => storyboardService,
+    edits: () => editsService,
+    imports: () => importsService?.service,
+    stills: activeStills,
+    approvals: () => ({ executing: agent.approvals.executing(), decided: agent.approvals.list() }),
+    uploads: () => agent.uploads.active(),
+    send: sendWork
+  })
+  work = status
+  registerWorkIpc(status)
+
   registerLibraryRootIpc({
     busy: libraryBusyReason,
     onOpened: () => {
@@ -439,9 +508,18 @@ function registerIpc(): void {
         console.error('Resuming the edits failed:', err)
       }
       agent.libraryOpened()
+      // Another library: its own unseen work, and nothing of the previous one's.
+      status.reset()
     },
+    // No library: the windows and the Dock badge hear that nothing runs and nothing is new any more.
+    onClosed: () => status.reset(),
     onReorganized: broadcastLibraryReorganized,
-    beforeClose: () => jobs.pauseBackfill()
+    beforeClose: async () => {
+      await jobs.pauseBackfill()
+      // Uploads still coming in stop before the folder they write into is switched or moved; not when the switch is
+      // about to be refused anyway (something else still runs).
+      if (!libraryBusyReason()) agent.libraryClosing()
+    }
   })
 
   registerAgentIpc(agent)

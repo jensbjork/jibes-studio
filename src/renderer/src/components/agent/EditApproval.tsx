@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { formatTimecode, frameCaptions } from '@shared/edit-plan'
-import type { ApprovalEditRequest, ApprovalRequest, Asset, AssetAudio, Edit, EditOperation, EditPlan } from '@shared/types'
+import type {
+  ApprovalEditRequest,
+  ApprovalRequest,
+  Asset,
+  AssetAudio,
+  Edit,
+  EditJob,
+  EditOperation,
+  EditPlan
+} from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatUsd, mediaUrl } from '../../lib/media'
 import AudioPlayButton from '../pickers/AudioPlayButton'
@@ -9,8 +18,9 @@ import { KIND_TONE } from '../pickers/assetKinds'
 
 // The approval dialog's panels for Redigera's paid requests: an operation on a version of an edit (the version's
 // poster, the start and end frames of a picture operation, what changes – prompt, old → new lines, the voice – the
-// parts and the price) and a new voice designed for a character. A cloned voice also needs the user's own consent,
-// asked here with a required checkbox, since an agent can never give it.
+// parts and the price), continuing a stopped paid job ("Fortsätt"), and a new voice designed for a character. A
+// cloned voice also needs the user's own consent, asked here with a required checkbox, since an agent can never give
+// it.
 
 /** The plan's problem that only the clone consent solves; the checkbox below takes care of it. */
 const CONSENT_PROBLEM = /rätt att använda rösten/i
@@ -38,6 +48,10 @@ export interface EditApprovalState {
   edit?: Edit
   /** The plan as it would run now (free): warnings to show, and problems that would make main refuse it. */
   plan?: EditPlan
+  /** Continuing a stopped job: the job as it is now. */
+  job?: EditJob
+  /** What approving waits for is on screen: the plan (an operation) or the job (continuing one). */
+  ready: boolean
   /** Why it can't be approved as it looks now (Swedish), e.g. the version is gone. */
   blocking?: string
   /** The plan is being made again (after the edit changed): approving waits for it. */
@@ -56,12 +70,13 @@ export function useEditApproval(a: ApprovalRequest): EditApprovalState {
   const editId = request?.editId
   const baseId = request?.baseId
   const operation = request?.operation
-  const key = JSON.stringify([editId, baseId, operation])
+  const resumeJobId = request?.resumeJobId
+  const key = JSON.stringify([editId, baseId, operation, resumeJobId])
   const [state, setState] = useState<{ key?: string; edit?: Edit; plan?: EditPlan; error?: string; loading: boolean }>({
     loading: false
   })
   useEffect(() => {
-    if (!editId || !operation) return
+    if (!editId || (!operation && !resumeJobId)) return
     let active = true
     let seq = 0
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -71,8 +86,9 @@ export function useEditApproval(a: ApprovalRequest): EditApprovalState {
       try {
         const edit = await window.studio.getEdit(editId)
         // A decided request only needs the version's poster; planning is for what may still be approved.
+        // Continuing a job plans nothing: the job itself (edit.jobs) says whether it still can, and at what price.
         const plan =
-          pending && edit.versions.some((v) => v.id === baseId)
+          operation && pending && edit.versions.some((v) => v.id === baseId)
             ? await window.studio.planEditOperation(editId, operation, baseId)
             : undefined
         if (active && mine === seq) setState({ key, edit, plan, loading: false })
@@ -95,8 +111,9 @@ export function useEditApproval(a: ApprovalRequest): EditApprovalState {
     // `key` stands for the edit, the version and the operation (a new copy of the same request changes nothing).
   }, [key, pending])
 
-  if (!request) return { loading: false }
-  if (state.key !== key) return { loading: pending }
+  if (!request) return { loading: false, ready: false }
+  if (state.key !== key) return { loading: pending, ready: false }
+  if (resumeJobId) return resumeState(a, request, state.edit, state.error, state.loading)
   const versionGone = state.edit && !state.edit.versions.some((v) => v.id === baseId)
   const problems = (state.plan?.problems ?? []).filter((p) => !(request.needsCloneConsent && CONSENT_PROBLEM.test(p)))
   const blocking = !pending
@@ -106,7 +123,40 @@ export function useEditApproval(a: ApprovalRequest): EditApprovalState {
       : versionGone
         ? `Version v${request.baseNumber ?? '?'} finns inte längre i redigeringen`
         : problems[0]?.replace(/\.$/, '')
-  return { edit: state.edit, plan: state.plan, blocking, loading: state.loading }
+  return { edit: state.edit, plan: state.plan, blocking, loading: state.loading, ready: !!state.plan }
+}
+
+/**
+ * Continuing a stopped job, as the edit has it now: main lapses the request when the job can no longer be continued
+ * or "Fortsätt" would cost more than the user is shown (by more than a cent), so the dialog says so before the click.
+ */
+function resumeState(
+  a: ApprovalRequest,
+  request: ApprovalEditRequest,
+  edit: Edit | undefined,
+  error: string | undefined,
+  loading: boolean
+): EditApprovalState {
+  const job = edit?.jobs.find((j) => j.id === request.resumeJobId)
+  if (a.status !== 'pending') return { edit, job, loading, ready: !!job }
+  const rose =
+    !!job &&
+    ((a.priceUsd === undefined
+      ? job.resumePriceUsd !== undefined
+      : job.resumePriceUsd === undefined || job.resumePriceUsd > a.priceUsd + 0.01) ||
+      (!request.partialPrice && !!job.resumePartialPrice))
+  const blocking = error
+    ? `Redigeringen kunde inte läsas: ${error.replace(/\.$/, '')}`
+    : !edit
+      ? undefined
+      : !job
+        ? 'Jobbet finns inte längre i redigeringen'
+        : !job.canResume
+          ? `Jobbet ”${job.label}” kan inte fortsättas längre`
+          : rose
+            ? `Det kostar nu ${job.resumePriceUsd !== undefined ? formatUsd(job.resumePriceUsd) : 'ett okänt pris'}${job.resumePartialPrice ? ' +' : ''} att fortsätta`
+            : undefined
+  return { edit, job, blocking, loading, ready: !!job }
 }
 
 function Label({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -409,6 +459,64 @@ export function EditSummary({
           </span>
         </label>
       )}
+    </section>
+  )
+}
+
+/** "≈ $0.45 +" for a price with a part Venice doesn't price, else "$0.45". */
+function priceText(usd: number | undefined, partial: boolean | undefined): string {
+  if (usd === undefined) return 'okänt pris'
+  return partial ? `≈ ${formatUsd(usd)} +` : formatUsd(usd)
+}
+
+/** "Fortsätt jobbet ”Byt röst” · $0.40": the stopped job, how far it got and what continuing it sends again. */
+export function ResumeSummary({
+  approval: a,
+  request,
+  state
+}: {
+  approval: ApprovalRequest
+  request: ApprovalEditRequest
+  state: EditApprovalState
+}) {
+  const job = state.job
+  const base = state.edit?.versions.find((v) => v.id === request.baseId)
+  const editName = state.edit?.name ?? request.editName
+  const stopped = job?.status === 'cancelled' ? 'Avbröts' : 'Stoppade'
+  return (
+    <section className="space-y-3">
+      <div>
+        <p className="font-medium">
+          {request.summary} · {priceText(a.priceUsd, request.partialPrice)}
+        </p>
+        <p className="text-[12px] text-muted">
+          {editName ? `Redigeringen ”${editName}”` : 'Redigeringen'}
+          {request.baseNumber ? ` · utgår från v${request.baseNumber}` : ''}
+          {base?.generation.videoDuration ? ` (${formatTimecode(base.generation.videoDuration)})` : ''}
+        </p>
+      </div>
+      {request.baseId && (
+        <Frame
+          path={base?.generation.thumbPath}
+          badge={request.baseNumber ? `v${request.baseNumber}` : 'Version'}
+          caption="Versionen jobbet utgår från"
+        />
+      )}
+      {job ? (
+        <div className="rounded-md border border-line bg-raised px-3 py-2 text-[12px] leading-relaxed">
+          <p>
+            {stopped} efter {job.stepsDone} av {job.stepsTotal} {job.stepsTotal === 1 ? 'del' : 'delar'}
+            {job.costUsd > 0 ? ` · ${formatUsd(job.costUsd)} redan betalt` : ''}
+          </p>
+          {job.error && <p className="text-[#ffb3b5] select-text">{job.error}</p>}
+          <p className="mt-1 text-muted">
+            Det som redan är klart används. Bara delarna som inte skickats eller misslyckades skickas igen.
+          </p>
+        </div>
+      ) : (
+        !state.blocking && <p className="text-[12px] text-muted">Läser jobbet…</p>
+      )}
+      {request.priceNote && <p className="text-[12px] text-muted">{request.priceNote}</p>}
     </section>
   )
 }

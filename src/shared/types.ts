@@ -246,6 +246,8 @@ export interface GenerationFilter {
   sort?: 'newest' | 'oldest' | 'rating' | 'cost' | 'length'
   /** Only generations of this source ("Källa"): Venice's, the user's own clips, or versions made in Redigera. */
   source?: GenerationSource
+  /** "Nya": finished and not looked at yet (needs FilterableGeneration.unseen; rows without it never match). */
+  unseen?: boolean
 }
 
 export interface Settings {
@@ -333,6 +335,7 @@ export type LibraryFolderTarget =
   | 'root'
   | 'characters'
   | 'environments'
+  | 'products'
   | 'outfits'
   | 'poses'
   | 'references'
@@ -361,22 +364,41 @@ export interface ConsentRequest {
 /** Prefix on error messages that carry a ConsentRequest as JSON. */
 export const NEEDS_CONSENT = 'NEEDS_CONSENT:'
 
-// ── Assets: characters, environments, outfits, poses ─────────────────────────
+// ── Assets: characters, environments, products, outfits, poses ───────────────
 
 /**
- * character: who is in the shot (Karaktärer). environment: where it takes place (Miljöer). outfit: what a
- * character wears (Kläder). pose: how people stand and where, relative to each other (Poser). Each is a name, a
- * description and reference photos in a folder of their own; characters and environments can also have
- * audio clips (a voice, a soundscape).
+ * character: who is in the shot (Karaktärer). environment: where it takes place (Miljöer). product: a specific item
+ * to show in the film (Produkter), e.g. a package, a bottle or a gadget. outfit: what a character wears (Kläder).
+ * pose: how people stand and where, relative to each other (Poser). Each is a name, a description and reference
+ * photos in a folder of their own; characters and environments can also have audio clips (a voice, a soundscape).
  */
-export type AssetKind = 'character' | 'environment' | 'outfit' | 'pose'
+export type AssetKind = 'character' | 'environment' | 'product' | 'outfit' | 'pose'
 
-export const ASSET_KINDS = ['character', 'environment', 'outfit', 'pose'] as const satisfies readonly AssetKind[]
+/** Every kind, in the order the UI lists them (picker tabs, chips, the feed's filter); nothing stored depends on it. */
+export const ASSET_KINDS = [
+  'character',
+  'environment',
+  'product',
+  'outfit',
+  'pose'
+] as const satisfies readonly AssetKind[]
+
+/** Who added a photo or a sound clip when it wasn't the user (set only from an agent's call). */
+export interface AssetFileOrigin {
+  /** The agent's name (its MCP clientInfo name). */
+  agent: string
+  /** The host the file was fetched from, when it came from a URL. Never the URL itself (it may carry tokens). */
+  host?: string
+  /** Epoch ms when it was added. */
+  at: number
+}
 
 export interface AssetImage {
   id: string
   /** Absolute path to the copy stored in the library (e.g. Karaktärer/<name>/). */
   path: string
+  /** An agent added it (undefined: the user did). */
+  origin?: AssetFileOrigin
 }
 
 /**
@@ -398,6 +420,8 @@ export interface AssetAudio {
    * new spoken lines. Set only by the user in Studio (never by an agent).
    */
   cloneConsent: boolean
+  /** An agent added it (undefined: the user did, or Studio made it). */
+  origin?: AssetFileOrigin
 }
 
 export interface Asset {
@@ -620,7 +644,7 @@ export type SegmentImageSlot = 'start' | 'end'
 export type SegmentImageSource =
   /** An image file from outside Studio (picked or dropped): copied into the sequence's Storyboard folder as a still. */
   | { kind: 'file'; path: string }
-  /** A photo of a character, environment, outfit or pose (AssetImage.id), used where it is. */
+  /** A photo of an asset of any kind (AssetImage.id), used where it is. */
   | { kind: 'asset-image'; imageId: string }
   /** A still of the sequence (generated, uploaded or a saved frame). */
   | { kind: 'still'; stillId: string }
@@ -787,6 +811,16 @@ export interface StillParams {
   aspectRatio?: string
   resolution?: string
   quality?: string
+  /**
+   * The dialog's key while the picture is made, so its result or failure is announced (Pågår och klart) also after
+   * the dialog closed. Informational: never sent to Venice and never stored; main reads it from the raw IPC input.
+   */
+  workToken?: string
+  /**
+   * Where the picture is meant to go, for its label in Pågår och klart ("Bild till ruta 3 i …"). Informational like
+   * workToken; an agent's request_image_generation passes its assign_to here too.
+   */
+  target?: { boardId?: string; segmentId?: string; slot?: SegmentImageSlot }
 }
 
 /** An image of a sequence or a storyboard: generated, uploaded, or a frame saved from a take. */
@@ -800,8 +834,8 @@ export interface Still {
   /** For generated stills; '' otherwise. */
   prompt: string
   model?: string
-  /** How a generated still was made (reference paths absolute). */
-  params: Omit<StillParams, 'prompt' | 'model' | 'sequenceId'>
+  /** How a generated still was made (reference paths absolute). workToken and target are never stored. */
+  params: Omit<StillParams, 'prompt' | 'model' | 'sequenceId' | 'workToken' | 'target'>
   /** USD, for generated stills. */
   costUsd?: number
   createdAt: number
@@ -1396,7 +1430,174 @@ export interface ApprovalEditRequest {
   /** Once approved: the job it started and the version it made. */
   jobId?: string
   resultId?: string
+  /** Resuming a stopped paid job ("Fortsätt") instead of a new operation: that job's id. */
+  resumeJobId?: string
 }
+
+// ── Status: Pågår och klart ──────────────────────────────────────────────────
+// What runs right now and what finished that the user hasn't looked at yet, wherever it was started. Main builds the
+// summary (src/main/work.ts) from the services' registries and the library's `unseen` table and pushes it whole on
+// `work:change`; the renderer keeps one store of it (lib/work.ts) that the sidebar, the lists, the cards and the
+// panel read.
+
+/** The sidebar view an item counts under (the renderer's View ids). */
+export type WorkView =
+  | 'generate'
+  | 'sequences'
+  | 'storyboards'
+  | 'editor'
+  | 'characters'
+  | 'environments'
+  | 'products'
+  | 'outfits'
+  | 'poses'
+
+/** Where "Gå dit" goes; the renderer maps it to navigate(view, intent). */
+export interface WorkTarget {
+  view: WorkView
+  generationId?: string
+  sequenceId?: string
+  segmentId?: string
+  storyboardId?: string
+  transitionId?: string
+  boardId?: string
+  editId?: string
+  versionId?: string
+  jobId?: string
+  assetId?: string
+  audioId?: string
+  exportId?: string
+  stillId?: string
+  /** An agent request being carried out: opens it in the approval dialog instead. */
+  approvalId?: string
+}
+
+export type RunningKind =
+  | 'video'
+  | 'sending'
+  | 'run'
+  | 'still'
+  | 'edit-job'
+  | 'render'
+  | 'voice-design'
+  | 'export'
+  | 'import'
+  | 'approval'
+  | 'upload'
+
+/** Something under way right now. */
+export interface RunningWork {
+  /**
+   * Stable while it runs: 'gen:<id>', 'send:<token>', 'run:<sequenceId>', 'still:<token>', 'job:<id>',
+   * 'render:<token>', 'export:<sequenceId>', 'import:<path>', 'approval:<id>', 'upload:<id>'.
+   */
+  key: string
+  kind: RunningKind
+  /** Undefined: counted only in the panel and the totals (uploads). */
+  view?: WorkView
+  /** The sequence, storyboard, edit or asset it belongs to. */
+  ownerId?: string
+  /** The clip or transition it belongs to. */
+  segmentId?: string
+  /** Swedish, e.g. "Klipp 3 i ”Strandscen”". */
+  label: string
+  /** Swedish phase, e.g. "Genererar 40 %", "I kö hos Venice". */
+  detail?: string
+  startedAt: number
+  /** 0–1. */
+  progress?: number
+  /** Milliseconds left, as measured at measuredAt (the renderer counts down from there). */
+  remainingMs?: number
+  /** How long this kind of work usually takes, in milliseconds ("brukar ta ~3 min"). */
+  typicalMs?: number
+  measuredAt: number
+  /** Absolute. */
+  thumbPath?: string
+  /** The agent whose approved request (or upload) it is. */
+  via?: string
+  generationId?: string
+  target?: WorkTarget
+}
+
+export type FinishedKind = 'video' | 'version' | 'still' | 'export' | 'voice' | 'job' | 'failure'
+
+/** Something that finished (or failed) and that the user hasn't looked at yet. */
+export interface FinishedWork {
+  /** 'gen:<id>' | 'still:<id>' | 'export:<id>' | 'audio:<id>' | 'job:<id>' | 'unseen:<row id>' (see workKey). */
+  key: string
+  kind: FinishedKind
+  status: 'completed' | 'failed'
+  view: WorkView
+  ownerId?: string
+  segmentId?: string
+  /** Swedish. */
+  label: string
+  /** Swedish. */
+  error?: string
+  finishedAt: number
+  /** Absolute. */
+  thumbPath?: string
+  /** Absolute: the video or sound whose playback marks it seen. */
+  mediaPath?: string
+  via?: string
+  generationId?: string
+  stillId?: string
+  exportId?: string
+  audioId?: string
+  jobId?: string
+  /** An error-only row ('unseen:<id>'): what failed. 'still' rows carry the dialog's workToken. */
+  failureOf?: 'still' | 'export' | 'run'
+  workToken?: string
+  target: WorkTarget
+}
+
+/** `unseen` = finished fine and not seen; `failed` = failures not seen. Disjoint: the Dock badge is unseen + failed. */
+export interface WorkCounts {
+  running: number
+  unseen: number
+  failed: number
+}
+
+/**
+ * An unseen item past the 200 the summary lists in full: enough for the window's seen rules – its "Ny" marks, the
+ * playback rule (mediaPath) and a picture being on screen (picturePath). Paths absolute.
+ */
+export interface UnseenRef {
+  key: string
+  failed?: true
+  mediaPath?: string
+  picturePath?: string
+}
+
+export interface WorkSummary {
+  running: RunningWork[]
+  /** Finished and not seen yet, newest first, failures included; at most 200 (the counts are exact). */
+  unseen: FinishedWork[]
+  /** Every unseen item after those 200, newest first. */
+  more: UnseenRef[]
+  byView: Partial<Record<WorkView, WorkCounts>>
+  /** By sequence, storyboard, segment (clip or transition), edit and asset id. */
+  byOwner: Record<string, WorkCounts>
+  total: WorkCounts
+  /** Increases with every summary; an older one never replaces a newer one. */
+  revision: number
+}
+
+/** What "Markera alla som sedda" covers: everything, one view, or one sequence, storyboard, edit or asset. */
+export interface SeenScope {
+  view?: WorkView
+  ownerId?: string
+}
+
+/** The keys of the summary, built the same way everywhere. */
+export const workKey = {
+  generation: (id: string) => `gen:${id}`,
+  still: (id: string) => `still:${id}`,
+  export: (id: string) => `export:${id}`,
+  audio: (id: string) => `audio:${id}`,
+  job: (id: string) => `job:${id}`,
+  row: (id: string) => `unseen:${id}`
+} as const
 
 // ── Agent connection (MCP server for the user's own agents) ──────────────────
 
@@ -1470,6 +1671,65 @@ export interface ApprovalImageRequest {
   assignToBoard?: { boardId: string; storyboardId: string; boardNumber: number }
 }
 
+/** What a 'delete' request item removes (request_delete; every removal by an agent goes through one). */
+export type DeleteTargetKind =
+  | 'asset'
+  | 'asset-image'
+  | 'asset-audio'
+  | 'prompt'
+  | 'learning'
+  | 'review'
+  | 'sequence'
+  | 'segment'
+  | 'storyboard'
+  | 'board'
+  | 'board-move'
+  | 'generation'
+  | 'take'
+  | 'still'
+  | 'edit'
+  | 'version'
+  | 'prune-versions'
+
+/** One thing a 'delete' request removes, as planned when the agent asked (and its outcome once approved). */
+export interface ApprovalDeleteItem {
+  kind: DeleteTargetKind
+  /** The row's id (for prune-versions the edit's id; for board-move the board's). */
+  id: string
+  /** 'take': the clip or transition it is taken off. */
+  segmentId?: string
+  /** 'board-move': the 0-based place it moves to. */
+  toIndex?: number
+  /** Swedish, e.g. "Karaktären ”Anna”", "Klipp 4 i ”Sommar”". */
+  label: string
+  /** Swedish group heading, e.g. "Karaktärer", "Klipp". */
+  group: string
+  /** Absolute picture: the asset's cover, the photo, a poster, the still, the board picture. */
+  preview?: string
+  /** 'asset-audio': the clip's file (absolute) and its length in seconds, so the dialog can name it and play it. */
+  sound?: { path: string; duration: number }
+  assetKind?: AssetKind
+  /** Prompts, learnings, reviews: a text excerpt (≤ 200 chars). */
+  text?: string
+  /** Swedish lines: what else happens, e.g. "3 tagningar blir vanliga klipp i Generera". */
+  effects: string[]
+  /** What goes to the Trash. */
+  trash?: { files: number; bytes?: number }
+  /** An asset, sequence, storyboard or edit (the dialog asks a second question). */
+  container?: boolean
+  /** Once approved: what happened to it. */
+  outcome?: { status: 'deleted' | 'gone' | 'failed'; error?: string }
+}
+
+/** What a 'delete' request asks for. */
+export interface ApprovalDeleteRequest {
+  /** Swedish one-liner, e.g. "Ta bort 3 saker i ”Sommar”". */
+  summary: string
+  items: ApprovalDeleteItem[]
+  /** The second step's question when containers or more than 5 items go (Swedish). */
+  confirm?: string
+}
+
 /**
  * A paid generation an agent asked for. Nothing is sent to Venice until the user approves it in Studio; main
  * then submits exactly what is described here (refusing if the clip changed meanwhile).
@@ -1485,10 +1745,11 @@ export interface ApprovalRequest {
   note?: string
   /**
    * generation: the Generate form. segment: one sequence clip. generate-all: every clip still missing a take.
-   * image: one still for a storyboard ("Skapa bild"). edit: a paid operation in Redigera. voice-design: a new
-   * voice for a character ("Skapa röst med AI").
+   * image: one still for a storyboard ("Skapa bild"). edit: a paid operation in Redigera (or resuming a stopped
+   * one). voice-design: a new voice for a character ("Skapa röst med AI"). delete: removing things (free, but
+   * nothing an agent asks to remove goes without the user's OK).
    */
-  kind: 'generation' | 'segment' | 'generate-all' | 'image' | 'edit' | 'voice-design'
+  kind: 'generation' | 'segment' | 'generate-all' | 'image' | 'edit' | 'voice-design' | 'delete'
   /**
    * What will be generated: the form for 'generation', the clip's settings for 'segment' (a clip continuing
    * from the previous one gets that clip's last frame as its start image when it is generated).
@@ -1498,6 +1759,8 @@ export interface ApprovalRequest {
   image?: ApprovalImageRequest
   /** 'edit' and 'voice-design': what will be done. */
   edit?: ApprovalEditRequest
+  /** 'delete': what will be removed (and, once approved, each item's outcome). */
+  delete?: ApprovalDeleteRequest
   /** 'image', once approved: the still it made. */
   stillId?: string
   /** Approved, but something after the paid step didn't work out (Swedish), e.g. the clip was gone. */
@@ -1633,8 +1896,10 @@ export interface AgentSetFormArgs {
   /** Tokens already canonical ("@Image3"). */
   prompt?: string
   negative_prompt?: string
-  /** Absolute path of the start image (main resolved the agent's asset photo). */
-  start_image?: string
+  /** Absolute path of the start image (main resolved the agent's asset photo, still or upload); null clears it. */
+  start_image?: string | null
+  /** Absolute path of the end image, for a model that takes one (resolved like start_image); null clears it. */
+  end_image?: string | null
   /** GenerationParams.includeDescriptions ("Ta med beskrivningar"). */
   include_descriptions?: boolean
   /** GenerationParams.excludedDescriptionAssetIds; [] switches every description back on. */
@@ -1665,20 +1930,34 @@ export interface AgentReorderReferencesArgs {
   audios?: string[]
 }
 
+/** The library views of the five asset kinds (the renderer's View ids). */
+export type AssetViewId = 'characters' | 'environments' | 'products' | 'outfits' | 'poses'
+
+/** The views an agent can open. */
+export type AgentOpenView = 'generate' | 'sequences' | 'storyboards' | 'editor' | 'prompts' | AssetViewId
+
 /** open: brings a place in Studio to the front. */
 export interface AgentOpenArgs {
-  view: 'generate' | 'sequences' | 'storyboards' | 'editor'
+  view: AgentOpenView
   sequenceId?: string
   segmentId?: string
   /** For 'storyboards': the storyboard to open. */
   storyboardId?: string
+  /** For 'storyboards': the transition to open in the transition editor. */
+  transitionId?: string
   /** For 'editor': the edit to open (none: the list of edits). */
   editId?: string
+  /** For 'editor': the version to show in the player. */
+  versionId?: string
+  /** For an asset view: the asset to open. */
+  assetId?: string
+  /** For 'generate': the clip to open in the clip drawer. */
+  generationId?: string
 }
 
 /** What the window shows after an open command. */
 export interface AgentOpenResult {
-  view: 'generate' | 'sequences' | 'storyboards' | 'editor'
+  view: AgentOpenView
   sequenceId?: string
   sequenceName?: string
   /** The clip actually on screen (normally the one asked for). */
@@ -1689,6 +1968,15 @@ export interface AgentOpenResult {
   /** The edit on screen (view 'editor'). */
   editId?: string
   editName?: string
+  /** The version shown in the player (view 'editor'). */
+  versionId?: string
+  /** The transition open in the transition editor (view 'storyboards'). */
+  transitionId?: string
+  /** The asset on screen (asset views). */
+  assetId?: string
+  assetName?: string
+  /** The clip open in the clip drawer (view 'generate'). */
+  generationId?: string
   /** Swedish, when the window couldn't show exactly what was asked for. */
   note?: string
 }
@@ -1749,7 +2037,7 @@ export interface StudioApi {
   onReviewChange(cb: (generationId: string) => void): () => void
   onLearningsChange(cb: () => void): () => void
 
-  // Assets (characters, environments, outfits, poses)
+  // Assets (characters, environments, products, outfits, poses)
   /** Sorted by name; every kind when kind is omitted. */
   listAssets(kind?: AssetKind): Promise<Asset[]>
   /** Creates (no id) or updates an asset. Rejects with a Swedish message (empty name, unknown outfit…). */
@@ -1937,6 +2225,11 @@ export interface StudioApi {
    * the request stays pending, so accept the consent and approve again.
    */
   resolveApproval(id: string, approve: boolean, reason?: string): Promise<ApprovalRequest>
+  /**
+   * User only: checks a pending request again without carrying it out (the delete dialog asks every 2 s and on
+   * focus). null: it can still be approved; else why not (Swedish). Always null for kinds other than 'delete'.
+   */
+  verifyApproval(id: string): Promise<string | null>
   onAgentStatus(cb: (s: AgentStatus) => void): () => void
   onAgentActivity(cb: (a: AgentActivity) => void): () => void
   /** A request was created or changed. */
@@ -2013,6 +2306,21 @@ export interface StudioApi {
   /** Fires with the edit id whenever an edit, its versions, jobs or media change. */
   onEditChange(cb: (editId: string) => void): () => void
   onEditProgress(cb: (p: EditProgress) => void): () => void
+
+  // Status: Pågår och klart
+  /** What runs and what finished unseen; an empty summary while no library is open. */
+  getWorkSummary(): Promise<WorkSummary>
+  /** User only: the items (WorkSummary keys) were looked at. */
+  markSeen(keys: string[]): Promise<void>
+  /**
+   * User only: "Markera alla som sedda" (everything, or one view or owner). undoToken undoes it with undoMarkAllSeen
+   * for 10 seconds.
+   */
+  markAllSeen(scope?: SeenScope): Promise<{ count: number; undoToken?: string }>
+  /** User only: "Ångra" after markAllSeen; resolves with how many items came back (those that still exist). */
+  undoMarkAllSeen(token: string): Promise<number>
+  /** The whole summary, whenever something starts, moves on, finishes or is seen. */
+  onWorkChange(cb: (s: WorkSummary) => void): () => void
 
   // Files
   revealFile(path: string): Promise<void>

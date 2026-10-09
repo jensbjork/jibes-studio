@@ -2,8 +2,8 @@
 
 A desktop video studio for [Venice.ai](https://venice.ai)'s video models. Studio lets you generate short clips from
 text, a start image or a set of reference photos (and voices), keep a library of **characters**, **environments**,
-**outfits** and **poses** with their reference photos — and what the characters and places sound like — and save
-the prompts that work. Clips are chained into longer films that continue seamlessly from one clip's last frame into
+**products**, **outfits** and **poses** with their reference photos — and what the characters and places sound
+like — and save the prompts that work. Clips are chained into longer films that continue seamlessly from one clip's last frame into
 the next, and a clip in the middle that didn't turn out can be redone so it fits exactly between its neighbours. A
 film can also start as a **storyboard**: one picture for every milestone — made with Venice's image models or taken
 from what you already have — with the clips between the pictures generated for you. Your **own footage** can be
@@ -11,9 +11,11 @@ brought in and continued with AI clips, and any finished film — a clip, a take
 be changed in **Redigera**, the editor: cut, faded, its sound cleaned up or its voice taken out, new lines spoken in
 another or a cloned voice, music and effects added, a stretch redone or changed with a prompt, every change a new
 version next to the untouched original. Everything lives in a plain folder you choose, with human-readable folder
-and file names, and your own AI agents can work in the app over [MCP](https://modelcontextprotocol.io) — preparing
-references, prompts, sequences and storyboards, editing films, and reviewing what the generations became to write
-better prompts next time — while every paid generation still waits for your approval.
+and file names, and your own AI agents can work in the app over [MCP](https://modelcontextprotocol.io) much as you
+do — creating characters and products with the photos and sound they upload, preparing references, prompts,
+sequences and storyboards, editing films, and reviewing what the generations became to write better prompts next
+time — while every paid generation and every removal still waits for your approval. *Pågår och klart* shows what is
+being made right now and what is ready to watch, wherever you are in the app.
 
 Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 
@@ -25,7 +27,8 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   generation's settings.
 - **A live clip feed built for many clips.** Queued, rendering and finished videos as big cards or a compact table
   (*Kort* / *Tabell*, with keyboard navigation), search in the prompts, filters (status, model, the asset whose
-  photos or voice were used, rating, unrated or reviewed, time, standalone or a take), sorting (newest, oldest,
+  photos or voice were used, rating, unrated or reviewed, time, standalone or a take, *Nya* — not watched yet),
+  sorting (newest, oldest,
   rating, cost, length) and a summary of the filtered clips. A detail drawer shows the player, the prompt with its
   tokens (and *Skickad prompt*, the prompt exactly as it was sent, when descriptions were appended), the references
   and voices that were sent, the settings, and your own rating (1–5 stars), note and tags next to the agents'
@@ -35,24 +38,29 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   at, shows the photo on hover and plays the voice, offers an `@` menu, flags wrong or malformed tokens with one-click
   fixes, and blocks generation while a reference is wrong. The same check runs again in the main process before
   anything is sent to Venice. **Drag a reference photo or voice to another place** and its number changes, with
-  every token in the prompt following it. **The descriptions of the referenced characters, places, outfits and
-  poses are appended automatically** when the prompt is sent, as a short *References* list, so you write what
+  every token in the prompt following it. **The descriptions of the referenced characters, places, products, outfits
+  and poses are appended automatically** when the prompt is sent, as a short *References* list, so you write what
   happens rather than what everyone looks like.
-- **Library of characters, environments, outfits and poses** (*Karaktärer*, *Miljöer*, *Kläder*, *Poser*): a name, a
-  description and ordered reference photos, each in its own folder. A character can have a default outfit that comes
-  along automatically, and **a voice** (*Röst*); an environment can have **a soundscape** (*Ljudmiljö*). Each audio
-  clip has a 2–15 s reference window, the part that is sent, which you pick on a timeline. A **pose** is a photo or
-  sketch of how people stand relative to each other, applied to the characters in the shot.
+- **Library of characters, environments, products, outfits and poses** (*Karaktärer*, *Miljöer*, *Produkter*,
+  *Kläder*, *Poser*): a name, a description and ordered reference photos, each in its own folder. A character can
+  have a default outfit that comes along automatically, and **a voice** (*Röst*); an environment can have **a
+  soundscape** (*Ljudmiljö*). Each audio clip has a 2–15 s reference window, the part that is sent, which you pick on
+  a timeline. A **product** is a specific item to show in the film — a package, a bottle, a gadget — with clear
+  packshots and a description (brand, model, colours, what the packaging says); in the form a character can hold it
+  (*Hålls av*). A **pose** is a photo or sketch of how people stand relative to each other, applied to the characters
+  in the shot.
 - **Prompt library** with titles, tags, favourites, a negative prompt and usage counts, and **Lärdomar**
   (learnings): short insights about what works, recorded by you or your agents, with the clips they are based on.
 - **Sequences:** films made of clips. Each clip has its own prompt, references, voices and settings, *Vad händer*
-  notes, any number of takes, a selected take and start/end trims. A clip can start on the previous clip's last
+  notes, any number of takes in a strip under the player — **click a take and it becomes the clip's take** and plays,
+  with sound; ← / → choose with the keyboard, ⌥-click previews without choosing — and start/end trims that each take
+  remembers for itself. A clip can start on the previous clip's last
   (trimmed) frame (*Startbild från föregående klipp*) and end on the next clip's first frame (*Slutbild från nästa
   klipp*), both taken out automatically with ffmpeg, or on start and end images of its own. *Generate missing*
   renders the clips in the order their frames allow; *Export* cuts the selected takes into one mp4 with ffmpeg.
 - **Storyboards** (their own view, next to Sekvenser): mock up a film's milestones as pictures, one per board
   (*ruta*), then generate the clips between them. A board's picture is made with **Skapa bild…** (Venice's image
-  models, about $0.06, with characters, outfits, places, poses, other storyboard pictures — or the previous board's
+  models, about $0.06, with characters, products, outfits, places, poses, other storyboard pictures — or the previous board's
   picture, for continuity — as references) or taken from what you have: a library photo, an uploaded or dropped
   file, a frame of any clip. Between every two neighbouring boards there is a **transition**, the clip that goes
   from the first picture to the second (*Vad händer?*, length, price, takes). *Generera saknade* makes every missing
@@ -64,8 +72,8 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   first, or redo a clip between them. Files are copied into `Egna klipp/<day>/` as an APFS clone where the disk allows
   (no extra space); a phone or camera film that can't be used as it is (HDR, 10-bit, 4K, a variable frame
   rate, rotation, ProRes, spatial audio, non-square pixels, sound and picture starting apart) gets an H.264 SDR
-  working copy next to the untouched original. A film already imported is reused. Agents can use your clips once
-  they are in, but never import files themselves.
+  working copy next to the untouched original. A film already imported is reused. Agents can import video files
+  they upload the same way.
 - **Redigera**, the editor: open a feed clip, a take, an exported film or your own film and change it. Every change
   is a new **version** (*v1 Original*, *v2* …) in a tree you can go back and forth in, compare (*Jämför ⇄*) and send
   to a sequence; the original is never touched. A player with in/out marks and frame stepping, and a timeline with
@@ -89,14 +97,24 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 - **Redo a clip between its neighbours** (*Gör om mellan grannarna*): a clip in the middle that didn't turn out is
   set up to start exactly on the previous clip's last frame and end exactly on the next clip's first frame — both
   taken out automatically, with live previews — and a new take fits the cut without touching the neighbours.
+- **Pågår och klart** (in progress and done): every sidebar view shows what runs there (a spinner and a count) and
+  what has finished that you haven't looked at yet (a dot), and so do the lists, the cards, the takes, the
+  transitions, the versions and the voices. The panel at the bottom of the sidebar lists everything that runs — with
+  its progress and an estimate —, what is ready to watch and what failed, with *Markera alla som sedda* (and
+  *Ångra*). A video counts as seen once it has played for a second or you chose it; the Dock icon shows the number of
+  new results.
+- **A grouped sidebar that folds away:** *Skapa* (Generera, Sekvenser, Storyboards, Redigera) and *Bibliotek* (the
+  five kinds and Prompter), one icon set, and a 72 px icon rail (⌃⌘S, or the button by the wordmark) that gives the
+  views more room.
 - **Your own folder:** a base folder you choose, with Swedish, human-readable folders and file names. Paths in the
   database are stored relative to it, so the library can be moved, switched or tidied up from Settings.
 - **Agent connection (MCP):** an optional Streamable HTTP MCP server (off by default, loopback + Tailscale only,
-  bearer token) through which your own agents read the library, set references, voices and prompts, build sequences
-  and storyboards, edit films in Redigera (free operations directly, paid ones by request), *request* paid
-  generations, pictures, edits and voices that you approve or decline in an in-app dialog, and look back at
-  finished clips and exported films (frames, sound, the references used) to review them and record learnings for
-  the next prompt.
+  bearer token) through which your own agents work much as you do: they create assets of every kind and give them
+  photos and sound (sent as uploads or URLs Studio fetches — never paths on your Mac), set references, voices and
+  prompts, build, trim and export sequences and storyboards, import own clips, edit films in Redigera (free
+  operations directly, paid ones by request), *request* paid generations, pictures, edits and voices — and any
+  removal — that you approve or decline in an in-app dialog, follow what runs, and look back at finished clips and
+  exported films (frames, sound, the references used) to review them and record learnings for the next prompt.
 - **Separate development profile** ("Studio Dev") so development never touches the library the installed app uses.
 
 ## Status
@@ -174,6 +192,7 @@ every file the library knows about back where it belongs.
 ├── Karaktärer/<Name>/                      Characters: reference photos and voice clips (original file names)
 │                                           + Beskrivning.txt
 ├── Miljöer/<Name>/                         Environments: photos of the place, soundscape clips + Beskrivning.txt
+├── Produkter/<Name>/                       Products: packshots of the item + Beskrivning.txt
 ├── Kläder/<Name>/                          Outfits: photos of the garments + Beskrivning.txt
 ├── Poser/<Name>/                           Poses: photos or sketches of the positions + Beskrivning.txt
 ├── Referensbilder/<YYYY-MM-DD>/            Start, end and reference images and reference audio picked from
@@ -211,7 +230,8 @@ every file the library knows about back where it belongs.
     ├── stammar/                            separated voice and background stems (a cache, at most 4 GB)
     ├── redigering/                         paid edit jobs' downloaded parts while they are put together
     ├── tidslinje/                          Redigera's filmstrips and waveforms (a cache)
-    └── tmp/                                scratch files, cleared when the library is opened
+    └── tmp/                                scratch files, cleared when the library is opened (agents' uploads
+                                            wait in tmp/agent-uploads/ until a tool copies them in)
 ```
 
 Paths in the database are stored relative to the base folder whenever they point into one of these folders, so
@@ -222,8 +242,8 @@ converted to this layout when it is opened.
 ## Prompts, `@ImageN` and `@AudioN` references
 
 In **reference mode** the model receives the reference images in order, and the prompt refers to them as
-`@Image1`, `@Image2` … in that order. Picking a character, environment, outfit or pose adds its photos to the
-reference images, and a label for each asset inserts the right tokens, for example:
+`@Image1`, `@Image2` … in that order. Picking a character, environment, product, outfit or pose adds its photos to
+the reference images, and a label for each asset inserts the right tokens, for example:
 
 ```
 Anna (@Image1, @Image2) wearing Red dress (@Image3) walks along the beach promenade (@Image4) …
@@ -243,6 +263,10 @@ it doesn't come along (a note says so).
 
 **Poses.** A pose chip applies to the characters you choose (all of them by default):
 `Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)` (`… och … i posen …` in Swedish).
+
+**Products.** A product chip can be held by one of the characters in the form (*Hålls av*; nobody by default):
+`Anna (@Image1) holding Kaffeburken (@Image4)` (`… håller …` in Swedish). Video models rarely render small text or
+logos exactly, so medium and close shots that show the product large work best.
 
 **Reordering.** Drag a reference thumbnail (or a voice or sound chip) to another place — an insertion marker
 shows where it lands and every badge shows the number it will get — or focus it and press ⌥← / ⌥→. Its `@ImageN`
@@ -304,6 +328,14 @@ take, each after the clips whose frames it needs, waiting for each one; if two c
 says which switch to turn off before anything is paid for. **Exportera** renders the selected, trimmed takes into
 one H.264/AAC mp4 in the sequence's folder, showing a picture two clips share at a cut only once.
 
+**Takes.** Every take of a clip is a thumbnail in the strip under the player, newest first (so one being made comes
+first), each keeping its place when it finishes. Click one and it becomes the clip's take and plays from its kept start,
+with sound; click it again to start over. ← / → (and Home / End) choose takes at once without playing them, ⌥-click or
+*Förhandsvisa utan att välja* plays one without choosing it (*Välj den* / *Visa vald*), hovering scrubs a silent
+preview, and the menu (right-click or ⋯) has *Använd tagningens prompt*, *Redigera tagningen…*, *Visa i Finder* and
+*Radera tagningen…*. Each take keeps its own trims: trim A, choose B, choose A again, and A's trims are back. A new take
+is chosen by itself only when the clip has no usable one; otherwise it waits in the strip, marked *Ny*.
+
 **Start and end images.** A clip can also start or end on a picture of its own (a file or a library photo in the
 clip editor; agents can also put in pictures made with Venice's image models or frames of takes). A clip with a
 start or end image is generated with the image-to-video model of its family: the look comes from the pictures, so
@@ -314,8 +346,8 @@ happens between them. Pictures made or saved for a sequence's clips are kept as 
 the clip editor) sets it to start on the previous clip's last frame and end on the next clip's first frame, with an
 image-to-video model that takes an end image, keeping its prompt, length and sound. The first or last clip only gets
 the one neighbour it has. The editor shows both frames and the price; the neighbours need finished selected takes.
-When the new take is ready, pick it with *Välj* under *Tagningar* — the old take stays selected until you choose,
-and stays among the takes in case you want it back.
+When the new take is ready, click it in the take strip — the old take stays selected until you choose, and stays
+among the takes in case you want it back.
 
 ## Storyboards
 
@@ -324,8 +356,8 @@ It has a name, a format (16:9 by default; 9:16, 1:1, 4:3, 3:4 or 21:9) and an or
 and it lives in its own view, **Storyboards** — storyboards never show up in Sekvenser, nor sequences here.
 
 - **One picture per board**, with a short note under it (*Vad visar bilden?*). Click the picture (or the empty
-  board) for **Skapa bild…**, *Från biblioteket…* (any photo of a character, place, outfit or pose, used where it
-  is), *Storyboardbilder* (pictures made or added for this storyboard before; *Visa* opens one full size, where it
+  board) for **Skapa bild…**, *Från biblioteket…* (any photo of a character, place, product, outfit or pose, used
+  where it is), *Storyboardbilder* (pictures made or added for this storyboard before; *Visa* opens one full size, where it
   can be used or deleted), *Ladda upp en bild…* (or drop a file on the board; it is copied into the storyboard's
   `Bilder/`) or *Bildruta ur ett klipp…* (scrub any finished clip in the library and save the frame; needs ffmpeg). A picture whose shape differs from the storyboard's format is marked
   *Annat format*: the clips to and from it get the picture's shape. A board may stay empty while you plan.
@@ -368,21 +400,26 @@ Studio can run an MCP server so agents such as OpenClaw, Hermes Agent, Claude De
 the app: read the library and see its photos (and hear its voices), choose references, write and validate prompts,
 fill in the Generate form, build sequences (also with your own clips), plan storyboards (boards, their pictures and
 the transitions' prompts), set a clip up to be redone between its neighbours, and edit films in Redigera.
-They can also look back: review finished clips and exported films frame by frame next to the references they were
-made from, record reviews, and save *learnings* that every later session reads before it writes a prompt. Agents
-**cannot generate anything on their own** — the paid tools (videos, pictures, paid edits and designed voices) only
-create a request that Studio shows you with the prompt, references, voices and price, and nothing is sent to Venice
-until you approve it. They also cannot import files from disk or delete edits and versions.
+They create characters, products and the other assets and add photos and sound to them, import own clips and export
+films; files reach Studio as uploads — a URL Studio fetches (public addresses or the agent's own machine), a raw
+`PUT` with the token, or a small file inline — never as paths on your Mac. They can also look back: review finished
+clips and exported films frame by frame next to the references they were made from, record reviews, and save
+*learnings* that every later session reads before it writes a prompt. Agents **cannot generate or remove anything on
+their own** — the paid tools (videos, pictures, paid edits and designed voices) and `request_delete` only create a
+request that Studio shows you (with the prompt, references, voices and price, or with what would be removed and what
+depends on it), and nothing is sent to Venice or removed until you approve it. Settings, the library folder,
+consents and your own ratings and learnings stay yours.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 73
-tools, the review loop and troubleshooting.
+Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 88
+tools, sending files, the review loop and troubleshooting.
 
 ## Security
 
 Studio is a local app. The agent connection is off by default, listens only on loopback and the Tailscale
-interface (never on your LAN or `0.0.0.0`), requires a 256-bit bearer token, refuses browser requests, and paid
-actions always need your approval in the app. Secrets are encrypted with the macOS Keychain. Details, the threat
+interface (never on your LAN or `0.0.0.0`), requires a 256-bit bearer token, refuses browser requests, fetches
+agents' URLs only from public addresses (or the agent's own machine), and paid actions and removals always need your
+approval in the app. Secrets are encrypted with the macOS Keychain. Details, the threat
 model and how to report a vulnerability: **[SECURITY.md](SECURITY.md)**.
 
 ## Documentation
@@ -408,10 +445,12 @@ Done:
 8. Asset descriptions appended to the prompt automatically, references reordered by drag and drop
 9. Storyboards as a workflow of their own: milestone pictures, with the clips between them generated
 10. Redigera (an AI editor for any finished film), own clips in sequences, designed and cloned voices
+11. Products, click-to-select takes with per-take trims, *Pågår och klart*, a grouped and collapsible sidebar, and
+    agents that work like the user (uploads, every content tool, removals by approval)
 
 Next:
 
-11. Cost overview, cancelling a running export, fades between clips; continuing the motion of an own clip,
+12. Cost overview, cancelling a running export, fades between clips; continuing the motion of an own clip,
     upscaling long films in parts, subtitles burned into the picture
 
 Ideas where help is welcome: an English UI (i18n), an automated test suite, signed and notarized builds.

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { Still } from '@shared/types'
+import { workKey, type Still } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
+import { useSeenWhenVisible } from '../../lib/work'
 import ConfirmButton from '../sequences/ConfirmButton'
 import {
   formatImagePrice,
@@ -144,6 +145,9 @@ export default function StillViewer({ still, stills, onClose, deletable = false,
 
 function StillImage({ still }: { still: Still }) {
   const [missing, setMissing] = useState(false)
+  // A new picture (Pågår och klart) has been looked at once it has been on screen here for a moment.
+  const imgRef = useRef<HTMLImageElement>(null)
+  useSeenWhenVisible(imgRef, missing ? undefined : workKey.still(still.id))
   if (missing) {
     return (
       <p className="max-w-sm text-center text-muted select-text">
@@ -155,6 +159,7 @@ function StillImage({ still }: { still: Still }) {
   }
   return (
     <img
+      ref={imgRef}
       src={mediaUrl(still.path)}
       alt=""
       draggable={false}

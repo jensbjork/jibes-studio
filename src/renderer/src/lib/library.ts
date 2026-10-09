@@ -15,6 +15,7 @@ export const LAST_EDIT_KEY = 'editor:lastOpen'
 export const SELECTED_ASSET_KEYS: Record<AssetKind, string> = {
   character: 'characters:selected',
   environment: 'environments:selected',
+  product: 'products:selected',
   outfit: 'outfits:selected',
   pose: 'poses:selected'
 }
@@ -69,9 +70,9 @@ export function mapParamImages(
 
 // ── Following asset images ──────────────────────────────────────────────────
 
-// The photos of a character, environment or outfit move when its folder follows a rename, or when "Städa upp"
-// tidies them. Main rewrites the paths it stores; the Generate form's own copy (state and localStorage)
-// follows by image id.
+// The photos of an asset (a character, environment, product, outfit or pose) move when its folder follows a rename,
+// or when "Städa upp" tidies them. Main rewrites the paths it stores; the Generate form's own copy (state and
+// localStorage) follows by image id.
 
 /** Anything with library images: an Asset, or a list item shaped like one. */
 type WithImages = Pick<Asset, 'images'>
@@ -206,6 +207,7 @@ function legacyImageId(path: string, m: SwitchMemory): string | undefined {
 const LIBRARY_FOLDERS = new Set([
   'Karaktärer',
   'Miljöer',
+  'Produkter',
   'Kläder',
   'Poser',
   'Referensbilder',

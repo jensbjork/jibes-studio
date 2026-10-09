@@ -370,11 +370,56 @@ function isOwnFrameStill(segmentId: string, path: string): boolean {
 }
 
 /**
- * Points a segment at a take, re-clamping the trims to that take's length (and starting a side the take was made
- * to meet exactly untrimmed, see seamTrims).
+ * Remembers the trims the segment's selected take has right now (take_trims), so that switching to another take and
+ * back gives this one exactly the trims the user left it with: the segment's own trims follow the new take (and are
+ * clamped to its length), which would otherwise erode them. Called right before a selection changes. Storyboard
+ * transitions are never trimmed, so they write nothing. Bookkeeping only: a failure is logged, never thrown into the
+ * selection it precedes.
+ */
+export function rememberTrims(row: SegmentRow): void {
+  if (!row.selected_generation_id || row.from_board_id) return
+  try {
+    conn()
+      .prepare(
+        `INSERT INTO take_trims (segment_id, generation_id, trim_start, trim_end, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (segment_id, generation_id) DO UPDATE
+           SET trim_start = excluded.trim_start, trim_end = excluded.trim_end, updated_at = excluded.updated_at`
+      )
+      .run(row.id, row.selected_generation_id, row.trim_start ?? 0, row.trim_end ?? 0, Date.now())
+  } catch (err) {
+    console.warn(`Could not remember the trims of take ${row.selected_generation_id}:`, err)
+  }
+}
+
+/**
+ * The trims `take` gets when it becomes the segment's selected take: the ones it last had in this segment
+ * (rememberTrims) when it was selected there before, else today's rule (seamTrims: the segment's trims carry over,
+ * except at a side the take was made to meet exactly). The caller clamps them to the take's length (clampTrims).
+ * `row` carries the link flags the segment has (or is about to have).
+ */
+export function trimsFor(row: SegmentRow, take: Generation): { trimStart: number; trimEnd: number } {
+  if (!row.from_board_id) {
+    const kept = conn()
+      .prepare('SELECT trim_start, trim_end FROM take_trims WHERE segment_id = ? AND generation_id = ?')
+      .get(row.id, take.id) as { trim_start: number; trim_end: number } | undefined
+    if (kept) return { trimStart: kept.trim_start, trimEnd: kept.trim_end }
+  }
+  return seamTrims(row, take)
+}
+
+/** Forgets the trims a take had in a segment (the take was taken off it). */
+export function forgetTrims(segmentId: string, generationId: string): void {
+  conn().prepare('DELETE FROM take_trims WHERE segment_id = ? AND generation_id = ?').run(segmentId, generationId)
+}
+
+/**
+ * Points a segment at a take, re-clamping the trims to that take's length. A take selected here before gets back the
+ * trims it had then (see trimsFor), and the take that was selected keeps its own for later (rememberTrims).
  */
 export function setSelectedTake(row: SegmentRow, take: Generation | undefined): void {
-  const kept = take && take.id !== row.selected_generation_id ? seamTrims(row, take) : undefined
+  const switching = (take?.id ?? null) !== row.selected_generation_id
+  if (switching) rememberTrims(row)
+  const kept = take && take.id !== row.selected_generation_id ? trimsFor(row, take) : undefined
   const { trimStart, trimEnd } = clampTrims(
     kept?.trimStart ?? row.trim_start,
     kept?.trimEnd ?? row.trim_end,
@@ -536,12 +581,15 @@ export function setSequenceFolder(id: string, folder: string): void {
 /**
  * Remembers a finished export, so moving or tidying the library carries it along. `cuts`: where its clips meet in
  * the film (seconds, the start of every clip after the first), so Redigera knows the film's Klippgränser exactly.
+ * Returns the export's id.
  */
-export function recordExport(sequenceId: string, path: string, cuts?: readonly number[]): void {
+export function recordExport(sequenceId: string, path: string, cuts?: readonly number[]): string {
   const clean = (cuts ?? []).filter((t) => Number.isFinite(t) && t > 0).map((t) => Math.round(t * 1000) / 1000)
+  const id = randomUUID()
   conn()
     .prepare('INSERT INTO exports (id, sequence_id, file_path, created_at, cuts) VALUES (?, ?, ?, ?, ?)')
-    .run(randomUUID(), sequenceId, toStoredPath(path), Date.now(), cuts ? JSON.stringify(clean) : null)
+    .run(id, sequenceId, toStoredPath(path), Date.now(), cuts ? JSON.stringify(clean) : null)
+  return id
 }
 
 // ── Exportformat ─────────────────────────────────────────────────────────────

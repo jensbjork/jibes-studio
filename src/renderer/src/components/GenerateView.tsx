@@ -21,6 +21,7 @@ import OpenFolderButton from './library/OpenFolderButton'
 import ParamsForm, { missingInput, modelForKind, unavailableModel } from './ParamsForm'
 import { addAssetToForm } from './pickers/assetRefs'
 import { stableJson } from './sequences/sequenceUtils'
+import NewPictures from './work/NewPictures'
 
 interface Props {
   intent?: Intent
@@ -222,6 +223,9 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
           navigate={navigate}
           onReuse={reuse}
           emptyText="Dina videor hamnar här. Börja med en prompt till vänster."
+          openRequest={intent?.type === 'open-generation' ? intent : undefined}
+          onOpenRequestHandled={onIntentHandled}
+          banner={<NewPictures view="generate" />}
           trailing={
             <>
               {folderError && (

@@ -25,16 +25,39 @@ export function recordIpcHandlers(): void {
 }
 
 /** Stands in for the IPC event of a call that comes from the agent rather than a window. */
-const AGENT_EVENT = { sender: undefined, frameId: -1, processId: -1 } as unknown as IpcMainInvokeEvent
+const AGENT_EVENT = Object.freeze({ sender: undefined, frameId: -1, processId: -1 }) as unknown as IpcMainInvokeEvent
+
+/**
+ * Stands in for the IPC event of a call the user approved in Studio's approval dialog. It is not AGENT_EVENT, so
+ * isAgentCall is false and the handler runs with the user's authority: an approved removal of an edit or a version, or
+ * of another agent's review, goes through exactly as the user's own click would.
+ */
+const APPROVED_EVENT = Object.freeze({ sender: undefined, frameId: -2, processId: -1 }) as unknown as IpcMainInvokeEvent
 
 /** True when a handler is running for an agent's tool call rather than for a window. */
 export function isAgentCall(event: IpcMainInvokeEvent | undefined): boolean {
   return event === AGENT_EVENT
 }
 
-/** Calls a Studio service the way the window would (e.g. 'segments:add'), in this process. */
-export async function callService<T>(channel: string, ...args: unknown[]): Promise<T> {
+function handlerFor(channel: string): Handler {
   const handler = handlers.get(channel)
   if (!handler) throw new Error(`Studio saknar tjänsten ${channel}.`)
-  return (await handler(AGENT_EVENT, ...args)) as T
+  return handler
+}
+
+/** Calls a Studio service the way the window would (e.g. 'segments:add'), in this process. */
+export async function callService<T>(channel: string, ...args: unknown[]): Promise<T> {
+  return (await handlerFor(channel)(AGENT_EVENT, ...args)) as T
+}
+
+/**
+ * Calls a Studio service with the user's authority, for something the user has approved in the approval dialog.
+ *
+ * Only ApprovalPlan.execute of a 'delete' request (tools/delete.ts) calls this, and only after the store has run
+ * the plan's verify on the user's click: the planner and verify carry the rules an agent's own call would meet in
+ * the handler (only its own reviews and learnings, never the user's, nothing during a run…), because the handler
+ * itself now sees the user. Never call it from a tool's own code path.
+ */
+export async function callApproved<T>(channel: string, ...args: unknown[]): Promise<T> {
+  return (await handlerFor(channel)(APPROVED_EVENT, ...args)) as T
 }

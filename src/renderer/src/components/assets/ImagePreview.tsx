@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import type { AssetImage } from '@shared/types'
+import { originText } from '../../lib/assets'
 import { mediaUrl } from '../../lib/media'
 import { imageIssues, type Size } from './imageUtils'
 
@@ -22,6 +23,7 @@ const arrow = `${base} text-base leading-none hover:text-text`
 export default function ImagePreview({ images, index, size, onSize, onIndex, onClose, onMakeCover, onRemove }: Props) {
   const image = images[index]
   const issues = size ? imageIssues(size) : []
+  const origin = originText(image.origin)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -79,6 +81,7 @@ export default function ImagePreview({ images, index, size, onSize, onIndex, onC
           </span>
         )}
         {index === 0 && <span className="rounded bg-raised px-1.5 py-0.5 text-[11px]">Omslag</span>}
+        {origin && <span className="min-w-0 truncate text-muted">{origin}</span>}
         {issues.map((issue) => (
           <span key={issue.label} className="text-amber-400">
             ⚠ {issue.detail}
