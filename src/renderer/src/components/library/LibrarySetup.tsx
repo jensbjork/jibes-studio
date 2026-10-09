@@ -95,10 +95,9 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
             <>
               <h1 className="text-xl font-semibold">Var ska Studio spara allt?</h1>
               <p className="mt-2 leading-relaxed text-muted">
-                Välj en grundmapp på datorn. Där samlar Studio karaktärer, miljöer, kläder, poser,
+                Välj en grundmapp på datorn. Där samlar Studio karaktärer, miljöer, produkter, kläder, poser,
                 referensbilder, genererade videor, egna klipp, sekvenser, storyboards och redigeringar i tydligt
-                namngivna mappar, så att
-                du kan gå in och titta i Finder när du vill.
+                namngivna mappar, så att du kan gå in och titta i Finder när du vill.
               </p>
               {legacy && (
                 <p className="mt-3 rounded-md border border-line bg-panel px-3 py-2 text-[12px] leading-relaxed text-muted">

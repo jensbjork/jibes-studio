@@ -7,7 +7,8 @@
 // or another format Chromium can't play, a first audio track ffmpeg can't decode, pixels that aren't square, sound and
 // picture that start apart), a working copy is made next to it (H.264 SDR ≤1080p, constant fps, upright, square
 // pixels, both streams from 0, metadata stripped) and used everywhere instead; the original stays untouched beside it
-// (originalPath). Agents can't import: only the user's own click or drop brings a file in.
+// (originalPath). Agents import too, but only files they uploaded to Studio (staged in the library) or that the
+// library already records: never a path of their own on this Mac (assertAgentFiles).
 
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, createReadStream, createWriteStream } from 'node:fs'
@@ -27,7 +28,6 @@ import type {
   ImportTarget,
   VideoFileInfo
 } from '@shared/types'
-import { isAgentCall } from './agent/local-ipc'
 import * as db from './db'
 import { extractThumbnail, normalizeVideo, probe, probeMedia, type MediaInfo } from './ffmpeg'
 import { originalHome, toPublic, videoLocation } from './jobs'
@@ -35,6 +35,7 @@ import { isInsideRoot, libraryOperationSettled, libraryRoot, thumbsDir, tmpDir, 
 import { fileErrorReason, placeFile } from './references'
 import type { SequenceService } from './sequences'
 import * as store from './sequence-store'
+import { assertAgentFiles } from './upload-paths'
 
 const execFileAsync = promisify(execFile)
 
@@ -43,9 +44,6 @@ export const VIDEO_FILE_TYPES = ['mp4', 'mov', 'm4v', 'webm', 'mkv'] as const
 
 /** Said while an import runs (a library switch or "Städa upp" would pull the folder away under it). */
 export const IMPORT_BUSY = 'Det pågår en import av egna klipp. Vänta tills den är klar och försök igen.'
-
-/** Said when an agent's call reaches the import (only the user's own click or drop brings a file in). */
-const USER_ONLY = 'Det här kan bara du göra i Studio.'
 
 /** Said for a file the import was stopped before (Avbryt). */
 const CANCELLED = 'Importen avbröts.'
@@ -560,19 +558,28 @@ interface Placement {
 export class ImportService {
   private queue: Promise<unknown> = Promise.resolve()
   private readonly running = new Set<AbortController>()
-  private active = 0
+  /** Imports running or queued (the busy count). */
+  private importing = 0
   /** Paths of files waiting or being imported (counted: the same file may be in two imports). */
   private readonly pending = new Map<string, number>()
   /** Files whose own Avbryt was pressed before they started: they are skipped. */
   private readonly skipped = new Set<string>()
   /** The file being imported right now, with the abort of that file alone. */
   private readonly current = new Map<string, AbortController>()
+  /**
+   * Files of the running and queued imports that haven't finished, with how far they are, by path: what the status
+   * summary (work.ts) shows, also after the view that started the import is gone.
+   */
+  private readonly files = new Map<
+    string,
+    { name: string; fraction: number; target: ImportTarget; startedAt: number }
+  >()
 
   constructor(private readonly deps: ImportDeps) {}
 
   /** Why the library can't be switched or tidied right now (Swedish), or undefined. */
   isBusy(): string | undefined {
-    return this.active > 0 ? IMPORT_BUSY : undefined
+    return this.importing > 0 ? IMPORT_BUSY : undefined
   }
 
   /**
@@ -605,6 +612,11 @@ export class ImportService {
     return inspectVideoFiles(paths)
   }
 
+  /** The files being imported (or waiting for their turn) right now, in the order they were given. */
+  active(): { path: string; name: string; fraction: number; target: ImportTarget; startedAt: number }[] {
+    return [...this.files].map(([path, f]) => ({ path, ...f }))
+  }
+
   /**
    * Imports the files into the library and puts them where `target` says. Every file is looked at before anything is
    * copied, and one that can't be imported never stops the others (it is reported in `errors`). Files go in name
@@ -615,14 +627,20 @@ export class ImportService {
     const controller = new AbortController()
     const files = uniquePaths(paths)
     this.running.add(controller)
-    this.active++
+    this.importing++
     this.track(files, 1)
+    const startedAt = Date.now()
+    if (target && typeof target === 'object') {
+      for (const path of files) this.files.set(path, { name: basename(path), fraction: 0, target, startedAt })
+    }
     const run = this.queue.then(() => this.run(files, target, controller.signal))
     this.queue = run.catch(() => {})
     return run.finally(() => {
       this.running.delete(controller)
-      this.active--
+      this.importing--
       this.track(files, -1)
+      // A file this import still lists (refused before it began, say) is no longer on its way.
+      for (const path of files) if (this.files.get(path)?.startedAt === startedAt) this.files.delete(path)
     })
   }
 
@@ -645,6 +663,10 @@ export class ImportService {
     if (kind !== 'feed') result.segmentIds = []
     const idByPath = new Map<string, string>()
     const report = (p: Omit<ImportProgress, 'sequenceId' | 'segmentId'>): void => {
+      // Before the event goes out: the summary read on it shows the file's state as the event says.
+      const file = this.files.get(p.path)
+      if (p.done) this.files.delete(p.path)
+      else if (file) file.fraction = p.fraction
       try {
         this.deps.progress({ ...p, ...(sequenceId ? { sequenceId } : {}), ...(segmentId ? { segmentId } : {}) })
       } catch (err) {
@@ -910,9 +932,10 @@ export class ImportService {
 }
 
 /**
- * Registers imports:inspect, imports:import and imports:cancel. The import itself is the user's only: an agent's
- * call is refused (second line of defence behind the tool list, which has no import). Returns what index.ts needs:
- * whether an import is running (the library switch's busy check) and a stop for quitting.
+ * Registers imports:inspect, imports:import and imports:cancel. An agent's call may only name files it uploaded to
+ * Studio or that the library records (assertAgentFiles): inspecting reads a file as much as importing does. Returns
+ * what index.ts needs: whether an import is running (the library switch's busy check), a stop for quitting, and the
+ * service (its active files for the status summary).
  */
 export function registerImportIpc(deps: ImportDeps): {
   isBusy(): string | undefined
@@ -920,10 +943,15 @@ export function registerImportIpc(deps: ImportDeps): {
   service: ImportService
 } {
   const service = new ImportService(deps)
-  ipcMain.handle('imports:inspect', (_e, paths: unknown) => service.inspect(Array.isArray(paths) ? paths : []))
+  ipcMain.handle('imports:inspect', (e, paths: unknown) => {
+    const files = Array.isArray(paths) ? paths : []
+    assertAgentFiles(e, files)
+    return service.inspect(files)
+  })
   ipcMain.handle('imports:import', (e, paths: unknown, target: ImportTarget) => {
-    if (isAgentCall(e)) throw new Error(USER_ONLY)
-    return service.import(Array.isArray(paths) ? paths : [], target)
+    const files = Array.isArray(paths) ? paths : []
+    assertAgentFiles(e, files)
+    return service.import(files, target)
   })
   // A file card's Avbryt names its file; without a path every import stops.
   ipcMain.handle('imports:cancel', (_e, path?: unknown) => service.cancel(typeof path === 'string' ? path : undefined))

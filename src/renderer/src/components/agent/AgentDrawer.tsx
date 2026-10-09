@@ -11,6 +11,7 @@ import {
   approvalVerb,
   expiresText,
   formatTime,
+  thingsText,
   TONE_DOT
 } from './agentText'
 
@@ -22,7 +23,7 @@ interface Props {
 
 /**
  * What the connected agents have done, newest first, with requests waiting for the user's OK pinned on top.
- * Slides out next to the sidebar.
+ * Slides out next to the sidebar (at --sidebar-w, so it follows the sidebar when it is collapsed to its icon rail).
  */
 export default function AgentDrawer({ open, onClose, navigate }: Props) {
   const agent = useAgentState()
@@ -49,11 +50,11 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
 
   return (
     <>
-      {/* Clicking anywhere outside closes the drawer. */}
-      <div className="no-drag fixed inset-y-0 left-52 right-0 z-30" onMouseDown={onClose} />
+      {/* Clicking anywhere outside closes the drawer. It opens next to the sidebar, expanded or collapsed. */}
+      <div className="no-drag fixed inset-y-0 left-[var(--sidebar-w,208px)] right-0 z-30" onMouseDown={onClose} />
       <aside
         aria-label="Agent"
-        className="no-drag fixed inset-y-0 left-52 z-40 flex w-[340px] flex-col border-r border-line bg-panel shadow-2xl shadow-black/50"
+        className="no-drag fixed inset-y-0 left-[var(--sidebar-w,208px)] z-40 flex w-[340px] flex-col border-r border-line bg-panel shadow-2xl shadow-black/50 transition-[left] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none"
       >
         <div className="drag flex h-12 shrink-0 items-center gap-2 px-4">
           <h2 className="font-semibold">Agent</h2>
@@ -111,7 +112,7 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
               <p className="text-[12px] leading-relaxed text-muted">
                 {summary.tone === 'off'
                   ? 'Inget än. Slå på agentanslutningen så syns allt en agent gör här.'
-                  : 'Inget än. När en agent ansluter syns allt den gör här – vad den läser, ändrar och vill generera.'}
+                  : 'Inget än. När en agent ansluter syns allt den gör här – vad den läser och ändrar, och vad den vill generera eller ta bort.'}
               </p>
             )}
           </section>
@@ -185,17 +186,27 @@ function StatusCard({
 }
 
 function PendingCard({ approval: a, now }: { approval: ApprovalRequest; now: number }) {
+  // A removal costs nothing: it says how many things go, and what, instead of a price.
+  const removal = a.kind === 'delete'
   return (
     <div className="rounded-lg border border-accent/40 bg-accent/5 p-3">
       <p className="text-[12px]">
-        <span className="font-medium">{a.client}</span> {approvalVerb(a)} {lowerFirst(approvalTitle(a, a.sequenceName))}
+        <span className="font-medium">{a.client}</span> {approvalVerb(a)}{' '}
+        {removal ? thingsText(a.delete?.items.length ?? 0) : lowerFirst(approvalTitle(a, a.sequenceName))}
       </p>
+      {removal && a.delete?.summary && (
+        <p className="mt-0.5 truncate text-[12px] text-muted" title={a.delete.summary}>
+          {a.delete.summary}
+        </p>
+      )}
       <div className="mt-2 flex items-center gap-3 text-[12px]">
-        <span className="font-medium tabular-nums">
-          {a.priceUsd !== undefined
-            ? `${a.edit?.partialPrice ? '≈ ' : ''}${formatUsd(a.priceUsd)}${a.edit?.partialPrice ? ' +' : ''}`
-            : 'Okänt pris'}
-        </span>
+        {!removal && (
+          <span className="font-medium tabular-nums">
+            {a.priceUsd !== undefined
+              ? `${a.edit?.partialPrice ? '≈ ' : ''}${formatUsd(a.priceUsd)}${a.edit?.partialPrice ? ' +' : ''}`
+              : 'Okänt pris'}
+          </span>
+        )}
         <span className="min-w-0 flex-1 truncate text-muted">{expiresText(a.createdAt + APPROVAL_TTL_MS, now)}</span>
         <button
           onClick={() => showApproval(a.id)}

@@ -2,6 +2,7 @@ import {
   Fragment,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -9,11 +10,12 @@ import {
   type RefObject,
   type WheelEvent
 } from 'react'
-import type { Asset, AssetKind, BoardImageSource, Still, Storyboard } from '@shared/types'
+import type { Asset, AssetKind, BoardImageSource, FinishedWork, RunningWork, Still, Storyboard } from '@shared/types'
 import { isStillDrag, stillIdFromDrop } from '../images/StillThumb'
 import { useReorder } from '../pickers/useReorder'
 import { PlusIcon } from '../sequences/icons'
 import type { FlushRegistry } from '../sequences/useDraft'
+import type { SegmentNews } from '../takes/takeText'
 import BoardCard, { CARD_HEADER_HEIGHT, CARD_MIN_WIDTH, CARD_NOTE_HEIGHT } from './BoardCard'
 import { acceptsImageDrag, droppedImagePaths, DROP_ONLY_IMAGES } from './BoardImage'
 import { fitBox, transitionBetween } from './storyboardUtils'
@@ -55,6 +57,14 @@ interface Props {
   editorId?: string
   /** Transitions being sent to Venice right now. */
   submitting: Record<string, boolean>
+  /** Per transition: its takes that finished or failed and haven't been looked at (Pågår och klart). */
+  news: Map<string, SegmentNews>
+  /** What finished in this storyboard and hasn't been looked at: new and failed board pictures among it. */
+  unseen: FinishedWork[]
+  /** What runs in this storyboard now: board pictures being made, takes being sent. */
+  running: RunningWork[]
+  /** A board to light up for a moment (a link pointed at it); `n` repeats it. */
+  flash?: { boardId: string; n: number }
   /** A board is being added. */
   adding: boolean
   /**
@@ -99,6 +109,10 @@ export default function BoardRow({
   ffmpegOk,
   editorId,
   submitting,
+  news,
+  unseen,
+  running,
+  flash,
   adding,
   fitWidth,
   reveal,
@@ -127,6 +141,23 @@ export default function BoardRow({
   const imageWidth =
     fitWidth > 0 ? Math.max(IMAGE_MIN_WIDTH, Math.min(IMAGE_MAX_WIDTH, twoBoards)) : IMAGE_DEFAULT_WIDTH
   const image = fitBox(storyboard.aspectRatio, imageWidth, imageHeight)
+
+  // Board pictures from Pågår och klart: one being made (also after its dialog closed, or by an agent), and one that
+  // couldn't be made. A take on its way to Venice counts as being made for its transition.
+  const boardWork = useMemo(() => {
+    const making = new Set<string>()
+    const sending = new Set<string>()
+    for (const w of running) {
+      if (w.kind === 'still' && w.target?.boardId) making.add(w.target.boardId)
+      if (w.kind === 'sending' && w.segmentId) sending.add(w.segmentId)
+    }
+    const failures = new Map<string, FinishedWork>()
+    for (const w of unseen) {
+      const boardId = w.target.boardId
+      if (w.failureOf === 'still' && boardId && !failures.has(boardId)) failures.set(boardId, w)
+    }
+    return { making, sending, failures }
+  }, [running, unseen])
 
   // Whether the last move waits for the user's yes, so a screen reader isn't told it happened.
   const moveAsked = useRef(false)
@@ -223,6 +254,9 @@ export default function BoardRow({
                   stills={stills}
                   assets={assets}
                   busy={!!busyBoards[board.id]}
+                  making={boardWork.making.has(board.id)}
+                  failure={boardWork.failures.get(board.id)}
+                  flash={flash?.boardId === board.id ? flash.n : undefined}
                   ffmpegOk={ffmpegOk}
                   store={store}
                   flushers={flushers}
@@ -244,7 +278,8 @@ export default function BoardRow({
                       height={image.height}
                       offsetTop={CARD_HEADER_HEIGHT}
                       selected={!!transition && transition.id === editorId}
-                      submitting={!!transition && !!submitting[transition.id]}
+                      submitting={!!transition && (!!submitting[transition.id] || boardWork.sending.has(transition.id))}
+                      news={transition ? news.get(transition.id) : undefined}
                       dropHere={reorder.gap === i + 1}
                       adding={adding}
                       onOpen={() => transition && onOpenTransition(transition.id)}

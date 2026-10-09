@@ -1,10 +1,22 @@
-import { Fragment, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type RefObject } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type RefObject
+} from 'react'
 import { generationTitle, sourceBadge } from '@shared/generation-label'
-import type { Segment, Sequence } from '@shared/types'
+import type { FinishedWork, RunningWork, Segment, Sequence } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { useSeenWhenVisible } from '../../lib/work'
 import { carriesFiles, droppedVideoPaths, ImportCardView, type ImportCard } from '../feed/ownClips'
 import Popover from '../pickers/Popover'
 import { menuRow, onMenuKeyDown } from '../storyboards/ui'
+import { freshTakesLabel, newsBySegment, pendingPhase, type SegmentNews } from '../takes/takeText'
+import { NewChip, Spinner } from '../work/StatusMark'
 import { BridgeIcon, CameraIcon, ChevronDownIcon, LinkIcon, PlusIcon } from './icons'
 import {
   bridgeDescription,
@@ -40,6 +52,10 @@ interface Props {
   onDropFiles: (paths: string[], gap: number) => void
   /** Own clips on their way into this sequence (shown after the last clip with their progress). */
   importing: ImportCard[]
+  /** What finished in this sequence that the user hasn't looked at yet (Pågår och klart). */
+  unseen: FinishedWork[]
+  /** What runs in this sequence now (takes being sent show on their cards). */
+  running: RunningWork[]
   onMove: (segmentId: string, toIndex: number) => void
   /** "Gör om mellan grannarna" on a card. */
   onBridge: (segmentId: string) => void
@@ -55,10 +71,18 @@ export default function Timeline({
   onAddFrom,
   onDropFiles,
   importing,
+  unseen,
+  running,
   onMove,
   onBridge
 }: Props) {
   const segments = sequence.segments
+  const news = useMemo(() => newsBySegment(unseen), [unseen])
+  // A take on its way to Venice has no row yet: its card says so from the store.
+  const sending = useMemo(
+    () => new Set(running.flatMap((w) => (w.kind === 'sending' && w.segmentId ? [w.segmentId] : []))),
+    [running]
+  )
   const cards = useRef(new Map<string, HTMLDivElement>())
   const [dragId, setDragId] = useState<string>()
   // Gap g sits before segment g (g = segments.length is after the last one).
@@ -224,6 +248,8 @@ export default function Timeline({
               <SegmentCard
                 segment={s}
                 number={i + 1}
+                news={news.get(s.id)}
+                sending={sending.has(s.id)}
                 bridgeTitle={bridgeDescription(i, segments.length)}
                 onBridge={() => onBridge(s.id)}
                 selected={s.id === selectedId}
@@ -493,6 +519,8 @@ function Joint({
 function SegmentCard({
   segment,
   number,
+  news,
+  sending,
   bridgeTitle,
   onBridge,
   selected,
@@ -505,6 +533,10 @@ function SegmentCard({
 }: {
   segment: Segment
   number: number
+  /** Its takes that finished (or failed) and haven't been looked at yet. */
+  news?: SegmentNews
+  /** A take of it is being sent to Venice. */
+  sending: boolean
   /** What "Gör om mellan grannarna" does here; undefined for a clip without neighbours. */
   bridgeTitle?: string
   onBridge: () => void
@@ -543,7 +575,7 @@ function SegmentCard({
       } ${dragging ? 'opacity-40' : ''}`}
     >
       <div className="relative aspect-video bg-black">
-        <CardPreview segment={segment} />
+        <CardPreview segment={segment} sending={sending} />
         <span className="absolute left-1.5 top-1.5 flex items-center gap-1">
           <span className="rounded bg-black/75 px-1.5 py-px text-[11px] font-semibold tabular-nums">{number}</span>
           {own && badge && (
@@ -556,11 +588,7 @@ function SegmentCard({
             </span>
           )}
         </span>
-        {takes > 0 && (
-          <span className="absolute right-1.5 top-1.5 rounded bg-black/75 px-1.5 py-px text-[10px] text-muted">
-            {takes} {takes === 1 ? 'tagning' : 'tagningar'}
-          </span>
-        )}
+        <CardChip segment={segment} news={news} sending={sending} takes={takes} />
         {bridgeTitle && (
           <button
             type="button"
@@ -593,33 +621,86 @@ function SegmentCard({
   )
 }
 
-function CardPreview({ segment }: { segment: Segment }) {
+/**
+ * The card's top-right chip, the most pressing first: a take being made (when the card shows a picture; else the
+ * whole card says it), a new failure, new takes not looked at yet, else how many takes the clip has.
+ */
+function CardChip({
+  segment,
+  news,
+  sending,
+  takes
+}: {
+  segment: Segment
+  news?: SegmentNews
+  sending: boolean
+  takes: number
+}) {
+  const chip = 'absolute right-1.5 top-1.5 flex items-center gap-1 rounded px-1.5 py-px text-[10px]'
+  const pending = pendingTake(segment)
+  const showsPicture = !!readyTake(segment)
+  if ((pending || sending) && showsPicture) {
+    return (
+      <span className={`${chip} bg-black/75 text-text`} title="En ny tagning genereras">
+        <Spinner size={10} />
+        {pending ? pendingPhase(pending) : 'Skickas'}
+      </span>
+    )
+  }
+  if (news?.failed.length) return <FailedChip className={chip} failedKey={news.failed[0]} />
+  if (news?.fresh.length) {
+    return (
+      <NewChip
+        variant="overlay"
+        label={freshTakesLabel(news.fresh.length)}
+        title="En ny tagning är klar. Öppna klippet och klicka på den för att använda den."
+        className="absolute right-1.5 top-1.5"
+      />
+    )
+  }
+  if (!takes) return null
+  return (
+    <span className={`${chip} bg-black/75 text-muted`}>
+      {takes} {takes === 1 ? 'tagning' : 'tagningar'}
+    </span>
+  )
+}
+
+/**
+ * "Misslyckades" on a clip's card: the failure counts as seen once it has been on screen a moment (D4), as on a
+ * storyboard's transition card; the clip's take strip still says why.
+ */
+function FailedChip({ className, failedKey }: { className: string; failedKey: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  useSeenWhenVisible(ref, failedKey)
+  return (
+    <span
+      ref={ref}
+      className={`${className} bg-black/75 font-medium text-accent`}
+      title="En tagning misslyckades. Öppna klippet för att se varför."
+    >
+      Misslyckades
+    </span>
+  )
+}
+
+function CardPreview({ segment, sending }: { segment: Segment; sending: boolean }) {
   const ready = readyTake(segment)
   const pending = pendingTake(segment)
   const selected = selectedTake(segment)
   const latest = segment.takes[0]
 
   if (ready) {
-    return (
-      <>
-        {ready.thumbPath ? (
-          <img src={mediaUrl(ready.thumbPath)} draggable={false} className="h-full w-full object-cover" />
-        ) : (
-          // No poster yet (older take or still being extracted); the browser can show a frame itself.
-          <video
-            src={`${mediaUrl(ready.filePath!)}#t=0.5`}
-            preload="metadata"
-            muted
-            className="pointer-events-none h-full w-full object-cover"
-          />
-        )}
-        {pending && (
-          <span
-            title="En ny tagning genereras"
-            className="absolute bottom-1.5 right-1.5 h-2 w-2 animate-pulse rounded-full bg-accent ring-2 ring-black/60"
-          />
-        )}
-      </>
+    return ready.thumbPath ? (
+      <img src={mediaUrl(ready.thumbPath)} alt="" draggable={false} className="h-full w-full object-cover" />
+    ) : (
+      // No poster yet (older take or still being extracted); the browser can show a frame itself.
+      <video
+        src={`${mediaUrl(ready.filePath!)}#t=0.5`}
+        preload="metadata"
+        muted
+        className="pointer-events-none h-full w-full object-cover"
+      />
     )
   }
 
@@ -627,10 +708,22 @@ function CardPreview({ segment }: { segment: Segment }) {
     const progress = takeProgress(pending)
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-5 text-[11px] text-muted">
-        <span className="animate-pulse">{pending.status === 'queued' ? 'I kö…' : 'Genererar…'}</span>
+        <span className="flex items-center gap-1.5">
+          <Spinner size={11} />
+          {pendingPhase(pending)}
+        </span>
         <div className="h-1 w-full overflow-hidden rounded bg-raised">
           <div className="h-full bg-accent transition-all duration-1000" style={{ width: `${(progress ?? 0.03) * 100}%` }} />
         </div>
+      </div>
+    )
+  }
+
+  if (sending) {
+    return (
+      <div className="flex h-full items-center justify-center gap-1.5 text-[11px] text-muted">
+        <Spinner size={11} />
+        Skickas till Venice
       </div>
     )
   }

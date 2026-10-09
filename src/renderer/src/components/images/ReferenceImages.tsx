@@ -69,8 +69,8 @@ type Picker = 'library' | 'stills'
 
 /**
  * The reference images of a still: thumbnails in send order (the first is the base), with pickers for the
- * library (characters, environments, outfits, poses) and the sequence's stills, a file dialog, drag and drop of
- * files and stills, and drag to reorder.
+ * library (characters, environments, products, outfits, poses) and the sequence's stills, a file dialog, drag and
+ * drop of files and stills, and drag to reorder.
  */
 export default function ReferenceImages({
   value,
@@ -182,7 +182,7 @@ export default function ReferenceImages({
             ref={libraryButton}
             onClick={() => setPicker((p) => (p === 'library' ? null : 'library'))}
             className={`${smallButton} ${picker === 'library' ? 'bg-raised text-text' : ''}`}
-            title="Karaktärer, miljöer, kläder och poser"
+            title="Karaktärer, miljöer, produkter, kläder och poser"
           >
             Från biblioteket
           </button>
@@ -321,7 +321,7 @@ export default function ReferenceImages({
         <button
           onClick={() => add(clipMissing)}
           className="mt-1.5 rounded-md border border-line px-2 py-1 text-[11px] text-muted transition hover:bg-raised hover:text-text"
-          title="Samma karaktärer, kläder och miljöer som klippet använder"
+          title="Samma karaktärer, miljöer, produkter, kläder och poser som klippet använder"
         >
           ＋ {clipNumber ? `Klipp ${clipNumber}s` : 'Klippets'} referensbilder ({clipMissing.length})
         </button>
@@ -331,7 +331,7 @@ export default function ReferenceImages({
           ? 'Den första bilden är basen som de andra kombineras in i. Dra bilderna för att ändra ordning, och ' +
             'hänvisa gärna till dem i prompten, t.ex. ”the woman from image 2”.'
           : 'Med referensbilder kombinerar modellen dem till en ny bild – t.ex. en karaktär i en miljö, i vissa ' +
-            'kläder och en viss pose.'}
+            'kläder och en viss pose, eller med en produkt i handen.'}
       </p>
 
       <Popover

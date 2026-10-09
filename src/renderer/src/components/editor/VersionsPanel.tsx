@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Edit, EditJob, EditProgress, EditVersion } from '@shared/types'
+import { workKey, type Edit, type EditJob, type EditProgress, type EditVersion } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { markSeen, useIsUnseen, useSeenWhenVisible } from '../../lib/work'
 import Popover from '../pickers/Popover'
 import { MoreIcon } from '../sequences/icons'
 import { menuRow, onMenuKeyDown, SubView } from '../storyboards/ui'
@@ -8,6 +9,7 @@ import { deleteVersionBlocked, formatBytes, formatPrice, jobProgressText, nextVe
 import { ChevronDownIcon } from './icons'
 import SendMenu, { type SentTo } from './SendMenu'
 import type { Runner } from './useEditOps'
+import { NewChip, Spinner } from '../work/StatusMark'
 
 // Versioner: what is being made (jobs with progress, Avbryt, Fortsätt), and every version as a tree under the
 // original. Clicking a version shows it in the player (Jämför); "Använd" makes it the one operations work on.
@@ -82,7 +84,9 @@ export default function VersionsPanel({
   const next = nextVersionNumber(edit.versions)
   const render = progress.render
 
-  const dismiss = (id: string) =>
+  const dismiss = (id: string) => {
+    // Hiding a failure is acting on it: it is seen (no card is left that could clear it later).
+    markSeen([workKey.job(id)])
     setDismissed((s) => {
       const nextSet = new Set(s).add(id)
       try {
@@ -93,8 +97,14 @@ export default function VersionsPanel({
       }
       return nextSet
     })
+  }
 
   const busyCount = running.length + (render ? 1 : 0)
+  // Making a version the one operations work on is choosing it on purpose: it is seen from then on.
+  const use = (versionId: string) => {
+    markSeen([workKey.generation(versionId)])
+    onSetCurrent(versionId)
+  }
   return (
     <section
       aria-label="Versioner"
@@ -114,7 +124,7 @@ export default function VersionsPanel({
         </button>
         {!expanded && busyCount > 0 && (
           <span className="flex items-center gap-1.5 text-[11px] text-muted">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+            <Spinner size={10} />
             {busyCount} pågår
           </span>
         )}
@@ -151,7 +161,7 @@ export default function VersionsPanel({
               shown={version.id === shownId}
               now={now}
               onShow={() => onShow(version.id)}
-              onSetCurrent={() => onSetCurrent(version.id)}
+              onSetCurrent={() => use(version.id)}
               onSent={onSent}
               onError={onError}
               onChanged={onChanged}
@@ -178,7 +188,7 @@ function JobLine({
   return (
     <div className="mb-1 rounded-md border border-line bg-panel px-2.5 py-2">
       <div className="flex items-center gap-2">
-        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+        <Spinner size={10} />
         <span className="min-w-0 flex-1 truncate">{title}…</span>
         {fraction !== undefined && (
           <span className="shrink-0 text-[11px] tabular-nums text-muted">{Math.round(fraction * 100)} %</span>
@@ -287,10 +297,16 @@ function JobRow({
 
   const failed = job.status === 'failed'
   const picture = PICTURE_JOB_OPS.has(job.op)
+  // A failed paid job is news in Pågår och klart until its message has been on screen here for a moment.
+  const failureRef = useRef<HTMLDivElement>(null)
+  useSeenWhenVisible(failureRef, failed ? workKey.job(job.id) : undefined)
   // Nothing left to send: only the version is made (or, for a picture, the paid take put in again).
   const free = job.resumePriceUsd === 0 && !job.resumePartialPrice
   return (
-    <div className={`mb-1 rounded-md border px-2.5 py-2 ${failed ? 'border-accent/30 bg-accent/5' : 'border-line'}`}>
+    <div
+      ref={failureRef}
+      className={`mb-1 rounded-md border px-2.5 py-2 ${failed ? 'border-accent/30 bg-accent/5' : 'border-line'}`}
+    >
       <div className="flex items-center gap-2">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${failed ? 'bg-accent' : 'bg-muted'}`} />
         <span className="min-w-0 flex-1 truncate">
@@ -367,6 +383,8 @@ function VersionRow({
   const [menu, setMenu] = useState<'menu' | 'send' | 'delete'>()
   const close = () => setMenu(undefined)
   const blocked = deleteVersionBlocked(version)
+  // Made by a paid job and not played or used yet.
+  const fresh = useIsUnseen(workKey.generation(version.id))
   const usedBy = version.usedBy[0]
   // A stopped job that builds on this version and has paid for parts: deleting the version makes them unusable.
   const pausedPaid = edit.jobs.find(
@@ -415,6 +433,7 @@ function VersionRow({
               <span className={`truncate ${current ? 'text-text' : ''}`}>
                 {version.label || (version.number === 1 ? 'Original' : '')}
               </span>
+              {fresh && <NewChip className="shrink-0 self-center" title="Ny version – inte tittad på än" />}
             </span>
             <span className="block truncate text-[11px] text-muted">
               {version.costUsd ? `${formatPrice(version.costUsd)} · ` : ''}

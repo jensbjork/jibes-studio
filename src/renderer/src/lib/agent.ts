@@ -3,8 +3,8 @@ import type { AgentActivity, AgentStatus, ApprovalRequest } from '@shared/types'
 import { ipcErrorMessage } from './hooks'
 
 // Live state of the agent connection (the MCP server in main): its status, the activity log and the approval
-// requests for paid generations. One subscription for the whole window, shared by the sidebar indicator, the
-// activity drawer, the approval dialog and Settings.
+// requests (paid generations, and removals an agent asks for). One subscription for the whole window, shared by the
+// sidebar indicator, the activity drawer, the approval dialog and Settings.
 
 /** Main keeps the same number of entries in its ring buffer. */
 const MAX_ACTIVITY = 200
@@ -119,12 +119,12 @@ function applyStatus(status: AgentStatus): void {
 let users = 0
 let stopFeed: (() => void) | undefined
 
-/** A heads-up outside the window when an agent asks for a paid generation and Studio isn't in front. */
+/** A heads-up outside the window when an agent asks for something that needs the user's OK and Studio isn't in front. */
 function notifyNewApproval(a: ApprovalRequest): void {
   if (document.hasFocus() || typeof Notification === 'undefined') return
   try {
-    // An image request makes a still, an edit changes a film in Redigera, a voice design makes a voice; the rest
-    // generates video.
+    // An image request makes a still, an edit changes a film in Redigera, a voice design makes a voice, a removal
+    // removes things; the rest generates video.
     const what =
       a.kind === 'image'
         ? 'vill skapa en bild'
@@ -132,7 +132,9 @@ function notifyNewApproval(a: ApprovalRequest): void {
           ? 'vill redigera en film'
           : a.kind === 'voice-design'
             ? 'vill skapa en röst'
-            : 'vill generera'
+            : a.kind === 'delete'
+              ? 'vill ta bort något'
+              : 'vill generera'
     const note = new Notification(`${a.client} ${what}`, {
       body: 'Öppna Studio för att godkänna eller avböja.',
       silent: false
@@ -222,6 +224,14 @@ export async function resolveApproval(id: string, approve: boolean, reason?: str
   const result = await window.studio.resolveApproval(id, approve, reason)
   applyApprovals([result])
   return result
+}
+
+/**
+ * The delete dialog's live check: main runs the request's own check again without carrying anything out. Resolves
+ * null while it can still be approved, else why not (Swedish).
+ */
+export function verifyApproval(id: string): Promise<string | null> {
+  return window.studio.verifyApproval(id)
 }
 
 /** "Senare": keeps the request pending but stops the dialog from showing it until it's opened again. */

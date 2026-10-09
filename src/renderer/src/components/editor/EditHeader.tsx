@@ -60,12 +60,12 @@ export default function EditHeader({
         className="no-drag flex h-8 shrink-0 items-center gap-1 rounded-md px-1.5 text-muted transition hover:bg-raised hover:text-text"
       >
         <BackIcon size={14} />
-        <span className="hidden text-[12px] xl:inline">Redigeringar</span>
+        <span className="hidden text-[12px] @min-[67rem]/main:inline">Redigeringar</span>
       </button>
       <NameInput name={edit.name} onRename={onRename} focus={renaming} onFocused={() => setRenaming(false)} />
       <span
         title={edit.origin.missing ? 'Filmen redigeringen gjordes från finns inte längre' : undefined}
-        className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line px-2 py-0.5 text-[11px] text-muted lg:flex"
+        className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line px-2 py-0.5 text-[11px] text-muted @min-[51rem]/main:flex"
       >
         {edit.origin.kind === 'import' && <CameraIcon size={11} />}
         {originLabel(edit.origin)}
@@ -80,7 +80,7 @@ export default function EditHeader({
           className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-muted transition hover:bg-raised hover:text-text"
         >
           <FolderIcon size={13} />
-          <span className="hidden xl:inline">Visa i Finder</span>
+          <span className="hidden @min-[67rem]/main:inline">Visa i Finder</span>
         </button>
         <button
           ref={sendAnchor}
@@ -338,7 +338,7 @@ function NameInput({
       placeholder="Namnlös redigering"
       title="Byt namn"
       aria-label="Redigeringens namn"
-      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised xl:min-w-28"
+      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised @min-[67rem]/main:min-w-28"
     />
   )
 }

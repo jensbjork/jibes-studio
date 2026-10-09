@@ -1,8 +1,15 @@
 import { MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
-import { ASSET_KINDS, type Asset, type AssetAudio, type AssetKind, type LibraryFolderTarget } from '@shared/types'
+import {
+  ASSET_KINDS,
+  type Asset,
+  type AssetAudio,
+  type AssetFileOrigin,
+  type AssetKind,
+  type LibraryFolderTarget
+} from '@shared/types'
 import type { View } from './navigation'
 
-/** Every kind, in the order the app lists them (Karaktärer, Miljöer, Kläder, Poser). */
+/** Every kind, in the order the app lists them (Karaktärer, Miljöer, Produkter, Kläder, Poser). */
 export { ASSET_KINDS }
 
 /** "2–15 sekunder": how long the part of a sound clip sent to Venice may be. */
@@ -29,7 +36,7 @@ export interface AudioCopy {
   firstBadge?: { label: string; title: string }
 }
 
-/** Swedish wording for one kind of library asset (karaktär, miljö, klädsel, pose). */
+/** Swedish wording for one kind of library asset (karaktär, miljö, produkt, klädsel, pose). */
 export interface AssetCopy {
   /** Sidebar and list title: "Karaktärer". */
   plural: string
@@ -120,6 +127,27 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
       tips: 'En inspelning av själva platsen, utan tal eller musik, ger bäst resultat.'
     }
   },
+  product: {
+    plural: 'Produkter',
+    singular: 'produkt',
+    definite: 'produkten',
+    possessive: 'produktens',
+    newName: 'Ny produkt',
+    generatePhrase: 'med produkten',
+    descriptionPlaceholder: 'Märke, modell, färg, material, storlek, vad som står på förpackningen…',
+    descriptionHint: 'Läggs till i prompten så att produkten ser likadan ut i varje klipp',
+    emptyTitle: 'Inga produkter än',
+    emptyText:
+      'Spara produkter du vill ha med i filmerna – en förpackning, en flaska, en pryl – med några tydliga bilder ' +
+      'och en beskrivning. Sedan hänvisar du till dem i prompten, t.ex. att en karaktär håller produkten.',
+    listHint: 'Produkter du skapar visas här. Släpp bilder på en produkt för att lägga till dem.',
+    imageTips:
+      'Tydliga bilder mot enkel bakgrund – framsidan med etiketten först, gärna även sidan och i en hand för ' +
+      'storleken. Små texter och logotyper blir sällan exakta i video.',
+    usage:
+      'Lägg till produkten i Generera tillsammans med karaktären som håller den, så skriver prompten t.ex. ' +
+      '”Anna (@Image1) håller Kaffeburken (@Image4)”.'
+  },
   outfit: {
     plural: 'Kläder',
     singular: 'klädsel',
@@ -167,14 +195,16 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
 export const ASSET_VIEW: Record<AssetKind, View> = {
   character: 'characters',
   environment: 'environments',
+  product: 'products',
   outfit: 'outfits',
   pose: 'poses'
 }
 
-/** The library folder that holds each kind (Karaktärer, Miljöer, Kläder, Poser). */
+/** The library folder that holds each kind (Karaktärer, Miljöer, Produkter, Kläder, Poser). */
 export const ASSET_FOLDER: Record<AssetKind, LibraryFolderTarget> = {
   character: 'characters',
   environment: 'environments',
+  product: 'products',
   outfit: 'outfits',
   pose: 'poses'
 }
@@ -201,6 +231,29 @@ export function audioCountLabel(kind: AssetKind, n: number): string | undefined 
   const copy = ASSET_COPY[kind].audio
   if (!copy) return undefined
   return n === 0 ? `Inga ${copy.clip}` : `${n} ${copy.clip}`
+}
+
+const originDay = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short' })
+const originDayAndYear = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })
+const originClock = new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit' })
+
+/**
+ * Who added a photo or a sound clip, when an agent did: "Tillagd av Min agent 9 okt 14:02 · från example.com"
+ * (the year only when it isn't this year's; the host only for a file fetched from a URL). Undefined for the user's
+ * own files.
+ */
+export function originText(origin: AssetFileOrigin | undefined, now = Date.now()): string | undefined {
+  if (!origin?.agent) return undefined
+  let when = ''
+  if (origin.at > 0) {
+    const d = new Date(origin.at)
+    const day = (d.getFullYear() === new Date(now).getFullYear() ? originDay : originDayAndYear)
+      .format(d)
+      // Swedish short months end in a period ("okt."), which reads oddly before the time.
+      .replace(/\.(?=\s|$)/g, '')
+    when = ` ${day} ${originClock.format(d)}`
+  }
+  return `Tillagd av ${origin.agent}${when}${origin.host ? ` · från ${origin.host}` : ''}`
 }
 
 /** "Anna", "Anna och Kalle", "Anna, Kalle och Bo". */

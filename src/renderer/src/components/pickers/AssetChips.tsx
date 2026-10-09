@@ -14,7 +14,8 @@ import {
   characterReference,
   formatAudioRefs,
   formatImageRefs,
-  poseReference
+  poseReference,
+  productReference
 } from './text'
 
 interface Props {
@@ -40,6 +41,9 @@ interface Props {
   /** Pose id → the characters it applies to; undefined: every character in the form. */
   posePeople: Readonly<Record<string, string[] | undefined>>
   onPosePeople: (poseId: string, characterIds: string[] | undefined) => void
+  /** Product id → the character holding it ("hålls av"); missing or null: nobody (the default). */
+  productHolders: Readonly<Record<string, string | null | undefined>>
+  onHolder: (productId: string, characterId: string | null) => void
   onInsert: (text: string) => void
   onRemove: (asset: Asset) => void
   /** "bärs av": who wears an outfit (null = nobody). */
@@ -62,6 +66,20 @@ export function posePeopleOf(
 }
 
 /**
+ * The character holding a product in the form: the one chosen with "hålls av", while it is still among the
+ * references. Nobody by default – a product is often just in the scene, and guessing a hand for it would put
+ * words in the prompt the user didn't ask for.
+ */
+export function productHolderOf(
+  productId: string,
+  characters: readonly AssetRef[],
+  chosen: Readonly<Record<string, string | null | undefined>>
+): AssetRef | undefined {
+  const id = chosen[productId]
+  return id ? characters.find((c) => c.asset.id === id) : undefined
+}
+
+/**
  * The library assets among the reference images, grouped and coloured by kind, with their @Image (and @Audio)
  * tokens. Clicking a chip inserts its prompt text; below them the image budget.
  */
@@ -78,6 +96,8 @@ export default function AssetChips({
   onToggleAudio,
   posePeople,
   onPosePeople,
+  productHolders,
+  onHolder,
   onInsert,
   onRemove,
   onWear,
@@ -152,6 +172,31 @@ export default function AssetChips({
                     chosen={posePeople[a.id]}
                     onChange={(ids) => onPosePeople(a.id, ids)}
                   />
+                </AssetChip>
+              )
+            }
+            if (a.kind === 'product') {
+              const holder = productHolderOf(a.id, characterRefs, productHolders)
+              return (
+                <AssetChip
+                  key={a.id}
+                  entry={entry}
+                  text={productReference(
+                    { name: a.name, indices: entry.indices },
+                    holder && { name: holder.asset.name, indices: holder.indices },
+                    language
+                  )}
+                  onInsert={onInsert}
+                  onRemove={() => onRemove(a)}
+                >
+                  {characters.length > 0 && (
+                    <HolderSelect
+                      product={a}
+                      holder={holder?.asset.id}
+                      characters={characters}
+                      onChange={(id) => onHolder(a.id, id)}
+                    />
+                  )}
                 </AssetChip>
               )
             }
@@ -426,6 +471,47 @@ function WearerSelect({ outfit, wearer, characters, onChange }: WearerSelectProp
         value={wearer ?? ''}
         onChange={(e) => onChange(e.target.value || null)}
         aria-label={`Vem bär ${outfit.name}`}
+        className="absolute inset-0 cursor-pointer opacity-0"
+      >
+        <option value="">Ingen</option>
+        {characters.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+interface HolderSelectProps {
+  product: Asset
+  /** The character holding it; undefined: nobody. */
+  holder?: string
+  /** The characters in the form. */
+  characters: Asset[]
+  onChange: (characterId: string | null) => void
+}
+
+/**
+ * "hålls av Anna ▾" on a product chip: which of the form's characters holds the product. Only shapes the text the
+ * chip inserts ("Anna (@Image1) holding Kaffeburken (@Image4)"); nothing is stored.
+ */
+function HolderSelect({ product, holder, characters, onChange }: HolderSelectProps) {
+  const name = characters.find((c) => c.id === holder)?.name
+  return (
+    <label
+      className="relative flex shrink-0 items-center gap-1 pr-1 text-muted"
+      title={`Vem håller ${product.name}? Styr texten som infogas.`}
+    >
+      <span>hålls av</span>
+      <span className={`max-w-20 truncate ${name ? 'text-text' : ''}`}>{name ?? 'ingen'}</span>
+      <span aria-hidden>▾</span>
+      {/* The native select sits invisibly on top, so the chip keeps its own look but gets the system menu. */}
+      <select
+        value={holder ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        aria-label={`Vem håller ${product.name}`}
         className="absolute inset-0 cursor-pointer opacity-0"
       >
         <option value="">Ingen</option>

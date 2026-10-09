@@ -1,10 +1,20 @@
-import { useRef, useState, type DragEvent } from 'react'
-import type { Asset, AssetKind, BoardImageSource, Still, StoryboardBoard } from '@shared/types'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
+import {
+  workKey,
+  type Asset,
+  type AssetKind,
+  type BoardImageSource,
+  type FinishedWork,
+  type Still,
+  type StoryboardBoard
+} from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { markSeen, useIsUnseen, useSeenWhenVisible } from '../../lib/work'
 import StillThumb, { isStillDrag, stillIdFromDrop } from '../images/StillThumb'
 import AssetPicker from '../pickers/AssetPicker'
 import Popover from '../pickers/Popover'
-import { ImageIcon, SparkleIcon } from '../sequences/icons'
+import { CloseIcon, ImageIcon, SparkleIcon } from '../sequences/icons'
+import { NewChip, Spinner } from '../work/StatusMark'
 import { menuRow, onMenuKeyDown, SubView } from './ui'
 
 const IMAGE_FILE = /\.(jpe?g|png|webp)$/i
@@ -34,6 +44,10 @@ interface Props {
   assets: Asset[]
   /** A change to the picture is being saved (a file copied, a frame cut out). */
   busy: boolean
+  /** A picture for the board is being made (Skapa bild – also after its dialog closed – or an agent's request). */
+  making: boolean
+  /** A picture for the board couldn't be made, and the user hasn't seen that yet. */
+  failure?: FinishedWork
   /** ffmpeg is installed: without it no frame can be cut out of a clip. */
   ffmpegOk: boolean
   onSet: (source: BoardImageSource | null) => void
@@ -62,6 +76,8 @@ export default function BoardImage({
   stills,
   assets,
   busy,
+  making,
+  failure,
   ffmpegOk,
   onSet,
   onCreateImage,
@@ -77,10 +93,27 @@ export default function BoardImage({
   const path = board.imagePath
   const label = `Ruta ${number}`
 
+  // A picture made for the board that hasn't been looked at yet: "Ny", until it has been on screen a moment (D4).
+  const stillKey = board.stillId ? workKey.still(board.stillId) : undefined
+  const fresh = useIsUnseen(stillKey)
+  const frame = useRef<HTMLDivElement>(null)
+  useSeenWhenVisible(frame, fresh && path ? stillKey : undefined)
+
+  // A picture that couldn't be made: told on the board (also when its dialog was closed long ago). It counts as seen
+  // once on screen a moment, but the message stays until closed (or another picture is chosen), so it can be read.
+  const [keptFailure, setKeptFailure] = useState<FinishedWork>()
+  useEffect(() => {
+    if (failure) setKeptFailure(failure)
+  }, [failure])
+  const shownFailure = failure ?? keptFailure
+  const failureBox = useRef<HTMLDivElement>(null)
+  useSeenWhenVisible(failureBox, failure?.key)
+
   const close = () => setView(undefined)
   const toggleMenu = () => setView(view ? undefined : 'menu')
   const choose = (source: BoardImageSource | null) => {
     close()
+    setKeptFailure(undefined)
     onSet(source)
   }
 
@@ -115,6 +148,7 @@ export default function BoardImage({
 
   return (
     <div
+      ref={frame}
       className="relative shrink-0"
       style={{ width, height }}
       onDragOver={onDragOver}
@@ -151,6 +185,13 @@ export default function BoardImage({
           <span className="absolute right-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[11px] text-white/90 opacity-0 transition group-hover/image:opacity-100 group-focus-visible/image:opacity-100">
             Byt bild
           </span>
+          {fresh && (
+            <NewChip
+              variant="overlay"
+              title="En ny bild som du inte har tittat på än"
+              className="pointer-events-none absolute left-2 top-2"
+            />
+          )}
           {board.aspectMismatch && (
             <span
               title="Bildformatet skiljer sig – klippet får bildens format"
@@ -196,10 +237,44 @@ export default function BoardImage({
       {over && path && (
         <span className="pointer-events-none absolute inset-0 rounded-lg ring-2 ring-accent ring-inset" aria-hidden />
       )}
-      {busy && (
-        <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/60 text-[12px] text-muted">
-          <span className="animate-pulse">Sparar…</span>
+      {busy ? (
+        <span className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-lg bg-black/60 text-[12px] text-muted">
+          <Spinner />
+          Sparar…
         </span>
+      ) : (
+        making && (
+          <span
+            className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 rounded-b-lg bg-black/70 py-1.5 text-[11px] text-text"
+            role="status"
+          >
+            <Spinner />
+            Skapar bilden…
+          </span>
+        )
+      )}
+      {shownFailure && !busy && !making && (
+        <div
+          ref={failureBox}
+          role="alert"
+          className="absolute inset-x-2 bottom-2 flex items-start gap-2 rounded-md border border-accent/30 bg-[#2a1416]/95 px-2.5 py-2 text-[11px] leading-snug text-[#ffb3b5]"
+        >
+          <span className="min-w-0 flex-1 select-text">
+            Bilden kunde inte skapas{shownFailure.error ? `: ${shownFailure.error}` : '.'}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (failure) markSeen([failure.key])
+              setKeptFailure(undefined)
+            }}
+            title="Stäng"
+            aria-label="Stäng"
+            className="mt-px shrink-0 opacity-70 transition hover:opacity-100"
+          >
+            <CloseIcon size={10} />
+          </button>
+        </div>
       )}
 
       <Popover

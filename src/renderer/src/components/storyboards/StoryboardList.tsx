@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
-import type { StoryboardSummary } from '@shared/types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { FinishedWork, RunningWork, StoryboardSummary } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { useOwnerWork, useRunning, useUnseen, useViewWork } from '../../lib/work'
 import Popover from '../pickers/Popover'
 import { CloseIcon, PlusIcon } from '../sequences/icons'
+import MarkViewSeen from '../takes/MarkViewSeen'
+import { ownerStatusText } from '../takes/takeText'
+import { StatusMark } from '../work/StatusMark'
 import CreateStoryboardForm from './CreateStoryboardForm'
 import { StoryboardIcon } from './icons'
 import { boardCountLabel } from './storyboardUtils'
@@ -10,8 +14,6 @@ import { boardCountLabel } from './storyboardUtils'
 interface Props {
   storyboards?: StoryboardSummary[]
   selectedId?: string
-  /** The open storyboard is sending its missing clips. */
-  runningId?: string
   creating: boolean
   onSelect: (id: string) => void
   onCreate: (name: string, aspectRatio: string) => Promise<boolean>
@@ -26,19 +28,34 @@ function progressLabel(s: StoryboardSummary): string | undefined {
     : `${s.doneCount} av ${s.transitionCount} klipp klara`
 }
 
-/** The storyboards, newest change first, with "Ny storyboard" (name and format) and deleting (asked twice). */
-export default function StoryboardList({
-  storyboards,
-  selectedId,
-  runningId,
-  creating,
-  onSelect,
-  onCreate,
-  onDelete
-}: Props) {
+// Module-level, so the store's selectors keep one identity (and re-render only on a real change).
+const inStoryboards = (w: RunningWork | FinishedWork) => w.view === 'storyboards'
+
+/** What runs and what is new, per storyboard, for the rows' tooltips (the counts come from useOwnerWork). */
+function useStoryboardsWork(): { running: Map<string, RunningWork[]>; unseen: Map<string, FinishedWork[]> } {
+  const running = useRunning(inStoryboards)
+  const unseen = useUnseen(inStoryboards)
+  return useMemo(() => {
+    const group = <T extends { ownerId?: string }>(items: readonly T[]) => {
+      const out = new Map<string, T[]>()
+      for (const w of items) if (w.ownerId) out.set(w.ownerId, [...(out.get(w.ownerId) ?? []), w])
+      return out
+    }
+    return { running: group(running), unseen: group(unseen) }
+  }, [running, unseen])
+}
+
+/**
+ * The storyboards, newest change first, with "Ny storyboard" (name and format) and deleting (asked twice). Every row
+ * shows what is being made there and what is new, not only the open storyboard's.
+ */
+export default function StoryboardList({ storyboards, selectedId, creating, onSelect, onCreate, onDelete }: Props) {
   const [confirming, setConfirming] = useState<string>()
   const [createOpen, setCreateOpen] = useState(false)
   const createButton = useRef<HTMLButtonElement>(null)
+  const work = useStoryboardsWork()
+  const view = useViewWork('storyboards')
+  const newCount = view.unseen + view.failed
 
   useEffect(() => {
     if (!confirming) return
@@ -56,13 +73,14 @@ export default function StoryboardList({
           disabled={creating}
           aria-haspopup="dialog"
           aria-expanded={createOpen}
-          className="no-drag flex items-center gap-1 rounded-md px-2 py-1 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
+          className="no-drag flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
           title="Skapa en ny storyboard"
         >
           <PlusIcon size={12} />
           Ny storyboard
         </button>
       </div>
+      {newCount > 0 && <MarkViewSeen view="storyboards" />}
       <Popover
         anchorRef={createButton}
         open={createOpen}
@@ -120,54 +138,102 @@ export default function StoryboardList({
               </div>
             )
           }
-          const progress = progressLabel(s)
           return (
-            <div
+            <StoryboardRow
               key={s.id}
-              role="button"
-              tabIndex={0}
-              aria-current={active || undefined}
-              onClick={() => onSelect(s.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  onSelect(s.id)
-                }
-              }}
-              className={`group mb-0.5 flex cursor-pointer items-center gap-2.5 rounded-md p-1.5 outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
-                active ? 'bg-raised' : 'hover:bg-raised/60'
-              }`}
-            >
-              <div className="relative flex h-10 w-[71px] shrink-0 items-center justify-center overflow-hidden rounded bg-black">
-                {s.coverPath ? (
-                  <img src={mediaUrl(s.coverPath)} alt="" draggable={false} className="h-full w-full object-cover" />
-                ) : (
-                  <StoryboardIcon className="text-[16px] text-muted/60" />
-                )}
-                {s.id === runningId && <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className={`truncate ${active ? 'text-text' : ''}`}>{s.name}</p>
-                <p className="truncate text-[11px] text-muted">
-                  {boardCountLabel(s.boardCount)}
-                  {progress && ` · ${progress}`}
-                </p>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setConfirming(s.id)
-                }}
-                title="Radera storyboarden"
-                aria-label={`Radera ${s.name}`}
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted opacity-0 transition hover:bg-line hover:text-accent focus:opacity-100 group-hover:opacity-100"
-              >
-                <CloseIcon size={11} />
-              </button>
-            </div>
+              storyboard={s}
+              active={active}
+              running={work.running.get(s.id)}
+              unseen={work.unseen.get(s.id)}
+              onSelect={() => onSelect(s.id)}
+              onDelete={() => setConfirming(s.id)}
+            />
           )
         })}
       </div>
     </aside>
+  )
+}
+
+const NONE: never[] = []
+
+/** One storyboard: its cover, name and progress, what is being made there and what is new; ✕ on hover deletes it. */
+function StoryboardRow({
+  storyboard: s,
+  active,
+  running = NONE,
+  unseen = NONE,
+  onSelect,
+  onDelete
+}: {
+  storyboard: StoryboardSummary
+  active: boolean
+  running?: RunningWork[]
+  unseen?: FinishedWork[]
+  onSelect: () => void
+  onDelete: () => void
+}) {
+  const counts = useOwnerWork(s.id)
+  const status = ownerStatusText('storyboard', running, unseen, counts)
+  const marked = counts.running + counts.unseen + counts.failed > 0
+  const progress = progressLabel(s)
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-current={active || undefined}
+      title={status}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      className={`group mb-0.5 flex cursor-pointer items-center gap-2.5 rounded-md p-1.5 outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
+        active ? 'bg-raised' : 'hover:bg-raised/60'
+      }`}
+    >
+      <div className="relative flex h-10 w-[71px] shrink-0 items-center justify-center overflow-hidden rounded bg-black">
+        {s.coverPath ? (
+          <img src={mediaUrl(s.coverPath)} alt="" draggable={false} className="h-full w-full object-cover" />
+        ) : (
+          <StoryboardIcon className="text-[16px] text-muted/60" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className={`truncate ${active ? 'text-text' : ''}`}>{s.name}</p>
+        <p className="truncate text-[11px] text-muted">
+          {boardCountLabel(s.boardCount)}
+          {progress && ` · ${progress}`}
+        </p>
+      </div>
+      <span className="relative flex h-6 min-w-6 shrink-0 items-center justify-end">
+        {marked && (
+          // Steps aside only where the ✕ takes its place (hover, or the ✕ itself focused) – never just because the
+          // row has the focus after a click, which would leave the slot empty.
+          <span className="flex items-center transition-opacity group-hover:opacity-0 group-has-[button:focus]:opacity-0">
+            <StatusMark
+              variant="inline"
+              running={counts.running}
+              fresh={counts.unseen}
+              failed={counts.failed}
+              title={status}
+            />
+          </span>
+        )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          title="Radera storyboarden"
+          aria-label={`Radera ${s.name}`}
+          className="absolute right-0 top-0 flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition hover:bg-line hover:text-accent focus:opacity-100 group-hover:opacity-100"
+        >
+          <CloseIcon size={11} />
+        </button>
+      </span>
+    </div>
   )
 }

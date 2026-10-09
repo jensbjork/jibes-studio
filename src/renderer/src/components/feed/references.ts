@@ -1,5 +1,5 @@
-// What a generation was made from, in library terms: which character, environment, outfit or pose each of its
-// pictures and sound clips is. Generations store plain file paths; the library index maps them back to assets.
+// What a generation was made from, in library terms: which character, environment, product, outfit or pose each of
+// its pictures and sound clips is. Generations store plain file paths; the library index maps them back to assets.
 
 import { generationAssetIds, indexAssetPaths, pathKey, type AssetPathIndex } from '@shared/generation-filter'
 import { maxReferenceImages } from '@shared/models'

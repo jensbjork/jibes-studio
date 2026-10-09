@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-label'
-import type { Generation, VideoModel } from '@shared/types'
+import { workKey, type Generation, type VideoModel } from '@shared/types'
 import { formatSeconds, formatUsd, mediaUrl } from '../lib/media'
 import type { Navigate } from '../lib/navigation'
 import { findTakeOwner, openTakeOwner } from '../lib/takes'
+import { markSeen, useIsUnseen, useSeenWhenVisible } from '../lib/work'
 import { isPending, progressOf, reviewCountText } from './feed/feedText'
 import { CameraIcon, ExpandIcon, ReviewIcon, ScissorsIcon } from './feed/icons'
 import { pauseOthers } from './feed/playback'
@@ -11,6 +12,7 @@ import StarRating from './feed/StarRating'
 import Popover from './pickers/Popover'
 import SequencePicker, { type AddedToSequence } from './pickers/SequencePicker'
 import { PlayIcon } from './sequences/icons'
+import { NewChip, Spinner } from './work/StatusMark'
 
 interface Props {
   generation: Generation
@@ -99,7 +101,7 @@ function GenerationCard({
     setOpeningSequence(true)
     try {
       const owner = await findTakeOwner(g.segmentId)
-      if (owner) openTakeOwner(owner, g.segmentId, navigate)
+      if (owner) openTakeOwner(owner, g.segmentId, navigate, g.id)
     } catch (e) {
       // The badge is only a shortcut; if the lookup fails the take is still reachable from the sidebar.
       console.warn('Kunde inte hitta var tagningen hör hemma', e)
@@ -134,6 +136,21 @@ function GenerationCard({
   const own = badge?.kind === 'own' || badge?.kind === 'edited'
   const title = generationTitle(g)
   const editable = g.status === 'completed' && !!g.filePath && !!navigate
+
+  // Pågår och klart: a finished clip the user hasn't played or opened yet is "Ny"; a failure counts as seen once
+  // its message has been on screen for a moment.
+  const key = workKey.generation(g.id)
+  const unseen = useIsUnseen(key)
+  const fresh = unseen && g.status === 'completed'
+  const failureRef = useRef<HTMLDivElement>(null)
+  useSeenWhenVisible(failureRef, g.status === 'failed' ? key : undefined)
+  const rate = onRate
+    ? (r: number | null) => {
+        // Rating a clip is looking at it on purpose.
+        markSeen([key])
+        onRate(g, r)
+      }
+    : undefined
 
   return (
     <div
@@ -188,7 +205,10 @@ function GenerationCard({
           ))}
         {pending && (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-muted">
-            <span className="animate-pulse">{g.status === 'queued' ? 'I kö…' : 'Genererar…'}</span>
+            <span className="flex items-center gap-2">
+              <Spinner />
+              {g.status === 'queued' ? 'I kö…' : 'Genererar…'}
+            </span>
             <div className="h-1 w-full max-w-48 overflow-hidden rounded bg-raised">
               <div
                 className="h-full bg-accent transition-all duration-1000"
@@ -202,12 +222,16 @@ function GenerationCard({
           </div>
         )}
         {g.status === 'failed' && (
-          <div className="flex h-full items-center justify-center overflow-y-auto p-4 text-center text-accent">
+          <div
+            ref={failureRef}
+            className="flex h-full items-center justify-center overflow-y-auto p-4 text-center text-accent"
+          >
             {g.error ?? 'Misslyckades'}
           </div>
         )}
-        {(g.segmentId || badge) && (
+        {(g.segmentId || badge || fresh) && (
           <div className="absolute left-2 top-2 flex items-center gap-1">
+            {fresh && <NewChip variant="overlay" title="Klar och inte tittad på än" />}
             {badge && (
               <span
                 title={badge.description}
@@ -246,13 +270,13 @@ function GenerationCard({
               {otherReviews}
             </button>
           )}
-          {g.status === 'completed' && onRate && (
+          {g.status === 'completed' && rate && (
             <div
               className={`flex h-[22px] items-center rounded bg-black/70 px-1 backdrop-blur transition ${
                 g.rating ? '' : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100'
               }`}
             >
-              <StarRating value={g.rating} onChange={(r) => onRate(g, r)} size="sm" />
+              <StarRating value={g.rating} onChange={rate} size="sm" />
             </div>
           )}
           {onOpen && (
@@ -339,7 +363,11 @@ function GenerationCard({
                 )}
                 {editable && (
                   <button
-                    onClick={() => navigate?.('editor', { type: 'open-editor', generationId: g.id })}
+                    onClick={() => {
+                      // Taking a clip into Redigera is choosing it on purpose.
+                      markSeen([key])
+                      navigate?.('editor', { type: 'open-editor', generationId: g.id })
+                    }}
                     title="Ändra klippet med AI i Redigera (originalet lämnas orört)"
                     className={action}
                   >

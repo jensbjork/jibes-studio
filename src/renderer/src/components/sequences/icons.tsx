@@ -182,3 +182,13 @@ export function ChevronDownIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** Two check marks: "Markera alla som sedda". */
+export function CheckAllIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M1.5 8.5l3 3 6-7" />
+      <path d="M7.5 11.5l.5.5 6.5-7.5" />
+    </Icon>
+  )
+}

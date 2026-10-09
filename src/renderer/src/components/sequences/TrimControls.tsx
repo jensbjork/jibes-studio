@@ -1,9 +1,21 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type Ref,
+  type RefObject
+} from 'react'
 import { durationSeconds } from '@shared/models'
 import type { Generation, Segment } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
-import { MIN_CLIP_SECONDS, formatLength, round2 } from './sequenceUtils'
-import { useDraft, useRegisterFlush, type FlushRegistry } from './useDraft'
+import { pauseOthers } from '../feed/playback'
+import { MIN_CLIP_SECONDS, formatLength, formatTakeTime, round2 } from './sequenceUtils'
+import { useDraft, useRegisterFlush, type DraftStatus, type FlushRegistry } from './useDraft'
 import type { SequenceStore } from './useSequence'
 
 interface Trims {
@@ -11,10 +23,28 @@ interface Trims {
   trimEnd: number
 }
 
+/** What the take strip asks of the player: Space and Enter. */
+export interface TakePlayerHandle {
+  /** Space: play or pause. */
+  toggle: () => void
+  /** Enter: from the kept start (a previewed take from its beginning). */
+  playFromStart: () => void
+}
+
+/** Play `takeId` from its kept start once it is in the player; a new `n` asks again (a click on the same take). */
+export interface PlayRequest {
+  takeId: string
+  n: number
+}
+
 interface Props {
   segment: Segment
-  /** The selected take; must be completed with a file. */
-  take: Generation
+  /** The chosen take, finished with a file; undefined when there is none (a preview, or only the hint). */
+  take?: Generation
+  /** A take shown without being chosen (⌥-click): the trims are put away while it is. */
+  preview?: Generation
+  /** Shown in the player's place when there is nothing to play (why no take is in use). */
+  hint?: ReactNode
   number: number
   /** The next segment starts from this take's (trimmed) last frame. */
   nextContinues: boolean
@@ -22,6 +52,16 @@ interface Props {
   previousEndsHere: boolean
   patchSegment: SequenceStore['patchSegment']
   flushers: FlushRegistry
+  /** The choice of take hasn't reached main yet: the trims wait, since they would land on the take before. */
+  selecting?: boolean
+  playRequest?: PlayRequest
+  playerRef?: Ref<TakePlayerHandle>
+  /** "Välj den": the previewed take becomes the chosen one. */
+  onChoosePreview: () => void
+  /** "Visa vald" (or Esc): back to the chosen take. */
+  onLeavePreview: () => void
+  /** The take strip, right under the player. */
+  children?: ReactNode
 }
 
 const snap = (t: number) => Math.round(t * 10) / 10
@@ -29,33 +69,299 @@ const snap = (t: number) => Math.round(t * 10) / 10
 // Hatching for the parts that are cut away.
 const HATCH = 'repeating-linear-gradient(135deg, #00000088 0 4px, #00000044 4px 8px)'
 
+/** The trims as the editor below the strip has them (its draft), reported up for the header and the player. */
+interface TrimState extends Trims {
+  status: DraftStatus
+  error?: string
+}
+
 /**
- * The selected take with start/end trims. Mount with a key per segment + take. Trims are saved debounced
- * as a trims-only patch; main clamps them, and the clamped values come back through the draft.
+ * The clip's player, the take strip under it, then the chosen take's start/end trims. Mount with a key per segment:
+ * the player and the strip stay while takes are chosen (the strip keeps its focus), and only the trim editor is
+ * remounted per take. Trims are saved debounced as a trims-only patch; main clamps them, and the clamped values come
+ * back through the draft. A take can also be previewed here without being chosen: the header says so, and
+ * "Välj den" / "Visa vald" stand where the trims are.
  */
 export default function TrimControls({
   segment,
   take,
+  preview,
+  hint,
   number,
   nextContinues,
   previousEndsHere,
   patchSegment,
-  flushers
+  flushers,
+  selecting = false,
+  playRequest,
+  playerRef,
+  onChoosePreview,
+  onLeavePreview,
+  children
 }: Props) {
+  const previewing = !!preview && preview.id !== take?.id
+  const shown = previewing ? preview : take
+  const video = useRef<HTMLVideoElement>(null)
+  const [measured, setMeasured] = useState<{ id: string; seconds: number }>()
+  const duration = take
+    ? (take.videoDuration ??
+      (measured?.id === take.id ? measured.seconds : undefined) ??
+      durationSeconds(take.params.duration))
+    : 0
+
+  // The editor below reports its draft; until it has (or while a preview hides it) main's trims are the truth.
+  const [reported, setReported] = useState<TrimState & { takeId: string }>()
+  const trims: TrimState =
+    reported && take && reported.takeId === take.id && !previewing
+      ? reported
+      : { trimStart: segment.trimStart, trimEnd: segment.trimEnd, status: 'idle' }
+  const { trimStart, trimEnd } = trims
+  const keepEnd = Math.max(trimStart, duration - trimEnd)
+  const [time, setTime] = useState(trimStart)
+  const [playing, setPlaying] = useState(false)
+  const [onlyTrimmed, setOnlyTrimmed] = useState(true)
+
+  // Play requests and the editor's callbacks outlive the render that created them, so they read the latest values.
+  // `server` is main's answer: right after another take was chosen it carries that take's remembered trims a render
+  // before the editor's draft takes them over.
+  const latest = useRef({ trims, server: segment.trimStart, previewing })
+  useEffect(() => {
+    latest.current = { trims, server: segment.trimStart, previewing }
+  })
+
+  /** Where the take starts in the sequence: what the user is editing, else main's. A preview starts at 0. */
+  const keptStart = useCallback(() => {
+    const l = latest.current
+    if (l.previewing) return 0
+    return l.trims.status === 'idle' ? l.server : l.trims.trimStart
+  }, [])
+
+  // A play that waits for the video to know its length (a take just put in the player).
+  const pendingPlay = useRef(false)
+  const startPlaying = useCallback(() => {
+    const el = video.current
+    if (!el) return
+    if (el.readyState < 1) {
+      pendingPlay.current = true
+      return
+    }
+    pendingPlay.current = false
+    el.currentTime = keptStart()
+    setTime(el.currentTime)
+    void el.play().catch(() => undefined)
+  }, [keptStart])
+
+  useImperativeHandle(
+    playerRef,
+    () => ({
+      toggle: () => {
+        const el = video.current
+        if (!el) return
+        if (el.paused) void el.play().catch(() => undefined)
+        else el.pause()
+      },
+      playFromStart: startPlaying
+    }),
+    [startPlaying]
+  )
+
+  // A click on a take plays it, with sound, from where it starts in the sequence.
+  const handledRequest = useRef(playRequest?.n)
+  useEffect(() => {
+    if (!playRequest || !shown || playRequest.takeId !== shown.id || handledRequest.current === playRequest.n) return
+    handledRequest.current = playRequest.n
+    startPlaying()
+  }, [playRequest, shown?.id, startPlaying])
+
+  // A start that changes by itself – main's remembered trims for a take just chosen (they arrive a moment after it
+  // is shown), an agent's trim, main's clamping, Nollställ – moves a paused player there, so the frame it shows is
+  // where the take begins in the sequence. Dragging or typing a start already shows that frame.
+  useEffect(() => {
+    const el = video.current
+    if (!el || previewing || !el.paused || pendingPlay.current || el.readyState < 1) return
+    if (Math.abs(el.currentTime - trimStart) > 0.02) {
+      el.currentTime = trimStart
+      setTime(trimStart)
+    }
+  }, [trimStart, previewing, take?.id])
+
+  // Follow the playhead smoothly while playing, and stop at the end trim when playing only what is used.
+  useEffect(() => {
+    if (!playing || previewing) return
+    let raf = 0
+    const tick = () => {
+      const el = video.current
+      if (el) {
+        setTime(el.currentTime)
+        if (onlyTrimmed && el.currentTime >= keepEnd - 0.01) {
+          el.pause()
+          el.currentTime = keepEnd
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [playing, onlyTrimmed, keepEnd, previewing])
+
+  const keptLength = Math.max(0, keepEnd - trimStart)
+
+  // The strip keeps one place in the tree whatever is above and below it, so it is never remounted (focus stays).
+  return (
+    <section>
+      {shown?.filePath ? (
+        <>
+          <div className="mb-3 flex flex-wrap items-baseline gap-x-2">
+            {previewing ? (
+              <>
+                <h3 className="font-medium">Förhandsvisning</h3>
+                <span className="text-[12px] text-muted">tagning {formatTakeTime(shown.createdAt)} (inte vald)</span>
+              </>
+            ) : (
+              <>
+                <h3 className="font-medium">Vald tagning</h3>
+                <span className="text-[12px] text-muted">
+                  klipp {number} · {formatLength(keptLength)} i sekvensen
+                </span>
+              </>
+            )}
+            <span className="ml-auto text-[11px] text-muted">
+              {trims.error ? <span className="text-accent">{trims.error}</span> : trims.status !== 'idle' && 'Sparar…'}
+            </span>
+          </div>
+          <video
+            key={shown.id}
+            ref={video}
+            src={mediaUrl(shown.filePath)}
+            poster={shown.thumbPath ? mediaUrl(shown.thumbPath) : undefined}
+            controls
+            preload="auto"
+            onLoadedMetadata={(e) => {
+              const el = e.currentTarget
+              if (!previewing && take && Number.isFinite(el.duration)) {
+                setMeasured({ id: take.id, seconds: el.duration })
+              }
+              const start = keptStart()
+              if (start > 0) el.currentTime = start
+              setTime(el.currentTime)
+              if (pendingPlay.current) {
+                pendingPlay.current = false
+                void el.play().catch(() => undefined)
+              }
+            }}
+            onPlay={(e) => {
+              setPlaying(true)
+              pauseOthers(e.currentTarget)
+              const el = e.currentTarget
+              const outside = el.currentTime < trimStart - 0.05 || el.currentTime >= keepEnd - 0.05
+              if (!previewing && onlyTrimmed && outside) el.currentTime = trimStart
+            }}
+            onPause={() => setPlaying(false)}
+            onSeeked={(e) => setTime(e.currentTarget.currentTime)}
+            className="aspect-video max-h-[40vh] w-full rounded-lg bg-black object-contain"
+          />
+        </>
+      ) : (
+        hint
+      )}
+
+      <div className={shown?.filePath || hint ? 'mt-3' : undefined}>{children}</div>
+
+      {previewing ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onChoosePreview}
+            className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover"
+          >
+            Välj den
+          </button>
+          <button
+            type="button"
+            onClick={onLeavePreview}
+            title="Tillbaka till den valda tagningen (Esc)"
+            className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text"
+          >
+            {take ? 'Visa vald' : 'Stäng förhandsvisningen'}
+          </button>
+          <span className="text-[11px] text-muted">Trimningen hör till den valda tagningen.</span>
+        </div>
+      ) : (
+        take?.filePath && (
+          <TrimEditor
+            key={take.id}
+            segment={segment}
+            takeId={take.id}
+            duration={duration}
+            number={number}
+            nextContinues={nextContinues}
+            previousEndsHere={previousEndsHere}
+            patchSegment={patchSegment}
+            flushers={flushers}
+            disabled={selecting}
+            video={video}
+            time={time}
+            onTime={setTime}
+            onlyTrimmed={onlyTrimmed}
+            onOnlyTrimmed={setOnlyTrimmed}
+            onReport={setReported}
+          />
+        )
+      )}
+    </section>
+  )
+}
+
+/**
+ * The chosen take's trims: the bar, the two inputs with Här, Nollställ, "Spela bara det som används" and the notes
+ * about seamless neighbours. Mounted per take (its draft belongs to that take), so a switch saves a pending trim
+ * first – on unmount – while main still has the take it was made for.
+ */
+function TrimEditor({
+  segment,
+  takeId,
+  duration,
+  number,
+  nextContinues,
+  previousEndsHere,
+  patchSegment,
+  flushers,
+  disabled,
+  video,
+  time,
+  onTime,
+  onlyTrimmed,
+  onOnlyTrimmed,
+  onReport
+}: {
+  segment: Segment
+  takeId: string
+  duration: number
+  number: number
+  nextContinues: boolean
+  previousEndsHere: boolean
+  patchSegment: SequenceStore['patchSegment']
+  flushers: FlushRegistry
+  disabled: boolean
+  video: RefObject<HTMLVideoElement | null>
+  time: number
+  onTime: (t: number) => void
+  onlyTrimmed: boolean
+  onOnlyTrimmed: (on: boolean) => void
+  onReport: (state: TrimState & { takeId: string }) => void
+}) {
   const segmentId = segment.id
   const save = useCallback((t: Trims) => patchSegment(segmentId, t), [patchSegment, segmentId])
   const draft = useDraft<Trims>({ trimStart: segment.trimStart, trimEnd: segment.trimEnd }, save)
   const { value, setValue } = draft
   useRegisterFlush(flushers, draft.flush)
-
-  const video = useRef<HTMLVideoElement>(null)
-  const [measured, setMeasured] = useState<number>()
-  const duration = take.videoDuration ?? measured ?? durationSeconds(take.params.duration)
   const { trimStart, trimEnd } = value
   const keepEnd = Math.max(trimStart, duration - trimEnd)
-  const [time, setTime] = useState(trimStart)
-  const [playing, setPlaying] = useState(false)
-  const [onlyTrimmed, setOnlyTrimmed] = useState(true)
+
+  // The header and the player above follow the draft (the length in the sequence, where playing stops).
+  useLayoutEffect(() => {
+    onReport({ takeId, trimStart, trimEnd, status: draft.status, error: draft.error })
+  }, [takeId, trimStart, trimEnd, draft.status, draft.error, onReport])
 
   // Pointer listeners outlive the render that created them, so trims are computed from the latest values.
   const latest = useRef({ value, duration })
@@ -77,137 +383,81 @@ export default function TrimControls({
         // Show the frame at the cut point; for the end that is the frame the next clip continues from.
         el.pause()
         el.currentTime = key === 'trimStart' ? v : Math.max(0, d - v - 0.04)
-        setTime(el.currentTime)
+        onTime(el.currentTime)
       }
     },
-    [setValue]
+    [setValue, video, onTime]
   )
 
   const seek = (t: number) => {
     const el = video.current
     if (!el) return
     el.currentTime = t
-    setTime(t)
+    onTime(t)
   }
 
-  // Follow the playhead smoothly while playing, and stop at the end trim when previewing the trimmed part.
-  useEffect(() => {
-    if (!playing) return
-    let raf = 0
-    const tick = () => {
-      const el = video.current
-      if (el) {
-        setTime(el.currentTime)
-        if (onlyTrimmed && el.currentTime >= keepEnd - 0.01) {
-          el.pause()
-          el.currentTime = keepEnd
-        }
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [playing, onlyTrimmed, keepEnd])
-
-  const keptLength = Math.max(0, keepEnd - trimStart)
-
   return (
-    <section>
-      <div className="mb-3 flex flex-wrap items-baseline gap-x-2">
-        <h3 className="font-medium">Vald tagning</h3>
-        <span className="text-[12px] text-muted">
-          klipp {number} · {formatLength(keptLength)} i sekvensen
-        </span>
-        <span className="ml-auto text-[11px] text-muted">
-          {draft.error ? <span className="text-accent">{draft.error}</span> : draft.status !== 'idle' && 'Sparar…'}
-        </span>
+    <div className={`mt-3 space-y-3 transition-opacity ${disabled ? 'pointer-events-none opacity-50' : ''}`}>
+      {duration > 0 && (
+        <TrimBar
+          duration={duration}
+          trimStart={trimStart}
+          trimEnd={trimEnd}
+          time={time}
+          onSeek={seek}
+          onDrag={(key, t) => setTrim(key, snap(key === 'trimStart' ? t : latest.current.duration - t), true)}
+        />
+      )}
+
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+        <SecondsInput
+          label="Trimma början"
+          value={trimStart}
+          onChange={(v) => setTrim('trimStart', v, true)}
+          onHere={() => setTrim('trimStart', video.current?.currentTime ?? time, false)}
+          hereTitle="Börja klippet vid uppspelningshuvudet"
+        />
+        <SecondsInput
+          label="Trimma slutet"
+          value={trimEnd}
+          onChange={(v) => setTrim('trimEnd', v, true)}
+          onHere={() => setTrim('trimEnd', duration - (video.current?.currentTime ?? time), false)}
+          hereTitle="Avsluta klippet vid uppspelningshuvudet"
+        />
+        <button
+          onClick={() => {
+            setTrim('trimStart', 0, false)
+            setTrim('trimEnd', 0, false)
+          }}
+          disabled={trimStart === 0 && trimEnd === 0}
+          className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          Nollställ
+        </button>
+        <label className="ml-auto flex items-center gap-2 pb-1.5 text-muted">
+          <input
+            type="checkbox"
+            checked={onlyTrimmed}
+            onChange={(e) => onOnlyTrimmed(e.target.checked)}
+            className="accent-accent"
+          />
+          Spela bara det som används
+        </label>
       </div>
 
-      <video
-        ref={video}
-        src={mediaUrl(take.filePath!)}
-        poster={take.thumbPath ? mediaUrl(take.thumbPath) : undefined}
-        controls
-        preload="auto"
-        onLoadedMetadata={(e) => {
-          const el = e.currentTarget
-          if (Number.isFinite(el.duration)) setMeasured(el.duration)
-          if (latest.current.value.trimStart > 0) el.currentTime = latest.current.value.trimStart
-        }}
-        onPlay={(e) => {
-          setPlaying(true)
-          const el = e.currentTarget
-          if (onlyTrimmed && (el.currentTime < trimStart - 0.05 || el.currentTime >= keepEnd - 0.05)) {
-            el.currentTime = trimStart
-          }
-        }}
-        onPause={() => setPlaying(false)}
-        onSeeked={(e) => setTime(e.currentTarget.currentTime)}
-        className="aspect-video max-h-[46vh] w-full rounded-lg bg-black object-contain"
-      />
-
-      <div className="mt-3 space-y-3">
-        {duration > 0 && (
-          <TrimBar
-            duration={duration}
-            trimStart={trimStart}
-            trimEnd={trimEnd}
-            time={time}
-            onSeek={seek}
-            onDrag={(key, t) => setTrim(key, snap(key === 'trimStart' ? t : latest.current.duration - t), true)}
-          />
-        )}
-
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-          <SecondsInput
-            label="Trimma början"
-            value={trimStart}
-            onChange={(v) => setTrim('trimStart', v, true)}
-            onHere={() => setTrim('trimStart', video.current?.currentTime ?? time, false)}
-            hereTitle="Börja klippet vid uppspelningshuvudet"
-          />
-          <SecondsInput
-            label="Trimma slutet"
-            value={trimEnd}
-            onChange={(v) => setTrim('trimEnd', v, true)}
-            onHere={() => setTrim('trimEnd', duration - (video.current?.currentTime ?? time), false)}
-            hereTitle="Avsluta klippet vid uppspelningshuvudet"
-          />
-          <button
-            onClick={() => {
-              setTrim('trimStart', 0, false)
-              setTrim('trimEnd', 0, false)
-            }}
-            disabled={trimStart === 0 && trimEnd === 0}
-            className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            Nollställ
-          </button>
-          <label className="ml-auto flex items-center gap-2 pb-1.5 text-muted">
-            <input
-              type="checkbox"
-              checked={onlyTrimmed}
-              onChange={(e) => setOnlyTrimmed(e.target.checked)}
-              className="accent-accent"
-            />
-            Spela bara det som används
-          </label>
-        </div>
-
-        {previousEndsHere && (
-          <p className="text-[11px] leading-relaxed text-muted">
-            Klipp {number - 1} slutar på bildrutan vid {formatLength(trimStart)}. Ändrar du starten behöver klipp{' '}
-            {number - 1} en ny tagning för att övergången ska bli sömlös.
-          </p>
-        )}
-        {nextContinues && (
-          <p className="text-[11px] leading-relaxed text-muted">
-            Klipp {number + 1} fortsätter från bildrutan vid {formatLength(keepEnd)}. Ändrar du slutet behöver klipp{' '}
-            {number + 1} en ny tagning för att övergången ska bli sömlös.
-          </p>
-        )}
-      </div>
-    </section>
+      {previousEndsHere && (
+        <p className="text-[11px] leading-relaxed text-muted">
+          Klipp {number - 1} slutar på bildrutan vid {formatLength(trimStart)}. Ändrar du starten behöver klipp{' '}
+          {number - 1} en ny tagning för att övergången ska bli sömlös.
+        </p>
+      )}
+      {nextContinues && (
+        <p className="text-[11px] leading-relaxed text-muted">
+          Klipp {number + 1} fortsätter från bildrutan vid {formatLength(keepEnd)}. Ändrar du slutet behöver klipp{' '}
+          {number + 1} en ny tagning för att övergången ska bli sömlös.
+        </p>
+      )}
+    </div>
   )
 }
 

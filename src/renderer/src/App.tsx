@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import type { LibraryStatus, Settings } from '@shared/types'
 import AgentDrawer from './components/agent/AgentDrawer'
 import AgentPresence from './components/agent/AgentPresence'
@@ -11,13 +11,17 @@ import SwitchingOverlay from './components/library/SwitchingOverlay'
 import PromptsView from './components/prompts/PromptsView'
 import SequencesView from './components/sequences/SequencesView'
 import SettingsView from './components/SettingsView'
-import Sidebar from './components/Sidebar'
+import Sidebar, { SIDEBAR_WIDTH } from './components/Sidebar'
 import StoryboardsView from './components/storyboards/StoryboardsView'
+import SeenToast from './components/work/SeenToast'
+import WorkPanel from './components/work/WorkPanel'
+import WorkStillViewer from './components/work/WorkStillViewer'
 import { startAgentFeed } from './lib/agent'
 import { useAgentBridge } from './lib/agentBridge'
 import { assetKindOfView } from './lib/assets'
 import { ipcErrorMessage } from './lib/hooks'
 import type { Intent, Navigate, View } from './lib/navigation'
+import { startWorkFeed } from './lib/work'
 
 export default function App() {
   const [library, setLibrary] = useState<LibraryStatus>()
@@ -81,6 +85,25 @@ export default function App() {
   return <Workspace />
 }
 
+/** Whether the sidebar is the icon rail: per profile (this window's storage), not library data. */
+const SIDEBAR_COLLAPSED_KEY = 'sidebar:collapsed:v1'
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** ⌃⌘S, wherever the focus is (text fields too): nothing else in Studio or the default macOS menu uses it. */
+function isSidebarShortcut(e: KeyboardEvent): boolean {
+  return e.metaKey && e.ctrlKey && !e.altKey && !e.shiftKey && e.code === 'KeyS' && !e.repeat
+}
+
+/** What slides out beside the sidebar; one at a time. */
+type Panel = 'agent' | 'work'
+
 function Workspace() {
   const [view, setView] = useState<View>('generate')
   const [intent, setIntent] = useState<Intent>()
@@ -109,25 +132,60 @@ function Workspace() {
   // bridge that lets them read and fill the Generate form. Mounted here, so both work whatever view is open.
   useEffect(() => startAgentFeed(), [])
   useAgentBridge(view, navigate)
-  const [agentOpen, setAgentOpen] = useState(false)
-  const closeAgent = useCallback(() => setAgentOpen(false), [])
+  // Pågår och klart: what runs and what is new, for the sidebar, every view and the panel; also installs the
+  // playback rule that marks a video seen once it has played.
+  useEffect(() => startWorkFeed(), [])
+
+  const [panel, setPanel] = useState<Panel>()
+  const closePanel = useCallback(() => setPanel(undefined), [])
+  const togglePanel = useCallback((p: Panel) => setPanel((open) => (open === p ? undefined : p)), [])
+
+  // The icon rail: remembered per profile, expanded by default, never collapsed by itself.
+  const [collapsed, setCollapsed] = useState(readSidebarCollapsed)
+  const toggleCollapsed = useCallback(() => setCollapsed((c) => !c), [])
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
+    } catch {
+      // Only a convenience: the sidebar opens expanded next time.
+    }
+  }, [collapsed])
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (!isSidebarShortcut(e)) return
+      e.preventDefault()
+      e.stopPropagation()
+      setCollapsed((c) => !c)
+    }
+    // Capture phase on the window: a view's own key handling (Redigera's player keys …) never sees it first.
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [])
+
+  // The sidebar, the agent drawer, the panel and the toast all place themselves by this width.
+  const rootStyle = {
+    '--sidebar-w': `${collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded}px`
+  } as CSSProperties
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full" style={rootStyle}>
       <Sidebar
         view={view}
         onChange={(v) => {
-          setAgentOpen(false)
+          setPanel(undefined)
           navigate(v)
         }}
         devProfile={settings?.devProfile}
-        agentOpen={agentOpen}
-        onToggleAgent={() => setAgentOpen((open) => !open)}
+        collapsed={collapsed}
+        onToggleCollapsed={toggleCollapsed}
+        panel={panel}
+        onTogglePanel={togglePanel}
       />
-      <main className="min-w-0 flex-1">
+      {/* A size container: views lay out by the width they get, so collapsing the sidebar gives them room. */}
+      <main className="@container/main min-w-0 flex-1">
         {view === 'generate' && <GenerateView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />}
-        {/* Keyed so Karaktärer, Miljöer, Kläder and Poser each start with their own selection, search, drafts
-            and sound players. */}
+        {/* Keyed so Karaktärer, Miljöer, Produkter, Kläder and Poser each start with their own selection, search,
+            drafts and sound players. */}
         {assetKind && (
           <AssetsView
             key={assetKind}
@@ -147,8 +205,12 @@ function Workspace() {
         {view === 'editor' && <EditorView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />}
         {view === 'settings' && settings && <SettingsView settings={settings} onChanged={refreshSettings} />}
       </main>
-      <AgentDrawer open={agentOpen} onClose={closeAgent} navigate={navigate} />
-      <AgentPresence hidden={agentOpen} onOpen={() => setAgentOpen(true)} />
+      <AgentDrawer open={panel === 'agent'} onClose={closePanel} navigate={navigate} />
+      <WorkPanel open={panel === 'work'} onClose={closePanel} navigate={navigate} />
+      <WorkStillViewer />
+      {/* The pill steps aside while either panel is open: it would cover the panel's bottom at narrow widths. */}
+      <AgentPresence hidden={panel !== undefined} onOpen={() => setPanel('agent')} />
+      <SeenToast agentPillHidden={panel !== undefined} besideWorkPanel={panel === 'work'} />
       <ApprovalDialog />
     </div>
   )

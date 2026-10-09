@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { BoardImageSource, ConsentRequest, FfmpegStatus, Generation, Still, Storyboard } from '@shared/types'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type {
+  BoardImageSource,
+  ConsentRequest,
+  FfmpegStatus,
+  FinishedWork,
+  Generation,
+  RunningWork,
+  Still,
+  Storyboard
+} from '@shared/types'
 import { ASSET_VIEW } from '../../lib/assets'
 import { ipcErrorMessage, useAssets, useModels } from '../../lib/hooks'
 import { LAST_STORYBOARD_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
 import type { Intent, Navigate } from '../../lib/navigation'
+import { markSeen, useRunning, useSeenWhenVisible, useUnseen } from '../../lib/work'
 import ConsentDialog from '../ConsentDialog'
 import CreateImageDialog from '../images/CreateImageDialog'
 import FramePickerDialog from '../images/FramePickerDialog'
@@ -12,17 +22,18 @@ import StillViewer from '../images/StillViewer'
 import { useStills } from '../images/imageModels'
 import PreviewPlayer from '../sequences/PreviewPlayer'
 import type { FlushRegistry } from '../sequences/useDraft'
+import { useExportStatus } from '../sequences/useExportStatus'
 import { useClipQuote, useTotalQuote } from '../sequences/useTotalQuote'
+import { newsBySegment } from '../takes/takeText'
 import BoardRow from './BoardRow'
 import CreateStoryboardForm from './CreateStoryboardForm'
 import { StoryboardIcon } from './icons'
-import StoryboardHeader, { type ExportState } from './StoryboardHeader'
+import StoryboardHeader from './StoryboardHeader'
 import StoryboardList from './StoryboardList'
 import {
   asPreviewSequence,
   boardNumber,
   exportBlocked as exportBlockedReason,
-  fileName,
   lostTransitionsText,
   moveBoardLocally,
   orderWithNewBoard,
@@ -106,9 +117,27 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   const assets = useAssets()
   const { stills } = useStills(storyboardId)
 
+  // ── Pågår och klart for the open storyboard (also what an agent or an earlier visit started) ──────────────
+  const exportStatus = useExportStatus(storyboardId)
+  const ownerUnseenFilter = useCallback(
+    (w: FinishedWork) => !!storyboardId && w.ownerId === storyboardId,
+    [storyboardId]
+  )
+  const ownerRunningFilter = useCallback(
+    (w: RunningWork) => !!storyboardId && w.ownerId === storyboardId,
+    [storyboardId]
+  )
+  const ownerUnseen = useUnseen(ownerUnseenFilter)
+  const ownerRunning = useRunning(ownerRunningFilter)
+  const news = useMemo(() => newsBySegment(ownerUnseen), [ownerUnseen])
+  // A "Generera saknade" that stopped on a problem: main keeps its error with the storyboard while the app runs,
+  // and as a failure in Pågår och klart (also after a restart) until it has been seen.
+  const runFailure = ownerUnseen
+    .filter((w) => w.failureOf === 'run')
+    .sort((a, b) => b.finishedAt - a.finishedAt)[0]
+  const runWork = ownerRunning.find((w) => w.kind === 'run')
+
   const [ffmpeg, setFfmpeg] = useState<FfmpegStatus>()
-  const [exports, setExports] = useState<Record<string, ExportState>>({})
-  const [exportDismissed, setExportDismissed] = useState<Record<string, boolean>>({})
   const [notice, setNotice] = useState<Notice>()
   const [creating, setCreating] = useState(false)
   const [adding, setAdding] = useState(false)
@@ -131,6 +160,9 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   // One of the storyboard's pictures full size, opened from a board's menu: it can be put in that board or deleted.
   const [viewingStill, setViewingStill] = useState<{ still: Still; boardId: string }>()
   const [reveal, setReveal] = useState<string>()
+  // A board pointed out by a link (Pågår och klart: its picture failed or is new): it lights up briefly.
+  const [flash, setFlash] = useState<{ boardId: string; n: number }>()
+  const flashCount = useRef(0)
   const [pendingChange, setPendingChange] = useState<PendingChange>()
 
   const ffmpegOk = ffmpeg?.ok !== false
@@ -163,10 +195,16 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     }
   }, [selectedId])
 
+  // A transition or a board to show once the storyboard is open (a link to it, or an agent's open_in_studio). Showing
+  // a place marks nothing seen by itself (D4): pictures and failures count once they have been on screen a moment.
+  const [target, setTarget] = useState<{ storyboardId: string; transitionId?: string; boardId?: string }>()
+
   useEffect(() => {
     if (intent?.type !== 'open-storyboard') return
     gone.current.delete(intent.storyboardId)
     setSelectedId(intent.storyboardId)
+    const { storyboardId: id, transitionId, boardId } = intent
+    setTarget(transitionId || boardId ? { storyboardId: id, transitionId, boardId } : undefined)
     onIntentHandled()
   }, [intent])
 
@@ -180,6 +218,21 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     setPendingChange(undefined)
   }, [storyboardId])
 
+  // The intent's transition opens in the editor and its board lights up, once the storyboard has loaded (after the
+  // reset above, which runs first for a storyboard that was just opened).
+  useEffect(() => {
+    if (!storyboard || !target || target.storyboardId !== storyboard.id) return
+    setTarget(undefined)
+    if (target.transitionId && storyboard.transitions.some((t) => t.id === target.transitionId)) {
+      setEditorId(target.transitionId)
+      setReveal(target.transitionId)
+    }
+    if (target.boardId && storyboard.boards.some((b) => b.id === target.boardId)) {
+      setReveal(target.boardId)
+      setFlash({ boardId: target.boardId, n: ++flashCount.current })
+    }
+  }, [storyboard, target])
+
   const editorTransition = editorId ? storyboard?.transitions.find((t) => t.id === editorId) : undefined
   // Its boards were moved apart or one was deleted: the transition is gone, and so is its editor.
   useEffect(() => {
@@ -191,24 +244,6 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   useEffect(() => {
     window.studio.ffmpegStatus().then(setFfmpeg, (e: unknown) => setFfmpeg({ ok: false, message: ipcErrorMessage(e) }))
   }, [])
-
-  useEffect(
-    () =>
-      window.studio.onExportProgress((p) =>
-        setExports((m) => {
-          if (p.done) {
-            if (p.error) return { ...m, [p.sequenceId]: { status: 'error', error: p.error } }
-            if (p.path) return { ...m, [p.sequenceId]: { status: 'done', path: p.path } }
-            return m
-          }
-          // A straggling progress event must not reopen a finished export.
-          const prev = m[p.sequenceId]
-          if (prev && prev.status !== 'running') return m
-          return { ...m, [p.sequenceId]: { status: 'running', progress: p.progress } }
-        })
-      ),
-    []
-  )
 
   useEffect(() => {
     if (!storyboard?.running) setStopping(false)
@@ -432,15 +467,20 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   const consentTransition = consent ? storyboard?.transitions.find((t) => t.id === consent.transitionId) : undefined
   const consentQuote = useClipQuote(consentTransition?.params)
 
-  const selectTake = (transitionId: string, take: Generation) => {
-    store.update((s) => patchTransitionLocally(s, transitionId, { selectedGenerationId: take.id }))
-    store
-      .mutate(() => window.studio.updateTransition(transitionId, { selectedGenerationId: take.id }))
-      .catch((e: unknown) => {
-        setNotice({ text: ipcErrorMessage(e), storyboardId })
-        store.refresh()
-      })
-  }
+  /** A take becomes the transition's (the editor's strip shows it at once and calls this when main should know). */
+  const { update: updateStore, mutate: mutateStore, refresh: refreshStore } = store
+  const commitTake = useCallback(
+    async (transitionId: string, takeId: string) => {
+      updateStore((s) => patchTransitionLocally(s, transitionId, { selectedGenerationId: takeId }))
+      try {
+        await mutateStore(() => window.studio.updateTransition(transitionId, { selectedGenerationId: takeId }))
+      } catch (e) {
+        refreshStore()
+        throw e
+      }
+    },
+    [updateStore, mutateStore, refreshStore]
+  )
 
   const deleteTake = async (transitionId: string, take: Generation) => {
     store.update((s) => withoutTake(s, take.id))
@@ -502,6 +542,8 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
       return
     }
     setDismissedRunError(undefined)
+    // Starting again is acting on the last run's problem: it has been seen.
+    if (runFailure) markSeen([runFailure.key])
     store.update((s) => ({ ...s, running: true, runError: undefined }))
     try {
       await window.studio.generateStoryboard(storyboardId)
@@ -540,14 +582,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
       setNotice({ text: UNSAVED, storyboardId })
       return
     }
-    setExportDismissed((m) => ({ ...m, [storyboardId]: false }))
-    setExports((m) => ({ ...m, [storyboardId]: { status: 'running', progress: 0 } }))
-    try {
-      const path = await window.studio.exportStoryboard(storyboardId)
-      setExports((m) => ({ ...m, [storyboardId]: { status: 'done', path } }))
-    } catch (e) {
-      setExports((m) => ({ ...m, [storyboardId]: { status: 'error', error: ipcErrorMessage(e) } }))
-    }
+    await exportStatus.run(() => window.studio.exportStoryboard(storyboardId))
   }
 
   const openPreview = async () => {
@@ -572,11 +607,11 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const exportState = storyboardId ? exports[storyboardId] : undefined
   const exportBlocked = storyboard ? exportBlockedReason(storyboard, ffmpegOk) : undefined
   const doneCount = storyboard ? storyboard.transitions.filter((t) => readyTake(t)).length : 0
   const previewDisabled = doneCount === 0 ? 'Inga övergångar har ett färdigt klipp ännu' : undefined
-  const runError = storyboard?.runError
+  // While the app runs, main keeps the run's error with the storyboard; after a restart only Pågår och klart has it.
+  const runError = storyboard?.runError ?? runFailure?.error
   const runConsent = parseConsent(runError)
   const runErrorTransition = storyboard && runError ? transitionInMessage(storyboard, runError) : undefined
   const visibleNotice = notice && (!notice.storyboardId || notice.storyboardId === storyboardId) ? notice : undefined
@@ -636,51 +671,65 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
         </Banner>
       )}
       {runError && runError !== dismissedRunError && !storyboard?.running && (
-        <Banner tone="error" onDismiss={() => setDismissedRunError(runError)}>
-          {runConsent ? (
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              Generera saknade stoppades: modellen kräver att du godkänner leverantörens villkor.
-              <button
-                onClick={() => storyboard && setRunConsentOpen(new Set(runKeys(storyboard)))}
-                className="rounded bg-accent px-2 py-0.5 font-medium text-white hover:bg-accent-hover"
-              >
-                Granska och fortsätt
-              </button>
-            </span>
-          ) : (
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>Generera saknade stoppades – {runError}</span>
-              {runErrorTransition && runErrorTransition.id !== editorId && storyboard && (
+        <SeenWhenVisible seenKey={runFailure?.key}>
+          <Banner
+            tone="error"
+            onDismiss={() => {
+              setDismissedRunError(runError)
+              if (runFailure) markSeen([runFailure.key])
+            }}
+          >
+            {runConsent ? (
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                Generera saknade stoppades: modellen kräver att du godkänner leverantörens villkor.
                 <button
-                  onClick={() => showTransition(runErrorTransition.id)}
-                  className="rounded border border-accent/40 px-2 py-0.5 font-medium hover:bg-accent/10"
+                  onClick={() => storyboard && setRunConsentOpen(new Set(runKeys(storyboard)))}
+                  className="rounded bg-accent px-2 py-0.5 font-medium text-white hover:bg-accent-hover"
                 >
-                  Visa {transitionLabel(storyboard, runErrorTransition).toLowerCase()}
+                  Granska och fortsätt
                 </button>
-              )}
-            </span>
-          )}
-        </Banner>
+              </span>
+            ) : (
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>Generera saknade stoppades – {runError}</span>
+                {runErrorTransition && runErrorTransition.id !== editorId && storyboard && (
+                  <button
+                    onClick={() => showTransition(runErrorTransition.id)}
+                    className="rounded border border-accent/40 px-2 py-0.5 font-medium hover:bg-accent/10"
+                  >
+                    Visa {transitionLabel(storyboard, runErrorTransition).toLowerCase()}
+                  </button>
+                )}
+              </span>
+            )}
+          </Banner>
+        </SeenWhenVisible>
       )}
-      {exportState?.status === 'done' && storyboardId && !exportDismissed[storyboardId] && (
-        <Banner tone="success" onDismiss={() => setExportDismissed((m) => ({ ...m, [storyboardId]: true }))}>
+      {exportStatus.done && (
+        <Banner tone="success" onDismiss={exportStatus.dismissDone}>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>
-              Exporterad: <span className="font-mono">{fileName(exportState.path)}</span>
-            </span>
+            <span title={exportStatus.done.mediaPath}>Filmen är klar</span>
             <button
-              onClick={() => window.studio.revealFile(exportState.path)}
+              onClick={() => void exportStatus.reveal()}
               className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
             >
               Visa i Finder
             </button>
+            {exportStatus.done.exportId && (
+              <button
+                onClick={() => exportStatus.edit(navigate)}
+                title="Ändra den färdiga filmen med AI i Redigera. Storyboarden rörs inte."
+                className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
+              >
+                Redigera
+              </button>
+            )}
           </span>
         </Banner>
       )}
-      {exportState?.status === 'error' && storyboardId && !exportDismissed[storyboardId] && (
-        <Banner tone="error" onDismiss={() => setExportDismissed((m) => ({ ...m, [storyboardId]: true }))}>
-          {/* main's messages often say so already ("Exporten misslyckades: …", "Exporten avbröts."). */}
-          {exportState.error.startsWith('Exporten') ? exportState.error : `Exporten misslyckades: ${exportState.error}`}
+      {exportStatus.failure && (
+        <Banner tone="error" onDismiss={exportStatus.dismissFailure}>
+          {exportStatus.failure}
         </Banner>
       )}
     </>
@@ -691,7 +740,6 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
       <StoryboardList
         storyboards={storyboards}
         selectedId={selectedId}
-        runningId={storyboard?.running ? storyboard.id : undefined}
         creating={creating}
         onSelect={(id) => {
           gone.current.delete(id)
@@ -714,8 +762,9 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               runBlocked={plan?.blocked?.message}
               runQuote={runQuote}
               stopping={stopping}
+              runDetail={runWork?.detail}
               previewDisabled={previewDisabled}
-              exportState={exportState}
+              exportProgress={exportStatus.progress}
               exportBlocked={exportBlocked}
               converting={converting}
               autoFocusName={focusNameFor === storyboard.id}
@@ -752,6 +801,10 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
                   ffmpegOk={ffmpegOk}
                   editorId={editorTransition?.id}
                   submitting={submitting}
+                  news={news}
+                  unseen={ownerUnseen}
+                  running={ownerRunning}
+                  flash={flash}
                   adding={adding}
                   fitWidth={areaWidth}
                   reveal={reveal}
@@ -791,9 +844,10 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
                     error={errors[editorTransition.id]}
                     onDismissError={() => setErrors((m) => ({ ...m, [editorTransition.id]: undefined }))}
                     onGenerate={() => void generate(editorTransition.id)}
-                    onSelectTake={(take) => selectTake(editorTransition.id, take)}
+                    onCommitTake={commitTake}
                     onDeleteTake={(take) => void deleteTake(editorTransition.id, take)}
                     onEditTake={(take) => navigate('editor', { type: 'open-editor', generationId: take.id })}
+                    onError={(text) => setNotice({ text, storyboardId: storyboard.id })}
                     onClose={() => setEditorId(undefined)}
                   />
                 </section>
@@ -911,6 +965,13 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
       )}
     </div>
   )
+}
+
+/** Marks `seenKey` seen once its content has been on screen for a moment with the window focused (D4). */
+function SeenWhenVisible({ seenKey, children }: { seenKey?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useSeenWhenVisible(ref, seenKey)
+  return <div ref={ref}>{children}</div>
 }
 
 function EmptyState({

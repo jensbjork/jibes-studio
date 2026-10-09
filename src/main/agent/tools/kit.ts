@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { ShapeOutput, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js'
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js'
@@ -9,6 +10,7 @@ import type { FormBridge } from '../bridge'
 import type { AudioBlock, ImageBlock } from '../images'
 import { callService } from '../local-ipc'
 import { errorText } from '../studio'
+import type { UploadStore } from '../uploads'
 
 // The frame every tool is built in: input validated by zod (the SDK answers malformed input itself), the
 // answer as compact JSON plus pictures, errors as tool errors the agent can read, and an entry in the
@@ -18,9 +20,17 @@ import { errorText } from '../studio'
 export interface ToolContext {
   bridge: FormBridge
   approvals: ApprovalStore
+  /** Files agents send (begin_upload), shared by every session. */
+  uploads: UploadStore
   promptLanguage(): PromptLanguage
   /** The agent's name, as shown in the activity log and on approval requests. */
   clientName(): string
+  /** Where the agent connects from (its own machine as Studio sees it: loopback for an agent on this Mac). */
+  peer(): string
+  /** "http://<host>:<port>" as the agent reached Studio, for upload URLs; undefined when it can't be told. */
+  baseUrl(): string | undefined
+  /** Studio's agent port, which a URL fetch never goes to. */
+  agentPort(): number | undefined
   /** The client's protocol version knows audio content (2025-03-26 and later). */
   audioContent(): boolean
   /** False once the session has ended or the connection was switched off; nothing is asked of the user then. */
@@ -68,6 +78,18 @@ function shorten(text: string): string {
   return flat.length > MAX_SUMMARY ? `${flat.slice(0, MAX_SUMMARY - 1)}…` : flat
 }
 
+/** What runs when the tool call in progress has answered (see afterCall). */
+const callScope = new AsyncLocalStorage<(() => void | Promise<void>)[]>()
+
+/**
+ * Runs `cleanup` once the tool call in progress has answered (or failed), e.g. to throw away the uploads a URL source
+ * was staged as once the call has copied them in. Outside a tool call there is no end to wait for, and nothing runs
+ * (what it would clean up expires by itself).
+ */
+export function afterCall(cleanup: () => void | Promise<void>): void {
+  callScope.getStore()?.push(cleanup)
+}
+
 /** Registers one tool on the session's server. */
 export function defineTool<S extends ZodRawShapeCompat>(
   server: McpServer,
@@ -84,8 +106,9 @@ export function defineTool<S extends ZodRawShapeCompat>(
       // A summary is only for the log; the call itself goes ahead.
     }
     const readOnly = spec.annotations.readOnlyHint === true
+    const cleanups: (() => void | Promise<void>)[] = []
     try {
-      const out = await run(args)
+      const out = await callScope.run(cleanups, () => run(args))
       ctx.record({
         tool: name,
         summary: shorten(out.summary ?? summary),
@@ -109,6 +132,14 @@ export function defineTool<S extends ZodRawShapeCompat>(
       const message = errorText(err)
       ctx.record({ tool: name, summary: shorten(`${summary} – ${message}`), ok: false, readOnly })
       return { isError: true, content: [{ type: 'text', text: message }] }
+    } finally {
+      for (const cleanup of cleanups.splice(0)) {
+        try {
+          await cleanup()
+        } catch (err) {
+          console.warn(`A cleanup after ${name} failed:`, err)
+        }
+      }
     }
   }
   server.registerTool(
@@ -164,7 +195,7 @@ export const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: fa
 // ── Shared input shapes ──────────────────────────────────────────────────────
 
 /** One asset's references, as set_references, validate_prompt, add_segment and update_segment take them. */
-export const referenceItem = z.object({
+export const assetReferenceItem = z.object({
   asset_id: z.string().describe('An asset id from list_assets.'),
   image_ids: z
     .array(z.string())
@@ -185,6 +216,19 @@ export const referenceItem = z.object({
       "When no audio_ids are given: add the asset's first audio clip (a character's voice, an environment's soundscape). Default: true for characters when the model takes reference audio, false otherwise; a default voice shorter than 2 s is left out and reported in not_added_audio."
     )
 })
+
+/**
+ * A reference: an asset's photos (and audio), or one loose picture – a still, or an uploaded picture (made a still in
+ * Referensbilder first, so the form or clip never points into the scratch folder). A loose picture has no
+ * description, so nothing is appended to the prompt for it.
+ */
+export const referenceItem = z.union([
+  assetReferenceItem,
+  z.object({ still_id: z.string().describe('A still (list_stills): one picture, no description.') }).strict(),
+  z
+    .object({ upload_id: z.string().describe('A ready image upload (begin_upload): one picture, no description.') })
+    .strict()
+])
 
 /** The "Ta med beskrivningar" switch, as set_form, validate_prompt, add_segment and update_segment take it. */
 export const includeDescriptionsInput = z

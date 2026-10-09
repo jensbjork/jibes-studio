@@ -32,6 +32,7 @@ import {
   type ToolContext
 } from './kit'
 import { assertNotRunning, asSent, clipInfo, continues, loadClip, loadSequence } from './sequences'
+import { importAsStill, uploadSource, urlSource } from './sources'
 import { loadStoryboard } from './storyboards'
 
 // Stills – the pictures of a sequence (its clips' keyframes) or of a storyboard (its boards): generated with an
@@ -118,7 +119,7 @@ function ownerInfo(sequenceId: string | undefined, owners: StillOwners): Record<
 
 const SOURCE_LABEL: Record<Still['source'], string> = {
   generated: 'generated with an image model',
-  upload: 'a picture the user added',
+  upload: 'a picture added from a file (by the user or with import_still)',
   frame: 'a frame saved from a clip'
 }
 
@@ -230,7 +231,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List image models',
       description:
-        "Venice's image models that request_image_generation can use, with the price of one picture at the default settings, and whether the user's \"Säkert läge för bilder\" (safe_mode: Venice blurs adult content) is on. takes_references: false are text-to-image models (prompt only; negative_prompt allowed); true are models that combine up to max_input_images reference pictures (characters, outfits, places, poses, stills) into a new picture. The defaults are marked: Seedream (seedream-v5-pro, and seedream-v5-pro-edit with references), the same family as the Seedance video models.",
+        "Venice's image models that request_image_generation can use, with the price of one picture at the default settings, and whether the user's \"Säkert läge för bilder\" (safe_mode: Venice blurs adult content) is on. takes_references: false are text-to-image models (prompt only; negative_prompt allowed); true are models that combine up to max_input_images reference pictures (characters, products, outfits, places, poses, stills) into a new picture. The defaults are marked: Seedream (seedream-v5-pro, and seedream-v5-pro-edit with references), the same family as the Seedance video models.",
       input: {
         takes_references: z
           .boolean()
@@ -289,7 +290,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List stills',
       description:
-        "The stills of a sequence or a storyboard (or all of them, without an id), newest first: pictures generated with request_image_generation, pictures the user added and frames saved from clips. Each has its still_id, source, prompt and model (generated ones), the references it was made from, the sequence or storyboard it belongs to, and used_by – the sequence clips that use it as their start or end image and the storyboard boards that show it. With include_thumbnails (default true) the newest ones come as small images. Use a still as a board's picture (update_board({image: {still_id}})), as a clip's start or end image (update_segment({start_image: {still_id}})), or as a reference of a new picture (reference_still_ids).",
+        "The stills of a sequence or a storyboard (or all of them, without an id), newest first: pictures generated with request_image_generation, pictures added (by the user, or with import_still) and frames saved from clips. Each has its still_id, source, prompt and model (generated ones), the references it was made from, the sequence or storyboard it belongs to, and used_by – the sequence clips that use it as their start or end image and the storyboard boards that show it. With include_thumbnails (default true) the newest ones come as small images. Use a still as a board's picture (update_board({image: {still_id}})), as a clip's start or end image (update_segment({start_image: {still_id}})), or as a reference of a new picture (reference_still_ids).",
       input: {
         sequence_id: z.string().optional().describe('Only the stills of this sequence.'),
         storyboard_id: z.string().optional().describe('Only the stills of this storyboard.'),
@@ -419,6 +420,43 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
         data: stillInfo(still, assets, stills, owners),
         images: image ? [{ label: `Still ${still.id} – frame at t = ${seconds(time).toFixed(1)} s`, image }] : [],
         summary: `sparade en bildruta som stillbild${ownerName ? ` i ${q(ownerName)}` : ''}`
+      }
+    }
+  )
+
+  defineTool(
+    server,
+    ctx,
+    'import_still',
+    {
+      title: 'Import a picture as a still',
+      description:
+        "Copies a picture you send into Studio as a still – of a sequence (sequence_id) or a storyboard (storyboard_id), or, with neither, among the loose reference pictures (Referensbilder) – to use as a board's picture, a clip's start or end image, a reference of a new picture (reference_still_ids) or a loose reference ({still_id}). source: {upload_id} (a ready image upload) or {url} (fetched like begin_upload({url}); waits at most 45 s). The same picture imported again into the same place gives the still it became the first time. Free. Returns the still and its picture.",
+      input: {
+        source: z.union([uploadSource, urlSource]),
+        sequence_id: z.string().optional(),
+        storyboard_id: z.string().optional()
+      },
+      annotations: WRITE,
+      summary: () => 'importerade en bild som stillbild'
+    },
+    async ({ source, sequence_id, storyboard_id }) => {
+      requireLibrary()
+      if (sequence_id && storyboard_id) throw new Error('Ange sequence_id eller storyboard_id, inte båda.')
+      const ownerId = storyboard_id ?? sequence_id
+      // Checked before anything is fetched: the owner must be what the agent says it is.
+      const owner = !ownerId
+        ? undefined
+        : storyboard_id || isStoryboardId(ownerId)
+          ? await loadStoryboard(ownerId)
+          : await loadSequence(ownerId)
+      const still = await importAsStill(ctx, source, owner?.id)
+      const [stills, assets, owners] = await Promise.all([StillIndex.load(), AssetIndex.load(), loadStillOwners()])
+      const image = await imageBlock(still.path)
+      return {
+        data: stillInfo(still, assets, stills, owners),
+        images: image ? [{ label: `Still ${still.id}`, image }] : [],
+        summary: `importerade en bild som stillbild${owner ? ` i ${q(owner.name)}` : ' (Referensbilder)'}`
       }
     }
   )

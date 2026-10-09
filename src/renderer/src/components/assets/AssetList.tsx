@@ -1,6 +1,9 @@
 import { useRef, useState, type DragEvent } from 'react'
-import type { Asset, AssetKind } from '@shared/types'
+import type { Asset, AssetKind, WorkCounts } from '@shared/types'
 import { ASSET_COPY, assetAudio } from '../../lib/assets'
+import { useOwnerWork } from '../../lib/work'
+import { StatusMark } from '../work/StatusMark'
+import { failedText } from '../work/workText'
 import AssetAvatar from './AssetAvatar'
 import { droppedPaths, imageCountLabel, isFileDrag } from './imageUtils'
 
@@ -128,6 +131,18 @@ function summary(a: Asset, outfitName: string | undefined): string {
   return parts.join(' · ')
 }
 
+/**
+ * What Pågår och klart says about an asset (only characters have work of their own so far: a voice made with AI):
+ * "Skapar en röst…", "1 ny röst", "… · 1 misslyckades".
+ */
+function workTitle(c: WorkCounts): string | undefined {
+  const parts: string[] = []
+  if (c.running > 0) parts.push(c.running === 1 ? 'Skapar en röst…' : `Skapar ${c.running} röster…`)
+  if (c.unseen > 0) parts.push(c.unseen === 1 ? '1 ny röst' : `${c.unseen} nya röster`)
+  if (c.failed > 0) parts.push(failedText(c.failed))
+  return parts.length ? parts.join(' · ') : undefined
+}
+
 /** One row; also a drop target that adds Finder images (and sound clips) to that asset. */
 function AssetListItem({
   asset: a,
@@ -140,6 +155,7 @@ function AssetListItem({
 }: ItemProps) {
   const [over, setOver] = useState(false)
   const depth = useRef(0)
+  const work = useOwnerWork(a.id)
 
   const onDragEnter = (e: DragEvent) => {
     if (!isFileDrag(e)) return
@@ -189,6 +205,13 @@ function AssetListItem({
                 : summary(a, outfitName)}
         </div>
       </div>
+      <StatusMark
+        running={work.running}
+        fresh={work.unseen}
+        failed={work.failed}
+        variant="inline"
+        title={workTitle(work)}
+      />
     </button>
   )
 }

@@ -25,7 +25,7 @@ import * as store from '../../sequence-store'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
 import { isStoryboardId } from '../storyboard-rows'
-import { errorText, localTime, q, requireLibrary, seconds } from '../studio'
+import { AssetIndex, errorText, localTime, q, requireLibrary, seconds } from '../studio'
 import {
   EDIT_DEFAULT_MODELS,
   agentOpName,
@@ -36,12 +36,14 @@ import {
   type OperationInput
 } from './edit-input'
 import { READ_ONLY, WRITE, defineTool, priceValue, usd, type LabeledImage, type ToolContext } from './kit'
+import { URL_WAIT_MS, stageFiles, uploadSource, urlSource, type FileSource } from './sources'
 
 // Redigera for agents: edits (one film changed into versions), their versions, transcripts and audio models, the
-// free operations, and plans of paid ones. Everything goes through the edit service's own handlers (edits:*,
-// audio:*), so an agent gets exactly the checks, versions and change events the window gets. Paid operations are
-// only ever asked for (request_edit_operation in editor-paid.ts). Agents can't import files from disk, add their
-// own audio files, delete edits or versions, or clean versions up: those stay with the user.
+// free operations, plans of paid ones, the edit's own audio (from uploads, URLs or library clips) and stopping a
+// paid job. Everything goes through the edit service's own handlers (edits:*, audio:*), so an agent gets exactly the
+// checks, versions and change events the window gets. Paid operations – and resuming a stopped one – are only ever
+// asked for (request_edit_operation in editor-paid.ts); removing edits or versions, or cleaning versions up, only
+// through request_delete, which the user approves.
 
 // ── Shared steps ─────────────────────────────────────────────────────────────
 
@@ -180,7 +182,7 @@ export function jobInfo(j: EditJob): Record<string, unknown> {
     ...(j.canResume
       ? {
           can_resume: true,
-          note: 'Only the user can continue it ("Fortsätt" in Redigera), or you can ask again with request_edit_operation.'
+          note: 'Stopped with parts left: ask the user to continue it with request_edit_operation({edit_id, resume_job_id}) (they approve the price of the parts left), or the user presses "Fortsätt" in Redigera.'
         }
       : {}),
     updated: localTime(j.updatedAt)
@@ -586,7 +588,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Create an edit (Redigera)',
       description:
-        "Opens a film in Redigera as a new edit, free: a finished generation (generation_id – a clip from the feed, a take of a sequence clip or storyboard transition, an imported own clip, or a version of another edit) or an exported film (export_id from list_exports; it is copied into the edit as v1). The original is never changed: every operation makes a new version. Files from disk can only be opened by the user. Answers with the edit (get_edit's fields) and, when there already are edits of the same film, a note naming them – reuse one instead of making another when that is what the user means.",
+        "Opens a film in Redigera as a new edit, free: a finished generation (generation_id – a clip from the feed, a take of a sequence clip or storyboard transition, an imported own clip, or a version of another edit) or an exported film (export_id from list_exports; it is copied into the edit as v1). The original is never changed: every operation makes a new version. A film you have as a file: import it with import_own_clips first (target {feed: true}), then open its generation here. Answers with the edit (get_edit's fields) and, when there already are edits of the same film, a note naming them – reuse one instead of making another when that is what the user means.",
       input: {
         generation_id: z.string().optional().describe('A finished generation (list_generations, get_sequence…).'),
         export_id: z.string().optional().describe('An exported film (list_exports).'),
@@ -635,7 +637,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Apply a free edit',
       description:
-        "Makes a free operation on a version (default the current one) and saves the result as a new version (it becomes current when its base was current; otherwise a branch): trim, cut, fade, volume, mute, denoise, loudness, add_audio (media_id: audio already in the edit; asset_audio_id: a library clip – own audio files can only be added by the user) or layer. Rendered on this Mac; nothing is paid. Paid operations are refused: plan them with plan_edit_operation and ask with request_edit_operation. Check first with plan_edit_operation; problems come back as an error and nothing is made. Answers with the new version.",
+        "Makes a free operation on a version (default the current one) and saves the result as a new version (it becomes current when its base was current; otherwise a branch): trim, cut, fade, volume, mute, denoise, loudness, add_audio (media_id: audio already in the edit – add_edit_audio puts a sound you send there first; asset_audio_id: a library clip) or layer. Rendered on this Mac; nothing is paid. Paid operations are refused: plan them with plan_edit_operation and ask with request_edit_operation. Check first with plan_edit_operation; problems come back as an error and nothing is made. Answers with the new version.",
       input: {
         edit_id: editIdInput,
         base_version_id: baseVersionInput,
@@ -789,6 +791,92 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
           as: segment_id ? 'take' : 'clip'
         },
         summary: `skickade ${v ? q(generationTitle(v, 40)) : 'en version'} till ${clip ? `klipp ${clip} i ` : ''}${sequence ? q(sequence.name) : 'en sekvens'}`
+      }
+    }
+  )
+
+  defineTool(
+    server,
+    ctx,
+    'add_edit_audio',
+    {
+      title: 'Add audio to an edit',
+      description:
+        "Adds sound files to an edit's audio (Redigera's media: music, effects, lines) so apply_edit can lay them on a version with {op: \"add_audio\", media_id}. sources (1–6): {upload_id} (a ready audio upload), {url} (fetched like begin_upload({url}); waits at most 45 s in all) or {asset_audio_id} (a character's voice or an environment's sound from the library). Any sound longer than 0.05 s (a click or a whoosh too). Free; nothing is mixed yet. Answers each new media_id with its label (the file's name) and length.",
+      input: {
+        edit_id: editIdInput,
+        sources: z
+          .array(z.union([uploadSource, urlSource, z.object({ asset_audio_id: z.string() }).strict()]))
+          .min(1)
+          .max(6)
+      },
+      annotations: WRITE,
+      summary: ({ sources }) =>
+        `lade till ${sources.length === 1 ? 'ett ljud' : `${sources.length} ljud`} i en redigering`
+    },
+    async ({ edit_id, sources }) => {
+      const edit = await loadEdit(edit_id)
+      const deadline = Date.now() + URL_WAIT_MS
+      const files = await stageFiles(
+        ctx,
+        'audio',
+        sources.filter((s): s is FileSource => 'upload_id' in s || 'url' in s),
+        deadline
+      )
+      const assets = sources.some((s) => 'asset_audio_id' in s) ? await AssetIndex.load() : undefined
+      let next = 0
+      const paths = sources.map((s) =>
+        'asset_audio_id' in s ? assets!.requireAudio(s.asset_audio_id).audio.path : files[next++].path
+      )
+      const added = await callService<EditMedia[]>('edits:addAudio', edit.id, paths)
+      return {
+        data: {
+          edit_id: edit.id,
+          media: added.map((m) => ({
+            media_id: m.id,
+            label: m.label,
+            ...(m.durationSeconds !== undefined ? { duration: seconds(m.durationSeconds) } : {})
+          })),
+          next: 'Lay it on a version with apply_edit({edit_id, operation: {op: "add_audio", media_id, start}}) – check with plan_edit_operation first.'
+        },
+        summary: `lade till ${added.length === 1 ? `ljudet ${q(added[0].label)}` : `${added.length} ljud`} i ${q(edit.name)}`
+      }
+    }
+  )
+
+  defineTool(
+    server,
+    ctx,
+    'cancel_edit_job',
+    {
+      title: 'Stop a paid edit job',
+      description:
+        "Stops a running paid job in Redigera (get_edit's jobs) like the user's Avbryt: no further parts are sent to Venice, so nothing more is paid. Parts already sent finish and are kept. A picture operation (regenerate, prompt_edit, extend, upscale) can't be stopped once its take is at Venice. Free.",
+      input: { job_id: z.string().describe("A job_id from get_edit's jobs.") },
+      annotations: { ...WRITE, idempotentHint: true },
+      summary: () => 'stoppade ett jobb i Redigera'
+    },
+    async ({ job_id }) => {
+      requireLibrary()
+      const row = db.getDb().prepare('SELECT id, edit_id, status FROM media_jobs WHERE id = ?').get(job_id) as
+        | { id: string; edit_id: string | null; status: string }
+        | undefined
+      if (!row) throw new Error('Det finns inget jobb med det id:t. get_edit visar en redigerings jobb.')
+      if (row.status !== 'running') {
+        return {
+          data: { job_id, status: row.status, note: 'The job is not running.' },
+          summary: 'försökte stoppa ett jobb som inte körde'
+        }
+      }
+      await callService('edits:cancel', job_id)
+      const edit = row.edit_id ? await loadEdit(row.edit_id).catch(() => undefined) : undefined
+      const job = edit?.jobs.find((j) => j.id === job_id)
+      return {
+        data: {
+          ...(job ? jobInfo(job) : { job_id, status: 'cancelled' }),
+          note: 'No more parts are sent. Parts already at Venice finish and are kept.'
+        },
+        summary: edit ? `stoppade ${job ? q(job.label) : 'ett jobb'} i ${q(edit.name)}` : 'stoppade ett jobb'
       }
     }
   )

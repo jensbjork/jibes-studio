@@ -7,12 +7,15 @@ export type RevealTarget = LibraryFolderTarget
 
 interface Props {
   target: RevealTarget
-  /** A character, environment, outfit or sequence id, to open that one's own folder. */
+  /** An asset's (any kind) or a sequence's id, to open that one's own folder. */
   id?: string
   label?: string
   title?: string
   className?: string
-  /** Show only the icon below the xl breakpoint, for crowded toolbars. */
+  /**
+   * Show only the icon while the work area (the `main` size container) is narrower than 67rem, for crowded toolbars.
+   * Measured on the work area rather than the window, so collapsing the sidebar brings the label back.
+   */
   compact?: boolean
   onError: (message: string) => void
 }
@@ -50,7 +53,7 @@ export default function OpenFolderButton({
       className={`flex items-center gap-1.5 whitespace-nowrap ${className}`}
     >
       <FolderIcon size={13} className="shrink-0" />
-      <span className={compact ? 'hidden xl:inline' : undefined}>{label}</span>
+      <span className={compact ? 'hidden @min-[67rem]/main:inline' : undefined}>{label}</span>
     </button>
   )
 }

@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react'
-import { generationTitle } from '@shared/generation-label'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { audioForModel, pickOption, PREFERRED, supportsEndImage } from '@shared/models'
-import type { Generation, Storyboard, StoryboardTransition, VideoModel } from '@shared/types'
+import { workKey, type Generation, type Storyboard, type StoryboardTransition, type VideoModel } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
-import { ScissorsIcon } from '../feed/icons'
+import { markSeen } from '../../lib/work'
+import { pauseOthers } from '../feed/playback'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { ArrowRightIcon, CloseIcon } from '../sequences/icons'
 import { useDraft, useRegisterFlush, type FlushRegistry } from '../sequences/useDraft'
 import { useClipQuote } from '../sequences/useTotalQuote'
+import TakeStrip, { type PickedBy } from '../takes/TakeStrip'
+import { pendingPhase } from '../takes/takeText'
+import { KEY_SELECT_DELAY, useTakeSelection } from '../takes/useTakeSelection'
+import { Spinner } from '../work/StatusMark'
 import {
   aspectValue,
   boardNumber,
@@ -18,7 +22,6 @@ import {
   isPending,
   madeFromOtherImages,
   playable,
-  readyTake,
   suggestPrompt,
   takeProgress,
   takeSeconds,
@@ -63,18 +66,22 @@ interface Props {
   error?: string
   onDismissError: () => void
   onGenerate: () => void
-  onSelectTake: (take: Generation) => void
+  /** Makes the take the transition's (main's answer applied); rejects with main's refusal. */
+  onCommitTake: (transitionId: string, takeId: string) => Promise<void>
   onDeleteTake: (take: Generation) => void
   /** "Redigera tagningen…": opens the take in Redigera. */
   onEditTake?: (take: Generation) => void
+  /** A refusal to show above the storyboard (choosing a take failed). */
+  onError: (message: string) => void
   onClose: () => void
 }
 
 /**
  * One transition in full, beside the boards: the two pictures it goes between, the take in use (or the one
- * being looked at) in a player, "Vad händer?" with Föreslå, length, resolution, sound and the model (only those
- * that can end on a picture), the price and Generera, and every take with Välj and Radera. Edits are saved by
- * themselves; Generera saves first, so the take is made from what is on screen.
+ * being looked at) in a player with every take in a strip right under it – a click makes a take the one in use and
+ * plays it –, "Vad händer?" with Föreslå, length, resolution, sound and the model (only those that can end on a
+ * picture), the price and Generera. Edits are saved by themselves; Generera saves first, so the take is made from
+ * what is on screen.
  */
 export default function TransitionEditor({
   storyboard,
@@ -87,9 +94,10 @@ export default function TransitionEditor({
   error,
   onDismissError,
   onGenerate,
-  onSelectTake,
+  onCommitTake,
   onDeleteTake,
   onEditTake,
+  onError,
   onClose
 }: Props) {
   const { mutate } = store
@@ -163,23 +171,82 @@ export default function TransitionEditor({
   if (model?.offline) problems.push('Modellen är offline – välj en annan')
   const blocked = problems[0]
   const quote = useClipQuote(t.ready ? params : undefined)
-  const ready = readyTake(t)
 
   // ── "Föreslå" ──────────────────────────────────────────────────────────────
 
   const suggestion = suggestPrompt(from?.note, to?.note)
   const promptId = useId()
 
-  // ── The take in the player ─────────────────────────────────────────────────
+  // ── The take in use, and the one in the player ─────────────────────────────
 
-  const [viewingId, setViewingId] = useState<string>()
-  const viewing =
-    t.takes.find((g) => g.id === viewingId && playable(g)) ?? ready ?? t.takes.find((g) => playable(g))
-  // Looking at another take is only for a while: a new selection shows the selected take again.
-  useEffect(() => setViewingId(undefined), [t.selectedGenerationId])
+  // Optimistic: a click or an arrow moves the ring at once; main hears of the keyboard's choice once it rests.
+  const selection = useTakeSelection(t.id, t.selectedGenerationId, onCommitTake)
+  const active = t.takes.find((g) => g.id === selection.activeId)
+  const ready = active && playable(active) ? active : undefined
+  // A take shown without being chosen (⌥-click, the menu, ⌥← / ⌥→).
+  const [previewId, setPreviewId] = useState<string>()
+  const preview = previewId ? t.takes.find((g) => g.id === previewId && playable(g)) : undefined
+  // Without a usable chosen take, the newest finished one is shown (not chosen) so there is something to look at.
+  const viewing = preview ?? ready ?? t.takes.find((g) => playable(g))
+  // Looking at another take is only for a while: a new choice (here, by main or by an agent) shows the chosen one.
+  useEffect(() => setPreviewId(undefined), [t.selectedGenerationId])
   const pending = t.takes.find(isPending)
   // The newest take made from the pictures the boards hold now, for a selected take made from earlier ones.
   const currentTake = t.staleTake ? t.takes.find((g) => playable(g) && !madeFromOtherImages(g, t)) : undefined
+
+  // ── Playing: a click on a take plays it from the start, with sound ──────────
+
+  const video = useRef<HTMLVideoElement>(null)
+  const [playRequest, setPlayRequest] = useState<{ id: string; n: number }>()
+  const playCount = useRef(0)
+  const pendingPlay = useRef(false)
+  const requestPlay = (id: string) => setPlayRequest({ id, n: ++playCount.current })
+  const playFromStart = useCallback(() => {
+    const el = video.current
+    if (!el) return
+    if (el.readyState < 1) {
+      pendingPlay.current = true
+      return
+    }
+    el.currentTime = 0
+    void el.play().catch(() => undefined)
+  }, [])
+  const handledPlay = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!playRequest || playRequest.id !== viewing?.id || handledPlay.current === playRequest.n) return
+    handledPlay.current = playRequest.n
+    playFromStart()
+  }, [playRequest, viewing?.id, playFromStart])
+
+  const chooseTake = (take: Generation, by: PickedBy) => {
+    setPreviewId(undefined)
+    if (take.id === selection.activeId) {
+      if (by === 'click') requestPlay(take.id)
+      return
+    }
+    selection.choose(take.id, by === 'click' ? 0 : KEY_SELECT_DELAY).then(
+      () => {
+        if (by === 'click') requestPlay(take.id)
+      },
+      (e: unknown) => onError(ipcErrorMessage(e))
+    )
+  }
+
+  const previewTake = (take: Generation, by: PickedBy) => {
+    if (take.id === selection.activeId) {
+      setPreviewId(undefined)
+      return
+    }
+    setPreviewId(take.id)
+    if (by === 'click') requestPlay(take.id)
+  }
+
+  /** "Välj den" (under the player, or in the banner about earlier pictures): choosing on purpose, without replaying. */
+  const chooseShown = (take: Generation) => {
+    setPreviewId(undefined)
+    markSeen([workKey.generation(take.id)])
+    selection.choose(take.id, 0).catch((e: unknown) => onError(ipcErrorMessage(e)))
+  }
 
   const aspect = aspectValue(storyboard.aspectRatio)
 
@@ -190,7 +257,9 @@ export default function TransitionEditor({
         const inField = (e.target as HTMLElement).closest('textarea, input, select')
         if (e.key === 'Escape' && !e.defaultPrevented && !inField) {
           e.preventDefault()
-          onClose()
+          // A preview goes first: Esc shows the chosen take again, the next one closes the editor.
+          if (preview) setPreviewId(undefined)
+          else onClose()
         }
       }}
     >
@@ -229,16 +298,23 @@ export default function TransitionEditor({
           <BoardThumb path={to?.imagePath} label={`Ruta ${toNumber}`} aspect={aspect} />
         </div>
 
-        {/* The take in use, or the one picked below. */}
+        {/* The take in use, or the one being previewed. */}
         <section>
           <div className="overflow-hidden rounded-lg bg-black" style={{ aspectRatio: aspect }}>
             {viewing?.filePath ? (
               <video
                 key={viewing.id}
+                ref={video}
                 src={mediaUrl(viewing.filePath)}
                 poster={viewing.thumbPath ? mediaUrl(viewing.thumbPath) : undefined}
                 controls
                 preload="metadata"
+                onLoadedMetadata={(e) => {
+                  if (!pendingPlay.current) return
+                  pendingPlay.current = false
+                  void e.currentTarget.play().catch(() => undefined)
+                }}
+                onPlay={(e) => pauseOthers(e.currentTarget)}
                 className="h-full w-full object-contain"
               />
             ) : pending ? (
@@ -252,19 +328,33 @@ export default function TransitionEditor({
             )}
           </div>
           {viewing && (
-            <p className="mt-1.5 flex items-center gap-2 text-[11px] text-muted">
-              {viewing.id === t.selectedGenerationId ? (
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-muted">
+              {viewing.id === selection.activeId ? (
                 <span>Valt klipp · {formatLength(takeSeconds(viewing))}</span>
               ) : (
                 <>
                   <span>Tagning från {formatTakeTime(viewing.createdAt)} – inte vald</span>
+                  <span aria-hidden>·</span>
                   <button
                     type="button"
-                    onClick={() => onSelectTake(viewing)}
-                    className="rounded px-1.5 py-0.5 text-text transition hover:bg-raised"
+                    onClick={() => chooseShown(viewing)}
+                    className="rounded px-1 py-0.5 text-text transition hover:bg-raised"
                   >
                     Välj den
                   </button>
+                  {preview && ready && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewId(undefined)}
+                        title="Tillbaka till den valda tagningen (Esc)"
+                        className="rounded px-1 py-0.5 text-text transition hover:bg-raised"
+                      >
+                        Visa vald
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </p>
@@ -277,7 +367,7 @@ export default function TransitionEditor({
                   Det finns en tagning med bilderna som ligger där nu.{' '}
                   <button
                     type="button"
-                    onClick={() => onSelectTake(currentTake)}
+                    onClick={() => chooseShown(currentTake)}
                     className="rounded px-1 font-medium text-amber-100 underline underline-offset-2 hover:text-white"
                   >
                     Välj den
@@ -289,6 +379,39 @@ export default function TransitionEditor({
             </p>
           )}
         </section>
+
+        {/* Every take, right under the player: a click makes one the transition's and plays it. */}
+        {t.takes.length > 0 && (
+          <TakeStrip
+            owner="storyboard"
+            takes={t.takes}
+            activeId={selection.activeId}
+            previewId={preview?.id}
+            aspect={aspect}
+            models={models}
+            // main chooses a finished take by itself while the transition has no usable one, or only one made from
+            // earlier pictures (autoSelect).
+            autoSelects={!ready || !!t.staleTake}
+            madeFromEarlierPictures={(g) => madeFromOtherImages(g, t)}
+            promptDiffers={(g) => g.prompt.trim() !== value.prompt.trim()}
+            onChoose={chooseTake}
+            onPreview={previewTake}
+            onLeavePreview={() => setPreviewId(undefined)}
+            onTogglePlay={() => {
+              const el = video.current
+              if (!el) return
+              if (el.paused) void el.play().catch(() => undefined)
+              else el.pause()
+            }}
+            onPlayFromStart={playFromStart}
+            onDelete={(take) => {
+              if (take.id === previewId) setPreviewId(undefined)
+              onDeleteTake(take)
+            }}
+            onUsePrompt={(g) => set('prompt', g.prompt)}
+            onEdit={onEditTake}
+          />
+        )}
 
         {/* What happens. */}
         <section>
@@ -464,15 +587,6 @@ export default function TransitionEditor({
             </p>
           )}
         </section>
-
-        <TakeList
-          transition={t}
-          viewingId={viewing?.id}
-          onView={(g) => setViewingId(g.id)}
-          onSelect={onSelectTake}
-          onDelete={onDeleteTake}
-          onEdit={onEditTake}
-        />
       </div>
     </div>
   )
@@ -499,7 +613,10 @@ function PendingView({ take }: { take: Generation }) {
   const progress = takeProgress(take)
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2.5 px-10 text-muted">
-      <span className="animate-pulse">{take.status === 'queued' ? 'I kö…' : 'Genererar…'}</span>
+      <span className="flex items-center gap-1.5">
+        <Spinner />
+        {pendingPhase(take)}
+      </span>
       <div className="h-1 w-full max-w-48 overflow-hidden rounded bg-raised">
         <div className="h-full bg-accent transition-all duration-1000" style={{ width: `${(progress ?? 0.03) * 100}%` }} />
       </div>
@@ -508,127 +625,5 @@ function PendingView({ take }: { take: Generation }) {
         {take.averageExecutionTime ? ` av ~${formatSeconds(take.averageExecutionTime)}` : ''}
       </span>
     </div>
-  )
-}
-
-/** Every take of the transition, newest first: look at one, choose the one the film uses, delete the rest. */
-function TakeList({
-  transition: t,
-  viewingId,
-  onView,
-  onSelect,
-  onDelete,
-  onEdit
-}: {
-  transition: StoryboardTransition
-  viewingId?: string
-  onView: (take: Generation) => void
-  onSelect: (take: Generation) => void
-  onDelete: (take: Generation) => void
-  onEdit?: (take: Generation) => void
-}) {
-  if (!t.takes.length) return null
-  return (
-    <section>
-      <h3 className="mb-2 flex items-baseline gap-2">
-        <span className="font-medium">Tagningar</span>
-        <span className="text-[12px] text-muted">{t.takes.length} st</span>
-      </h3>
-      <ul className="space-y-1.5">
-        {t.takes.map((take) => {
-          const selected = take.id === t.selectedGenerationId
-          const pending = isPending(take)
-          const canPlay = playable(take)
-          const older = take.status === 'completed' && madeFromOtherImages(take, t)
-          return (
-            <li
-              key={take.id}
-              className={`flex items-center gap-2.5 rounded-lg border p-1.5 transition ${
-                selected ? 'border-accent/60 bg-accent/5' : take.id === viewingId ? 'border-muted/50' : 'border-line'
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => canPlay && onView(take)}
-                disabled={!canPlay}
-                title={canPlay ? 'Visa i spelaren ovan' : undefined}
-                className="relative h-10 w-[72px] shrink-0 overflow-hidden rounded bg-black"
-              >
-                {take.thumbPath && canPlay ? (
-                  <img src={mediaUrl(take.thumbPath)} alt="" draggable={false} className="h-full w-full object-cover" />
-                ) : (
-                  <span className="flex h-full w-full items-center justify-center text-[10px] text-muted">
-                    {pending ? (take.status === 'queued' ? 'I kö' : 'Genererar') : take.status === 'failed' ? 'Fel' : null}
-                  </span>
-                )}
-              </button>
-              <div className="min-w-0 flex-1 text-[11px] leading-snug">
-                <p className="truncate text-text/90">
-                  {formatTakeTime(take.createdAt)}
-                  {take.status === 'completed' && <span className="text-muted"> · {formatLength(takeSeconds(take))}</span>}
-                  <span className="text-muted"> · {formatUsd(take.quote)}</span>
-                </p>
-                {take.status === 'failed' ? (
-                  <p className="truncate text-accent" title={take.error}>
-                    {take.error ?? 'Misslyckades'}
-                  </p>
-                ) : take.fileMissing ? (
-                  <p className="truncate text-muted">Videofilen finns inte längre</p>
-                ) : older ? (
-                  <p className="truncate text-amber-300/90" title="Gjord med en tidigare bild i någon av rutorna">
-                    Gjord med en tidigare bild
-                  </p>
-                ) : (
-                  <p className="truncate text-muted" title={generationTitle(take)}>
-                    {take.prompt || take.title ? generationTitle(take, 80) : 'Ingen prompt'}
-                  </p>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-0.5 text-[11px]">
-                {selected ? (
-                  <span className="px-1.5 font-medium text-accent">Vald</span>
-                ) : (
-                  canPlay && (
-                    <button
-                      type="button"
-                      onClick={() => onSelect(take)}
-                      className="rounded-md bg-raised px-2 py-0.5 font-medium text-text transition hover:bg-accent hover:text-white"
-                    >
-                      Välj
-                    </button>
-                  )
-                )}
-                {onEdit && canPlay && (
-                  <button
-                    type="button"
-                    onClick={() => onEdit(take)}
-                    title="Redigera tagningen… – ändra den med AI i Redigera (övergången rörs inte)"
-                    aria-label="Redigera tagningen"
-                    className="rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-text"
-                  >
-                    <ScissorsIcon size={12} />
-                  </button>
-                )}
-                {/* A take Redigera keeps (an edit started from it) only leaves the transition; main does the same. */}
-                {!pending && (
-                  <ConfirmButton
-                    question={take.keptByEdit ? 'Ta bort?' : 'Radera?'}
-                    onConfirm={() => onDelete(take)}
-                    title={
-                      take.keptByEdit
-                        ? 'Ta bort tagningen från övergången (filmen finns kvar i Redigera)'
-                        : 'Radera tagningen och videofilen'
-                    }
-                    className="rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-accent"
-                  >
-                    {take.keptByEdit ? 'Ta bort' : 'Radera'}
-                  </ConfirmButton>
-                )}
-              </div>
-            </li>
-          )
-        })}
-      </ul>
-    </section>
   )
 }

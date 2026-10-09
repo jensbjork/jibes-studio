@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-label'
 import { durationSeconds, kindOfModelId, type Kind } from '@shared/models'
-import type { Edit, Generation, GenerationReview, VideoModel } from '@shared/types'
+import { workKey, type Edit, type Generation, type GenerationReview, type VideoModel } from '@shared/types'
 import { ASSET_VIEW } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { markSeen, useSeenWhenVisible } from '../../lib/work'
 import { findTakeOwner, openTakeOwner, takeOwnerLabel, type TakeOwner } from '../../lib/takes'
 import { KIND_TONE } from '../pickers/assetKinds'
 import Popover from '../pickers/Popover'
@@ -17,6 +18,7 @@ import { formatWhen } from '../prompts/prompt-utils'
 import { requestLearning, useLearnings } from '../prompts/useLearnings'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { CloseIcon } from '../sequences/icons'
+import { Spinner } from '../work/StatusMark'
 import { STATUS_LABEL, formatClipLength, isPending, progressOf } from './feedText'
 import HighlightedPrompt from './HighlightedPrompt'
 import { BulbIcon, CameraIcon, ChevronLeftIcon, ChevronRightIcon, ScissorsIcon, SoundIcon } from './icons'
@@ -54,6 +56,11 @@ interface Props {
   onOpenLearning?: (id: string) => void
   /** "Använd igen" also takes the user to Generera (when the drawer is shown elsewhere). */
   reuseTitle?: string
+  /**
+   * An agent opened the drawer (open_in_studio): showing the clip then isn't the user looking at it, so it is not
+   * marked seen on opening (playing it still is; a failure counts once it has been on screen for a moment).
+   */
+  openedByAgent?: boolean
 }
 
 const MODE_LABEL: Record<Kind, string> = {
@@ -102,7 +109,8 @@ export default function ClipDrawer({
   onRate,
   navigate,
   onOpenLearning,
-  reuseTitle = 'Fyll i formuläret med klippets inställningar'
+  reuseTitle = 'Fyll i formuläret med klippets inställningar',
+  openedByAgent = false
 }: Props) {
   const asideRef = useRef<HTMLElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -115,6 +123,13 @@ export default function ClipDrawer({
   const otherReviews = reviews.filter((r) => r.author !== 'user')
   const refs = referencesOf(g.params, index)
   const model = models.find((m) => m.id === g.model)
+
+  // Opening a clip in the drawer is looking at it on purpose: a finished or failed one is seen from now on (also
+  // one that finishes while the drawer shows it). Not when an agent opened it.
+  const settled = g.status === 'completed' || g.status === 'failed'
+  useEffect(() => {
+    if (settled && !openedByAgent) markSeen([workKey.generation(g.id)])
+  }, [g.id, settled, openedByAgent])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -208,7 +223,7 @@ export default function ClipDrawer({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <Player key={g.id} g={g} videoRef={videoRef} />
+        <Player key={g.id} g={g} videoRef={videoRef} autoPlay={!openedByAgent} />
 
         <div className="space-y-6 px-5 pb-8 pt-4">
           {/* Keyed by clip: an armed "Radera" (and its focused confirm button) must never carry over to the next
@@ -292,8 +307,23 @@ export default function ClipDrawer({
   )
 }
 
-function Player({ g, videoRef }: { g: Generation; videoRef: RefObject<HTMLVideoElement | null> }) {
+function Player({
+  g,
+  videoRef,
+  autoPlay
+}: {
+  g: Generation
+  videoRef: RefObject<HTMLVideoElement | null>
+  /**
+   * Off when an agent opened the drawer: the clip waits for the user to press play (playing it is what marks it
+   * seen, and an agent showing a clip shouldn't start sound on its own).
+   */
+  autoPlay: boolean
+}) {
   const progress = progressOf(g)
+  // A failure shown in a drawer an agent opened counts as seen once it has been on screen for a moment.
+  const failureRef = useRef<HTMLDivElement>(null)
+  useSeenWhenVisible(failureRef, g.status === 'failed' ? workKey.generation(g.id) : undefined)
   return (
     <div className="relative aspect-video w-full shrink-0 bg-black">
       {g.status === 'completed' && g.filePath ? (
@@ -302,7 +332,7 @@ function Player({ g, videoRef }: { g: Generation; videoRef: RefObject<HTMLVideoE
           src={mediaUrl(g.filePath)}
           poster={g.thumbPath ? mediaUrl(g.thumbPath) : undefined}
           controls
-          autoPlay
+          autoPlay={autoPlay}
           loop
           preload="auto"
           onPlay={(e) => pauseOthers(e.currentTarget)}
@@ -310,7 +340,10 @@ function Player({ g, videoRef }: { g: Generation; videoRef: RefObject<HTMLVideoE
         />
       ) : isPending(g) ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-muted">
-          <span className="animate-pulse">{g.status === 'queued' ? 'I kö…' : 'Genererar…'}</span>
+          <span className="flex items-center gap-2">
+            <Spinner />
+            {g.status === 'queued' ? 'I kö…' : 'Genererar…'}
+          </span>
           <div className="h-1 w-full max-w-64 overflow-hidden rounded bg-raised">
             <div className="h-full bg-accent transition-all duration-1000" style={{ width: `${(progress ?? 0.03) * 100}%` }} />
           </div>
@@ -320,7 +353,10 @@ function Player({ g, videoRef }: { g: Generation; videoRef: RefObject<HTMLVideoE
           </span>
         </div>
       ) : (
-        <div className="flex h-full items-center justify-center overflow-y-auto p-6 text-center text-accent select-text">
+        <div
+          ref={failureRef}
+          className="flex h-full items-center justify-center overflow-y-auto p-6 text-center text-accent select-text"
+        >
           {g.status === 'failed' ? (g.error ?? 'Misslyckades') : 'Videon finns inte.'}
         </div>
       )}
@@ -371,7 +407,11 @@ function Actions({
         {g.status === 'completed' && g.filePath && navigate && (
           <button
             type="button"
-            onClick={() => navigate('editor', { type: 'open-editor', generationId: g.id })}
+            onClick={() => {
+              // Taking a clip into Redigera is choosing it on purpose.
+              markSeen([workKey.generation(g.id)])
+              navigate('editor', { type: 'open-editor', generationId: g.id })
+            }}
             title="Ändra klippet med AI i Redigera. Originalet lämnas orört – varje ändring blir en ny version."
             className={`${actionButton} flex items-center gap-1.5`}
           >
@@ -584,7 +624,10 @@ function Settings({ g, modelName, navigate }: { g: Generation; modelName?: strin
   rows.push(['Skapad', new Date(g.createdAt).toLocaleString('sv-SE', { dateStyle: 'medium', timeStyle: 'short' })])
   if (g.completedAt && g.status === 'completed') rows.push(['Tog', formatSeconds(g.completedAt - g.createdAt)])
   if (g.segmentId) {
-    rows.push(['Tagning i', <TakeOwnerLink key={g.segmentId} segmentId={g.segmentId} navigate={navigate} />])
+    rows.push([
+      'Tagning i',
+      <TakeOwnerLink key={g.segmentId} segmentId={g.segmentId} generationId={g.id} navigate={navigate} />
+    ])
   }
   if (g.filePath) {
     rows.push([
@@ -699,8 +742,16 @@ function OwnFilm({ g, navigate }: { g: Generation; navigate?: Navigate }) {
   )
 }
 
-/** The sequence clip or storyboard transition a take belongs to, named, and opened on click. */
-function TakeOwnerLink({ segmentId, navigate }: { segmentId: string; navigate?: Navigate }) {
+/** The sequence clip or storyboard transition a take belongs to, named, and opened on click (with the take in focus). */
+function TakeOwnerLink({
+  segmentId,
+  generationId,
+  navigate
+}: {
+  segmentId: string
+  generationId: string
+  navigate?: Navigate
+}) {
   // undefined while looking, null when it can't be found (the take's clip or transition is gone).
   const [owner, setOwner] = useState<TakeOwner | null>()
   useEffect(() => {
@@ -724,7 +775,7 @@ function TakeOwnerLink({ segmentId, navigate }: { segmentId: string; navigate?: 
   return (
     <button
       type="button"
-      onClick={() => openTakeOwner(owner, segmentId, navigate)}
+      onClick={() => openTakeOwner(owner, segmentId, navigate, generationId)}
       title={owner.kind === 'storyboard' ? 'Öppna storyboarden' : 'Öppna sekvensen'}
       className="text-left text-text underline-offset-2 hover:underline"
     >

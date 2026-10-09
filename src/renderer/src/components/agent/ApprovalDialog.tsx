@@ -40,7 +40,8 @@ import {
 import Modal from '../pickers/Modal'
 import { effectiveParams, needsTake, parseConsent, pendingTake } from '../sequences/sequenceUtils'
 import { approvalHeading, approvalOutcome, approvalTitle, approveLabel, expiresText, slotName } from './agentText'
-import { EditSummary, VoiceDesignSummary, useEditApproval } from './EditApproval'
+import { DeleteSummary, useDeleteCheck } from './DeleteApproval'
+import { EditSummary, ResumeSummary, VoiceDesignSummary, useEditApproval } from './EditApproval'
 import PromptText, { type TokenTarget } from './PromptText'
 import {
   BoardTargetSummary,
@@ -52,9 +53,10 @@ import {
 } from './StoryboardApproval'
 
 /**
- * Paid generations (videos and pictures) an agent asks for wait here for the user's OK. Shown above every view;
- * several requests queue up and are shown one at a time. Nothing is sent to Venice until "Godkänn och generera"
- * ("Godkänn och skapa" for a picture).
+ * What an agent asks for that needs the user's OK waits here: paid generations (videos, pictures, Redigera's paid
+ * operations, voices) and removals. Shown above every view; several requests queue up and are shown one at a time.
+ * Nothing is sent to Venice until "Godkänn och generera" ("Godkänn och skapa" for a picture), and nothing is removed
+ * until "Godkänn och ta bort".
  */
 export default function ApprovalDialog() {
   const agent = useAgentState()
@@ -87,9 +89,11 @@ export default function ApprovalDialog() {
 }
 
 /**
- * done: an image request was approved and its picture is made (shown until the user closes the dialog).
+ * done: an image request was approved and its picture is made, or a removal was carried out but not all of it went
+ * (shown until the user closes the dialog).
  * confirming: an edit or a voice design above BIG_PRICE_USD, with an unknown price or a part without one asks "Det
- * här kostar … Fortsätt?" once more before it is approved (Redigera's own rule for a paid click).
+ * här kostar … Fortsätt?" once more before it is approved (Redigera's own rule for a paid click); a removal of a
+ * container (an asset, a sequence, a storyboard, an edit) or of more than 5 things asks its own question.
  */
 type Phase = 'review' | 'confirming' | 'declining' | 'submitting' | 'failed' | 'done'
 
@@ -156,11 +160,16 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const [error, setError] = useState<string>()
   const [consent, setConsent] = useState<ConsentRequest>()
   const [reason, setReason] = useState('')
+  // A decline on its way: the buttons then say so, not the approve button's "Tar bort…" or "Skickar…".
+  const [declineSending, setDeclineSending] = useState(false)
   /** The still an approved image request made. */
   const [madeStill, setMadeStill] = useState<string>()
   // Redigera's requests: an operation on an edit's version, or a new voice for a character.
   const editRequest = a.kind === 'edit' || a.kind === 'voice-design' ? (a.edit ?? null) : undefined
   const editState = useEditApproval(a)
+  // A removal: what goes, checked again while it is on screen for review.
+  const removal = a.kind === 'delete' ? (a.delete ?? null) : undefined
+  const deleteCheck = useDeleteCheck(a, removal !== undefined && (phase === 'review' || phase === 'confirming'))
   /** "Jag har rätt att använda den här rösten", ticked in this dialog (a cloned voice needs it). */
   const [cloneConsent, setCloneConsent] = useState(false)
   const consentClip = a.kind === 'edit' ? a.edit?.needsCloneConsent : undefined
@@ -215,7 +224,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
       // An edit: what it does, and the plan as it would run now (another plan is something else to approve).
       editRequest && { ...editRequest, jobId: undefined, resultId: undefined },
       editState.plan?.fingerprint,
+      editState.job?.resumePriceUsd,
       editState.blocking,
+      // A removal: the items, and the live check's answer (a problem that clears arms the button again, after a while).
+      removal?.items.map((i) => [i.kind, i.id, i.segmentId, i.toIndex, i.label, i.effects]),
+      removal?.confirm,
+      deleteCheck.checked,
+      deleteCheck.problem,
       // A neighbour's other take (or trim) is another frame: the user must see it before it is paid for. While a
       // new answer is on its way the old frame may be stale, so the request arms again only once it has come.
       framesLoading,
@@ -242,18 +257,24 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     transitionState?.blocking ??
     boardTarget?.problem ??
     (editRequest === null ? 'Förfrågan saknar uppgifter om ändringen' : undefined) ??
-    editState.blocking
+    editState.blocking ??
+    (removal === null ? 'Förfrågan saknar uppgifter om vad som ska tas bort' : undefined) ??
+    (removal ? deleteCheck.problem : undefined)
   // Changed since the agent asked (rather than something the agent can fix): the agent has to ask again.
   const askAgain =
     !!blocking &&
     (blocking === descriptionsChanged ||
       (!!transitionState?.lapsed && blocking === transitionState.blocking) ||
       blocking === boardTarget?.problem ||
-      blocking === editState.blocking)
+      blocking === editState.blocking ||
+      blocking === deleteCheck.problem)
   // The frames shown must be the ones that will be sent: no approving while they are being fetched (again).
   const framesPending = needsFrames && pending && framesLoading
-  // An edit is approved once its plan as it would run now is on screen (its warnings, a price that moved).
-  const editPlanPending = a.kind === 'edit' && pending && !editState.plan && !editState.blocking
+  // An edit is approved once its plan as it would run now is on screen (its warnings, a price that moved) – or, for a
+  // stopped job to continue, the job as it is now.
+  const editPlanPending = a.kind === 'edit' && pending && !editState.ready && !editState.blocking
+  // A removal is approved once main has checked it again since it was shown.
+  const deleteCheckPending = !!removal && pending && !deleteCheck.checked
 
   const fail = (message: string) => {
     const request = parseConsent(message)
@@ -282,6 +303,11 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           setPhase('done')
           return
         }
+        // A removal where something didn't go: the list says what, before the dialog moves on.
+        if (result.delete?.items.some((i) => i.outcome && i.outcome.status !== 'deleted')) {
+          setPhase('done')
+          return
+        }
         hold(false)
         return
       }
@@ -293,6 +319,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
 
   const decline = async () => {
     setPhase('submitting')
+    setDeclineSending(true)
     setError(undefined)
     try {
       await resolveApproval(a.id, false, reason.trim() || undefined)
@@ -300,6 +327,8 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     } catch (e) {
       setError(ipcErrorMessage(e))
       setPhase('failed')
+    } finally {
+      setDeclineSending(false)
     }
   }
 
@@ -340,8 +369,9 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   }
 
   const ownerName = storyboard?.name ?? sequence?.name ?? a.sequenceName
-  /** "Kan inte genereras" a video, "Kan inte göras" an edit or a voice. */
-  const cannot = editRequest !== undefined ? 'Kan inte göras' : 'Kan inte genereras'
+  /** "Kan inte genereras" a video, "Kan inte göras" an edit or a voice, "Kan inte tas bort" a removal. */
+  const cannot =
+    removal !== undefined ? 'Kan inte tas bort' : editRequest !== undefined ? 'Kan inte göras' : 'Kan inte genereras'
   const subtitle = [
     approvalTitle(a, ownerName),
     pending ? expiresText(expiresAt, now) : undefined,
@@ -351,7 +381,23 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     .join(' · ')
 
   const footer =
-    phase === 'confirming' ? (
+    phase === 'confirming' && removal ? (
+      <>
+        <span className="mr-auto text-[13px]">{removal.confirm ?? 'Fortsätt?'}</span>
+        <button onClick={() => setPhase('review')} className={secondary}>
+          Tillbaka
+        </button>
+        <button
+          autoFocus
+          onClick={() => void approve()}
+          disabled={!!blocking || !pending || expired || !armed || deleteCheckPending}
+          title={blocking ? `${cannot}: ${blocking}` : undefined}
+          className={primary}
+        >
+          Ja, ta bort
+        </button>
+      </>
+    ) : phase === 'confirming' ? (
       <>
         <span className="mr-auto text-[13px]">
           {a.priceUsd === undefined
@@ -424,10 +470,10 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           Senare
         </button>
         <button onClick={() => setPhase('declining')} disabled={phase === 'submitting'} className={secondary}>
-          Avböj
+          {declineSending ? 'Avböjer…' : 'Avböj'}
         </button>
         <button
-          onClick={() => (bigPrice ? setPhase('confirming') : void approve())}
+          onClick={() => (bigPrice || removal?.confirm ? setPhase('confirming') : void approve())}
           disabled={
             phase === 'submitting' ||
             !!blocking ||
@@ -436,6 +482,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             !armed ||
             framesPending ||
             editPlanPending ||
+            deleteCheckPending ||
             consentMissing
           }
           title={
@@ -447,24 +494,28 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
                   ? 'Hämtar start- och slutbilden…'
                   : editPlanPending
                     ? 'Läser redigeringen…'
-                    : consentMissing
-                      ? 'Bocka i att du har rätt att använda rösten först'
-                      : !armed
-                        ? 'Läs igenom förfrågan först'
-                        : undefined
+                    : deleteCheckPending
+                      ? 'Kontrollerar att inget har ändrats…'
+                      : consentMissing
+                        ? 'Bocka i att du har rätt att använda rösten först'
+                        : !armed
+                          ? 'Läs igenom förfrågan först'
+                          : undefined
           }
           className={`flex items-center gap-2 ${primary}`}
         >
           <span>
-            {phase === 'submitting'
+            {phase === 'submitting' && !declineSending
               ? image !== undefined
                 ? 'Skapar bilden…'
-                : a.kind === 'edit'
-                  ? 'Startar…'
-                  : 'Skickar…'
+                : removal !== undefined
+                  ? 'Tar bort…'
+                  : a.kind === 'edit'
+                    ? 'Startar…'
+                    : 'Skickar…'
               : approveLabel(a)}
           </span>
-          {phase !== 'submitting' && a.priceUsd !== undefined && (
+          {(phase !== 'submitting' || declineSending) && a.priceUsd !== undefined && (
             <span className="text-white/80">{priceShown(a.priceUsd)}</span>
           )}
         </button>
@@ -522,7 +573,10 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         )}
         {image === null && <p className="text-accent">Förfrågan saknar uppgifter om bilden.</p>}
 
-        {editRequest && a.kind === 'edit' && (
+        {editRequest && a.kind === 'edit' && editRequest.resumeJobId && (
+          <ResumeSummary approval={a} request={editRequest} state={editState} />
+        )}
+        {editRequest && a.kind === 'edit' && !editRequest.resumeJobId && (
           <EditSummary
             approval={a}
             request={editRequest}
@@ -534,6 +588,9 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         )}
         {editRequest && a.kind === 'voice-design' && <VoiceDesignSummary request={editRequest} />}
         {editRequest === null && <p className="text-accent">Förfrågan saknar uppgifter om ändringen.</p>}
+
+        {removal && <DeleteSummary approval={a} request={removal} check={deleteCheck} />}
+        {removal === null && <p className="text-accent">Förfrågan saknar uppgifter om vad som ska tas bort.</p>}
 
         {clips.map((clip) => (
           <ClipSummary
@@ -564,6 +621,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         {a.kind !== 'generation' &&
           image === undefined &&
           editRequest === undefined &&
+          removal === undefined &&
           !storyboardId &&
           !sequence &&
           !sequenceError &&
@@ -572,23 +630,27 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           <p className="text-muted">Läser storyboarden…</p>
         )}
 
-        <div className="flex items-baseline justify-between gap-4 border-t border-line pt-4">
-          <span className="text-muted">
-            {clips.length > 1
-              ? `Totalt för ${clips.length} klipp`
-              : transitions.length > 1
-                ? `Totalt för ${transitions.length} övergångar`
-                : 'Kostnad'}
-            <span className="ml-1.5 text-[11px]">(dras från ditt Venice-konto)</span>
-          </span>
-          <span className="text-lg font-semibold tabular-nums">
-            {a.priceUsd !== undefined ? priceShown(a.priceUsd) : 'Okänt pris'}
-          </span>
-        </div>
+        {/* A removal costs nothing; its panel ends with what happens to the files instead. */}
+        {removal === undefined && (
+          <div className="flex items-baseline justify-between gap-4 border-t border-line pt-4">
+            <span className="text-muted">
+              {clips.length > 1
+                ? `Totalt för ${clips.length} klipp`
+                : transitions.length > 1
+                  ? `Totalt för ${transitions.length} övergångar`
+                  : 'Kostnad'}
+              <span className="ml-1.5 text-[11px]">(dras från ditt Venice-konto)</span>
+            </span>
+            <span className="text-lg font-semibold tabular-nums">
+              {a.priceUsd !== undefined ? priceShown(a.priceUsd) : 'Okänt pris'}
+            </span>
+          </div>
+        )}
         {phase === 'submitting' && image !== undefined && (
           <p className="text-[12px] text-muted">Venice skapar bilden – det brukar ta 10–30 sekunder.</p>
         )}
-        {blocking && (
+        {/* A removal says what changed at the top of its list (DeleteSummary). */}
+        {blocking && removal === undefined && (
           <p className="text-[12px] text-accent">
             {cannot} som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {a.client}{' '}
             {askAgain ? 'fråga igen' : 'rätta det'}, eller avböj.
@@ -738,9 +800,9 @@ function segmentClip(segment: Segment, index: number, count: number): Clip {
   return clipOf(segment.id, effectiveParams(own, index), `Klipp ${index + 1}`, continuing ? index : undefined, endsAt)
 }
 
-/** The clips a request would generate, in order (none for an image request). */
+/** The clips a request would generate, in order (none for an image request, an edit, a voice or a removal). */
 function clipsOf(a: ApprovalRequest, sequence: Sequence | undefined): Clip[] {
-  if (a.kind === 'image') return []
+  if (a.kind === 'image' || a.kind === 'edit' || a.kind === 'voice-design' || a.kind === 'delete') return []
   if (a.kind === 'generation') return a.params ? [clipOf(a.id, a.params)] : []
   const count = sequence?.segments.length ?? 0
   const indexed = sequence?.segments.map((segment, index) => ({ segment, index })) ?? []

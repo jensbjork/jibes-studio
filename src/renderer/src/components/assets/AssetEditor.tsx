@@ -6,7 +6,7 @@ import type { Navigate } from '../../lib/navigation'
 import OpenFolderButton from '../library/OpenFolderButton'
 import AssetAvatar from './AssetAvatar'
 import AssetImages from './AssetImages'
-import AssetSounds from './AssetSounds'
+import AssetSounds, { type SoundFocus } from './AssetSounds'
 import DefaultOutfitPicker from './DefaultOutfitPicker'
 import { droppedPaths, fileDragKinds, imageCountLabel, isFileDrag, type FileDragKinds } from './imageUtils'
 import { useAssetDraft, type SaveState } from './useAssetDraft'
@@ -24,6 +24,8 @@ interface Props {
   addingImages: number
   /** Sound clips currently being copied into the library. */
   addingAudio: number
+  /** A sound clip (or a failed voice design) to bring into view and point out (see AssetSounds). */
+  focusAudio?: SoundFocus
   navigate: Navigate
   onUpdated: (a: Asset) => void
   /** Files dropped or picked: photos, and sound clips for the kinds that have them. */
@@ -35,9 +37,9 @@ interface Props {
 const createdFormat = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })
 
 /**
- * Name, description, actions and reference images of one character, environment, outfit or pose (plus a
- * character's default outfit and voice, an environment's sound, which characters wear an outfit by default
- * and how a pose is used). Mount with key={asset.id}.
+ * Name, description, actions and reference images of one character, environment, product, outfit or pose (plus a
+ * character's default outfit and voice, an environment's sound, which characters wear an outfit by default and how
+ * a pose or a product is used). Mount with key={asset.id}.
  */
 export default function AssetEditor({
   asset,
@@ -47,6 +49,7 @@ export default function AssetEditor({
   autoFocusName,
   addingImages,
   addingAudio,
+  focusAudio,
   navigate,
   onUpdated,
   onAddFiles,
@@ -286,6 +289,7 @@ export default function AssetEditor({
                 onUpdated={onUpdated}
                 onError={onError}
                 onBusyChange={setAudioBusy}
+                focus={focusAudio}
               />
             </section>
           )}

@@ -1,28 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supportsEndImage } from '@shared/models'
-import type { ConsentRequest, FfmpegStatus, Generation, GenerationParams, Segment, Sequence } from '@shared/types'
+import {
+  workKey,
+  type ConsentRequest,
+  type FfmpegStatus,
+  type FinishedWork,
+  type Generation,
+  type GenerationParams,
+  type RunningWork,
+  type Segment,
+  type Sequence
+} from '@shared/types'
 import { ipcErrorMessage, useModels } from '../../lib/hooks'
 import { LAST_SEQUENCE_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
 import type { Intent, Navigate } from '../../lib/navigation'
+import { markSeen, useRunning, useSeenWhenVisible, useUnseen } from '../../lib/work'
 import ConsentDialog from '../ConsentDialog'
 import GenerationPickerDialog from '../feed/GenerationPickerDialog'
 import { useImportCards, useImportFlow, type ImportOutcome } from '../feed/ownClips'
 import { missingInput } from '../ParamsForm'
+import { aspectValue } from '../storyboards/storyboardUtils'
+import { isPlayable } from '../takes/takeText'
+import TakeStrip, { type PickedBy } from '../takes/TakeStrip'
+import { KEY_SELECT_DELAY, useTakeSelection } from '../takes/useTakeSelection'
 import { ownEndImageRefused } from './clipChecks'
 import { CloseIcon, FilmIcon } from './icons'
 import PreviewPlayer from './PreviewPlayer'
 import SegmentEditor, { type EditorHandle } from './SegmentEditor'
-import SequenceHeader, { type ExportState } from './SequenceHeader'
+import SequenceHeader from './SequenceHeader'
 import SequenceList from './SequenceList'
-import TakeList from './TakeList'
 import Timeline, { type ClipSource } from './Timeline'
-import TrimControls from './TrimControls'
+import TrimControls, { type PlayRequest, type TakePlayerHandle } from './TrimControls'
 import {
   clipKey,
   continues,
   effectiveParams,
-  fileName,
   isPending,
   isUntouchedClip,
   needsTake,
@@ -32,9 +45,11 @@ import {
   readyTake,
   selectedTake,
   sequenceAspect,
+  takePromptsFor,
   totalLength
 } from './sequenceUtils'
 import type { FlushRegistry } from './useDraft'
+import { useExportStatus } from './useExportStatus'
 import { useSequence, useSequenceList } from './useSequence'
 import { useTotalQuote } from './useTotalQuote'
 
@@ -151,19 +166,39 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   const { sequence } = store
   const sequenceId = sequence?.id
 
+  // ── Pågår och klart for the open sequence (also what an agent or an earlier visit started) ────────────────
+  const exportStatus = useExportStatus(sequenceId)
+  const ownerUnseenFilter = useCallback((w: FinishedWork) => !!sequenceId && w.ownerId === sequenceId, [sequenceId])
+  const ownerRunningFilter = useCallback((w: RunningWork) => !!sequenceId && w.ownerId === sequenceId, [sequenceId])
+  const ownerUnseen = useUnseen(ownerUnseenFilter)
+  const ownerRunning = useRunning(ownerRunningFilter)
+  // A "Generera saknade" run that stopped on a problem: main keeps its error with the sequence while the app runs,
+  // and as a failure in Pågår och klart (also after a restart) until it has been seen.
+  const runFailure = ownerUnseen
+    .filter((w) => w.failureOf === 'run')
+    .sort((a, b) => b.finishedAt - a.finishedAt)[0]
+  const runWork = ownerRunning.find((w) => w.kind === 'run')
+
   const [segmentChoice, setSegmentChoice] = useState<Record<string, string>>({})
   const [ffmpeg, setFfmpeg] = useState<FfmpegStatus>()
-  const [exports, setExports] = useState<Record<string, ExportState>>({})
   const [notice, setNotice] = useState<Notice>()
   const [creating, setCreating] = useState(false)
   const [adding, setAdding] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [focusNameFor, setFocusNameFor] = useState<string>()
   const [preview, setPreview] = useState<{ startSegmentId?: string }>()
+  // A take shown in the player without being chosen (⌥-click), for the clip it belongs to.
+  const [takePreview, setTakePreview] = useState<{ segmentId: string; takeId: string }>()
+  // A click on a take plays it once the player has it (see TrimControls).
+  const [playRequest, setPlayRequest] = useState<PlayRequest>()
+  const playCount = useRef(0)
+  // A take to focus in the strip (a link to it: Pågår och klart, an agent's open_in_studio).
+  const [takeFocus, setTakeFocus] = useState<{ sequenceId: string; segmentId?: string; id: string; n: number }>()
+  const focusCount = useRef(0)
+  const player = useRef<TakePlayerHandle>(null)
   // Open with the clips the run would pay for when it was opened (see runPlanKeys).
   const [runConsentOpen, setRunConsentOpen] = useState<ReadonlySet<string>>()
   const [dismissedRunError, setDismissedRunError] = useState<string>()
-  const [exportDismissed, setExportDismissed] = useState<Record<string, boolean>>({})
   // The clip "Gör om mellan grannarna" was just used on, so its editor says what to do next.
   const [bridgedId, setBridgedId] = useState<string>()
   const [picking, setPicking] = useState<PickRequest>()
@@ -206,22 +241,37 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   useEffect(() => {
     if (intent?.type !== 'open-sequence') return
     gone.current.delete(intent.sequenceId)
-    if (intent.segmentId) {
-      // A given clip (an agent's open_in_studio): select it. One that no longer exists falls back as usual.
-      const { sequenceId, segmentId } = intent
+    const { sequenceId, segmentId, generationId } = intent
+    if (segmentId) {
+      // A given clip (an agent's open_in_studio, Pågår och klart): select it. One that no longer exists falls back
+      // as usual.
       pickNewestFor.current = undefined
       setSegmentChoice((m) => ({ ...m, [sequenceId]: segmentId }))
-    } else {
+    } else if (!generationId) {
       // Opened from "Lägg i sekvens": show the clip that was just added.
-      pickNewestFor.current = intent.sequenceId
+      pickNewestFor.current = sequenceId
     }
-    setSelectedId(intent.sequenceId)
+    // A given take is focused in the strip – never chosen, and never counted as seen by being shown this way (D4):
+    // only playing it or clicking it is looking at it, whoever opened the place (a link, or an agent: source 'agent').
+    if (generationId) setTakeFocus({ sequenceId, segmentId, id: generationId, n: ++focusCount.current })
+    setSelectedId(sequenceId)
     onIntentHandled()
   }, [intent])
 
   const chosenId = sequenceId ? segmentChoice[sequenceId] : undefined
   const segmentIndex = sequence ? sequence.segments.findIndex((s) => s.id === chosenId) : -1
   const segment: Segment | undefined = sequence && segmentIndex !== -1 ? sequence.segments[segmentIndex] : undefined
+
+  // The chosen take as the strip shows it (optimistic). Before main hears of another take, the trims being edited
+  // are saved: they belong to the take before, and main remembers them with it (take_trims).
+  const commitTake = useCallback(
+    async (segmentId: string, takeId: string) => {
+      await flushAll()
+      await store.patchSegment(segmentId, { selectedGenerationId: takeId })
+    },
+    [flushAll, store.patchSegment]
+  )
+  const selection = useTakeSelection(segment?.id, segment?.selectedGenerationId, commitTake)
 
   const selectSegment = useCallback(
     (id: string) => {
@@ -251,29 +301,26 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     setSegmentChoice((m) => ({ ...m, [sequence.id]: segments[i].id }))
   }, [sequence, segmentIndex])
 
+  // A take to focus that came without its clip: open the clip it is a take of, once the sequence has loaded.
+  useEffect(() => {
+    if (!sequence || !takeFocus || takeFocus.segmentId || takeFocus.sequenceId !== sequence.id) return
+    const owner = sequence.segments.find((s) => s.takes.some((t) => t.id === takeFocus.id))
+    if (!owner) return
+    setTakeFocus({ ...takeFocus, segmentId: owner.id })
+    setSegmentChoice((m) => ({ ...m, [sequence.id]: owner.id }))
+  }, [sequence, takeFocus])
+
+  // The focus request is for one visit: once another clip is opened, coming back doesn't move the focus again.
+  useEffect(() => {
+    if (!takeFocus?.segmentId || sequence?.id !== takeFocus.sequenceId || !segment) return
+    if (segment.id !== takeFocus.segmentId) setTakeFocus(undefined)
+  }, [segment?.id, sequence?.id, takeFocus])
+
   // ── Live state from main ───────────────────────────────────────────────────
 
   useEffect(() => {
     window.studio.ffmpegStatus().then(setFfmpeg, (e: unknown) => setFfmpeg({ ok: false, message: ipcErrorMessage(e) }))
   }, [])
-
-  useEffect(
-    () =>
-      window.studio.onExportProgress((p) =>
-        setExports((m) => {
-          if (p.done) {
-            if (p.error) return { ...m, [p.sequenceId]: { status: 'error', error: p.error } }
-            if (p.path) return { ...m, [p.sequenceId]: { status: 'done', path: p.path } }
-            return m
-          }
-          // A straggling progress event must not reopen a finished export.
-          const prev = m[p.sequenceId]
-          if (prev && prev.status !== 'running') return m
-          return { ...m, [p.sequenceId]: { status: 'running', progress: p.progress } }
-        })
-      ),
-    []
-  )
 
   useEffect(() => {
     if (!sequence?.running) setStopping(false)
@@ -358,6 +405,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       return
     }
     setDismissedRunError(undefined)
+    // Starting again is acting on the last run's problem: it has been seen.
+    if (runFailure) markSeen([runFailure.key])
     store.update((s) => ({ ...s, running: true, runError: undefined }))
     try {
       await window.studio.generateAllSegments(sequenceId)
@@ -397,14 +446,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       setNotice({ text: 'Ändringarna kunde inte sparas. Försök igen.', sequenceId })
       return
     }
-    setExportDismissed((m) => ({ ...m, [sequenceId]: false }))
-    setExports((m) => ({ ...m, [sequenceId]: { status: 'running', progress: 0 } }))
-    try {
-      const path = await window.studio.exportSequence(sequenceId)
-      setExports((m) => ({ ...m, [sequenceId]: { status: 'done', path } }))
-    } catch (e) {
-      setExports((m) => ({ ...m, [sequenceId]: { status: 'error', error: ipcErrorMessage(e) } }))
-    }
+    await exportStatus.run(() => window.studio.exportSequence(sequenceId))
   }
 
   const openPreview = async (startSegmentId?: string) => {
@@ -554,14 +596,46 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     store.moveSegment(id, toIndex).catch((e: unknown) => setNotice({ text: ipcErrorMessage(e), sequenceId }))
   }
 
-  const selectTake = (take: Generation) => {
+  // ── The take in use: a click chooses it and plays it, the keyboard chooses without playing ────────────────
+
+  const requestPlay = (takeId: string) => setPlayRequest({ takeId, n: ++playCount.current })
+
+  const chooseTake = (take: Generation, by: PickedBy) => {
     if (!segment) return
-    store
-      .patchSegment(segment.id, { selectedGenerationId: take.id })
-      .catch((e: unknown) => setNotice({ text: ipcErrorMessage(e), sequenceId }))
+    setTakePreview(undefined)
+    if (take.id === selection.activeId) {
+      // The chosen one again: a click starts it over from where it starts in the sequence; an arrow only leaves a
+      // preview.
+      if (by === 'click') requestPlay(take.id)
+      return
+    }
+    selection.choose(take.id, by === 'click' ? 0 : KEY_SELECT_DELAY).then(
+      () => {
+        if (by === 'click') requestPlay(take.id)
+      },
+      (e: unknown) => setNotice({ text: ipcErrorMessage(e), sequenceId })
+    )
+  }
+
+  const previewTake = (take: Generation, by: PickedBy) => {
+    if (!segment) return
+    if (take.id === selection.activeId) {
+      setTakePreview(undefined)
+      return
+    }
+    setTakePreview({ segmentId: segment.id, takeId: take.id })
+    if (by === 'click') requestPlay(take.id)
+  }
+
+  /** "Välj den" under a previewed take: it becomes the clip's take (already watched, so it isn't started over). */
+  const choosePreviewed = (take: Generation) => {
+    setTakePreview(undefined)
+    markSeen([workKey.generation(take.id)])
+    selection.choose(take.id, 0).catch((e: unknown) => setNotice({ text: ipcErrorMessage(e), sequenceId }))
   }
 
   const deleteTake = async (take: Generation) => {
+    setTakePreview((p) => (p?.takeId === take.id ? undefined : p))
     store.update((s) => ({
       ...s,
       segments: s.segments.map((seg) => ({
@@ -585,6 +659,16 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   }
 
   const reusePrompt = (take: Generation) => editorHandle.current?.applyPrompt(take.params)
+
+  /** "Lägg till tagning från fil…". */
+  const pickTakeFiles = async () => {
+    try {
+      const paths = await window.studio.pickVideos(true)
+      if (paths.length) await importTakes(paths)
+    } catch (e) {
+      setNotice({ text: ipcErrorMessage(e), sequenceId })
+    }
+  }
 
   /**
    * "Gör om mellan grannarna": main sets the clip to start on the previous clip's last frame and end on the next
@@ -633,14 +717,24 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
         : undefined
   const previewDisabled = readyCount === 0 ? 'Inga klipp har en färdig vald tagning ännu' : undefined
 
-  const exportState = sequenceId ? exports[sequenceId] : undefined
-  const runError = sequence?.runError
+  // While the app runs, main keeps the run's error with the sequence; after a restart only Pågår och klart has it.
+  const runError = sequence?.runError ?? runFailure?.error
   const runConsent = parseConsent(runError)
   // Run errors are prefixed "Klipp N: …"; offer a jump to that clip.
   const runErrorClip = Number(/^Klipp (\d+)/.exec(runError ?? '')?.[1])
   const runErrorSegment = runErrorClip ? sequence?.segments[runErrorClip - 1] : undefined
   const visibleNotice = notice && (!notice.sequenceId || notice.sequenceId === sequenceId) ? notice : undefined
-  const ready = segment && readyTake(segment)
+  // The right pane shows the take chosen in the strip, also before main has confirmed it.
+  const shownSegment = useMemo(
+    () => (segment ? { ...segment, selectedGenerationId: selection.activeId } : undefined),
+    [segment, selection.activeId]
+  )
+  const ready = shownSegment && readyTake(shownSegment)
+  const hintText = shownSegment && !ready ? selectionHintText(shownSegment) : undefined
+  const previewed =
+    segment && takePreview?.segmentId === segment.id
+      ? segment.takes.find((t) => t.id === takePreview.takeId && isPlayable(t))
+      : undefined
   const nextSegment = sequence && segmentIndex !== -1 ? sequence.segments[segmentIndex + 1] : undefined
   const previousSegment = sequence && segmentIndex > 0 ? sequence.segments[segmentIndex - 1] : undefined
 
@@ -674,6 +768,37 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     : []
   const takeImports = segment ? importCards.filter((c) => c.target === 'segment' && c.segmentId === segment.id) : []
 
+  const strip = segment && sequence && (
+    <TakeStrip
+      key={segment.id}
+      owner="sequence"
+      takes={segment.takes}
+      activeId={selection.activeId}
+      previewId={previewed?.id}
+      focusRequest={takeFocus && takeFocus.segmentId === segment.id ? takeFocus : undefined}
+      aspect={aspectValue(sequenceAspect(sequence))}
+      models={models}
+      // main chooses a finished take by itself only while the clip has no usable chosen take (autoSelect).
+      autoSelects={autoSelects(segment)}
+      importing={takeImports}
+      // Read with the clip's references now: a take whose prompt differs only by a reorder's renumbering has
+      // nothing to bring back.
+      promptDiffers={(take) =>
+        takePromptsFor(take.params, segment.params).prompt.trim() !== segment.params.prompt.trim()
+      }
+      onChoose={chooseTake}
+      onPreview={previewTake}
+      onLeavePreview={() => setTakePreview(undefined)}
+      onTogglePlay={() => player.current?.toggle()}
+      onPlayFromStart={() => player.current?.playFromStart()}
+      onDelete={(take) => void deleteTake(take)}
+      onUsePrompt={reusePrompt}
+      onEdit={(take) => navigate('editor', { type: 'open-editor', generationId: take.id })}
+      onImport={(paths) => void importTakes(paths)}
+      onPickFile={() => void pickTakeFiles()}
+    />
+  )
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const banners = (
@@ -696,51 +821,65 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       )}
       {importFlow.inspecting && <Banner tone="info">Läser filerna…</Banner>}
       {runError && runError !== dismissedRunError && !sequence?.running && (
-        <Banner tone="error" onDismiss={() => setDismissedRunError(runError)}>
-          {runConsent ? (
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              Generera saknade stoppades: modellen kräver att du godkänner leverantörens villkor.
-              <button
-                onClick={() => sequence && setRunConsentOpen(new Set(runPlanKeys(sequence)))}
-                className="rounded bg-accent px-2 py-0.5 font-medium text-white hover:bg-accent-hover"
-              >
-                Granska och fortsätt
-              </button>
-            </span>
-          ) : (
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>Generera saknade stoppades – {runError}</span>
-              {runErrorSegment && runErrorSegment.id !== segment?.id && (
+        <SeenWhenVisible seenKey={runFailure?.key}>
+          <Banner
+            tone="error"
+            onDismiss={() => {
+              setDismissedRunError(runError)
+              if (runFailure) markSeen([runFailure.key])
+            }}
+          >
+            {runConsent ? (
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                Generera saknade stoppades: modellen kräver att du godkänner leverantörens villkor.
                 <button
-                  onClick={() => selectSegment(runErrorSegment.id)}
-                  className="rounded border border-accent/40 px-2 py-0.5 font-medium hover:bg-accent/10"
+                  onClick={() => sequence && setRunConsentOpen(new Set(runPlanKeys(sequence)))}
+                  className="rounded bg-accent px-2 py-0.5 font-medium text-white hover:bg-accent-hover"
                 >
-                  Visa klipp {runErrorClip}
+                  Granska och fortsätt
                 </button>
-              )}
-            </span>
-          )}
-        </Banner>
+              </span>
+            ) : (
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>Generera saknade stoppades – {runError}</span>
+                {runErrorSegment && runErrorSegment.id !== segment?.id && (
+                  <button
+                    onClick={() => selectSegment(runErrorSegment.id)}
+                    className="rounded border border-accent/40 px-2 py-0.5 font-medium hover:bg-accent/10"
+                  >
+                    Visa klipp {runErrorClip}
+                  </button>
+                )}
+              </span>
+            )}
+          </Banner>
+        </SeenWhenVisible>
       )}
-      {exportState?.status === 'done' && sequenceId && !exportDismissed[sequenceId] && (
-        <Banner tone="success" onDismiss={() => setExportDismissed((m) => ({ ...m, [sequenceId]: true }))}>
+      {exportStatus.done && (
+        <Banner tone="success" onDismiss={exportStatus.dismissDone}>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>
-              Exporterad: <span className="font-mono">{fileName(exportState.path)}</span>
-            </span>
+            <span title={exportStatus.done.mediaPath}>Filmen är klar</span>
             <button
-              onClick={() => window.studio.revealFile(exportState.path)}
+              onClick={() => void exportStatus.reveal()}
               className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
             >
               Visa i Finder
             </button>
+            {exportStatus.done.exportId && (
+              <button
+                onClick={() => exportStatus.edit(navigate)}
+                title="Ändra den färdiga filmen med AI i Redigera. Sekvensen rörs inte."
+                className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
+              >
+                Redigera
+              </button>
+            )}
           </span>
         </Banner>
       )}
-      {exportState?.status === 'error' && sequenceId && !exportDismissed[sequenceId] && (
-        <Banner tone="error" onDismiss={() => setExportDismissed((m) => ({ ...m, [sequenceId]: true }))}>
-          {/* main's messages often already say so ("Exporten misslyckades: …", "Exporten avbröts.") */}
-          {exportState.error.startsWith('Exporten') ? exportState.error : `Exporten misslyckades: ${exportState.error}`}
+      {exportStatus.failure && (
+        <Banner tone="error" onDismiss={exportStatus.dismissFailure}>
+          {exportStatus.failure}
         </Banner>
       )}
     </>
@@ -751,7 +890,6 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       <SequenceList
         sequences={sequences}
         selectedId={selectedId}
-        runningId={sequence?.running ? sequence.id : undefined}
         creating={creating}
         onSelect={(id) => {
           gone.current.delete(id)
@@ -774,7 +912,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               runQuote={runQuote}
               stopping={stopping}
               previewDisabled={previewDisabled}
-              exportState={exportState}
+              runDetail={runWork?.detail}
+              exportProgress={exportStatus.progress}
               exportBlocked={exportBlocked}
               autoFocusName={focusNameFor === sequence.id}
               onAutoFocused={() => setFocusNameFor(undefined)}
@@ -797,49 +936,44 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               onAddFrom={(source, after) => void addFrom(source, after)}
               onDropFiles={dropFiles}
               importing={sequenceImports}
+              unseen={ownerUnseen}
+              running={ownerRunning}
               onMove={moveSegment}
               onBridge={(id) => void bridge(id)}
             />
 
-            {segment ? (
+            {segment && shownSegment ? (
               <div className="flex min-h-0 flex-1">
                 <section className="flex w-[360px] shrink-0 flex-col border-r border-line">{editor}</section>
-                <section className="min-w-0 flex-1 overflow-y-auto">
+                <section
+                  className="min-w-0 flex-1 overflow-y-auto"
+                  onKeyDown={(e) => {
+                    // Esc anywhere in the player's pane goes back from a preview to the chosen take.
+                    if (e.key !== 'Escape' || !previewed || e.defaultPrevented) return
+                    e.preventDefault()
+                    setTakePreview(undefined)
+                  }}
+                >
                   <div className="mx-auto max-w-4xl space-y-8 p-5">
-                    {ready ? (
-                      <TrimControls
-                        key={`${segment.id}:${ready.id}`}
-                        segment={segment}
-                        take={ready}
-                        number={segmentIndex + 1}
-                        nextContinues={!!nextSegment?.continueFromPrevious}
-                        previousEndsHere={!!previousSegment?.endFromNext}
-                        patchSegment={store.patchSegment}
-                        flushers={flushers}
-                      />
-                    ) : (
-                      <SelectionHint segment={segment} />
-                    )}
-                    <TakeList
-                      segment={segment}
+                    <TrimControls
+                      key={segment.id}
+                      segment={shownSegment}
+                      take={ready}
+                      preview={previewed}
+                      hint={hintText && <SelectionHint text={hintText} />}
                       number={segmentIndex + 1}
-                      models={models}
-                      currentPrompt={segment.params.prompt}
-                      importing={takeImports}
-                      navigate={navigate}
-                      onSelect={selectTake}
-                      onDelete={(take) => void deleteTake(take)}
-                      onUsePrompt={reusePrompt}
-                      onImport={(paths) => void importTakes(paths)}
-                      onPickFile={async () => {
-                        try {
-                          const paths = await window.studio.pickVideos(true)
-                          if (paths.length) await importTakes(paths)
-                        } catch (e) {
-                          setNotice({ text: ipcErrorMessage(e), sequenceId })
-                        }
-                      }}
-                    />
+                      nextContinues={!!nextSegment?.continueFromPrevious}
+                      previousEndsHere={!!previousSegment?.endFromNext}
+                      patchSegment={store.patchSegment}
+                      flushers={flushers}
+                      selecting={selection.pending}
+                      playRequest={playRequest}
+                      playerRef={player}
+                      onChoosePreview={() => previewed && choosePreviewed(previewed)}
+                      onLeavePreview={() => setTakePreview(undefined)}
+                    >
+                      {strip}
+                    </TrimControls>
                   </div>
                 </section>
               </div>
@@ -925,18 +1059,38 @@ function Banner({
   )
 }
 
-/** Shown above the take list while the segment has no usable selected take. */
-function SelectionHint({ segment }: { segment: Segment }) {
+/** Whether main will choose a take of the clip by itself when it is done: only while none usable is chosen. */
+function autoSelects(segment: Segment): boolean {
+  const chosen = selectedTake(segment)
+  return !readyTake(segment) && !(chosen && isPending(chosen))
+}
+
+/** Why the clip has no take in the player, or undefined when there is nothing to say (no takes yet). */
+function selectionHintText(segment: Segment): string | undefined {
   const pending = segment.takes.some(isPending)
-  const completed = segment.takes.some((t) => t.status === 'completed')
-  if (!pending && !completed) return null
-  return (
-    <div className="rounded-lg border border-dashed border-line px-5 py-6 text-center text-muted">
-      {pending && !completed
-        ? 'Tagningen genereras. Den väljs automatiskt till sekvensen när den är klar.'
-        : 'Ingen tagning är vald. Klicka på Välj på den tagning du vill använda i sekvensen.'}
-    </div>
-  )
+  const completed = segment.takes.some(isPlayable)
+  if (!pending && !completed) return undefined
+  if (selectedTake(segment)?.fileMissing && completed) {
+    return (
+      'Den valda tagningens videofil finns inte längre. Klicka på en annan tagning för att använda den i ' +
+      'sekvensen.'
+    )
+  }
+  return pending && !completed
+    ? 'Tagningen genereras. Den väljs automatiskt när den är klar.'
+    : 'Ingen tagning är vald. Klicka på en tagning för att använda den i sekvensen.'
+}
+
+/** Shown in the player's place while the clip has no usable chosen take. */
+function SelectionHint({ text }: { text: string }) {
+  return <div className="rounded-lg border border-dashed border-line px-5 py-6 text-center text-muted">{text}</div>
+}
+
+/** Marks `seenKey` seen once its content has been on screen for a moment with the window focused (D4). */
+function SeenWhenVisible({ seenKey, children }: { seenKey?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useSeenWhenVisible(ref, seenKey)
+  return <div ref={ref}>{children}</div>
 }
 
 function EmptyState({

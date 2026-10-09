@@ -9,7 +9,7 @@ import { Banner } from '../storyboards/ui'
 import { ExportPickerDialog, OpenChoiceDialog } from './dialogs'
 import EditList from './EditList'
 import { editsContaining, editsFrom } from './editorUtils'
-import EditWorkspace from './EditWorkspace'
+import EditWorkspace, { type ShowVersionRequest } from './EditWorkspace'
 
 // Redigera: change one finished film — a clip from the feed, a take, an exported film or the user's own — with free
 // local operations and priced AI ones. Every change is a new version; the original is never touched. The view shows
@@ -62,6 +62,8 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
   const [picker, setPicker] = useState<'feed' | 'export'>()
   const [busy, setBusy] = useState<string>()
   const [importing, setImporting] = useState<ReadonlySet<string>>(() => new Set())
+  // A version to show in the player once its edit is open (open-editor with versionId).
+  const [showVersion, setShowVersion] = useState<ShowVersionRequest & { editId: string }>()
   const imports = useImportFlow()
 
   useEffect(() => {
@@ -169,6 +171,9 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
     const run = async () => {
       // Whatever edit is open is closed first (it stays remembered until another one opens).
       if (!intent.editId && (intent.generationId || intent.exportId)) setOpenId(undefined)
+      if (intent.editId && intent.versionId) {
+        setShowVersion({ editId: intent.editId, versionId: intent.versionId, byAgent: intent.source === 'agent' })
+      }
       if (intent.editId) open(intent.editId)
       else if (intent.generationId) await openSource({ generationId: intent.generationId })
       else if (intent.exportId) await openSource({ exportId: intent.exportId })
@@ -244,6 +249,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
             void reload()
           }}
           onClosed={closed}
+          showVersion={showVersion?.editId === openId ? showVersion : undefined}
         />
       ) : (
         <EditList

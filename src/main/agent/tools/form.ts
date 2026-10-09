@@ -3,9 +3,11 @@ import { z } from 'zod'
 import {
   DEFAULT_MODEL,
   MAX_REFERENCE_AUDIO_SECONDS,
+  endImageVariant,
   kindOfModelId,
   maxReferenceAudios,
   maxReferenceImages,
+  supportsEndImage,
   type Kind
 } from '@shared/models'
 import { includesDescriptions } from '@shared/prompt-compose'
@@ -25,6 +27,8 @@ import type {
   AgentReorderReferencesArgs,
   AgentSetFormArgs,
   AgentSetReferencesArgs,
+  AssetKind,
+  AssetViewId,
   Edit,
   GenerationParams,
   ReferenceAudio,
@@ -32,6 +36,7 @@ import type {
   Storyboard,
   VideoModel
 } from '@shared/types'
+import * as db from '../../db'
 import * as store from '../../sequence-store'
 import { callService } from '../local-ipc'
 import { isStoryboardId } from '../storyboard-rows'
@@ -48,6 +53,7 @@ import {
 import {
   AssetIndex,
   MODES,
+  StillIndex,
   assetPhotoPath,
   audioTarget,
   audioTokenMap,
@@ -88,6 +94,7 @@ import {
   type ToolContext
 } from './kit'
 import { reorderClipReferences } from './sequences'
+import { importAsStill, resolvePictureReferences, uploadSource } from './sources'
 
 // The Generate form in Studio's window and what the user is looking at. These tools go through the window (the
 // form is its state), so the user sees every change as it happens.
@@ -175,6 +182,7 @@ function formChanges(args: Record<string, unknown>): string {
     ['audio', 'ljud'],
     ['negative_prompt', 'negativ prompt'],
     ['start_image', 'startbild'],
+    ['end_image', 'slutbild'],
     ['include_descriptions', 'beskrivningarna'],
     ['excluded_description_asset_ids', 'beskrivningarna']
   ]
@@ -186,6 +194,43 @@ function formChanges(args: Record<string, unknown>): string {
   return 'tittade på formuläret'
 }
 
+/** The library view of each asset kind (the renderer's View ids). */
+const ASSET_VIEWS: Record<AssetKind, AssetViewId> = {
+  character: 'characters',
+  environment: 'environments',
+  product: 'products',
+  outfit: 'outfits',
+  pose: 'poses'
+}
+
+/** A start or end picture for the Generate form, as an agent names it. */
+const formPictureInput = z
+  .union([
+    z.object({ asset_id: z.string(), image_id: z.string().optional() }).strict(),
+    z.object({ still_id: z.string() }).strict(),
+    uploadSource,
+    z.null()
+  ])
+  .optional()
+
+type FormPictureInput = z.infer<typeof formPictureInput>
+
+/**
+ * The file a form picture names: a library photo (its cover unless image_id), a still, or an upload – made a still in
+ * Referensbilder first, so the form (and every generation made from it) never points into the scratch folder. null
+ * clears the slot.
+ */
+async function formPicture(
+  ctx: ToolContext,
+  value: FormPictureInput,
+  index: AssetIndex
+): Promise<string | null | undefined> {
+  if (value === undefined || value === null) return value
+  if ('asset_id' in value) return assetPhotoPath(value.asset_id, value.image_id, index)
+  if ('still_id' in value) return (await StillIndex.load()).require(value.still_id).path
+  return (await importAsStill(ctx, { upload_id: value.upload_id })).path
+}
+
 export function registerFormTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
     server,
@@ -194,7 +239,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get workspace',
       description:
-        "What the user is looking at in Studio right now (the view, and the sequence and clip open in the sequence editor, the storyboard open in Storyboards, or the edit open in Redigera – view \"editor\", edit_id) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included) and whether it is in composed_prompt now (sent); include_descriptions and excluded_description_asset_ids are the form's switches, changed with set_form). Start here to see what the user is working on.",
+        "What the user is looking at in Studio right now (the view – generate, sequences, storyboards, editor, prompts, settings or a library view: characters, environments, products, outfits, poses – and the sequence and clip open in the sequence editor, the storyboard open in Storyboards, or the edit open in Redigera – view \"editor\", edit_id) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included) and whether it is in composed_prompt now (sent); include_descriptions and excluded_description_asset_ids are the form's switches, changed with set_form). Start here to see what the user is working on.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'tittade på arbetsytan'
@@ -234,9 +279,13 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Set references',
       description:
-        "Sets the Generate form's references (reference-to-video mode) from assets: each item adds all photos of an asset, or just the image_ids you list, in order – and for models that take reference audio (audio_input in list_models) its audio: by default a character's first voice clip, or the audio_ids you list (include_voice: false leaves the voice out; true also adds an environment's soundscape). Photos become @Image1, @Image2 … and audio clips @Audio1, @Audio2 … in the order given. mode \"replace\" (default) makes these the references; \"append\" adds them after the current ones (duplicates skipped). The model's limits apply (9 images for Seedance; at most 3 audio clips and 15 s of audio in total); what doesn't fit is reported in not_added / not_added_audio. A pose asset is a picture of how people stand – add it like any asset and refer to it in the prompt (see the guide). A character's default outfit is NOT added automatically – add it (or another outfit) yourself. Returns the resulting token maps (references, audio_references) – write the prompt with exactly these tokens. Choose the references first and write the prompt afterwards: setting the references (mode \"replace\") does not renumber tokens already in the prompt (check the returned issues and notes) – to change only their order, use reorder_references, which does. If the form is not in reference-to-video mode, Studio switches it (see notes). An empty items list with mode \"replace\" removes all references.",
+        "Sets the Generate form's references (reference-to-video mode) from assets: each item adds all photos of an asset, or just the image_ids you list, in order – and for models that take reference audio (audio_input in list_models) its audio: by default a character's first voice clip, or the audio_ids you list (include_voice: false leaves the voice out; true also adds an environment's soundscape). Photos become @Image1, @Image2 … and audio clips @Audio1, @Audio2 … in the order given. mode \"replace\" (default) makes these the references; \"append\" adds them after the current ones (duplicates skipped). The model's limits apply (9 images for Seedance; at most 3 audio clips and 15 s of audio in total); what doesn't fit is reported in not_added / not_added_audio. A pose asset is a picture of how people stand – add it like any asset and refer to it in the prompt (see the guide). A character's default outfit is NOT added automatically – add it (or another outfit) yourself. An item can also be {still_id} (a still) or {upload_id} (a ready image upload, made a still in Referensbilder first): one loose picture with no description, so nothing about it is appended to the prompt – say in words what it shows. A product goes after the characters (see the guide). Returns the resulting token maps (references, audio_references) – write the prompt with exactly these tokens. Choose the references first and write the prompt afterwards: setting the references (mode \"replace\") does not renumber tokens already in the prompt (check the returned issues and notes) – to change only their order, use reorder_references, which does. If the form is not in reference-to-video mode, Studio switches it (see notes). An empty items list with mode \"replace\" removes all references.",
       input: {
-        items: z.array(referenceItem).describe('Assets in the order their photos (and audio) should get @Image / @Audio numbers.'),
+        items: z
+          .array(referenceItem)
+          .describe(
+            'Assets (or loose pictures) in the order their photos (and audio) should get @Image / @Audio numbers.'
+          ),
         mode: z.enum(['replace', 'append']).default('replace')
       },
       annotations: WRITE,
@@ -249,7 +298,8 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       const models = items.length ? await modelsIfAvailable() : undefined
       const model = referenceModel(current.params.model, models)
       const existing = mode === 'append' ? (current.params.referenceAudios ?? []) : []
-      const resolved = resolveReferences(items, index, audioTarget(model, models, existing))
+      const refs = await resolvePictureReferences(ctx, items, true)
+      const resolved = resolveReferences(refs, index, audioTarget(model, models, existing))
       const args: AgentSetReferencesArgs = { paths: resolved.paths, audios: resolved.audios, mode }
       const state = await ctx.bridge.send<AgentFormState>('set_references', args)
       const result = new Set(state.params.referenceImages ?? [])
@@ -264,7 +314,9 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           reason: 'Studio-fönstret lade inte till ljudklippet (modellens gräns eller läge).'
         }))
       ]
-      const names = [...new Set(items.map((i) => index.get(i.asset_id)?.name).filter(Boolean))] as string[]
+      const names = [
+        ...new Set(items.map((i) => ('asset_id' in i ? index.get(i.asset_id)?.name : undefined)).filter(Boolean))
+      ] as string[]
       const kind = kindOfModelId(state.params.model)
       const notes = [...resolved.notes, ...(state.notes ?? [])]
       return {
@@ -295,7 +347,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Set Generate form',
       description:
-        "Fills in Studio's Generate form and shows the Generate view. Only the fields you pass change. Values are checked against the model (see list_models): duration like \"8s\", resolution like \"480p\", aspect_ratio like \"16:9\". Passing mode alone switches to that mode's model in the same family (as Studio's mode switch does). start_image is one photo of an asset (its cover unless you give image_id) that becomes the first frame; it switches the form to image-to-video. @ImageN tokens are normalised (\"@image3\" → \"@Image3\"). include_descriptions and excluded_description_asset_ids decide which descriptions of the referenced assets Studio appends to the prompt as a References legend (all of them by default – don't repeat them in the prompt). All or nothing: if any value is invalid, nothing changes and the error lists every problem. Returns the form with the token map, the composed prompt, validation issues, the price and notes about anything Studio adjusted on its own (e.g. a duration the new model doesn't offer). To use reference images, call set_references; to reorder them, reorder_references.",
+        "Fills in Studio's Generate form and shows the Generate view. Only the fields you pass change. Values are checked against the model (see list_models): duration like \"8s\", resolution like \"480p\", aspect_ratio like \"16:9\". Passing mode alone switches to that mode's model in the same family (as Studio's mode switch does). start_image is the picture that becomes the first frame – {asset_id, image_id?} (a library photo, its cover unless you give image_id), {still_id} or {upload_id} (made a still in Referensbilder first); it switches the form to image-to-video. end_image is the picture the clip ends on (the same kinds), for an image-to-video model that takes an end image (supports_end_image in list_models; without a model given Studio picks the family's one that does). null clears either. @ImageN tokens are normalised (\"@image3\" → \"@Image3\"). include_descriptions and excluded_description_asset_ids decide which descriptions of the referenced assets Studio appends to the prompt as a References legend (all of them by default – don't repeat them in the prompt). All or nothing: if any value is invalid, nothing changes and the error lists every problem. Returns the form with the token map, the composed prompt, validation issues, the price and notes about anything Studio adjusted on its own (e.g. a duration the new model doesn't offer). To use reference images, call set_references; to reorder them, reorder_references.",
       input: {
         mode: z.enum(MODES).optional().describe('"reference-to-video" (default mode), "image-to-video" or "text-to-video".'),
         model: z.string().optional().describe('A model id from list_models.'),
@@ -305,10 +357,12 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         audio: z.boolean().optional(),
         prompt: z.string().optional(),
         negative_prompt: z.string().optional().describe('Empty string clears it.'),
-        start_image: z
-          .object({ asset_id: z.string(), image_id: z.string().optional() })
-          .optional()
-          .describe('The photo that becomes the first frame (image-to-video).'),
+        start_image: formPictureInput.describe(
+          'The picture that becomes the first frame (image-to-video): {asset_id, image_id?}, {still_id} or {upload_id}; null clears it.'
+        ),
+        end_image: formPictureInput.describe(
+          'The picture the clip ends on (a model with supports_end_image): {asset_id, image_id?}, {still_id} or {upload_id}; null clears it.'
+        ),
         include_descriptions: includeDescriptionsInput,
         excluded_description_asset_ids: excludedDescriptionsInput
       },
@@ -331,7 +385,8 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         resolution !== undefined ||
         aspectRatio !== undefined ||
         input.audio !== undefined ||
-        input.start_image !== undefined
+        !!input.start_image ||
+        !!input.end_image
 
       const args: AgentSetFormArgs = {}
       if (needsModel) {
@@ -345,9 +400,13 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             throw new Error(`Modellen ${modelId} är för läget ${kind}, inte ${input.mode}.`)
           }
         } else {
-          // A start image alone means image-to-video, as choosing one in the form does.
-          const wanted = input.mode ?? (input.start_image ? 'image-to-video' : undefined)
+          // A start (or end) image alone means image-to-video, as choosing one in the form does.
+          const wanted = input.mode ?? (input.start_image || input.end_image ? 'image-to-video' : undefined)
           if (wanted && wanted !== kindOfModelId(modelId)) modelId = modelForMode(models, modelId, wanted)
+          // An end image needs a model that takes one: the family's, as a sequence clip gets it.
+          if (input.end_image && kindOfModelId(modelId) === 'image-to-video' && !supportsEndImage(modelId)) {
+            modelId = endImageVariant(modelId, usableModels(models).map((m) => m.id))
+          }
         }
         const model = usableModels(models).find((m) => m.id === modelId)
         if (model) {
@@ -357,6 +416,11 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         const mode: Kind = kindOfModelId(modelId)
         if (input.start_image && mode !== 'image-to-video') {
           throw new Error(`start_image används bara i läget image-to-video, men modellen ${modelId} är ${mode}.`)
+        }
+        if (input.end_image && (mode !== 'image-to-video' || !supportsEndImage(modelId))) {
+          throw new Error(
+            `${modelId} tar ingen slutbild. Välj en bild-till-video-modell med supports_end_image i list_models, eller lämna end_image.`
+          )
         }
         if (modelId !== current.params.model || input.mode !== undefined || input.model !== undefined) {
           args.mode = mode
@@ -369,7 +433,9 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       if (input.audio !== undefined) args.audio = input.audio
       if (input.prompt !== undefined) args.prompt = canonical(input.prompt)
       if (input.negative_prompt !== undefined) args.negative_prompt = canonical(input.negative_prompt)
-      if (input.start_image) args.start_image = assetPhotoPath(input.start_image.asset_id, input.start_image.image_id, index)
+      // Last: an upload becomes a still only once everything else is known to be right.
+      if (input.start_image !== undefined) args.start_image = await formPicture(ctx, input.start_image, index)
+      if (input.end_image !== undefined) args.end_image = await formPicture(ctx, input.end_image, index)
       if (input.include_descriptions !== undefined) args.include_descriptions = input.include_descriptions
       if (excluded !== undefined) args.excluded_description_asset_ids = excluded
 
@@ -425,8 +491,10 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     },
     async (input) => {
       const index = await AssetIndex.load()
-      const explicitRefs: ReferenceItem[] | undefined =
-        input.references ?? input.reference_asset_ids?.map((asset_id) => ({ asset_id }))
+      // A check changes nothing: an uploaded picture is checked as the upload itself, not made a still.
+      const explicitRefs: ReferenceItem[] | undefined = input.references
+        ? await resolvePictureReferences(ctx, input.references, false)
+        : input.reference_asset_ids?.map((asset_id) => ({ asset_id }))
       const needsForm = input.use_form && (!explicitRefs || (!input.model && !input.mode))
       const form = needsForm ? await readForm(ctx) : undefined
       const model =
@@ -603,13 +671,23 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Open in Studio',
       description:
-        "Brings a place in Studio to the front so the user sees it: the Generate view, a sequence (optionally with one clip selected), a storyboard, or an edit in Redigera (view \"editor\" with edit_id; without it the list of edits). Use it when you want the user to look at something you prepared.",
+        "Brings a place in Studio to the front so the user sees it: the Generate view (with generation_id: that clip opened in its drawer), a sequence (optionally with one clip selected), a storyboard (with transition_id: that transition opened in the transition editor), an edit in Redigera (view \"editor\" with edit_id; with version_id: that version in the player; without either the list of edits), an asset (view \"asset\" with asset_id: its library view – Karaktärer, Miljöer, Produkter, Kläder or Poser – with the asset open) or the prompt library (view \"prompts\"). Use it when you want the user to look at something you prepared. Opening something doesn't count as the user having seen it.",
       input: {
-        view: z.enum(['generate', 'sequence', 'storyboard', 'editor']),
+        view: z.enum(['generate', 'sequence', 'storyboard', 'editor', 'asset', 'prompts']),
         sequence_id: z.string().optional().describe('For view "sequence".'),
         segment_id: z.string().optional().describe('For view "sequence": the clip to select (its sequence is found automatically).'),
         storyboard_id: z.string().optional().describe('For view "storyboard": the storyboard to open.'),
-        edit_id: z.string().optional().describe('For view "editor": the edit to open (list_edits).')
+        transition_id: z
+          .string()
+          .optional()
+          .describe('For view "storyboard": the transition to open (its storyboard is found automatically).'),
+        edit_id: z.string().optional().describe('For view "editor": the edit to open (list_edits).'),
+        version_id: z
+          .string()
+          .optional()
+          .describe('For view "editor": the version to show (get_edit; its edit is found automatically).'),
+        generation_id: z.string().optional().describe('For view "generate": the clip to open in its drawer.'),
+        asset_id: z.string().optional().describe('For view "asset": the asset to open.')
       },
       annotations: { ...WRITE, idempotentHint: true },
       summary: ({ view }) =>
@@ -619,37 +697,98 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             ? 'visade en storyboard'
             : view === 'editor'
               ? 'visade Redigera'
-              : 'visade en sekvens'
+              : view === 'asset'
+                ? 'visade en tillgång'
+                : view === 'prompts'
+                  ? 'visade promptbiblioteket'
+                  : 'visade en sekvens'
     },
-    async ({ view, sequence_id, segment_id, storyboard_id, edit_id }) => {
+    async (input) => {
+      const { view, sequence_id, segment_id, storyboard_id, transition_id, edit_id, version_id, generation_id, asset_id } =
+        input
       requireLibrary()
-      if (view === 'editor') {
-        // Checked here first, so a wrong id gets the service's own message rather than the window's.
-        const edit = edit_id ? await callService<Edit>('edits:get', edit_id) : undefined
-        const args: AgentOpenArgs = { view: 'editor', ...(edit ? { editId: edit.id } : {}) }
-        const shown: Partial<AgentOpenResult> = (await ctx.bridge.send<AgentOpenResult | undefined>('open', args)) ?? {}
+      const open = async (args: AgentOpenArgs): Promise<Partial<AgentOpenResult>> => {
+        const shown = (await ctx.bridge.send<AgentOpenResult | undefined>('open', args)) ?? {}
         ctx.bridge.showWindow()
+        return shown
+      }
+      if (view === 'asset') {
+        if (!asset_id) throw new Error('Ange asset_id för att visa en tillgång.')
+        const asset = (await AssetIndex.load()).require(asset_id)
+        const shown = await open({ view: ASSET_VIEWS[asset.kind], assetId: asset.id })
+        return {
+          data: {
+            shown: 'asset',
+            asset_id: asset.id,
+            asset_name: asset.name,
+            kind: asset.kind,
+            ...(shown.note ? { note: shown.note } : {})
+          },
+          summary: `visade ${q(asset.name)}`
+        }
+      }
+      if (view === 'prompts') {
+        await open({ view: 'prompts' })
+        return { data: { shown: 'prompts' }, summary: 'visade promptbiblioteket' }
+      }
+      if (view === 'editor') {
+        let editId = edit_id
+        if (version_id) {
+          const version = db.getGeneration(version_id)
+          if (!version?.editId) {
+            throw new Error('Det finns ingen version i Redigera med det id:t. get_edit visar en redigerings versioner.')
+          }
+          if (editId && editId !== version.editId) throw new Error('Versionen hör inte till den redigeringen.')
+          editId = version.editId
+        }
+        // Checked here first, so a wrong id gets the service's own message rather than the window's.
+        const edit = editId ? await callService<Edit>('edits:get', editId) : undefined
+        const shown = await open({
+          view: 'editor',
+          ...(edit ? { editId: edit.id } : {}),
+          ...(version_id ? { versionId: version_id } : {})
+        })
         return {
           data: {
             shown: 'editor',
             ...(shown.editId ? { edit_id: shown.editId } : {}),
+            ...(shown.versionId ? { version_id: shown.versionId } : {}),
             ...(shown.note ? { note: shown.note } : {})
           },
           summary: edit ? `visade redigeringen ${q(edit.name)}` : 'visade Redigera'
         }
       }
       if (view === 'generate') {
-        const args: AgentOpenArgs = { view: 'generate' }
-        await ctx.bridge.send('open', args)
-        ctx.bridge.showWindow()
-        return { data: { shown: 'generate' }, summary: 'visade Generera' }
+        if (generation_id && !db.getGeneration(generation_id)) {
+          throw new Error(`Genereringen ${generation_id} finns inte (längre). list_generations visar vilka som finns.`)
+        }
+        const shown = await open({ view: 'generate', ...(generation_id ? { generationId: generation_id } : {}) })
+        return {
+          data: {
+            shown: 'generate',
+            ...(shown.generationId ? { generation_id: shown.generationId } : {}),
+            ...(shown.note ? { note: shown.note } : {})
+          },
+          summary: generation_id ? 'visade ett klipp i Generera' : 'visade Generera'
+        }
       }
       let sequenceId = sequence_id
+      let transitionId = transition_id
+      if (transitionId) {
+        const row = store.getSegmentRow(transitionId)
+        if (!row || !isStoryboardId(row.sequence_id)) throw new Error('Det finns ingen övergång med det id:t (längre).')
+        if (storyboard_id && storyboard_id !== row.sequence_id) {
+          throw new Error('Övergången hör inte till den storyboarden.')
+        }
+        sequenceId = row.sequence_id
+      }
       if (segment_id) {
         const row = store.getSegmentRow(segment_id)
         if (!row) throw new Error('Klippet finns inte längre.')
         if (sequenceId && sequenceId !== row.sequence_id) throw new Error('Klippet hör inte till den sekvensen.')
         sequenceId = row.sequence_id
+        // A storyboard's transition given as a clip opens as the transition it is.
+        if (isStoryboardId(row.sequence_id)) transitionId ??= segment_id
       }
       // A storyboard named as a sequence (or a transition as a clip) is opened where it lives: in Storyboards.
       const storyboardId = view === 'storyboard' ? (storyboard_id ?? sequenceId) : isStoryboardId(sequenceId) ? sequenceId : undefined
@@ -663,21 +802,25 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           )
         }
         const storyboard = await callService<Storyboard>('storyboards:get', storyboardId)
-        const args: AgentOpenArgs = { view: 'storyboards', storyboardId }
-        const shown: Partial<AgentOpenResult> = (await ctx.bridge.send<AgentOpenResult | undefined>('open', args)) ?? {}
-        ctx.bridge.showWindow()
+        const shown = await open({ view: 'storyboards', storyboardId, ...(transitionId ? { transitionId } : {}) })
+        const number = transitionId ? storyboard.transitions.findIndex((t) => t.id === transitionId) + 1 : 0
         return {
-          data: { shown: 'storyboard', storyboard_id: storyboardId, ...(shown.note ? { note: shown.note } : {}) },
-          summary: `visade storyboarden ${q(storyboard.name)}`
+          data: {
+            shown: 'storyboard',
+            storyboard_id: storyboardId,
+            ...(shown.transitionId ? { transition_id: shown.transitionId } : {}),
+            ...(shown.note ? { note: shown.note } : {})
+          },
+          summary: number
+            ? `visade övergång ${number} i storyboarden ${q(storyboard.name)}`
+            : `visade storyboarden ${q(storyboard.name)}`
         }
       }
       if (!sequenceId) throw new Error('Ange sequence_id eller segment_id för att visa en sekvens.')
       const sequence = await callService<Sequence>('sequences:get', sequenceId)
       const clip = segment_id ? sequence.segments.findIndex((s) => s.id === segment_id) + 1 : 0
-      const args: AgentOpenArgs = { view: 'sequences', sequenceId, segmentId: segment_id }
       // The window answers with the clip it actually shows (and a note when that isn't the one asked for).
-      const shown: Partial<AgentOpenResult> = (await ctx.bridge.send<AgentOpenResult | undefined>('open', args)) ?? {}
-      ctx.bridge.showWindow()
+      const shown = await open({ view: 'sequences', sequenceId, segmentId: segment_id })
       const shownId = shown.segmentId ?? segment_id
       const shownClip = shownId ? sequence.segments.findIndex((s) => s.id === shownId) + 1 : clip
       return {

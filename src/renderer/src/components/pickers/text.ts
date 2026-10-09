@@ -117,6 +117,24 @@ export function poseReference(
   return `${who ? `${who} ` : ''}${POSED_AS_IN[language]} ${assetReference(pose.name, pose.indices)}`
 }
 
+/** The word between a character and the product it holds: "Anna (@Image1) holding Kaffeburken (@Image4)". */
+const HOLDING: Record<PromptLanguage, string> = { en: 'holding', sv: 'håller' }
+
+/**
+ * A product, held by a character when one is chosen: "Anna (@Image1) holding Kaffeburken (@Image4)", or "Anna
+ * (@Image1) håller Kaffeburken (@Image4)" in Swedish. The holder is named with its own photos only (as a pose names
+ * its people), so the sentence says who holds it without repeating the character's voice or clothes. Without a
+ * holder it is just "Kaffeburken (@Image4)".
+ */
+export function productReference(
+  product: { name: string; indices: readonly number[] },
+  holder: { name: string; indices: readonly number[] } | undefined,
+  language: PromptLanguage = 'en'
+): string {
+  const item = assetReference(product.name, product.indices)
+  return holder ? `${assetReference(holder.name, holder.indices)} ${HOLDING[language]} ${item}` : item
+}
+
 /** "1 bild", "3 bilder". */
 export function imageCount(n: number): string {
   return `${n} ${n === 1 ? 'bild' : 'bilder'}`

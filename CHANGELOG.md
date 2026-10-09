@@ -10,6 +10,73 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Produkter**, a fifth kind of asset next to characters, environments, outfits and poses: a specific item to show
+  in the film — a package, a bottle, a gadget — with its packshots (the front with the label first) and a description
+  (brand, model, colours, material, size, what the packaging says) that is appended to the prompt like the others.
+  It has its own view in Bibliotek with square photo tiles, its own folder `Produkter/<name>/`, an orange colour and a
+  box icon, a *＋ Produkt* reference button and picker tab, and a packshot can be a clip's start or end image. In the
+  form a product chip can be held by one of the characters (*Hålls av*, nobody by default), and the prompt then says
+  `Anna (@Image1) holding Kaffeburken (@Image4)` (`håller` in Swedish).
+- **Click a take to use it.** In Sekvenser and in a storyboard's transition editor the takes are a strip of thumbnails
+  right under the player (newest first, each keeping its place when it finishes). A click makes a take the clip's or
+  transition's take and plays it from its kept start, with sound; clicking it again starts it over. ← / → and Home / End
+  choose takes at once (paused; Studio saves the choice once you stop), ⌥-click or *Förhandsvisa utan att välja* plays a
+  take without choosing it (*Välj den* / *Visa vald*, Esc goes back), hovering scrubs a silent preview, and each tile
+  shows *Vald*, *Ny*, *I kö* / *Genererar 40 %*, *Misslyckades*, *Filen saknas*, *Egen* / *Redigerad* or *Tidigare
+  bild*. One line under the strip tells the take's time, length, price, model and prompt (*Annan prompt än nu* with
+  *Använd prompt*); it stays on the take while the pointer moves down to its buttons. The menu (right-click or ⋯) has
+  the preview, *Använd tagningens prompt*, *Redigera tagningen…*, *Visa i Finder* and *Radera tagningen…* (or *Ta bort
+  från klippet…* for a film Redigera keeps), with ⌫ as a shortcut. Own films can be dropped on the strip or added from
+  its dashed tile, and show as *Importerar 30 %* with ✕ while they come in.
+- **Each take keeps its own trims**: trim take A, choose B, choose A again, and A's trims are back (agents selecting a
+  take get the same).
+- **Pågår och klart** (in progress and done): what runs and what has finished that you haven't looked at yet, wherever
+  you started it. Every sidebar view shows a spinner with the number of things running there and a dot for new
+  results (red for a failure), with the details in its tooltip; so do the rows of Sekvenser, Storyboards, Redigera and
+  the asset lists, the feed's cards (*Ny*) and table, the timeline cards (*Genererar 40 %*, *Ny tagning*), the take
+  strip, the transitions (*Klart · ny tagning*), board pictures, versions (*Ny version*) and designed voices. The new
+  row at the bottom of the sidebar opens a panel with everything running (grouped by place, with progress, *≈ 1 min
+  kvar* or *brukar ta ~3 min*, and the agent it was done for), what is ready to watch and what failed; a click goes
+  there, and agent requests waiting for you can be reviewed from it. A video or a sound counts as seen once it has
+  played for a second (or you chose it, rated it, opened it in Redigera …); a picture or a failure once it has been on
+  screen for a moment (a picture made for no board or clip is listed in Generera, a voice design that failed in the
+  character's *Röst*). *Markera alla som sedda* (in the panel, the lists and the ⋯ menus) can be undone for 10
+  seconds (*Ångra*). The feed gets a *Nya* filter and a *◌ n pågår* chip, a running export and its *Filmen är klar –
+  Visa i Finder · Redigera* banner now stay when you leave the view, and Studio's Dock icon shows the number of new and
+  failed results.
+- **A grouped sidebar that folds away**: *Skapa* (Generera, Sekvenser, Storyboards, Redigera) and *Bibliotek*
+  (Karaktärer, Miljöer, Produkter, Kläder, Poser, Prompter) with one 16 px icon set; the button next to the wordmark,
+  or ⌃⌘S, folds it to a 72 px icon rail whose icons keep their status as badges and explain themselves in tooltips.
+  The choice is remembered; the views use the room it frees.
+- **Agents work like you.** They create assets of every kind and add photos (`add_asset_images`) and sound
+  (`add_asset_audio`) from files they send, from stills, other assets' photos, frames of clips or a clip's sound, and
+  reorder them; update prompts (`update_prompt`); change a sequence's name, defaults and *Exportformat*
+  (`update_sequence`), trim takes (`update_segment` `trim_start` / `trim_end`) and export films (`export_film`); stop a
+  *Generera saknade* run (`stop_generation_run`); import pictures as stills (`import_still`) and their own films as own
+  clips (`import_own_clips`, `get_import`, `cancel_import`); add sound to an edit (`add_edit_audio`), stop a paid job
+  (`cancel_edit_job`) and ask to continue a stopped one (`request_edit_operation` with `resume_job_id`); and see what
+  runs and what is new (`get_work_status`; `list_generations` filters `unseen_only` and says `seen_by_user`).
+  `set_form` takes an end image, and pictures for the form, references, keyframes and boards can be uploads; agents'
+  photos and sound clips say who added them (*Tillagd av …*, with the host a file came from). 88 tools in all (34
+  read, 45 write, 9 ask for approval).
+- **Files from agents as uploads**: `begin_upload` with a URL Studio fetches (public addresses only, plus the agent's
+  own machine), with the file's size for a raw `PUT` to the agent port (`curl -T <file> -H "Authorization: Bearer
+  <token>" <put_url>`) or inline for files under 700 KB; `get_upload` and `discard_upload`. Pictures (JPG, PNG, WebP,
+  HEIC made JPEG; 30 MB, 16 384 px a side, 80 megapixels), sound (MP3, WAV, AIFF, FLAC, OGG, M4A, AAC; 100 MB) and video
+  (MP4, MOV, M4V, WebM, MKV; 4 GB), recognised by their bytes and checked like your own files. Uploads show in *Pågår
+  och klart* while they come in and live two hours; at most 16 at a time, 8 GB in all and 2 GB left free on the disk,
+  also while URLs download. A URL given straight to a content tool is fetched for that call and thrown away after it.
+  A `PUT` that stalls for 60 s or takes over 30 minutes is answered `408` and can be sent again (or discarded and
+  fetched by URL); one that would leave too little disk is answered `507`.
+- **Removals by approval**: `request_delete` asks to remove up to 50 things at once — assets, photos, sound clips,
+  prompts, agents' reviews and learnings, sequences, clips, storyboards, boards, a board move that would drop a
+  transition with a prompt or takes, videos, takes, stills, edits, versions, *Rensa versioner* — with a dry run first.
+  The approval dialog lists them grouped, with pictures and what else changes, checks the request again every 2
+  seconds (a request where something changed since the agent asked expires, and the agent can ask again), asks a
+  second time when a whole asset, sequence, storyboard or edit or more than 5 things go, plays a sound clip that would
+  go, and shows each item's outcome afterwards. No clip, board, take or video of a sequence or storyboard where
+  *Generera saknade* runs can be asked for.
+
 - **The agent's presence**: while a connected agent works, the sidebar reads *Agenten arbetar…* with a pulsing dot
   and what it just did, and a small pill at the bottom of the window shows its latest steps; click to open the
   activity drawer.
@@ -84,8 +151,7 @@ breaking changes; they are called out under **Changed** or **Removed**.
   returns titles, `get_generation` the recipe and original file, `add_segment` takes `from_generation_id`,
   `get_sequence` marks own clips and shows the *Exportformat*, `list_exports` returns `cuts`, assets show each voice
   clip's `clone_consent`, `review_generation` takes `audio_start`, and `open_in_studio` / `get_workspace` know
-  Redigera. The guide has sections on editing films and on own clips. Agents cannot import files, add their own
-  audio files, delete edits or versions, give clone consent or set the *Exportformat*.
+  Redigera. The guide has sections on editing films and on own clips. Agents give no clone consent.
 
 - **Descriptions in the prompt.** The descriptions of the characters, places, outfits and poses whose photos or
   voices a generation sends are appended to its prompt automatically when it is sent, as a *References* legend
@@ -157,8 +223,8 @@ breaking changes; they are called out under **Changed** or **Removed**.
 - **Gör om mellan grannarna**, on the timeline cards and in the clip editor: sets a clip up to start exactly on the
   previous clip's last frame and end exactly on the next clip's first frame, with an image-to-video model that takes
   an end image, keeping its prompt, length and sound — so a bad clip in the middle can be redone without touching its
-  neighbours. The old take stays selected until you pick the new one (*Välj* among the takes) and stays among the
-  takes. A take picked that was made from a neighbour's frame starts
+  neighbours. The old take stays selected until you pick the new one (a click in the take strip) and stays among
+  the takes. A take picked that was made from a neighbour's frame starts
   untrimmed at that end, so an old trim can't cut the matched frame away, and a neighbour that continued from the
   old take isn't flagged as out of date: the cut counts as seamless when either side was made from the other.
 - **Agent tools for storyboards** (13 new, 60 tools in all): `list_storyboards`, `get_storyboard`,
@@ -217,6 +283,31 @@ breaking changes; they are called out under **Changed** or **Removed**.
   prompt.
 
 ### Changed
+
+- The library database is migrated to version 12: `unseen` (finished work you haven't looked at; empty at first, so
+  an existing library starts with everything seen), `take_trims` (each take's own trims) and an `origin` on asset
+  photos and sound clips. From this version `Produkter` belongs to the library; an older library whose base folder
+  already holds a folder of your own named *Produkter* is not opened until it is renamed, and an older Studio refuses
+  a migrated library.
+- Sekvenser's clip pane is the chosen take's player (smaller, so the strip fits under it), the take strip, then the
+  trims; the take grid with its players and *Välj* buttons and the take list at the bottom of the transition editor
+  are gone. *Ingen tagning är vald. Klicka på en tagning för att använda den i sekvensen.*
+- The pulsing "running" dots in the lists, the timeline and the headers are spinners; *Generera saknade* says how far
+  it got (*Klipp 2 av 5*). Redigera's list shows the job (*Skapa musik 40 %*), free renders included.
+- The headers of Sekvenser, Storyboards and Redigera adapt to the width of the content area rather than the window,
+  so a folded sidebar gives them their wide layout sooner. The agent drawer and the status panel open next to the
+  sidebar at its current width, one at a time, and the agent's pill hides while either is open.
+- What agents may do (the guide, the tool descriptions and *Inställningar → Agentanslutning* say so): everything in
+  the library and the views except settings, the library folder, consents, approving, marking things seen, your own
+  ratings and learnings and saving files through a dialog; every removal by approval. `add_board` between two boards
+  whose transition has a prompt, a negative prompt or takes is refused (add it last and ask for the move), and so is
+  a `move_board` that would drop one; Studio itself refuses such a change from an agent too. `open_in_studio` opens a
+  clip's drawer, a transition, a version, an asset or the prompt library without marking anything seen;
+  `get_workspace` knows Produkter; `get_approval` reports a removal's outcomes.
+- Handlers that take file paths accept only files an agent uploaded or files the library records when an agent
+  calls them (photos and sound for assets, own clips, edit audio, stills, keyframes and board pictures).
+- The agent server has no overall request timeout any more (uploads of large videos take long); an `/mcp` body must
+  arrive within 60 seconds.
 
 - The sidebar says *Agent ansluten* (or *2 agenter anslutna*) instead of the client's own name, which can be
   something technical like "mcp"; the name is in the tooltip and the activity drawer.
@@ -291,6 +382,15 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Fixed
 
+- A picture that failed after its *Skapa bild…* dialog was closed is no longer lost: it shows in *Pågår och klart*
+  and on its board.
+- A free render in Redigera now shows the edit as running.
+- An agent's `add_board` between two boards no longer drops the transition between them, with its prompt or takes,
+  without your OK.
+- A *Generera saknade* run (of a sequence or a storyboard) that stopped on a problem is no longer silent once its view
+  is closed: the problem stays in *Pågår och klart* and on the sequence.
+- Choosing another take and then the first one again no longer changes the first one's trims.
+
 - Pictures sent to Venice (start and end images, references) are turned upright by their EXIF orientation, as
   Studio shows them, so a portrait phone photo no longer gives a sideways (or rotated) clip; WebP pictures are
   decoded and sized like the others.
@@ -300,6 +400,11 @@ breaking changes; they are called out under **Changed** or **Removed**.
   each clip's sound is now cut to exactly the frames its picture keeps, so sound and picture stay together across
   every cut.
 - Search fields in popovers (asset, outfit, prompt and sequence pickers) get the focus when the popover opens.
+
+### Removed
+
+- The agent tools `delete_segment`, `delete_board`, `delete_review` and `delete_learning`: every removal by an agent
+  goes through `request_delete` and your approval.
 
 ## [0.1.0] - 2026-10-06
 

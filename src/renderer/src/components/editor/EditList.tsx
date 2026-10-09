@@ -1,11 +1,14 @@
 import { useRef, useState, type DragEvent } from 'react'
 import type { EditSummary } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { markAllSeen, useHasUnseen, useOwnerWork, useRunning } from '../../lib/work'
 import { carriesFiles, droppedVideoPaths, ImportCardView, useImportCards } from '../feed/ownClips'
 import { FilmIcon } from '../sequences/icons'
 import { secondaryButton } from '../storyboards/ui'
 import { formatPrice, originLabel, summaryLine } from './editorUtils'
 import { CameraIcon, ScissorsIcon } from './icons'
+import { NewChip, Spinner } from '../work/StatusMark'
+import { countsTitle } from '../work/workText'
 
 // Redigeringar: every edit as a card (poster, name, where it came from, versions, length, spent), and the ways to
 // start one: an own film (file dialog, or dropped on the list), a clip from the feed, an exported film.
@@ -63,6 +66,7 @@ export default function EditList({
   }
 
   const empty = edits?.length === 0 && cards.length === 0
+  const anyNew = useHasUnseen({ view: 'editor' })
   const actions = (
     <>
       <button type="button" onClick={onOwnFilm} disabled={!!busy} className={secondaryButton}>
@@ -89,7 +93,21 @@ export default function EditList({
       <div className="drag flex h-12 shrink-0 items-center gap-2 border-b border-line pl-5 pr-3">
         <h1 className="font-medium">Redigeringar</h1>
         {busy && <span className="ml-2 text-[12px] text-muted">{busy}</span>}
-        {!empty && <div className="no-drag ml-auto flex items-center gap-2">{actions}</div>}
+        {!empty && (
+          <div className="no-drag ml-auto flex items-center gap-2">
+            {anyNew && (
+              <button
+                type="button"
+                onClick={() => void markAllSeen({ view: 'editor' })}
+                title="Ta bort Ny från alla redigeringar"
+                className="rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
+              >
+                Markera alla som sedda
+              </button>
+            )}
+            {actions}
+          </div>
+        )}
       </div>
       {error && <p className="mx-5 mt-3 text-[12px] text-accent select-text">{error}</p>}
 
@@ -135,11 +153,29 @@ export default function EditList({
   )
 }
 
+/** "”Intervju” – Skapa musik" → "Skapa musik": the card already names its edit. */
+function jobLabel(label: string, editName: string): string {
+  const head = `”${editName}” – `
+  return label.startsWith(head) ? label.slice(head.length) : label
+}
+
 function EditCard({ edit, onOpen }: { edit: EditSummary; onOpen: () => void }) {
+  // Pågår och klart: a paid job or a free render running for this edit (main counts both), new versions, failures.
+  const counts = useOwnerWork(edit.id)
+  const work = useRunning((w) => w.ownerId === edit.id && w.view === 'editor')
+  const first = work[0]
+  const running = edit.running || work.length > 0
+  const runningText = first
+    ? `${jobLabel(first.label, edit.name)}${first.progress !== undefined ? ` ${Math.round(first.progress * 100)} %` : ''}${
+        work.length > 1 ? ` +${work.length - 1}` : ''
+      }`
+    : 'Pågår…'
+  const title = countsTitle('edit', { ...counts, running: Math.max(counts.running, work.length) })
   return (
     <button
       type="button"
       onClick={onOpen}
+      title={title}
       className="group overflow-hidden rounded-lg border border-line bg-panel text-left outline-none transition hover:border-muted/60 focus-visible:ring-1 focus-visible:ring-muted"
     >
       <div className="relative flex aspect-video items-center justify-center bg-black">
@@ -148,12 +184,26 @@ function EditCard({ edit, onOpen }: { edit: EditSummary; onOpen: () => void }) {
         ) : (
           <FilmIcon size={22} className="text-muted/50" />
         )}
-        {edit.running && (
-          <span className="absolute left-2 top-2 flex items-center gap-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] text-white">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-            Pågår…
-          </span>
-        )}
+        <span className="absolute left-2 top-2 flex max-w-[calc(100%-1rem)] items-center gap-1">
+          {running && (
+            <span className="flex min-w-0 items-center gap-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] text-white backdrop-blur">
+              <Spinner size={10} className="text-white" />
+              <span className="truncate">{runningText}</span>
+            </span>
+          )}
+          {counts.unseen > 0 && (
+            <NewChip
+              variant="overlay"
+              label={counts.unseen === 1 ? 'Ny version' : `${counts.unseen} nya versioner`}
+              className="shrink-0"
+            />
+          )}
+          {counts.failed > 0 && (
+            <span className="shrink-0 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-[#ffb3b5] backdrop-blur">
+              Misslyckades
+            </span>
+          )}
+        </span>
       </div>
       <div className="px-3 py-2.5">
         <p className="truncate font-medium">{edit.name}</p>

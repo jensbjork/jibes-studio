@@ -1,29 +1,43 @@
-import { useEffect, useState } from 'react'
-import type { SequenceSummary } from '@shared/types'
+import { useEffect, useMemo, useState } from 'react'
+import type { FinishedWork, RunningWork, SequenceSummary } from '@shared/types'
 import { formatSeconds, mediaUrl } from '../../lib/media'
+import { useOwnerWork, useRunning, useUnseen, useViewWork } from '../../lib/work'
+import MarkViewSeen from '../takes/MarkViewSeen'
+import { ownerStatusText } from '../takes/takeText'
+import { StatusMark } from '../work/StatusMark'
 import { CloseIcon, FilmIcon, PlusIcon } from './icons'
 
 interface Props {
   sequences?: SequenceSummary[]
   selectedId?: string
-  /** The open sequence is running "Generera saknade". */
-  runningId?: string
   creating: boolean
   onSelect: (id: string) => void
   onCreate: () => void
   onDelete: (id: string) => void
 }
 
-export default function SequenceList({
-  sequences,
-  selectedId,
-  runningId,
-  creating,
-  onSelect,
-  onCreate,
-  onDelete
-}: Props) {
+// Module-level, so the store's selectors keep one identity (and re-render only on a real change).
+const inSequences = (w: RunningWork | FinishedWork) => w.view === 'sequences'
+
+/** What runs and what is new, per sequence, for the rows' tooltips (the counts come from useOwnerWork). */
+function useSequencesWork(): { running: Map<string, RunningWork[]>; unseen: Map<string, FinishedWork[]> } {
+  const running = useRunning(inSequences)
+  const unseen = useUnseen(inSequences)
+  return useMemo(() => {
+    const group = <T extends { ownerId?: string }>(items: readonly T[]) => {
+      const out = new Map<string, T[]>()
+      for (const w of items) if (w.ownerId) out.set(w.ownerId, [...(out.get(w.ownerId) ?? []), w])
+      return out
+    }
+    return { running: group(running), unseen: group(unseen) }
+  }, [running, unseen])
+}
+
+export default function SequenceList({ sequences, selectedId, creating, onSelect, onCreate, onDelete }: Props) {
   const [confirming, setConfirming] = useState<string>()
+  const work = useSequencesWork()
+  const view = useViewWork('sequences')
+  const newCount = view.unseen + view.failed
 
   useEffect(() => {
     if (!confirming) return
@@ -38,13 +52,14 @@ export default function SequenceList({
         <button
           onClick={onCreate}
           disabled={creating}
-          className="no-drag flex items-center gap-1 rounded-md px-2 py-1 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
+          className="no-drag flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
           title="Skapa en ny sekvens"
         >
           <PlusIcon size={12} />
           Ny sekvens
         </button>
       </div>
+      {newCount > 0 && <MarkViewSeen view="sequences" />}
 
       <div className="flex-1 overflow-y-auto px-2 pb-3">
         {sequences?.length === 0 && (
@@ -83,52 +98,103 @@ export default function SequenceList({
             )
           }
           return (
-            <div
+            <SequenceRow
               key={s.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => onSelect(s.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  onSelect(s.id)
-                }
-              }}
-              className={`group mb-0.5 flex cursor-pointer items-center gap-2.5 rounded-md p-1.5 outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
-                active ? 'bg-raised' : 'hover:bg-raised/60'
-              }`}
-            >
-              <div className="relative flex h-10 w-[71px] shrink-0 items-center justify-center overflow-hidden rounded bg-black">
-                {s.thumbPath ? (
-                  <img src={mediaUrl(s.thumbPath)} draggable={false} className="h-full w-full object-cover" />
-                ) : (
-                  <FilmIcon size={16} className="text-muted/60" />
-                )}
-                {s.id === runningId && (
-                  <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className={`truncate ${active ? 'text-text' : ''}`}>{s.name}</p>
-                <p className="text-[11px] text-muted">
-                  {s.segmentCount} klipp
-                  {s.totalDuration > 0 && ` · ${formatSeconds(s.totalDuration * 1000)}`}
-                </p>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setConfirming(s.id)
-                }}
-                title="Radera sekvensen"
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted opacity-0 transition hover:bg-line hover:text-accent focus:opacity-100 group-hover:opacity-100"
-              >
-                <CloseIcon size={11} />
-              </button>
-            </div>
+              sequence={s}
+              active={active}
+              running={work.running.get(s.id)}
+              unseen={work.unseen.get(s.id)}
+              onSelect={() => onSelect(s.id)}
+              onDelete={() => setConfirming(s.id)}
+            />
           )
         })}
       </div>
     </aside>
+  )
+}
+
+const NONE: never[] = []
+
+/**
+ * One sequence: its cover, name and length, and – for every sequence, not only the open one – what is being made
+ * there and what is new (a spinner with a count, then a dot). On hover the ✕ that deletes it takes that place.
+ */
+function SequenceRow({
+  sequence: s,
+  active,
+  running = NONE,
+  unseen = NONE,
+  onSelect,
+  onDelete
+}: {
+  sequence: SequenceSummary
+  active: boolean
+  running?: RunningWork[]
+  unseen?: FinishedWork[]
+  onSelect: () => void
+  onDelete: () => void
+}) {
+  const counts = useOwnerWork(s.id)
+  const status = ownerStatusText('sequence', running, unseen, counts)
+  const marked = counts.running + counts.unseen + counts.failed > 0
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-current={active || undefined}
+      title={status}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      className={`group mb-0.5 flex cursor-pointer items-center gap-2.5 rounded-md p-1.5 outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
+        active ? 'bg-raised' : 'hover:bg-raised/60'
+      }`}
+    >
+      <div className="relative flex h-10 w-[71px] shrink-0 items-center justify-center overflow-hidden rounded bg-black">
+        {s.thumbPath ? (
+          <img src={mediaUrl(s.thumbPath)} alt="" draggable={false} className="h-full w-full object-cover" />
+        ) : (
+          <FilmIcon size={16} className="text-muted/60" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className={`truncate ${active ? 'text-text' : ''}`}>{s.name}</p>
+        <p className="text-[11px] text-muted">
+          {s.segmentCount} klipp
+          {s.totalDuration > 0 && ` · ${formatSeconds(s.totalDuration * 1000)}`}
+        </p>
+      </div>
+      <span className="relative flex h-6 min-w-6 shrink-0 items-center justify-end">
+        {marked && (
+          // Steps aside only where the ✕ takes its place (hover, or the ✕ itself focused) – never just because the
+          // row has the focus after a click, which would leave the slot empty.
+          <span className="flex items-center transition-opacity group-hover:opacity-0 group-has-[button:focus]:opacity-0">
+            <StatusMark
+              variant="inline"
+              running={counts.running}
+              fresh={counts.unseen}
+              failed={counts.failed}
+              title={status}
+            />
+          </span>
+        )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          title="Radera sekvensen"
+          aria-label={`Radera ${s.name}`}
+          className="absolute right-0 top-0 flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition hover:bg-line hover:text-accent focus:opacity-100 group-hover:opacity-100"
+        >
+          <CloseIcon size={11} />
+        </button>
+      </span>
+    </div>
   )
 }

@@ -6,11 +6,13 @@ IPC surface safely. For how the code is organised, see [ARCHITECTURE.md](ARCHITE
 - [Setup](#setup)
 - [Scripts](#scripts)
 - [Profiles](#profiles)
-- [Testing without spending money](#testing-without-spending-money) (test clips, voices, reviews, harnesses)
+- [Testing without spending money](#testing-without-spending-money) (test clips, voices, reviews, status rows,
+  uploads, harnesses)
 - [Typecheck and build](#typecheck-and-build)
 - [Native helper](#native-helper) (voice separation)
 - [Packaging](#packaging)
 - [Database migrations](#database-migrations)
+- [Adding an asset kind](#adding-an-asset-kind)
 - [Adding an IPC method](#adding-an-ipc-method)
 - [Adding an agent tool](#adding-an-agent-tool)
 
@@ -95,6 +97,9 @@ suite yet; changes are verified with the techniques below (contributions of a pr
   queueing a generation fails with "Ingen API-nyckel är inställd" before anything is sent.
 - **Work in a throwaway profile and library** (`STUDIO_PROFILE_DIR`), not in `~/Movies/Studio*` or
   `~/Library/Application Support/Studio*`.
+- **Never let a test reach the internet.** Agents' URL uploads are tried against a local HTTP server on
+  `127.0.0.1` (the session's own machine, which Studio allows), and the public-address rules with a stubbed DNS
+  lookup (`UploadStoreOptions.resolve`), never against real hosts.
 
 ### Test clips with ffmpeg
 
@@ -207,6 +212,48 @@ SQL
 
 Author `user` is the user's own review (at most one per generation); any other author is an agent. Tags and
 evidence are JSON lists; evidence holds generation ids.
+
+### Fake status rows
+
+*Pågår och klart* reads finished work from the `unseen` table, so a fake completed row shows as seen until you add
+one (Studio quit, as above). Ids only, never paths; `created_at` is when it finished:
+
+```bash
+sqlite3 "$LIB/.studio/studio.db" <<'SQL'
+-- A finished video the user hasn't watched: Ny on its card, a dot on Generera, a row in the panel.
+INSERT INTO unseen (id, generation_id, context, created_at) VALUES ('fake-unseen-1', 'fake-1', '{}', 1767268800000);
+-- A picture that failed after its dialog closed (no row of its own: an error and a label, its owner in context).
+INSERT INTO unseen (id, error, label, context, created_at)
+VALUES ('fake-unseen-2', 'Venice svarade 500.', 'Bild', '{"failureOf":"still"}', 1767268900000);
+SQL
+```
+
+A failed generation row (`status = 'failed'`, `error` set) with an `unseen` row is a new failure. Rows for a sequence's
+or storyboard's run or export name it in `context` (`{"sequenceId": "…", "failureOf": "run"}`); such a row goes by
+itself once that sequence is deleted. Things that *run* can't be faked with rows (only Venice generations have them,
+and a pending row would be polled at Venice); start free work instead — an export, an import of a test clip, a free
+operation in Redigera — or drive the services in a harness. Playing a test clip for a second marks it seen, which is
+the quickest check of the playback rule.
+
+### Test agent uploads
+
+Uploads need a library and the agent connection (a throwaway profile). Serve test files from a local server and
+let the agent (or a harness's MCP SDK client) fetch them; a loopback session may fetch from its own machine:
+
+```bash
+mkdir -p /tmp/studio-uploads && cd /tmp/studio-uploads
+sips -s format heic photo.jpg --out photo.heic       # HEIC, converted back to JPEG by Studio
+printf '<html></html>' > not-a-picture.jpg           # refused: the bytes are HTML, whatever the name says
+python3 -m http.server 8787 --bind 127.0.0.1         # begin_upload({kind: "image", url: "http://127.0.0.1:8787/photo.heic"})
+```
+
+For a `PUT`, call `begin_upload({kind, file_name, bytes})` and send the file to the `put_url` it answers with
+`curl -T <file> -H "Authorization: Bearer $STUDIO_MCP_TOKEN" <put_url>`. For a file over 1 MB curl sends `Expect:
+100-continue`, and `curl -v` shows that a refused `PUT` (no token, a wrong length) gets its answer without a `100
+Continue`, so the body is never sent. Uploads are staged in the
+library's `.studio/tmp/agent-uploads/`. In harnesses, `UploadStoreOptions.limits` shortens the timeouts and
+`resolve` stands in for DNS, so a rebinding answer (public first, private next) and the redirect rules can be tested
+without leaving the Mac.
 
 ### Electron-as-Node harnesses
 
@@ -382,7 +429,7 @@ ws.addEventListener('message', (m) => {
 
 `Page.captureScreenshot` gives screenshots the same way. Anyone who can reach the debugging port controls the app,
 so only use it on a dev profile, and remember that `window.studio.generate`, `generateSegment`,
-`generateAllSegments` and `resolveApproval(id, true)` spend money. For the main process, `--inspect [port]` opens
+`generateAllSegments` and `resolveApproval(id, true)` spend money (or, for a removal, delete things). For the main process, `--inspect [port]` opens
 the V8 inspector (attach from `chrome://inspect`). The renderer's DevTools are under *View → Toggle Developer
 Tools* (⌥⌘I).
 
@@ -482,8 +529,35 @@ change the schema:
 5. **Test on a copy.** Quit Studio (closing folds the WAL into `studio.db`), copy a library's folder into a
    throwaway profile (or copy just `.studio/studio.db` into a temp folder for a harness), and open the copy. Check
    that the migration runs once, that the app works afterwards, and that opening it again changes nothing.
+6. **A new top-level folder** (as *Produkter* in migration 12) gets a `*_SCHEMA_VERSION` constant in `db.ts` and an
+   entry in `library-root.ts`'s `ADDED_FOLDERS` (and `VISIBLE_FOLDERS`), so an older library whose base folder already
+   holds a folder of the user's own by that name is refused until it is renamed, instead of the user's files being
+   taken over.
+
+Migration 12 is the latest example of bookkeeping without paths: `unseen.context`, `take_trims` and the `origin`
+columns hold ids, names and hosts only, so none of the stored-path code had to learn about them.
 
 There are no down-migrations: once a newer Studio has migrated a library, older builds should not open it.
+
+## Adding an asset kind
+
+`AssetKind` / `ASSET_KINDS` (`src/shared/types.ts`) and `ASSET_FOLDERS` (`src/main/paths.ts`) drive most of the code,
+and the `Record<AssetKind, …>` maps make TypeScript point at most of the rest (wording, colours, the picker copy, the
+agents' kind words). Products showed what the compiler doesn't catch:
+
+- a migration that bumps the schema version for the new folder (step 6 above), and the folder in `library-root.ts`:
+  `VISIBLE_FOLDERS`, `ADDED_FOLDERS`, `ASSET_LABELS`, `REVEAL_FOLDERS`, `ASSET_TARGETS`;
+- the renderer's `LIBRARY_FOLDERS` and `SELECTED_ASSET_KEYS` (`lib/library.ts`), `ASSET_VIEW` and the views
+  (`lib/navigation.ts`, `lib/assets.ts`), the folder tree's entries (`library/FolderTree.tsx`);
+- `AssetIcon.tsx` (one explicit branch per kind), `KIND_TONE` and `PICKER_COPY` (`pickers/`), `AssetPicker`'s
+  `counts` and its tab grid, `ParamsForm.tsx`'s `kindButtons` and `SINGLE_IMAGE_KINDS`, `AssetImages`' `LAYOUT`;
+- the prompt grammar if the kind relates to others (`pickers/text.ts`, `prompt/promptText.ts`, `AssetChips.tsx`);
+- every Swedish sentence that lists the kinds (`ReferenceImages.tsx`, `TokenMenu.tsx`, `LibrarySetup.tsx`,
+  `assets.ts`'s `assetWorkBusy`, the start and end picker titles in `ParamsForm.tsx`, `agent/studio.ts`), the work
+  summary's view of the kind (`work.ts`'s `assetView`, `WorkView`, `AssetViewId`) and the agent guide and tool
+  descriptions (`guide.ts`, `tools/library.ts`, `tools/delete.ts`).
+
+A grep for an existing kind's plural (`Poser`, `poses`) finds them.
 
 ## Adding an IPC method
 
@@ -501,10 +575,13 @@ There are no down-migrations: once a newer Studio has migrated a library, older 
 5. **Agents** — handlers are recorded automatically, so agent tools can reach the new method with
    `callService('area:doThing', …)`. If agents must be treated differently, check `isAgentCall(event)` (as the
    review and learning handlers do: an agent passes its name as the last argument and may only change what it
-   wrote). What only the user may do (import files, delete edits or versions, clone consent …) refuses an agent's
-   call with *"Det här kan bara du göra i Studio."* in the handler too, behind the tool list. Anything paid takes
-   the price the user saw and refuses when it rose (`expectedPriceUsd`, as `edits:run` does). A new user-facing
-   capability also needs a tool (see below).
+   wrote). What only the user may do (settings, delete edits or versions, clone consent, marking things seen …)
+   refuses an agent's call with *"Det här kan bara du göra i Studio."* in the handler too, behind the tool list. A
+   handler that takes file paths calls `assertAgentFiles(event, paths)` (`upload-paths.ts`), so an agent's call can
+   only hand over uploads or files the library records. Anything paid takes the price the user saw and refuses when
+   it rose (`expectedPriceUsd`, as `edits:run` does). A new user-facing capability also needs a tool (see below), and
+   work that runs for a while needs a place in *Pågår och klart* (a registry `work.ts` reads, a `touch` when it starts
+   or stops, an `unseen` row when its result is news).
 6. **Check** — `npm run check`, then try it in the dev profile; update [ARCHITECTURE.md](ARCHITECTURE.md#ipc-surface).
 
 ## Adding an agent tool
@@ -516,8 +593,8 @@ became `list_generations`' parameters through the shared `generation-filter.ts`;
 review tools.
 
 Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, `stills.ts`, `storyboards.ts`,
-`paid.ts`, `editor.ts`, `editor-paid.ts` with `edit-input.ts`, `review.ts`) and are registered with `defineTool`
-(`kit.ts`). Redigera shows the pattern for a new area: read and free tools in `editor.ts`, the paid requests in
+`paid.ts`, `editor.ts`, `editor-paid.ts` with `edit-input.ts`, `review.ts`, `uploads.ts`, `imports.ts`, `delete.ts`,
+`work.ts`, with the shared upload and picture sources in `sources.ts`) and are registered with `defineTool` (`kit.ts`). Redigera shows the pattern for a new area: read and free tools in `editor.ts`, the paid requests in
 `editor-paid.ts`, one snake_case input schema and converter for the operations (`edit-input.ts`), every check left
 to the service's own plan (`edits:plan`), and an approval panel in `components/agent/EditApproval.tsx`:
 
@@ -526,6 +603,12 @@ to the service's own plan (`edits:plan`), and an approval panel in `components/a
   `summary` for the activity log.
 - Reach Studio's services through `callService`, never by writing to the database or files directly, so the same
   validation and change notifications apply.
+- **Never take a file path.** A file comes as an `{upload_id}` (or a `{url}`, fetched like `begin_upload`), resolved
+  with `ctx.uploads.resolve(id, kind)` to its staged file (`sources.ts` does both), or as the id of something the library holds. A file that
+  ends up in generation params is imported as a still first (`importAsStill` in `sources.ts`).
+- **Never remove anything directly.** A removal is an item kind of `request_delete` (`tools/delete.ts`: planning with
+  its refusals and effects, `verify`, and `execute` through `callApproved`), never a tool of its own; a change that
+  would remove something as a side effect (a board put between two boards) refuses instead.
 - Share filters and checks with the UI instead of re-implementing them (`shared/prompt-refs.ts`,
   `shared/generation-filter.ts`, `shared/prompt-compose.ts`, `shared/prompt-remap.ts`, `agent/studio.ts`), so an
   agent and the user always see the same result — a prompt an agent is shown is composed by main's
@@ -539,4 +622,5 @@ to the service's own plan (`edits:plan`), and an approval panel in `components/a
   plan) before the user is asked. `verify` must catch everything that changed since the request (files by identity,
   plans by fingerprint, the price). Never add a tool that spends money without the user's approval.
 - Update the guide in `agent/guide.ts` (`studioGuide`, and `serverInstructions` if it changes how agents should
-  work), the tool list and counts in [AGENTS.md](AGENTS.md#tools), and `CHANGELOG.md` under *Unreleased*.
+  work), the tool list and counts in [AGENTS.md](AGENTS.md#tools), and `CHANGELOG.md` under *Unreleased*. Grep the
+  guide and the descriptions for sentences the change makes untrue ("only the user …", "you can't …").

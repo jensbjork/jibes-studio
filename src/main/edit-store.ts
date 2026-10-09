@@ -537,7 +537,14 @@ export function updateJob(
     sets.push('request = @request')
     values.request = JSON.stringify(patch.request)
   }
+  // Every job is paid work (a Redigera operation or a designed voice): one that fails is news for the user wherever
+  // they are, also when the edit isn't open. A cancelled job is the user's own doing and isn't.
+  const before = patch.status === 'failed' ? getJob(id) : undefined
   conn().prepare(`UPDATE media_jobs SET ${sets.join(', ')} WHERE id = @id`).run(values)
+  if (before && before.status !== 'failed') {
+    const owner = before.editId ? { editId: before.editId } : before.assetId ? { assetId: before.assetId } : {}
+    db.addUnseen({ jobId: id, context: owner })
+  }
 }
 
 /** Money Venice charged for a step that was sent: what the version or transcript cost. */

@@ -10,6 +10,7 @@ import {
   paramsForSubmit,
   pickOption,
   supportsAudioInput,
+  supportsEndImage,
   type Kind
 } from '@shared/models'
 import { canonicalizeTokens, findAudioTokens, findImageTokens, findMalformedTokens } from '@shared/prompt-refs'
@@ -23,6 +24,7 @@ import type {
   AgentFormState,
   AgentOpenResult,
   Asset,
+  AssetKind,
   GenerationParams,
   ReferenceAudio,
   VideoModel
@@ -30,16 +32,18 @@ import type {
 import { modelForKind } from '../components/ParamsForm'
 import { addPaths, sameList } from '../components/pickers/assetRefs'
 import { addAudios, audioSourcesByPath, sameAudios, windowOf } from '../components/pickers/audioRefs'
+import { ASSET_VIEW } from './assets'
 import { followGenerateAudio, generateParamsFrozen, getGenerateParams, setGenerateParams } from './generateStore'
 import { ipcErrorMessage, loadModels } from './hooks'
-import { followAssetImages, readRememberedImageIds } from './library'
+import { SELECTED_ASSET_KEYS, followAssetImages, readRememberedImageIds } from './library'
 import type { Intent, Navigate, View } from './navigation'
 import { promptIssuesOf } from './promptIssues'
 import { openEditInEditor, openInSequenceEditor, openStoryboard } from './workspace'
 
 // The renderer half of the agent connection. Tools that read or fill the Generate form (get_workspace,
-// set_form, set_references, reorder_references) and open_in_studio (Generate, a sequence, a storyboard or an edit
-// in Redigera) reach main's MCP server as an 'agent:command';
+// set_form, set_references, reorder_references) and open_in_studio (Generate or a clip in its drawer, a sequence, a
+// storyboard or one of its transitions, an edit or one of its versions in Redigera, an asset, the prompt library)
+// reach main's MCP server as an 'agent:command';
 // this applies them to the form store with the same rules the form itself uses (mode switching, model options,
 // the reference caps for images and audio, tokens following a reorder) and answers with 'agent:reply'.
 // Everything else the agent does goes straight to main's services. Error messages are Swedish: they are shown
@@ -195,14 +199,23 @@ export function applySetForm(
   const promptValue = field(args, 'prompt')
   const negativeValue = field(args, 'negative_prompt')
   const startValue = field(args, 'start_image')
+  const endValue = field(args, 'end_image')
   const includeValue = field(args, 'include_descriptions')
   const excludedValue = field(args, 'excluded_description_asset_ids')
   const explicit = new Set(
     ['duration', 'resolution', 'aspect_ratio', 'audio'].filter((key) => given(field(args, key)))
   )
 
-  const needsModels =
-    [modeValue, modelValue, durationValue, resolutionValue, aspectValue, audioValue, startValue].some(given)
+  const needsModels = [
+    modeValue,
+    modelValue,
+    durationValue,
+    resolutionValue,
+    aspectValue,
+    audioValue,
+    startValue,
+    endValue
+  ].some(given)
   if (needsModels && !models.length) {
     throw new BridgeError(
       `Studio kunde inte hämta modellistan från Venice${modelsError ? ` (${modelsError})` : ''}. Försök igen om en stund.`
@@ -225,13 +238,15 @@ export function applySetForm(
     } else modelId = chosen.id
   } else {
     const currentKind = kindOfModelId(current.model)
-    const wanted = mode ?? (given(startValue) && currentKind !== 'image-to-video' ? 'image-to-video' : undefined)
+    const picture = given(startValue) || given(endValue)
+    const wanted = mode ?? (picture && currentKind !== 'image-to-video' ? 'image-to-video' : undefined)
     if (wanted && wanted !== currentKind) {
       const id = modelForKind([...models], current.model, wanted)
       if (!id) errors.push(`Det finns ingen tillgänglig modell för läget ${modeName(wanted)} just nu.`)
       else {
         modelId = id
-        if (!mode) notes.push(`Bytte till läget ${modeName(wanted)} för startbilden.`)
+        const slot = given(startValue) ? 'startbilden' : 'slutbilden'
+        if (!mode) notes.push(`Bytte till läget ${modeName(wanted)} för ${slot}.`)
       }
     }
   }
@@ -314,6 +329,21 @@ export function applySetForm(
       else if (kind !== 'image-to-video') {
         errors.push(`En startbild används bara i läget ${modeName('image-to-video')}, inte ${modeName(kind)}.`)
       } else next.startImage = path
+    }
+  }
+
+  // The end image, as the form's own slot takes it: only for an image-to-video model that takes one.
+  if (endValue !== undefined) {
+    if (endValue === null) next.endImage = undefined
+    else {
+      const path = typeof endValue === 'string' ? endValue : asArgs(endValue).path
+      const kind = kindOfModelId(next.model)
+      if (typeof path !== 'string' || !path.startsWith('/')) errors.push('Slutbilden kunde inte hittas i biblioteket.')
+      else if (kind !== 'image-to-video') {
+        errors.push(`En slutbild används bara i läget ${modeName('image-to-video')}, inte ${modeName(kind)}.`)
+      } else if (!supportsEndImage(next.model)) {
+        errors.push(`${modelLabel} tar ingen slutbild. Välj en bild-till-video-modell som gör det.`)
+      } else next.endImage = path
     }
   }
 
@@ -742,17 +772,38 @@ function optionalId(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-/** open_in_studio: brings the Generate view, a sequence (and clip) or a storyboard to the front. */
+/** The library views, by the kind of asset they show. */
+const ASSET_VIEWS = new Set<View>(Object.values(ASSET_VIEW))
+
+/**
+ * open_in_studio: brings a place to the front – the Generate view (or a clip in its drawer), a sequence (and clip),
+ * a storyboard (or one of its transitions), an edit (or one of its versions), an asset in its library view or the
+ * prompt library. Every intent is marked as the agent's (`source: 'agent'`): opening a place for an agent never
+ * counts as the user having looked at it.
+ */
 export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<AgentOpenResult> {
   const args = asArgs(rawArgs)
-  if (args.view === 'generate') {
-    ctx.show('generate')
-    return { view: 'generate' }
+  const view = args.view as View
+  if (view === 'generate') {
+    const generationId = optionalId(field(args, 'generation_id'))
+    if (!generationId) {
+      ctx.show('generate')
+      return { view: 'generate' }
+    }
+    ctx.show('generate', { type: 'open-generation', generationId, source: 'agent' })
+    return { view: 'generate', generationId }
   }
+  if (view === 'prompts') {
+    ctx.show('prompts')
+    return { view: 'prompts' }
+  }
+  if (ASSET_VIEWS.has(view)) return openAssetView(view, args, ctx)
   if (args.view === 'storyboards' || args.view === 'storyboard') return openStoryboardView(args, ctx)
-  if (args.view === 'editor') return openEditorView(args, ctx)
+  if (view === 'editor') return openEditorView(args, ctx)
   if (args.view !== 'sequences' && args.view !== 'sequence') {
-    throw new BridgeError('view ska vara ”generate”, ”sequences”, ”storyboards” eller ”editor”.')
+    throw new BridgeError(
+      'view ska vara ”generate”, ”sequences”, ”storyboards”, ”editor”, ”prompts” eller en biblioteksvy (”characters”, ”environments”, ”products”, ”outfits”, ”poses”).'
+    )
   }
   const segmentId = optionalId(field(args, 'segment_id'))
   const sequenceId = optionalId(field(args, 'sequence_id')) ?? (segmentId && (await findSequenceOfSegment(segmentId)))
@@ -766,7 +817,7 @@ export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<A
   if (segmentId && !sequence.segments.some((s) => s.id === segmentId)) {
     throw new BridgeError(`Klippet finns inte i sekvensen ”${sequence.name}”.`)
   }
-  ctx.show('sequences', { type: 'open-sequence', sequenceId, segmentId })
+  ctx.show('sequences', { type: 'open-sequence', sequenceId, segmentId, source: 'agent' })
   // Answer with the clip that is actually on screen once the sequence editor has loaded it.
   const shown = await settled(() => {
     const onScreen = openInSequenceEditor()
@@ -782,9 +833,40 @@ export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<A
   }
 }
 
-/** Shows Storyboards, with the storyboard asked for open (or the one it last showed). */
+/** The asset a library view has selected (it remembers it as soon as it has taken the intent). */
+function selectedAsset(kind: AssetKind): string | undefined {
+  try {
+    return localStorage.getItem(SELECTED_ASSET_KEYS[kind]) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Shows an asset in its library view (Karaktärer, Miljöer, Produkter, Kläder or Poser). */
+async function openAssetView(view: View, args: Args, ctx: BridgeContext): Promise<AgentOpenResult> {
+  const assetId = optionalId(field(args, 'asset_id'))
+  if (!assetId) {
+    ctx.show(view)
+    return { view: view as AgentOpenResult['view'] }
+  }
+  const asset = (await window.studio.listAssets()).find((a) => a.id === assetId)
+  if (!asset) throw new BridgeError('Tillgången finns inte (längre).')
+  // An asset is opened in its own kind's view, whichever view was named.
+  const target = ASSET_VIEW[asset.kind]
+  ctx.show(target, { type: 'open-asset', assetId, source: 'agent' })
+  const shown = await settled(() => selectedAsset(asset.kind) === assetId)
+  return {
+    view: target as AgentOpenResult['view'],
+    assetId,
+    assetName: asset.name,
+    ...(shown ? {} : { note: 'Vyn visas, men tillgången valdes inte i tid – be användaren välja den i listan.' })
+  }
+}
+
+/** Shows Storyboards, with the storyboard asked for open (or the one it last showed), and a transition if named. */
 async function openStoryboardView(args: Args, ctx: BridgeContext): Promise<AgentOpenResult> {
   const storyboardId = optionalId(field(args, 'storyboard_id'))
+  const transitionId = optionalId(field(args, 'transition_id'))
   if (!storyboardId) {
     ctx.show('storyboards')
     const shown = openStoryboard()
@@ -792,20 +874,30 @@ async function openStoryboardView(args: Args, ctx: BridgeContext): Promise<Agent
   }
   const storyboard = await window.studio.getStoryboard(storyboardId).catch(() => undefined)
   if (!storyboard) throw new BridgeError('Storyboarden finns inte (längre).')
-  ctx.show('storyboards', { type: 'open-storyboard', storyboardId })
+  if (transitionId && !storyboard.transitions.some((t) => t.id === transitionId)) {
+    throw new BridgeError(`Övergången finns inte i storyboarden ”${storyboard.name}” (längre).`)
+  }
+  ctx.show('storyboards', {
+    type: 'open-storyboard',
+    storyboardId,
+    ...(transitionId ? { transitionId } : {}),
+    source: 'agent'
+  })
   // The view remembers the storyboard it shows as soon as it has taken the intent.
   const shown = await settled(() => openStoryboard() === storyboardId)
   return {
     view: 'storyboards',
     storyboardId,
     storyboardName: storyboard.name,
+    ...(transitionId && shown ? { transitionId } : {}),
     ...(shown ? {} : { note: 'Storyboards visas, men storyboarden öppnades inte i tid – be användaren välja den i listan.' })
   }
 }
 
-/** Shows Redigera, with the edit asked for open (or its list of edits). */
+/** Shows Redigera, with the edit asked for open (or its list of edits), on a version if named. */
 async function openEditorView(args: Args, ctx: BridgeContext): Promise<AgentOpenResult> {
   const editId = optionalId(field(args, 'edit_id'))
+  const versionId = optionalId(field(args, 'version_id'))
   if (!editId) {
     ctx.show('editor')
     const shown = openEditInEditor().editId
@@ -813,14 +905,28 @@ async function openEditorView(args: Args, ctx: BridgeContext): Promise<AgentOpen
   }
   const edit = await window.studio.getEdit(editId).catch(() => undefined)
   if (!edit) throw new BridgeError('Redigeringen finns inte (längre).')
-  ctx.show('editor', { type: 'open-editor', editId })
-  // The view reports the edit it shows as soon as it has taken the intent.
-  const shown = await settled(() => openEditInEditor().editId === editId)
+  if (versionId && !edit.versions.some((v) => v.id === versionId)) {
+    throw new BridgeError(`Versionen hör inte till redigeringen ”${edit.name}”.`)
+  }
+  ctx.show('editor', { type: 'open-editor', editId, ...(versionId ? { versionId } : {}), source: 'agent' })
+  // The view reports the edit (and the version in its player) as soon as it has taken the intent.
+  const shown = await settled(() => {
+    const onScreen = openEditInEditor()
+    return onScreen.editId === editId && (!versionId || onScreen.versionId === versionId)
+  })
+  const onScreen = openEditInEditor()
   return {
     view: 'editor',
     editId,
     editName: edit.name,
-    ...(shown ? {} : { note: 'Redigera visas, men redigeringen öppnades inte i tid – be användaren välja den i listan.' })
+    ...(onScreen.editId === editId && onScreen.versionId ? { versionId: onScreen.versionId } : {}),
+    ...(shown
+      ? {}
+      : {
+          note: versionId
+            ? 'Redigeringen visas, men versionen visades inte i tid – be användaren välja den.'
+            : 'Redigera visas, men redigeringen öppnades inte i tid – be användaren välja den i listan.'
+        })
   }
 }
 

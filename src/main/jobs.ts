@@ -260,6 +260,34 @@ interface JobEvents {
   update: [Generation]
   /** Exactly once per generation: completed (duration and poster already stored) or failed. */
   settled: [db.StoredGeneration]
+  /**
+   * A submit started or ended its way to Venice (see sending()). Nothing is broadcast while a submit uploads, so the
+   * status summary (work.ts) listens here to show it.
+   */
+  sending: []
+}
+
+/** A submit on its way to Venice: from its first check until Venice answered and the row was written (or it failed). */
+export interface SendingSubmit {
+  token: string
+  startedAt: number
+  segmentId?: string
+  editId?: string
+  prompt: string
+  model: string
+}
+
+/** How many of a model's latest finished generations its typical duration is measured over. */
+const TYPICAL_SAMPLE = 20
+/** How long a model's typical duration is kept before it is measured again. */
+const TYPICAL_TTL_MS = 10 * 60_000
+
+/** The middle value (the mean of the two middle ones for an even count); undefined for none. */
+export function median(values: readonly number[]): number | undefined {
+  const sorted = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b)
+  if (!sorted.length) return undefined
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2)
 }
 
 export interface SubmitOptions {
@@ -294,6 +322,14 @@ export class JobManager extends EventEmitter<JobEvents> {
   private readonly waiters = new Map<string, Waiter[]>()
   /** Submits between their first await and the row being written (copying images, uploading to Venice). */
   private submitting = 0
+  /**
+   * The submits behind `submitting` that got as far as submit() itself, with what they send, by a token of their own:
+   * what the status panel shows while a take uploads. `submitting` stays the busy count (holdSubmit bumps it before
+   * any params exist, and hasActiveJobs relies on it); this map only describes.
+   */
+  private readonly sendingNow = new Map<string, Omit<SendingSubmit, 'token'>>()
+  /** Each model's typical time from submit to saved video (see typicalMs), with when it was measured. */
+  private readonly typical = new Map<string, { at: number; ms: number | undefined }>()
   /** Bumped by every resume() (a library opened) and pauseBackfill(); an older backfill loop then stops. */
   private epoch = 0
   /** The backfill's current poster/duration step, which writes into the library that was open when it began. */
@@ -318,6 +354,8 @@ export class JobManager extends EventEmitter<JobEvents> {
    */
   resume(): void {
     const epoch = ++this.epoch
+    // Typical durations are the open library's; another library measures its own.
+    this.typical.clear()
     for (const g of db.listPendingGenerations()) this.track(g)
     void this.backfill(epoch).catch((err: unknown) => console.warn('Media backfill stopped:', err))
   }
@@ -346,6 +384,15 @@ export class JobManager extends EventEmitter<JobEvents> {
     const problem = blockingPromptError(params)
     if (problem) throw new Error(problem)
     this.submitting++
+    const token = randomUUID()
+    this.sendingNow.set(token, {
+      startedAt: Date.now(),
+      ...(opts.segmentId ? { segmentId: opts.segmentId } : {}),
+      ...(opts.editId ? { editId: opts.editId } : {}),
+      prompt: params.prompt,
+      model: params.model
+    })
+    this.safeEmit('sending')
     try {
       // Before the files are read: the model list may take a moment, and paths are only followed from there on.
       // A caller that composed the prompt itself (a sequence take) already had the limit.
@@ -353,7 +400,43 @@ export class JobManager extends EventEmitter<JobEvents> {
       return await this.queue(await prepareSubmission(params), opts, limit)
     } finally {
       this.submitting--
+      this.sendingNow.delete(token)
+      this.safeEmit('sending')
     }
+  }
+
+  /** The submits on their way to Venice right now (copying pictures, measuring audio, uploading), oldest first. */
+  sending(): SendingSubmit[] {
+    return [...this.sendingNow].map(([token, s]) => ({ token, ...s }))
+  }
+
+  /**
+   * How long a video of this model usually takes from submit to saved file, in milliseconds: the median over its
+   * latest finished Venice generations in the open library (measured again after ten minutes). Undefined when it has
+   * none yet or no library is open. Shown for a video still queued at Venice ("brukar ta ~3 min").
+   */
+  typicalMs(model: string): number | undefined {
+    if (typeof model !== 'string' || !model || !db.isDbOpen()) return undefined
+    const cached = this.typical.get(model)
+    const now = Date.now()
+    if (cached && now - cached.at < TYPICAL_TTL_MS) return cached.ms
+    let ms: number | undefined
+    try {
+      const durations = db
+        .getDb()
+        .prepare(
+          `SELECT completed_at - created_at FROM generations
+           WHERE model = ? AND source = 'generated' AND status = 'completed' AND completed_at IS NOT NULL
+           ORDER BY completed_at DESC LIMIT ?`
+        )
+        .pluck()
+        .all(model, TYPICAL_SAMPLE) as number[]
+      ms = median(durations)
+    } catch (err) {
+      console.warn('Could not measure how long a model usually takes:', err)
+    }
+    this.typical.set(model, { at: now, ms })
+    return ms
   }
 
   /**

@@ -91,16 +91,16 @@ Optional, but please use one when a change clearly belongs to an area. Pick the 
 | --- | --- | --- |
 | `generate` | The Generate view, the clip feed and the job queue | `GenerateView.tsx`, `ParamsForm.tsx`, `components/feed/`, `jobs.ts`, `venice.ts` |
 | `prompt` | The prompt editor and `@ImageN` / `@AudioN` reference checks | `components/prompt/`, `shared/prompt-refs.ts` |
-| `library` | Characters, environments, outfits and poses, the prompt library, reviews and learnings | `components/assets/`, `components/prompts/`, `library.ts`, `reviews.ts` |
+| `library` | Characters, environments, products, outfits and poses, the prompt library, reviews and learnings | `components/assets/`, `components/prompts/`, `library.ts`, `reviews.ts` |
 | `assets` | Reference images, audio clips and asset folders on disk | `assets.ts`, `references.ts` |
-| `sequences` | Sequences and storyboards: clips, boards, transitions, takes, trims, preview, keyframes, own clips (*Egna klipp*) | `components/sequences/`, `components/storyboards/`, `sequences.ts`, `storyboards.ts`, `sequence-store.ts`, `imports.ts` |
+| `sequences` | Sequences and storyboards: clips, boards, transitions, takes, trims, preview, keyframes, own clips (*Egna klipp*) | `components/sequences/`, `components/storyboards/`, `components/takes/`, `sequences.ts`, `storyboards.ts`, `sequence-store.ts`, `imports.ts` |
 | `editor` | Redigera: edits, versions, the free and paid operations, voices, transcripts and voice separation | `components/editor/`, `edits.ts`, `edit-ops.ts`, `edit-store.ts`, `edit-mix.ts`, `venice-audio.ts`, `voice-separation.ts`, `shared/edit-plan.ts`, `native/` |
 | `images` | Stills and Venice's image models (*Skapa bild…*, frames saved from takes) | `components/images/`, `images.ts`, `stills.ts` |
 | `export` | ffmpeg export of sequences and storyboards | `sequence-export.ts`, `ffmpeg.ts` |
 | `agent` | Agent connection: approvals, activity, the agent guide | `agent/approvals.ts`, `agent/guide.ts`, `components/agent/` |
-| `mcp` | The MCP server, its tools and transport | `agent/server.ts`, `agent/network.ts`, `agent/tools/` |
+| `mcp` | The MCP server, its tools, transport and agents' uploads | `agent/server.ts`, `agent/network.ts`, `agent/uploads.ts`, `agent/fetch-url.ts`, `agent/tools/` |
 | `db` | SQLite schema and migrations | `db.ts` |
-| `ui` | Shared UI components, layout and styling | `components/pickers/`, `Sidebar.tsx`, `styles.css` |
+| `ui` | Shared UI components, layout and styling, the sidebar and *Pågår och klart* | `components/pickers/`, `Sidebar.tsx`, `components/work/`, `lib/work.ts`, `work.ts`, `styles.css` |
 | `settings` | The Settings view, the base folder and profiles | `SettingsView.tsx`, `components/library/`, `settings.ts`, `library-root.ts`, `paths.ts` |
 | `build` | electron-vite, electron-builder and packaging | `electron.vite.config.ts`, `electron-builder.yml` |
 | `deps` | Dependency updates | `package.json`, `package-lock.json` |

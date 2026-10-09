@@ -1,5 +1,6 @@
-import { useState, type DragEvent, type ReactNode, type Ref } from 'react'
+import { useRef, useState, type DragEvent, type ReactNode, type Ref } from 'react'
 import { mediaUrl } from '../lib/media'
+import { useSeenPictureWhenVisible } from '../lib/work'
 import { moveItem } from './pickers/reorder'
 import { occurrenceKeys, useReorder } from './pickers/useReorder'
 
@@ -182,12 +183,15 @@ export default function ImageInput({
                     Filen saknas
                   </span>
                 ) : (
-                  <img
-                    src={mediaUrl(p)}
-                    draggable={false}
-                    onError={() => setMissing((s) => new Set(s).add(p))}
-                    className="pointer-events-none h-full w-full object-cover"
-                  />
+                  <>
+                    <img
+                      src={mediaUrl(p)}
+                      draggable={false}
+                      onError={() => setMissing((s) => new Set(s).add(p))}
+                      className="pointer-events-none h-full w-full object-cover"
+                    />
+                    <SeenWhenShown path={p} />
+                  </>
                 )}
                 {cap && (
                   <span
@@ -255,6 +259,16 @@ export default function ImageInput({
       </span>
     </div>
   )
+}
+
+/**
+ * Covers a thumbnail: a picture the user hasn't seen yet (one an agent made for this clip, say) counts as seen once it
+ * has been on screen here a moment, as it would in its viewer.
+ */
+function SeenWhenShown({ path }: { path: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  useSeenPictureWhenVisible(ref, path)
+  return <span ref={ref} aria-hidden className="pointer-events-none absolute inset-0" />
 }
 
 /** The insertion marker in the gap before (or after) a thumbnail, centred in the 8 px gap. */

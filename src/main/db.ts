@@ -1,7 +1,15 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import Database from 'better-sqlite3'
-import type { EditRecipe, Generation, GenerationParams, GenerationSource, GenerationStatus } from '@shared/types'
+import type {
+  EditRecipe,
+  Generation,
+  GenerationParams,
+  GenerationSource,
+  GenerationStatus,
+  SegmentImageSlot
+} from '@shared/types'
 import {
   fromStoredParams,
   fromStoredPath,
@@ -9,7 +17,8 @@ import {
   isLibraryRelative,
   LIBRARY_NOT_READY,
   toStoredParams,
-  toStoredPath
+  toStoredPath,
+  withoutLocalPaths
 } from './paths'
 
 let db: Database.Database | undefined
@@ -289,7 +298,43 @@ const migrations: string[] = [
   );
   ALTER TABLE asset_audio ADD COLUMN clone_consent_at INTEGER;
   ALTER TABLE exports ADD COLUMN cuts TEXT;
-  ALTER TABLE sequences ADD COLUMN export_height INTEGER;`
+  ALTER TABLE sequences ADD COLUMN export_height INTEGER;`,
+
+  // Phase 11. Products are a new asset kind (assets.kind = 'product', free text) that owns the Produkter folder from
+  // this version on. unseen: finished work the user hasn't looked at yet (ids only, never paths); a row refers to at
+  // most one item, so deleting the item removes the row with it, and an error-only row (a picture that wasn't made,
+  // a failed export or run) names its owner in `context`. take_trims: the trims each take of a clip last had, so
+  // switching takes never erodes them. origin: which agent added a photo or a sound clip, and from which host
+  // (JSON; NULL = the user). storyboard_boards_by_still: the status summary finds a picture's first board by its still.
+  `CREATE TABLE unseen (
+    id TEXT PRIMARY KEY,
+    generation_id TEXT REFERENCES generations(id) ON DELETE CASCADE,
+    still_id TEXT REFERENCES stills(id) ON DELETE CASCADE,
+    export_id TEXT REFERENCES exports(id) ON DELETE CASCADE,
+    audio_id TEXT REFERENCES asset_audio(id) ON DELETE CASCADE,
+    job_id TEXT REFERENCES media_jobs(id) ON DELETE CASCADE,
+    error TEXT,
+    label TEXT,
+    context TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX unseen_generation ON unseen(generation_id) WHERE generation_id IS NOT NULL;
+  CREATE UNIQUE INDEX unseen_still ON unseen(still_id) WHERE still_id IS NOT NULL;
+  CREATE UNIQUE INDEX unseen_export ON unseen(export_id) WHERE export_id IS NOT NULL;
+  CREATE UNIQUE INDEX unseen_audio ON unseen(audio_id) WHERE audio_id IS NOT NULL;
+  CREATE UNIQUE INDEX unseen_job ON unseen(job_id) WHERE job_id IS NOT NULL;
+  CREATE TABLE take_trims (
+    segment_id TEXT NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
+    generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
+    trim_start REAL NOT NULL,
+    trim_end REAL NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (segment_id, generation_id)
+  );
+  CREATE INDEX take_trims_by_generation ON take_trims(generation_id);
+  CREATE INDEX storyboard_boards_by_still ON storyboard_boards(still_id);
+  ALTER TABLE asset_images ADD COLUMN origin TEXT;
+  ALTER TABLE asset_audio ADD COLUMN origin TEXT;`
 ]
 
 
@@ -310,6 +355,12 @@ export const STORYBOARDS_SCHEMA_VERSION = 10
  * own folders.
  */
 export const EDITS_SCHEMA_VERSION = 11
+
+/**
+ * The user_version from which a library has products (and the unseen, take_trims and origin bookkeeping): from then
+ * on Produkter is its own folder.
+ */
+export const PRODUCTS_SCHEMA_VERSION = 12
 
 /**
  * Why this build doesn't open a library whose database a newer Studio has migrated: it doesn't know the newer
@@ -606,6 +657,101 @@ export function listGenerationsForSegments(segmentIds: string[]): StoredGenerati
       .prepare(`SELECT * FROM generations WHERE segment_id IN (${placeholders}) ORDER BY created_at DESC`)
       .all(...segmentIds) as GenerationRow[]
   ).map(generationFromRow)
+}
+
+// ── Unseen work (Pågår och klart) ────────────────────────────────────────────
+
+/**
+ * What an unseen row is about beyond its one item: ids only, never paths (the table isn't part of the stored-path
+ * upkeep). An error-only row always has `failureOf`, and names its owner (sequenceId, assetId or editId) so the
+ * status summary can drop it once that owner is deleted.
+ */
+export interface UnseenContext {
+  sequenceId?: string
+  storyboardId?: string
+  boardId?: string
+  segmentId?: string
+  slot?: SegmentImageSlot
+  assetId?: string
+  editId?: string
+  failureOf?: 'still' | 'export' | 'run'
+  /** A picture's dialog key (StillParams.workToken), so the open dialog can find its own failure. */
+  workToken?: string
+}
+
+/** A row to add: exactly one item id, or none and then `error` and `label` (a failure with no row of its own). */
+export interface UnseenInput {
+  generationId?: string
+  stillId?: string
+  exportId?: string
+  audioId?: string
+  jobId?: string
+  /** Swedish. */
+  error?: string
+  /** Swedish, the label at the time it failed. */
+  label?: string
+  context?: UnseenContext
+  /** When it finished (epoch ms); default now. */
+  at?: number
+}
+
+const UNSEEN_ITEM_COLUMNS = [
+  ['generationId', 'generation_id'],
+  ['stillId', 'still_id'],
+  ['exportId', 'export_id'],
+  ['audioId', 'audio_id'],
+  ['jobId', 'job_id']
+] as const satisfies readonly (readonly [keyof UnseenInput, string])[]
+
+const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim() !== ''
+
+/** The context as stored: known fields with usable values only. */
+function unseenContextJson(context: UnseenContext | undefined): string {
+  if (!context || typeof context !== 'object') return '{}'
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(context)) {
+    if (nonEmpty(value)) out[key] = value
+  }
+  return JSON.stringify(out)
+}
+
+/**
+ * Records finished work the user hasn't looked at yet (a row of `unseen`). An item that already has a row keeps it
+ * (INSERT OR IGNORE: a video settling twice is announced once). Bookkeeping must never break the work it announces,
+ * so nothing is thrown: a malformed input, an item that is already gone (the foreign key) or no open library is only
+ * logged.
+ */
+export function addUnseen(input: UnseenInput): void {
+  try {
+    if (!db) return
+    if (!input || typeof input !== 'object') throw new Error('no input')
+    const items = UNSEEN_ITEM_COLUMNS.filter(([key]) => nonEmpty(input[key]))
+    if (items.length > 1) throw new Error('more than one item')
+    if (!items.length && !(nonEmpty(input.error) && nonEmpty(input.label))) {
+      throw new Error('an error-only row needs an error and a label')
+    }
+    const values: Record<string, string | number | null> = {
+      id: randomUUID(),
+      generation_id: null,
+      still_id: null,
+      export_id: null,
+      audio_id: null,
+      job_id: null,
+      // Ids only, never paths (an error may quote ffmpeg, which names files by their full paths).
+      error: nonEmpty(input.error) ? withoutLocalPaths(input.error) : null,
+      label: nonEmpty(input.label) ? input.label : null,
+      context: unseenContextJson(input.context),
+      created_at: typeof input.at === 'number' && Number.isFinite(input.at) ? input.at : Date.now()
+    }
+    for (const [key, column] of items) values[column] = input[key] as string
+    db.prepare(
+      `INSERT OR IGNORE INTO unseen (id, generation_id, still_id, export_id, audio_id, job_id, error, label, context,
+         created_at)
+       VALUES (@id, @generation_id, @still_id, @export_id, @audio_id, @job_id, @error, @label, @context, @created_at)`
+    ).run(values)
+  } catch (err) {
+    console.warn('Could not record unseen work:', err)
+  }
 }
 
 // ── Stored path maintenance ──────────────────────────────────────────────────

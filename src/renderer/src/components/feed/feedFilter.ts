@@ -22,6 +22,8 @@ export interface FeedFilters {
   rating?: RatingChoice
   period?: PeriodChoice
   placement?: PlacementChoice
+  /** "Nya": finished and not looked at yet (Pågår och klart's seen state). */
+  unseen?: boolean
 }
 
 export const NO_FILTERS: FeedFilters = { query: '' }
@@ -91,11 +93,22 @@ export function toGenerationFilter(f: FeedFilters, sort: SortKey, now: number): 
   else if (f.rating === 'reviewed') filter.hasReviews = true
   if (f.period) filter.since = periodStart(f.period, now)
   if (f.placement) filter.placement = f.placement
+  if (f.unseen) filter.unseen = true
   return filter
 }
 
 export function hasFilters(f: FeedFilters): boolean {
-  return !!(f.query.trim() || f.source || f.status || f.model || f.assetId || f.rating || f.period || f.placement)
+  return !!(
+    f.query.trim() ||
+    f.source ||
+    f.status ||
+    f.model ||
+    f.assetId ||
+    f.rating ||
+    f.period ||
+    f.placement ||
+    f.unseen
+  )
 }
 
 /** Filters that point at something that no longer exists (a deleted asset) count as not set. */
@@ -136,6 +149,7 @@ export function filterChips(f: FeedFilters, models: readonly VideoModel[], asset
   if (f.placement) {
     chips.push({ key: 'placement', label: PLACEMENT_OPTIONS.find((o) => o.id === f.placement)?.label ?? '' })
   }
+  if (f.unseen) chips.push({ key: 'unseen', label: 'Nya' })
   return chips
 }
 
