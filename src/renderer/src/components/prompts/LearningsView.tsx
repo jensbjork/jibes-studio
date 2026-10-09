@@ -98,7 +98,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.defaultPrevented && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         searchRef.current?.focus()
         searchRef.current?.select()

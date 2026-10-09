@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { AudioGenModel, EditOperation } from '@shared/types'
 import { useOpenCard, useReportRange } from './cards'
 import { useCardRun, useEditor } from './EditorContext'
+import PromptField from '../prompt/PromptField'
 import { formatLength, formatPrice, operationRange } from './editorUtils'
 import { usePlan, usePlans } from './useEditOps'
 import { Check, Choice, Field, GainSlider, OpCard, PlanNotes, RunButton, TimeAt, fieldInput, textArea } from './ui'
@@ -94,14 +95,16 @@ function MusicCard({ open, onToggle }: CardProps) {
   return (
     <OpCard title="Skapa musik" summary="Ny musik under filmen eller markeringen, sänkt när någon pratar." open={open} onToggle={onToggle}>
       <Field label="Beskriv musiken">
-        <textarea
+        <PromptField
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={2}
-          maxLength={model?.promptLimit || undefined}
-          spellCheck={false}
+          onChange={setPrompt}
+          context="music"
+          minRows={2}
+          maxRows={8}
+          limit={model?.promptLimit || undefined}
+          title="Beskriv musiken"
+          focusHint="Instrument, tempo och känsla – gärna på engelska. Skriv / för en byggsten."
           placeholder="Calm piano, slow tempo, warm and hopeful"
-          className={textArea}
         />
       </Field>
       {model?.instrumental && (
@@ -200,14 +203,16 @@ function EffectCard({ open, onToggle }: CardProps) {
   return (
     <OpCard title="Skapa ljudeffekt" summary="En dörr som slår igen, regn, steg – där spelhuvudet står." open={open} onToggle={onToggle}>
       <Field label="Beskriv ljudet">
-        <textarea
+        <PromptField
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={2}
-          maxLength={model?.promptLimit || undefined}
-          spellCheck={false}
+          onChange={setPrompt}
+          context="sound"
+          minRows={2}
+          maxRows={6}
+          limit={model?.promptLimit || undefined}
+          title="Beskriv ljudet"
+          focusHint="Vad som hörs och var – gärna på engelska. Skriv / för en byggsten."
           placeholder="A wooden door slams shut in a quiet hallway"
-          className={textArea}
         />
         <p className="mt-1 text-[11px] text-muted">Skriv gärna på engelska.</p>
       </Field>

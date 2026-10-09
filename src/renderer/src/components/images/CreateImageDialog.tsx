@@ -41,6 +41,7 @@ import {
   type ImageMode,
   type ImageOptions
 } from './imageModels'
+import PromptField from '../prompt/PromptField'
 import ReferenceImages from './ReferenceImages'
 import StillThumb from './StillThumb'
 import StillViewer from './StillViewer'
@@ -571,19 +572,17 @@ function CreateImageDialogBody({
           <div className="space-y-4">
             <label className="block">
               <span className="mb-1.5 block text-muted">Vad ska bilden visa?</span>
-              <textarea
+              <PromptField
                 autoFocus
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault()
-                    void create()
-                  }
-                }}
-                rows={5}
+                onChange={setPrompt}
+                onSubmit={() => void create()}
+                context="image"
+                minRows={4}
+                maxRows={12}
+                title="Vad ska bilden visa?"
+                focusHint="Beskriv bilden som en filmruta: utsnitt, komposition, ljus och stämning – gärna på engelska. Skriv / för en byggsten."
                 placeholder="Wide shot of a woman by a rainy window at dusk, warm lamp light, shallow depth of field"
-                className={`${field} resize-y leading-relaxed`}
               />
               <span className="mt-1 block text-[11px] leading-relaxed text-muted">
                 Skriv gärna på engelska och beskriv bilden som en filmruta: utsnitt, komposition, ljus och stämning.
