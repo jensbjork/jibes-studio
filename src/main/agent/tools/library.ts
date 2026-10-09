@@ -5,6 +5,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { queryGenerations, summarizeGenerations } from '@shared/generation-filter'
 import { generationTitle } from '@shared/generation-label'
+import { PROMPT_BLOCK_GROUPS, promptBlockGroups, type PromptBlockContext } from '@shared/prompt-blocks'
 import {
   ASSET_KINDS,
   type Asset,
@@ -350,6 +351,38 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
       summary: () => 'läste guiden'
     },
     async () => ({ data: { guide: studioGuide(ctx.promptLanguage(), await learningsForGuide()) } })
+  )
+
+  defineTool(
+    server,
+    ctx,
+    'get_prompt_blocks',
+    {
+      title: 'Prompt building blocks',
+      description:
+        "The ready-made phrases the user inserts into prompts with \"/\" and the chips under every prompt field (Byggstenar): grouped by what they describe – a scene template, framing, camera, light, style, motion and sound for video prompts; framing, light and style for pictures; common things to avoid for negative prompts; music and sound effects for Redigera. Each block has the Swedish label the user sees and the English text it inserts. Use the same wording when you write prompts, so the user recognises them; filter with `context`.",
+      input: {
+        context: z
+          .enum(['video', 'image', 'negative', 'music', 'sound'])
+          .optional()
+          .describe('Only the groups a field of this kind offers: video (default prompt), image (Skapa bild), negative, music, sound.')
+      },
+      annotations: { ...READ_ONLY, idempotentHint: true },
+      summary: () => 'läste byggstenarna'
+    },
+    async ({ context }) => {
+      const groups = context ? promptBlockGroups(context as PromptBlockContext) : PROMPT_BLOCK_GROUPS
+      return {
+        data: {
+          groups: groups.map((g) => ({
+            id: g.id,
+            label: g.label,
+            contexts: g.contexts,
+            blocks: g.blocks.map((b) => ({ label: b.label, text: b.text }))
+          }))
+        }
+      }
+    }
   )
 
   defineTool(

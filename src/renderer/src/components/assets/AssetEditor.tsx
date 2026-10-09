@@ -8,6 +8,7 @@ import AssetAvatar from './AssetAvatar'
 import AssetImages from './AssetImages'
 import AssetSounds, { type SoundFocus } from './AssetSounds'
 import DefaultOutfitPicker from './DefaultOutfitPicker'
+import PromptField from '../prompt/PromptField'
 import { droppedPaths, fileDragKinds, imageCountLabel, isFileDrag, type FileDragKinds } from './imageUtils'
 import { useAssetDraft, type SaveState } from './useAssetDraft'
 
@@ -224,13 +225,16 @@ export default function AssetEditor({
                 <span className="font-medium">Beskrivning</span>
                 <span className="text-[11px] text-muted">{copy.descriptionHint}</span>
               </span>
-              <textarea
+              <PromptField
                 value={draft.description}
-                onChange={(e) => draft.setDescription(e.target.value)}
+                onChange={draft.setDescription}
                 onBlur={draft.onBlur}
-                rows={5}
+                minRows={4}
+                maxRows={14}
+                showCount
+                title="Beskrivning"
+                focusHint={copy.descriptionHint}
                 placeholder={copy.descriptionPlaceholder}
-                className="w-full resize-y rounded-md border border-line bg-raised px-3 py-2 leading-relaxed outline-none focus:border-muted"
               />
             </label>
           </section>

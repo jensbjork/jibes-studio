@@ -4,6 +4,7 @@ import { DEFAULT_MODEL, supportsEndImage } from '@shared/models'
 import type { EditOperation, EditPlan, VideoModel } from '@shared/types'
 import { useAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
+import PromptField from '../prompt/PromptField'
 import { useOpenCard, useReportRange } from './cards'
 import { useCardRun, useEditor } from './EditorContext'
 import { formatPrice, formatSecondsShort, operationRange, suggestRegeneratePrompt } from './editorUtils'
@@ -232,13 +233,15 @@ function RegenerateCard({ open, onToggle }: CardProps) {
               </button>
             }
           >
-            <textarea
+            <PromptField
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={3}
-              spellCheck={false}
+              onChange={setPrompt}
+              context="video"
+              minRows={3}
+              maxRows={10}
+              title="Vad händer?"
+              focusHint="Vad som händer i avsnittet – gärna på engelska. Skriv / för en byggsten."
               placeholder="She turns towards the window and smiles. Continuous shot."
-              className={textArea}
             />
             <p className="mt-1 text-[11px] text-muted">Skriv gärna på engelska – modellerna förstår det bäst.</p>
           </Field>
@@ -328,13 +331,15 @@ function PromptEditCard({ open, onToggle }: CardProps) {
         <>
           <Target range={range} />
           <Field label="Vad ska ändras?">
-            <textarea
+            <PromptField
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={3}
-              spellCheck={false}
+              onChange={setPrompt}
+              context="video"
+              minRows={3}
+              maxRows={10}
+              title="Vad ska ändras?"
+              focusHint="En ändring i taget, på engelska. Skriv / för ljus, stil och kamera."
               placeholder="Remove the car in the background, keeping the rest of the video unchanged."
-              className={textArea}
             />
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {EDIT_CHIPS.map((c) => (
@@ -508,13 +513,15 @@ function ExtendCard({ open, onToggle }: CardProps) {
         <span className="text-text">Efter slutet</span> · börjar på filmens sista bildruta
       </p>
       <Field label="Vad händer sedan?">
-        <textarea
+        <PromptField
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={3}
-          spellCheck={false}
+          onChange={setPrompt}
+          context="video"
+          minRows={3}
+          maxRows={10}
+          title="Vad händer sedan?"
+          focusHint="Hur filmen fortsätter efter slutet – gärna på engelska. Skriv / för en byggsten."
           placeholder="The camera slowly pulls back as she walks away down the street."
-          className={textArea}
         />
       </Field>
       <div className="grid grid-cols-2 gap-2">
