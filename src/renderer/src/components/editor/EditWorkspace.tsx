@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { EditRange, VideoModel } from '@shared/types'
+import { workKey, type EditRange, type VideoModel } from '@shared/types'
 import { ipcErrorMessage, useAudioCatalog, useSeparationStatus } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
+import { markSeen } from '../../lib/work'
 import { useReportOpenEdit } from '../../lib/workspace'
 import ConsentDialog from '../ConsentDialog'
 import { Banner, ConfirmDialog } from '../storyboards/ui'
@@ -37,6 +38,13 @@ function loadTab(): EditorTab {
   }
 }
 
+/** Show this version in the player once the edit has loaded ("Gå dit" in Pågår och klart, an agent's open_in_studio). */
+export interface ShowVersionRequest {
+  versionId: string
+  /** An agent asked: showing it isn't the user choosing it, so it isn't marked seen (playing it still is). */
+  byAgent: boolean
+}
+
 interface Props {
   editId: string
   models: VideoModel[]
@@ -46,9 +54,19 @@ interface Props {
   onBack: () => void
   /** The edit is gone (deleted here or elsewhere). */
   onClosed: (editId: string) => void
+  showVersion?: ShowVersionRequest
 }
 
-export default function EditWorkspace({ editId, models, modelsError, hasApiKey, navigate, onBack, onClosed }: Props) {
+export default function EditWorkspace({
+  editId,
+  models,
+  modelsError,
+  hasApiKey,
+  navigate,
+  onBack,
+  onClosed,
+  showVersion
+}: Props) {
   const { edit, error, progress, refresh, setEdit } = useEdit(editId, onClosed)
   const player = useMemo(() => new PlayerController(), [])
   useEffect(() => () => player.destroy(), [player])
@@ -147,6 +165,19 @@ export default function EditWorkspace({ editId, models, modelsError, hasApiKey, 
       setComparing(true)
     }
   }
+
+  // A version asked for from elsewhere goes into the player once the edit is here; opened by the user, that is
+  // choosing it on purpose, so it counts as seen.
+  const shownRequest = useRef<ShowVersionRequest>(undefined)
+  useEffect(() => {
+    if (!showVersion || !edit || shownRequest.current === showVersion) return
+    if (!edit.versions.some((v) => v.id === showVersion.versionId)) return
+    // The current version only settles with the edit; showing before that would compare against nothing.
+    if (!currentId) return
+    shownRequest.current = showVersion
+    show(showVersion.versionId)
+    if (!showVersion.byAgent) markSeen([workKey.generation(showVersion.versionId)])
+  }, [showVersion, edit, currentId])
 
   const rename = async (name: string) => {
     try {
@@ -344,7 +375,7 @@ export default function EditWorkspace({ editId, models, modelsError, hasApiKey, 
               opRange={opRange}
             />
           </div>
-          <aside className="flex w-[380px] shrink-0 flex-col border-l border-line 2xl:w-[440px]">
+          <aside className="flex w-[380px] shrink-0 flex-col border-l border-line @min-[83rem]/main:w-[440px]">
             <ActionsPanel tab={tab} onTab={setTab} />
             <VersionsPanel
               edit={edit}

@@ -6,12 +6,14 @@ import {
   MIN_AUDIO_CLIP_SECONDS,
   maxReferenceAudios
 } from '@shared/models'
-import type { Asset, AssetAudio, EditJob } from '@shared/types'
-import { ASSET_COPY, ASSET_FOLDER, assetAudio, type AudioCopy } from '../../lib/assets'
+import { workKey, type Asset, type AssetAudio, type EditJob, type FinishedWork } from '@shared/types'
+import { ASSET_COPY, ASSET_FOLDER, assetAudio, originText, type AudioCopy } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { markSeen, useIsUnseen, useSeenWhenVisible, useUnseen } from '../../lib/work'
 import OpenFolderButton from '../library/OpenFolderButton'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { PauseIcon, PlayIcon } from '../sequences/icons'
+import { NewChip, Spinner } from '../work/StatusMark'
 import ClipWindowTrack from './ClipWindowTrack'
 import {
   AUDIO_FORMATS,
@@ -34,16 +36,17 @@ import VoiceDesignDialog from './VoiceDesignDialog'
 const DRAG_TYPE = 'application/x-studio-asset-audio'
 const MAX_AUDIOS = maxReferenceAudios(DEFAULT_MODEL['reference-to-video'])
 
-/** Clips made with "Skapa röst med AI" while Studio has been open: marked "Ny" until the window reloads. */
-const designedClips = new Set<string>()
+/** What Pågår och klart's "Gå dit" points out in Röst: a new clip, or a voice design that failed. */
+export interface SoundFocus {
+  audioId?: string
+  jobId?: string
+}
 
 /** A voice being made for this character ("Skapa röst med AI"). */
 interface DesignJob {
   id: string
   label: string
   fraction?: number
-  /** The clips the character had when it started; any clip beyond them afterwards is the new voice. */
-  before: ReadonlySet<string>
 }
 
 interface Props {
@@ -58,6 +61,11 @@ interface Props {
   onError: (message: string) => void
   /** Whether a window edit is waiting to be saved or being saved (Generera waits for it). */
   onBusyChange: (busy: boolean) => void
+  /**
+   * A clip (or a failed voice design) to bring into view and point out once (Pågår och klart's "Gå dit"). Changes to
+   * a new request object each time, so the same one can be pointed out again.
+   */
+  focus?: SoundFocus
 }
 
 /**
@@ -65,7 +73,16 @@ interface Props {
  * player and the window that is sent to Venice. Add (drop or pick), remove, reorder, and preview exactly
  * what is sent.
  */
-export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated, onError, onBusyChange }: Props) {
+export default function AssetSounds({
+  asset,
+  adding,
+  fileOver,
+  onAdd,
+  onUpdated,
+  onError,
+  onBusyChange,
+  focus
+}: Props) {
   const copy = ASSET_COPY[asset.kind].audio
   const player = useClipPlayer()
   // Optimistic state so the list reacts before main answers.
@@ -80,11 +97,33 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
   const voices = asset.kind === 'character'
   const [designing, setDesigning] = useState(false)
   const [designs, setDesigns] = useState<DesignJob[]>([])
-  const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set(designedClips))
   const latestAsset = useRef(asset)
   latestAsset.current = asset
 
-  // A designed voice reports its progress per character; when it is done the new clip is fetched and marked "Ny".
+  // Voice designs of this character that failed and haven't been seen – wherever the user was when they failed: each
+  // is said here as a row, which counts as seen once it has been on screen a moment (D4) and stays listed until its ✕
+  // or another character, so it can be read.
+  const unseenFailures = useUnseen(
+    (w) => voices && w.kind === 'job' && w.status === 'failed' && w.ownerId === asset.id
+  )
+  const [keptFailures, setKeptFailures] = useState<FinishedWork[]>([])
+  const [closedFailures, setClosedFailures] = useState<ReadonlySet<string>>(() => new Set())
+  const failures = useMemo(() => {
+    const byKey = new Map<string, FinishedWork>()
+    for (const w of [...unseenFailures, ...keptFailures]) {
+      if (!closedFailures.has(w.key) && !byKey.has(w.key)) byKey.set(w.key, w)
+    }
+    return [...byKey.values()].sort((a, b) => b.finishedAt - a.finishedAt)
+  }, [unseenFailures, keptFailures, closedFailures])
+  const keepFailure = (w: FinishedWork) =>
+    setKeptFailures((list) => (list.some((x) => x.key === w.key) ? list : [...list, w]))
+  const closeFailure = (w: FinishedWork) => {
+    markSeen([w.key])
+    setClosedFailures((closed) => new Set(closed).add(w.key))
+  }
+
+  // A designed voice reports its progress per character; when it is done the new clip is fetched (main has marked it
+  // new in Pågår och klart, so its row shows "Ny" until it has been played).
   const designsRef = useRef(designs)
   designsRef.current = designs
   useEffect(() => {
@@ -100,20 +139,18 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
         return
       }
       if (job) setDesigns((l) => l.filter((d) => d.id !== job.id))
+      // A failure also gets its row below (from Pågår och klart), which is what marks it seen.
       if (p.error) onError(p.error)
-      // A job started before this view mounted is still collected; its clip is new compared with what is shown now.
-      else void collect(job?.before ?? new Set(latestAsset.current.audio.map((c) => c.id)))
+      // Also for a job started before this view mounted (or by an agent): the new clip shows at once.
+      else void collect()
     })
   }, [voices, asset.id])
 
-  /** Fetches the character again after a voice was made and marks the clips that weren't there before. */
-  const collect = async (before: ReadonlySet<string>) => {
+  /** Fetches the character again after a voice was made, so the new clip shows at once. */
+  const collect = async () => {
     try {
       const updated = (await window.studio.listAssets('character')).find((a) => a.id === latestAsset.current.id)
       if (!updated) return
-      const added = updated.audio.filter((c) => !before.has(c.id)).map((c) => c.id)
-      for (const id of added) designedClips.add(id)
-      if (added.length) setFresh(new Set(designedClips))
       onUpdated(updated)
     } catch (e) {
       onError(ipcErrorMessage(e))
@@ -126,8 +163,7 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
       {
         id: job.id,
         label: job.label || 'Skapar röst med AI',
-        fraction: job.fraction,
-        before: new Set(latestAsset.current.audio.map((c) => c.id))
+        fraction: job.fraction
       }
     ])
 
@@ -259,7 +295,7 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
   }
 
   if (!copy) return null
-  const empty = clips.length === 0 && adding === 0 && designs.length === 0
+  const empty = clips.length === 0 && adding === 0 && designs.length === 0 && failures.length === 0
 
   return (
     <div>
@@ -335,7 +371,7 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
               }
               onUpdated={onUpdated}
               voice={voices}
-              fresh={fresh.has(clip.id)}
+              focus={focus?.audioId === clip.id ? focus : undefined}
               onConsent={(on) => void toggleConsent(clip, on)}
               onBusy={(on) => setClipBusy(clip.id, on)}
               onRemove={() => void remove(clip.id)}
@@ -355,10 +391,19 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
           ))}
           {designs.map((d) => (
             <li key={d.id} className="flex h-16 items-center gap-3 rounded-lg bg-raised px-4 text-[11px] text-muted">
-              <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+              <Spinner />
               <span className="min-w-0 flex-1 truncate">{d.label}…</span>
               {d.fraction !== undefined && <span className="tabular-nums">{Math.round(d.fraction * 100)} %</span>}
             </li>
+          ))}
+          {failures.map((w) => (
+            <DesignFailureRow
+              key={w.key}
+              work={w}
+              focus={focus?.jobId && focus.jobId === w.jobId ? focus : undefined}
+              onSeen={() => keepFailure(w)}
+              onClose={() => closeFailure(w)}
+            />
           ))}
         </ul>
       )}
@@ -377,6 +422,54 @@ export default function AssetSounds({ asset, adding, fileOver, onAdd, onUpdated,
   )
 }
 
+/** A voice design that failed: its error, until ✕. Being on screen a moment marks it seen. */
+function DesignFailureRow({
+  work,
+  focus,
+  onSeen,
+  onClose
+}: {
+  work: FinishedWork
+  /** Set when "Gå dit" points it out (a new request object each time). */
+  focus?: SoundFocus
+  /** Told just before it is marked seen: it stays listed until ✕. */
+  onSeen: () => void
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLLIElement>(null)
+  useSeenWhenVisible(ref, work.key, 1500, onSeen)
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (!focus) return
+    ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlash(true)
+    const t = setTimeout(() => setFlash(false), 1600)
+    return () => clearTimeout(t)
+  }, [focus])
+  return (
+    <li
+      ref={ref}
+      className={`flex items-start gap-3 rounded-lg border bg-accent/10 px-4 py-3 text-[11px] leading-relaxed transition duration-500 ${
+        flash ? 'border-accent' : 'border-transparent'
+      }`}
+    >
+      <span className="min-w-0 flex-1 select-text">
+        <span className="font-medium text-accent">Rösten kunde inte skapas.</span>{' '}
+        <span className="text-[#ffb3b5]">{work.error ?? 'Jobbet misslyckades.'}</span>
+      </span>
+      <button
+        type="button"
+        onClick={onClose}
+        title="Stäng"
+        aria-label="Stäng felet"
+        className="shrink-0 rounded px-1 text-muted transition hover:bg-raised hover:text-text"
+      >
+        ✕
+      </button>
+    </li>
+  )
+}
+
 interface RowProps {
   clip: AssetAudio
   index: number
@@ -389,8 +482,8 @@ interface RowProps {
   onUpdated: (a: Asset) => void
   /** A character's voice: it can be marked as allowed to clone ("Får klonas för nya repliker"). */
   voice: boolean
-  /** Made with "Skapa röst med AI" just now. */
-  fresh: boolean
+  /** Set when this clip is to be brought into view and pointed out (a new request object each time). */
+  focus?: SoundFocus
   onConsent: (consent: boolean) => void
   onBusy: (busy: boolean) => void
   onRemove: () => void
@@ -412,7 +505,7 @@ function ClipRow({
   indicator,
   onUpdated,
   voice,
-  fresh,
+  focus,
   onConsent,
   onBusy,
   onRemove,
@@ -430,6 +523,20 @@ function ClipRow({
   const failed = player.failed.has(clip.id)
   const tooShort = clip.duration < MIN_AUDIO_CLIP_SECONDS
   const long = clip.duration > LONG_AUDIO_SECONDS
+  // A voice made with AI that hasn't been played yet (Pågår och klart); playing a second of it clears it.
+  const fresh = useIsUnseen(workKey.audio(clip.id))
+  const origin = originText(clip.origin)
+
+  // Pointed out from elsewhere: scrolled into view and outlined for a moment.
+  const rowRef = useRef<HTMLLIElement>(null)
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (!focus) return
+    rowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlash(true)
+    const t = setTimeout(() => setFlash(false), 1600)
+    return () => clearTimeout(t)
+  }, [focus])
 
   useEffect(() => onBusy(draft.busy), [draft.busy])
   // A clip removed mid-edit must not keep the section busy.
@@ -449,7 +556,7 @@ function ClipRow({
   }
 
   return (
-    <li data-clip-row className="relative" onDragOver={onDragOver}>
+    <li ref={rowRef} data-clip-row className="relative" onDragOver={onDragOver}>
       {indicator && (
         <div
           className={`pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-accent ${
@@ -457,7 +564,11 @@ function ClipRow({
           }`}
         />
       )}
-      <div className={`rounded-lg border border-line bg-panel px-3 pb-3 pt-2.5 transition ${dragging ? 'opacity-30' : ''}`}>
+      <div
+        className={`rounded-lg border bg-panel px-3 pb-3 pt-2.5 transition duration-500 ${
+          flash ? 'border-emerald-400/70' : 'border-line'
+        } ${dragging ? 'opacity-30' : ''}`}
+      >
         <div className="flex items-center gap-2">
           {count > 1 && (
             <button
@@ -485,17 +596,10 @@ function ClipRow({
           </button>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="truncate" title={clip.path}>
+              <span className="truncate" title={origin ? `${origin}\n${clip.path}` : clip.path}>
                 {name}
               </span>
-              {fresh && (
-                <span
-                  title="Skapad med AI just nu"
-                  className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent"
-                >
-                  Ny
-                </span>
-              )}
+              {fresh && <NewChip title="Ny röst – spela upp den för att lyssna" className="shrink-0" />}
               {index === 0 && copy.firstBadge && (
                 <span title={copy.firstBadge.title} className="shrink-0 rounded bg-raised px-1.5 py-0.5 text-[10px] font-medium text-muted">
                   {copy.firstBadge.label}

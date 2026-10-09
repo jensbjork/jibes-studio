@@ -49,7 +49,7 @@ body:
       options:
         - Generate view
         - Prompt editor and @ImageN references
-        - Library (characters, environments, outfits)
+        - Library (characters, environments, products, outfits, poses)
         - Prompt library
         - Sequences, takes and preview
         - Export (ffmpeg)

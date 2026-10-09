@@ -270,6 +270,28 @@ export interface OpsDeps {
   libraryChanged?: () => void
 }
 
+/** What Redigera runs right now, for the status summary (work.ts). */
+export interface EditActiveWork {
+  /** Running paid jobs: an edit's operations, and designed voices (assetId). */
+  jobs: {
+    jobId: string
+    editId?: string
+    assetId?: string
+    label: string
+    fraction?: number
+    currentStep?: string
+    stepsDone: number
+    stepsTotal: number
+    startedAt: number
+    /** The version it works on. */
+    baseId?: string
+    /** A picture operation's AI take (its progress at Venice is the job's). */
+    takeId?: string
+  }[]
+  /** Free renders (a cut, a fade, a sound fix …) that make a version without any paid job. */
+  renders: { token: string; editId: string; label: string; fraction: number; startedAt: number }[]
+}
+
 interface BaseInfo {
   duration: number
   width: number
@@ -502,6 +524,14 @@ export class EditOps {
   private readonly inFlight = new Set<string>()
   private readonly controllers = new Set<AbortController>()
   private readonly live = new Map<string, { fraction?: number; currentStep?: string }>()
+  /**
+   * Free renders, from the call until the version is written (or the render failed), by a token of their own: they
+   * have no job row, so this is how the edit list and the status summary know one runs.
+   */
+  private readonly liveRenders = new Map<
+    string,
+    { editId: string; label: string; fraction: number; startedAt: number }
+  >()
   /** Bumped when a library is opened or Studio stops: loops of an older epoch end. */
   private epoch = 0
   /** Studio is quitting: finished takes are left for the next start to pick up. */
@@ -1881,15 +1911,21 @@ export class EditOps {
     }
   }
 
-  /** Runs a render in the global queue, with its own abort and scratch folder. */
+  /**
+   * Runs a render in the global queue, with its own abort and scratch folder. A render without a job (a free
+   * operation) is recorded in liveRenders from the call on, named by `title` (the operation's label) when given.
+   */
   private render<T>(
     editId: string | undefined,
     label: string,
     task: (ctx: { signal: AbortSignal; work: string; progress: (f: number) => void }) => Promise<T>,
-    jobId?: string,
-    assetId?: string
+    opts: { jobId?: string; assetId?: string; title?: string } = {}
   ): Promise<T> {
+    const { jobId, assetId, title } = opts
     this.rendering++
+    const token = randomUUID()
+    const live = !jobId && editId ? { editId, label: title ?? label, fraction: 0, startedAt: Date.now() } : undefined
+    if (live) this.liveRenders.set(token, live)
     return this.renders(async () => {
       const ctrl = new AbortController()
       this.controllers.add(ctrl)
@@ -1901,7 +1937,11 @@ export class EditOps {
         const result = await task({
           signal: ctrl.signal,
           work,
-          progress: (f) => this.report({ editId, jobId, assetId, fraction: Math.min(1, Math.max(0, f)), label })
+          progress: (f) => {
+            const fraction = Math.min(1, Math.max(0, f))
+            if (live) live.fraction = fraction
+            this.report({ editId, jobId, assetId, fraction, label })
+          }
         })
         this.report({ editId, jobId, assetId, fraction: 1, label, done: true })
         return result
@@ -1909,11 +1949,42 @@ export class EditOps {
         this.report({ editId, jobId, assetId, label, done: true, error: errorText(err) })
         throw err
       } finally {
+        // In the same tick as the done report: the status summary it triggers no longer lists the render.
+        this.liveRenders.delete(token)
         this.controllers.delete(ctrl)
         this.rendering--
         await rm(work, { recursive: true, force: true }).catch(() => {})
       }
     })
+  }
+
+  /** A free render of the edit is running (or waiting for its turn): the edit counts as working. */
+  isRendering(editId: string): boolean {
+    for (const r of this.liveRenders.values()) if (r.editId === editId) return true
+    return false
+  }
+
+  /** What runs right now: the running paid jobs and the free renders (see EditActiveWork). */
+  activeWork(): EditActiveWork {
+    const jobs: EditActiveWork['jobs'] = []
+    for (const job of store.listJobsWithStatus('running')) {
+      const view = this.jobView(job)
+      jobs.push({
+        jobId: job.id,
+        ...(job.editId ? { editId: job.editId } : {}),
+        ...(job.assetId ? { assetId: job.assetId } : {}),
+        label: job.request.label,
+        ...(view.fraction !== undefined ? { fraction: view.fraction } : {}),
+        ...(view.currentStep ? { currentStep: view.currentStep } : {}),
+        stepsDone: view.stepsDone,
+        stepsTotal: view.stepsTotal,
+        startedAt: job.createdAt,
+        ...(job.baseId ? { baseId: job.baseId } : {}),
+        ...(job.takeId ? { takeId: job.takeId } : {})
+      })
+    }
+    const renders = [...this.liveRenders].map(([token, r]) => ({ token, ...r }))
+    return { jobs, renders }
   }
 
   /**
@@ -2035,6 +2106,8 @@ export class EditOps {
     takeId?: string
     quote?: number
     costUsd?: number
+    /** Made by a paid job: the version is news for the user until they look at it (Pågår och klart). */
+    paid?: boolean
   }): Promise<db.StoredGeneration> {
     const edit = store.getEditRow(spec.edit.id)
     if (!edit?.folder) throw new Error('Redigeringen finns inte längre.')
@@ -2089,6 +2162,8 @@ export class EditOps {
       }
       db.getDb().transaction(() => {
         db.insertGeneration(row)
+        // A free render the user just asked for is looked at right away; what a paid job made may land much later.
+        if (spec.paid) db.addUnseen({ generationId: id, context: { editId: edit.id } })
         const fresh = store.getEditRow(edit.id)
         // The new version becomes current when the base still is; otherwise it is a branch.
         if (fresh && (!fresh.current_generation_id || fresh.current_generation_id === spec.base.id)) {
@@ -2262,7 +2337,7 @@ export class EditOps {
       const wav = await this.mixToFile(mix, D, work, signal, (f) => progress(f * 0.8))
       await replaceAudioTrack(base.filePath, wav, out, { signal })
       return (await this.writeVersion({ edit, base, op, label, video: out, mix, timing: 'same' })).id
-    })
+    }, { title: label })
   }
 
   /** A rendered sound stored as the edit's "bake" media, as a new mix whose bed it is (or a silent one). */
@@ -2710,8 +2785,7 @@ export class EditOps {
           throw err
         }
       },
-      jobId,
-      job.assetId
+      { jobId, assetId: job.assetId }
     )
       .catch((err: unknown) => console.warn(`Finishing edit job ${jobId} failed:`, err))
       .finally(() => {
@@ -2930,7 +3004,8 @@ export class EditOps {
         mix,
         timing: 'same',
         quote,
-        costUsd: quote
+        costUsd: quote,
+        paid: true
       })
       store.updateJob(jobId, { resultId: g.id })
       return
@@ -3030,7 +3105,8 @@ export class EditOps {
         mix,
         timing: 'same',
         quote,
-        costUsd: quote
+        costUsd: quote,
+        paid: true
       })
       store.updateJob(jobId, { resultId: g.id })
       return
@@ -3076,7 +3152,8 @@ export class EditOps {
         mix,
         timing: 'same',
         quote,
-        costUsd: quote
+        costUsd: quote,
+        paid: true
       })
       store.updateJob(jobId, { resultId: g.id })
       return
@@ -3471,7 +3548,7 @@ export class EditOps {
           throw err
         }
       },
-      jobId
+      { jobId }
     )
       .catch((err: unknown) => console.warn(`Finishing edit job ${jobId} failed:`, err))
       .finally(() => {
@@ -3506,7 +3583,8 @@ export class EditOps {
     const label = job.request.label
     const out = join(work, 'version.mp4')
     const spliced = join(work, 'picture.mp4')
-    const costUsd = take.quote
+    // Every version a picture job makes: its paid take, what it cost, and that it is news (paid).
+    const pictureVersion = { edit, base, op, label, takeId: take.id, costUsd: take.quote, paid: true }
 
     const refuseScale = (span: number, target: number): void => {
       if (target <= 0 || Math.abs(span / target - 1) > TIME_SCALE_TOLERANCE) {
@@ -3555,7 +3633,7 @@ export class EditOps {
         })
         await replaceAudioTrack(picture, wav, out, { signal })
       }
-      return this.writeVersion({ edit, base, op, label, video: out, mix, timing: 'same', takeId: take.id, costUsd })
+      return this.writeVersion({ ...pictureVersion, video: out, mix, timing: 'same' })
     }
 
     if (op.op === 'extend') {
@@ -3605,16 +3683,11 @@ export class EditOps {
       const mix = await this.bakeMix(edit, wav, `${label} – ljud`)
       await replaceAudioTrack(picture, wav, out, { signal })
       return this.writeVersion({
-        edit,
-        base,
-        op,
-        label,
+        ...pictureVersion,
         video: out,
         mix,
         timing: 'changed',
-        spans: [{ from: 0, to: D, at: 0 }],
-        takeId: take.id,
-        costUsd
+        spans: [{ from: 0, to: D, at: 0 }]
       })
     }
 
@@ -3642,17 +3715,7 @@ export class EditOps {
     const { wav: baseWav, mix: baseMix } = await baseSound()
     if (op.audio === 'keep') {
       await replaceAudioTrack(picture, baseWav, out, { signal })
-      return this.writeVersion({
-        edit,
-        base,
-        op,
-        label,
-        video: out,
-        mix: baseMix,
-        timing: 'same',
-        takeId: take.id,
-        costUsd
-      })
+      return this.writeVersion({ ...pictureVersion, video: out, mix: baseMix, timing: 'same' })
     }
     // The model's sound replaces the range's: the base's sound is baked with the take's laid in.
     const takeWav = await takeSound(takeStart, takeEnd, target)
@@ -3684,7 +3747,7 @@ export class EditOps {
     )
     const mix = await this.bakeMix(edit, wav, `${label} – ljud`)
     await replaceAudioTrack(picture, wav, out, { signal })
-    return this.writeVersion({ edit, base, op, label, video: out, mix, timing: 'same', takeId: take.id, costUsd })
+    return this.writeVersion({ ...pictureVersion, video: out, mix, timing: 'same' })
   }
 
   /** A take of a running job was deleted (from the feed): the job can't finish. */

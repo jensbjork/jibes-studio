@@ -3,6 +3,11 @@
 import type { AgentActivity, AgentStatus, ApprovalRequest, SegmentImageSlot } from '@shared/types'
 import { swedishList } from '../../lib/assets'
 
+/** "1 sak", "3 saker": how many things a 'delete' request removes. */
+export function thingsText(n: number): string {
+  return `${n} ${n === 1 ? 'sak' : 'saker'}`
+}
+
 /** "startbild" / "slutbild". */
 export function slotName(slot: SegmentImageSlot): string {
   return slot === 'end' ? 'slutbild' : 'startbild'
@@ -79,12 +84,14 @@ export function activityText(a: AgentActivity): string {
   return `${client} ${summary}`
 }
 
-/** What an approval would generate, in a few words. `sequenceName`: the sequence's or storyboard's name. */
+/** What an approval would generate (or remove), in a few words. `sequenceName`: the sequence's or storyboard's name. */
 export function approvalTitle(a: ApprovalRequest, sequenceName?: string): string {
   const inSequence = sequenceName ? ` i ”${sequenceName}”` : ''
   // A storyboard's transitions are segments to main; the user knows them as transitions ("övergångar").
   const storyboard = a.sequenceKind === 'storyboard'
   switch (a.kind) {
+    case 'delete':
+      return `Ta bort ${thingsText(a.delete?.items.length ?? 0)}`
     case 'edit': {
       // "”Strandscen” v3": the edit and the version the operation works on.
       const name = a.edit?.editName ? `”${a.edit.editName}”` : 'En redigering'
@@ -129,8 +136,12 @@ export function expiresText(expiresAt: number, now: number): string {
   return minutes < 1 ? 'går ut om under en minut' : `går ut om ${minutes} min`
 }
 
-/** The verb for what the agent asks: "vill generera" a video, "vill skapa" a picture or a voice, "vill redigera" a film. */
+/**
+ * The verb for what the agent asks: "vill generera" a video, "vill skapa" a picture or a voice, "vill redigera" a
+ * film, "vill ta bort" things.
+ */
 export function approvalVerb(a: ApprovalRequest): string {
+  if (a.kind === 'delete') return 'vill ta bort'
   if (a.kind === 'edit') return 'vill redigera'
   return a.kind === 'image' || a.kind === 'voice-design' ? 'vill skapa' : 'vill generera'
 }
@@ -144,21 +155,74 @@ export function approvalHeading(a: ApprovalRequest): string {
       return 'vill redigera en film'
     case 'voice-design':
       return 'vill skapa en röst'
+    case 'delete':
+      return 'vill ta bort'
     default:
       return 'vill generera'
   }
 }
 
-/** The approve button: "Godkänn och generera", "… och skapa" for a picture or a voice, "… och kör" for an edit. */
+/**
+ * The approve button: "Godkänn och generera", "… och skapa" for a picture or a voice, "… och kör" for an edit,
+ * "… och ta bort" for a removal.
+ */
 export function approveLabel(a: ApprovalRequest): string {
+  if (a.kind === 'delete') return 'Godkänn och ta bort'
   if (a.kind === 'edit') return 'Godkänn och kör'
   return a.kind === 'image' || a.kind === 'voice-design' ? 'Godkänn och skapa' : 'Godkänn och generera'
+}
+
+/** "Borttaget: 3 av 3", "Borttaget: 2 av 3 – 1 gick inte: …": what an approved removal led to. */
+export function deleteOutcome(a: ApprovalRequest): string {
+  const items = a.delete?.items ?? []
+  const deleted = items.filter((i) => i.outcome?.status === 'deleted').length
+  const failed = items.filter((i) => i.outcome?.status === 'failed')
+  const gone = items.filter((i) => i.outcome?.status === 'gone').length
+  return [
+    `Borttaget: ${deleted} av ${items.length}`,
+    failed.length ? `${failed.length} gick inte: ${failed[0].outcome?.error ?? 'okänt fel'}` : '',
+    gone ? `${gone} fanns redan inte` : ''
+  ]
+    .filter(Boolean)
+    .join(' – ')
+}
+
+/**
+ * The delete dialog's live check, said for the user: "Ändrats sedan agenten frågade – kan inte godkännas: …". Main's
+ * "changed since" message names the item in parentheses; its other reasons (a run that started meanwhile …) are
+ * passed on as they are, without the advice meant for the agent.
+ */
+export function changedSinceText(reason: string): string {
+  const text = reason.trim()
+  const named = CHANGED_ITEM.exec(text)
+  const why = named ? `${named[1]} har ändrats eller tagits bort` : text.replace(ASK_AGAIN, '')
+  return `Ändrats sedan agenten frågade – kan inte godkännas: ${why.replace(/\.$/, '')}.`
+}
+
+/** Main's "changed since" message (tools/delete.ts), with the item's label in parentheses. */
+const CHANGED_ITEM = /^Något av det som skulle tas bort har ändrats sedan agenten frågade \((.+)\)\.\s*Be agenten fråga igen\.?$/s
+/** The advice main gives the agent, which the user doesn't need. */
+const ASK_AGAIN = /\s*Be agenten fråga igen\.?$/
+
+/** What failed, by kind, when main gave no message. */
+const FAILED: Record<ApprovalRequest['kind'], string> = {
+  generation: 'Genereringen kunde inte skickas.',
+  segment: 'Genereringen kunde inte skickas.',
+  'generate-all': 'Genereringen kunde inte skickas.',
+  image: 'Bilden kunde inte skapas.',
+  edit: 'Ändringen kunde inte startas.',
+  'voice-design': 'Rösten kunde inte skapas.',
+  delete: 'Inget kunde tas bort.'
 }
 
 /** Why an approval didn't lead to a generation, when main gave no message. */
 export function approvalOutcome(a: ApprovalRequest): string {
   switch (a.status) {
     case 'approved': {
+      if (a.kind === 'delete') return deleteOutcome(a)
+      if (a.kind === 'edit' && a.edit?.resumeJobId) {
+        return 'Godkänd – jobbet fortsätter. Resultatet visas i Redigera när det är klart.'
+      }
       if (a.kind === 'edit') {
         return a.edit?.operation?.op === 'transcribe'
           ? 'Godkänd – transkriberingen är startad. Texten visas i Redigera när den är klar.'
@@ -186,16 +250,7 @@ export function approvalOutcome(a: ApprovalRequest): string {
       // Main says why when it wasn't the 30 minutes (replaced by a newer request, the connection switched off…).
       return a.error ?? 'Begäran hann gå ut (efter 30 minuter). Be agenten skicka den igen.'
     case 'failed':
-      return (
-        a.error ??
-        (a.kind === 'image'
-          ? 'Bilden kunde inte skapas.'
-          : a.kind === 'edit'
-            ? 'Ändringen kunde inte startas.'
-            : a.kind === 'voice-design'
-              ? 'Rösten kunde inte skapas.'
-              : 'Genereringen kunde inte skickas.')
-      )
+      return a.error ?? FAILED[a.kind]
     case 'pending':
       return 'Väntar på ditt OK.'
   }

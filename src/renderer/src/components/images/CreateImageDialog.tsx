@@ -16,6 +16,7 @@ import { ipcErrorMessage, useAssets } from '../../lib/hooks'
 import { samePath } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { markSeen, newWorkToken, useUnseen } from '../../lib/work'
 import ConsentDialog from '../ConsentDialog'
 import Modal from '../pickers/Modal'
 import {
@@ -88,7 +89,7 @@ export interface CreateImageDialogProps {
 
 /**
  * "Skapa bild…": a still from a prompt, or from reference images combined by an edit model (characters,
- * environments, outfits, poses, the sequence's or storyboard's own images), with the model's options and its live
+ * environments, products, outfits, poses, the sequence's or storyboard's own images), with the model's options and its live
  * price. Paid: the button shows the price, and nothing is sent before it is pressed.
  */
 export default function CreateImageDialog(props: CreateImageDialogProps) {
@@ -295,6 +296,26 @@ function CreateImageDialogBody({
   // The pictures made in this dialog: a board showing one of them may get the next one.
   const madeHere = useRef<string[]>([])
 
+  // Pågår och klart: each picture asked for here carries a work token, so main can announce its result or failure
+  // after the dialog closed (the panel, the storyboard's badge). While the dialog is open and the window has focus,
+  // the user sees both here, so they count as seen.
+  const tokens = useRef(new Set<string>())
+  const resultIds = useMemo(() => new Set(results.map((r) => r.id)), [results])
+  const shownHere = useUnseen(
+    (w) =>
+      (w.stillId !== undefined && resultIds.has(w.stillId)) ||
+      (w.failureOf === 'still' && w.workToken !== undefined && tokens.current.has(w.workToken))
+  )
+  useEffect(() => {
+    if (!shownHere.length) return
+    const mark = (): void => {
+      if (document.hasFocus()) markSeen(shownHere.map((w) => w.key))
+    }
+    mark()
+    window.addEventListener('focus', mark)
+    return () => window.removeEventListener('focus', mark)
+  }, [shownHere])
+
   useEffect(() => {
     if (!busy) return
     setElapsed(0)
@@ -358,8 +379,15 @@ function CreateImageDialogBody({
     setError(undefined)
     setBoardNote(undefined)
     const seen = boardImageSeen()
+    const workToken = newWorkToken()
+    tokens.current.add(workToken)
+    const target = boardId
+      ? { boardId }
+      : slotTarget
+        ? { segmentId: slotTarget.segmentId, slot: slotTarget.slot }
+        : undefined
     try {
-      const still = await window.studio.generateStill(sent)
+      const still = await window.studio.generateStill({ ...sent, workToken, target })
       madeHere.current.push(still.path)
       if (mounted.current) {
         setResults((r) => [still, ...r])

@@ -32,6 +32,7 @@ import {
   NEEDS_CONSENT,
   type Asset,
   type AssetAudio,
+  type AssetFileOrigin,
   type AssetKind,
   type GenerationParams,
   type ReferenceAudio,
@@ -151,7 +152,7 @@ export class AssetIndex {
     const asset = this.byId.get(id)
     if (!asset) {
       throw new Error(
-        `Det finns ingen karaktär, miljö, klädsel eller pose med id ${id}. Använd list_assets för att se vad som finns.`
+        `Det finns ingen karaktär, miljö, produkt, klädsel eller pose med id ${id}. Använd list_assets för att se vad som finns.`
       )
     }
     return asset
@@ -171,7 +172,7 @@ export class AssetIndex {
     const ref = this.byImageId.get(imageId)
     if (!ref) {
       throw new Error(
-        `Det finns ingen bild med id ${imageId} bland karaktärerna, miljöerna, kläderna och poserna. Bildernas id finns i image_ids från list_assets eller get_asset.`
+        `Det finns ingen bild med id ${imageId} bland karaktärerna, miljöerna, produkterna, kläderna och poserna. Bildernas id finns i image_ids från list_assets eller get_asset.`
       )
     }
     return ref
@@ -335,6 +336,11 @@ export function referenceAudioOf(audio: AssetAudio): ReferenceAudio {
   return { path: audio.path, start: audio.clipStart, length: audio.clipLength }
 }
 
+/** `added_by` for a photo or clip an agent added (the agent, and the host a fetched file came from); {} otherwise. */
+export function addedBy(origin: AssetFileOrigin | undefined): Record<string, unknown> {
+  return origin ? { added_by: { agent: origin.agent, ...(origin.host ? { host: origin.host } : {}) } } : {}
+}
+
 /** An asset's audio clips as the tools list them. */
 export function audioClipsInfo(asset: Asset): Record<string, unknown>[] {
   return audioOf(asset).map((a, i) => ({
@@ -346,13 +352,14 @@ export function audioClipsInfo(asset: Asset): Record<string, unknown>[] {
     clip_start: seconds(a.clipStart),
     clip_length: seconds(a.clipLength),
     // Only a character's voice can be cloned for new lines, and only once the user ticked that they may use it.
-    ...(asset.kind === 'character' ? { clone_consent: a.cloneConsent === true } : {})
+    ...(asset.kind === 'character' ? { clone_consent: a.cloneConsent === true } : {}),
+    ...addedBy(a.origin)
   }))
 }
 
 // ── Choosing references ──────────────────────────────────────────────────────
 
-export interface ReferenceItem {
+export interface AssetReferenceItem {
   asset_id: string
   /** Only these photos, in this order; [] for none of the asset's photos (e.g. only its voice). */
   image_ids?: string[]
@@ -361,6 +368,16 @@ export interface ReferenceItem {
   /** Add the asset's first audio clip when no audio_ids are given. Default: characters yes, others no. */
   include_voice?: boolean
 }
+
+/**
+ * One loose picture as a reference, already resolved to its file: a still's picture, or an upload made a still. It
+ * has no description, so the References legend says nothing about it.
+ */
+export interface PictureReferenceItem {
+  picture: string
+}
+
+export type ReferenceItem = AssetReferenceItem | PictureReferenceItem
 
 /** What the references are chosen for: whether the model takes reference audio, and how much. */
 export interface AudioTarget {
@@ -389,7 +406,7 @@ export interface ResolvedReferences {
   notes: string[]
 }
 
-function chosenImages(asset: Asset, item: ReferenceItem): Asset['images'] {
+function chosenImages(asset: Asset, item: AssetReferenceItem): Asset['images'] {
   if (item.image_ids === undefined) return asset.images
   return item.image_ids.map((imageId) => {
     const image = asset.images.find((img) => img.id === imageId)
@@ -408,7 +425,7 @@ function chosenImages(asset: Asset, item: ReferenceItem): Asset['images'] {
  */
 function chosenAudio(
   asset: Asset,
-  item: ReferenceItem,
+  item: AssetReferenceItem,
   target: AudioTarget | undefined,
   notes: string[],
   tooShort: AssetAudio[]
@@ -480,6 +497,14 @@ export function resolveReferences(
   let total = audioSeconds(existing, index)
 
   for (const item of items) {
+    if ('picture' in item) {
+      const key = pathKey(item.picture)
+      if (!seenImages.has(key)) {
+        seenImages.add(key)
+        paths.push(item.picture)
+      }
+      continue
+    }
     const asset = index.require(item.asset_id)
     const images = chosenImages(asset, item)
     const tooShort: AssetAudio[] = []
@@ -488,13 +513,13 @@ export function resolveReferences(
       throw new Error(
         asset.images.length
           ? `${q(asset.name)} ger inga referenser: image_ids är tom och inget ljud valdes.`
-          : `${q(asset.name)} har inga bilder än. Användaren behöver lägga till bilder i Studio först.`
+          : `${q(asset.name)} har inga bilder än. Lägg till bilder med add_asset_images först.`
       )
     }
     for (const clip of tooShort) {
       skippedAudio.push({
         ...describeAudio(referenceAudioOf(clip), index),
-        reason: `Röstklippet är bara ${seconds(clip.clipLength)} s – Venice tar bara emot ljudklipp på minst ${MIN_AUDIO_CLIP_SECONDS} s, så det lades inte till. Användaren behöver lägga till en längre inspelning i Studio.`
+        reason: `Röstklippet är bara ${seconds(clip.clipLength)} s – Venice tar bara emot ljudklipp på minst ${MIN_AUDIO_CLIP_SECONDS} s, så det lades inte till. Lägg till en längre inspelning med add_asset_audio (eller välj ett längre referensfönster med update_asset_audio).`
       })
     }
     for (const image of images) {
@@ -531,7 +556,7 @@ export function resolveReferences(
 export function assetPhotoPath(assetId: string, imageId: string | undefined, index: AssetIndex): string {
   const asset = index.require(assetId)
   if (!asset.images.length) {
-    throw new Error(`${q(asset.name)} har inga bilder än. Användaren behöver lägga till bilder i Studio först.`)
+    throw new Error(`${q(asset.name)} har inga bilder än. Lägg till bilder med add_asset_images först.`)
   }
   if (!imageId) return asset.images[0].path
   const image = asset.images.find((img) => img.id === imageId)
@@ -698,6 +723,7 @@ export function modelInfo(m: VideoModel): Record<string, unknown> {
     audio_input: audioInput,
     max_reference_audios: audioInput ? maxReferenceAudios(m.id) : 0,
     ...(audioInput ? { max_reference_audio_seconds: MAX_REFERENCE_AUDIO_SECONDS } : {}),
+    ...(mode === 'image-to-video' ? { supports_end_image: supportsEndImage(m.id) } : {}),
     ...(m.promptCharacterLimit ? { prompt_character_limit: m.promptCharacterLimit } : {})
   }
 }

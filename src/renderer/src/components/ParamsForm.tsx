@@ -34,11 +34,11 @@ import {
   type SavedPrompt,
   type VideoModel
 } from '@shared/types'
-import { ASSET_COPY, ASSET_VIEW } from '../lib/assets'
+import { ASSET_COPY, ASSET_VIEW, swedishList } from '../lib/assets'
 import { useAssets, usePrompts } from '../lib/hooks'
 import type { Navigate } from '../lib/navigation'
 import ImageInput, { type ImageCaption } from './ImageInput'
-import AssetChips, { posePeopleOf } from './pickers/AssetChips'
+import AssetChips, { posePeopleOf, productHolderOf } from './pickers/AssetChips'
 import AssetPicker from './pickers/AssetPicker'
 import AudioChips from './pickers/AudioChips'
 import AudioPicker from './pickers/AudioPicker'
@@ -106,7 +106,7 @@ interface Props {
   endImageRequired?: boolean
   /** Called on ⌘/Ctrl+Enter in the prompt field. */
   onSubmit?: () => void
-  /** Lets the pickers link to the library views (characters, environments, outfits, prompts). */
+  /** Lets the pickers link to the library views (characters, environments, products, outfits, poses, prompts). */
   navigate?: Navigate
 }
 
@@ -116,8 +116,16 @@ interface Props {
  */
 type Picker = 'library' | 'start' | 'end' | 'audio' | `references:${AssetKind}`
 
-/** Tab order for a start/end image picker when the image isn't a library photo: environments make good opening frames. */
-const SINGLE_IMAGE_KINDS: readonly AssetKind[] = ['environment', 'character', 'outfit', 'pose']
+/**
+ * The kinds a start or end image can be picked from, in the order the picker falls back through when the image
+ * isn't a library photo: environments make good opening frames, and a product's packshot can open or close a clip.
+ */
+const SINGLE_IMAGE_KINDS: readonly AssetKind[] = ['environment', 'character', 'product', 'outfit', 'pose']
+
+/** "karaktärer, miljöer, produkter, kläder och poser": the kinds above in the app's order, for the button titles. */
+const SINGLE_IMAGE_KINDS_TEXT = swedishList(
+  ASSET_KINDS.filter((k) => SINGLE_IMAGE_KINDS.includes(k)).map((k) => ASSET_COPY[k].plural.toLocaleLowerCase('sv'))
+)
 
 const select = 'w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted'
 const smallButton =
@@ -149,16 +157,23 @@ export function missingInput(params: GenerationParams, continuing = false): stri
   return blockingPromptError(params)?.replace(/\.\s*$/, '')
 }
 
+/** The form-only choices that shape how assets are named in the prompt ("gäller", "hålls av"). */
+interface NamingChoices {
+  posePeople: Readonly<Record<string, string[] | undefined>>
+  productHolders: Readonly<Record<string, string | null | undefined>>
+}
+
 /**
  * What a library asset among the references is called in the prompt: with a character's voice and the clothes
- * it wears, an environment's sound, or for a pose the characters that take it.
+ * it wears, an environment's sound, for a pose the characters that take it, for a product the character holding
+ * it.
  */
 function referenceGroupOf(
   entry: AssetRef,
   assetRefs: AssetRef[],
   pairings: ReadonlyMap<string, string>,
   sentAudios: readonly FormAudio[],
-  posePeople: Readonly<Record<string, string[] | undefined>>
+  { posePeople, productHolders }: NamingChoices
 ): AssetGroup {
   const { asset, indices } = entry
   const outfits =
@@ -166,14 +181,12 @@ function referenceGroupOf(
       ? outfitsWornBy(asset.id, assetRefs, pairings).map((w) => ({ name: w.asset.name, indices: w.indices }))
       : undefined
   const audios = audioIndicesOf(sentAudios, asset.id)
+  const characters = assetRefs.filter((r) => r.asset.kind === 'character')
   const people =
     asset.kind === 'pose'
-      ? posePeopleOf(
-          asset.id,
-          assetRefs.filter((r) => r.asset.kind === 'character'),
-          posePeople
-        ).map((p) => ({ name: p.asset.name, indices: p.indices }))
+      ? posePeopleOf(asset.id, characters, posePeople).map((p) => ({ name: p.asset.name, indices: p.indices }))
       : undefined
+  const holder = asset.kind === 'product' ? productHolderOf(asset.id, characters, productHolders) : undefined
   return {
     asset,
     name: asset.name,
@@ -181,7 +194,8 @@ function referenceGroupOf(
     kind: asset.kind,
     ...(audios.length ? { audios } : {}),
     ...(outfits ? { outfits } : {}),
-    ...(people ? { people } : {})
+    ...(people ? { people } : {}),
+    ...(holder ? { holder: { name: holder.asset.name, indices: holder.indices } } : {})
   }
 }
 
@@ -233,12 +247,14 @@ export default function ParamsForm({
   const libraryButton = useRef<HTMLButtonElement>(null)
   const characterButton = useRef<HTMLButtonElement>(null)
   const environmentButton = useRef<HTMLButtonElement>(null)
+  const productButton = useRef<HTMLButtonElement>(null)
   const outfitButton = useRef<HTMLButtonElement>(null)
   const poseButton = useRef<HTMLButtonElement>(null)
   const audioButton = useRef<HTMLButtonElement>(null)
   const kindButtons: Record<AssetKind, RefObject<HTMLButtonElement | null>> = {
     character: characterButton,
     environment: environmentButton,
+    product: productButton,
     outfit: outfitButton,
     pose: poseButton
   }
@@ -288,7 +304,7 @@ export default function ParamsForm({
   // Which image-to-video models take an end image is a curated list shared with main and the agents.
   const endImagePossible = supportsEndImage(params.model)
 
-  // ── Library assets (characters, environments, outfits, poses) ────────────────
+  // ── Library assets (characters, environments, products, outfits, poses) ──────
 
   const byPath = useMemo(() => assetsByPath(assets), [assets])
   const outfits = useMemo(() => assets.filter((a) => a.kind === 'outfit'), [assets])
@@ -457,6 +473,30 @@ export default function ParamsForm({
     })
   }, [posesInForm])
 
+  // Which character holds each product ("hålls av"): form state only, like "bärs av" and "gäller"; it shapes the
+  // text a product chip inserts. Missing or null: nobody holds it (the default).
+  const [productHolders, setProductHolders] = useState<Record<string, string | null>>({})
+  const productsInForm = [
+    ...new Set(
+      refs.flatMap((p) => {
+        const a = byPath.get(p)
+        return a?.kind === 'product' ? [a.id] : []
+      })
+    )
+  ]
+    .sort()
+    .join()
+  // Forget the choice for a product that left the form, so adding it again starts with nobody holding it.
+  useEffect(() => {
+    const present = new Set(productsInForm.split(','))
+    setProductHolders((chosen) => {
+      const ids = Object.keys(chosen)
+      const keep = ids.filter((id) => present.has(id))
+      return keep.length === ids.length ? chosen : Object.fromEntries(keep.map((id) => [id, chosen[id]]))
+    })
+  }, [productsInForm])
+  const naming: NamingChoices = { posePeople, productHolders }
+
   const swapOutfitOf = (character: Asset, outfit: Asset | null) => {
     const wearing = outfitsWornBy(character.id, assetRefs, pairings).map((r) => r.asset)
     applyRefs(swapOutfit(refs, wearing, outfit, maxRefs), {
@@ -473,7 +513,7 @@ export default function ParamsForm({
     () => (kind === 'reference-to-video' ? promptReferences(refs, byPath, maxRefs) : []),
     [kind, refs.join('\n'), byPath, maxRefs]
   )
-  const groups = assetRefs.map((entry) => referenceGroupOf(entry, assetRefs, pairings, sentAudios, posePeople))
+  const groups = assetRefs.map((entry) => referenceGroupOf(entry, assetRefs, pairings, sentAudios, naming))
 
   /**
    * "@" menu → "Lägg till från biblioteket": adds the photos (and a character's voice) and tells the editor how
@@ -488,7 +528,7 @@ export default function ParamsForm({
     const audiosAfter = formAudios(change.referenceAudios ?? [], audioSources, maxAudios, audioSupported).filter(
       (a) => a.sent
     )
-    return entry && referenceGroupOf(entry, after, resolvePairings(after, wornBy), audiosAfter, posePeople)
+    return entry && referenceGroupOf(entry, after, resolvePairings(after, wornBy), audiosAfter, naming)
   }
 
   const manageKind = navigate
@@ -696,7 +736,7 @@ export default function ParamsForm({
                 value={params.startImage ? [params.startImage] : []}
                 onChange={(v) => set('startImage', v[0])}
                 caption={caption}
-                action={libraryImageButton(startButton, 'start', 'Välj startbild bland karaktärer, miljöer och kläder')}
+                action={libraryImageButton(startButton, 'start', `Välj startbild bland ${SINGLE_IMAGE_KINDS_TEXT}`)}
               />
               {singleImagePicker('start', params.startImage)}
             </>
@@ -717,7 +757,7 @@ export default function ParamsForm({
                   value={params.endImage ? [params.endImage] : []}
                   onChange={(v) => set('endImage', v[0])}
                   caption={caption}
-                  action={libraryImageButton(endButton, 'end', 'Välj slutbild bland karaktärer, miljöer och kläder')}
+                  action={libraryImageButton(endButton, 'end', `Välj slutbild bland ${SINGLE_IMAGE_KINDS_TEXT}`)}
                 />
                 {!endImagePossible && (
                   <p className="-mt-2 text-[11px] leading-relaxed text-accent">
@@ -744,7 +784,9 @@ export default function ParamsForm({
             onChange={(v) => setRefs(v)}
             caption={caption}
             action={
-              <span className="flex items-center">
+              // Five kinds don't fit beside the label in the form's width: the buttons wrap onto a second row,
+              // right-aligned, rather than squeezing the label.
+              <span className="flex flex-wrap items-center justify-end gap-y-0.5">
                 {ASSET_KINDS.map((k) => (
                   <button
                     key={k}
@@ -808,6 +850,10 @@ export default function ParamsForm({
             onToggleAudio={toggleAssetAudio}
             posePeople={posePeople}
             onPosePeople={(poseId, ids) => setPosePeople((chosen) => ({ ...chosen, [poseId]: ids }))}
+            productHolders={productHolders}
+            onHolder={(productId, characterId) =>
+              setProductHolders((chosen) => ({ ...chosen, [productId]: characterId }))
+            }
             onInsert={insertIntoPrompt}
             onRemove={removeAssetRefs}
             onWear={(outfitId, characterId) => setWornBy((chosen) => ({ ...chosen, [outfitId]: characterId }))}

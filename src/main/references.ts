@@ -264,9 +264,9 @@ const importing = serialized()
  * Copies every start/end/reference image, reference audio clip and source/reference video that lies outside the
  * library into Referensbilder/<today>/ (keeping its original name, made unique) and returns params pointing at the
  * copies (each audio clip keeps its window). An edit's proxies are made in its Underlag/ folder, so in practice only
- * images and audio are ever copied. Files already in the library (photos and voice clips of characters,
- * environments, outfits and poses, earlier references, continuation frames) are left as they are, and a file
- * whose exact content is already in today's folder is reused instead of copied again.
+ * images and audio are ever copied. Files already in the library (photos and voice clips of assets, earlier
+ * references, continuation frames) are left as they are, and a file whose exact content is already in today's
+ * folder is reused instead of copied again.
  */
 export function importExternalReferences(params: GenerationParams): Promise<GenerationParams> {
   const external = new Map<string, Material>()

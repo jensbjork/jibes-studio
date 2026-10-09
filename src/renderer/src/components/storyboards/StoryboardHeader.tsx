@@ -2,17 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import type { ExportSummary, Storyboard } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatUsd } from '../../lib/media'
+import { markAllSeen, useOwnerWork } from '../../lib/work'
 import { ScissorsIcon } from '../feed/icons'
 import FolderIcon from '../library/FolderIcon'
 import Popover from '../pickers/Popover'
-import { MoreIcon, PlayIcon } from '../sequences/icons'
+import { CheckAllIcon, MoreIcon, PlayIcon } from '../sequences/icons'
+import { Spinner } from '../work/StatusMark'
 import { aspectLabel, formatLength, STORYBOARD_ASPECTS } from './storyboardUtils'
 import { menuRow, onMenuKeyDown, primaryButton, secondaryButton } from './ui'
-
-export type ExportState =
-  | { status: 'running'; progress: number }
-  | { status: 'done'; path: string }
-  | { status: 'error'; error: string }
 
 interface Props {
   storyboard: Storyboard
@@ -28,8 +25,11 @@ interface Props {
   runBlocked?: string
   runQuote?: number
   stopping: boolean
+  /** Where "Generera saknade" is, from Pågår och klart. */
+  runDetail?: string
   previewDisabled?: string
-  exportState?: ExportState
+  /** 0–1 while the film is exported (also an export started elsewhere); undefined otherwise. */
+  exportProgress?: number
   exportBlocked?: string
   converting: boolean
   autoFocusName: boolean
@@ -57,8 +57,9 @@ export default function StoryboardHeader({
   runBlocked,
   runQuote,
   stopping,
+  runDetail,
   previewDisabled,
-  exportState,
+  exportProgress,
   exportBlocked,
   converting,
   autoFocusName,
@@ -75,7 +76,7 @@ export default function StoryboardHeader({
   onError
 }: Props) {
   const count = storyboard.transitions.length
-  const exporting = exportState?.status === 'running'
+  const exporting = exportProgress !== undefined
   // The button for the next sensible step gets the accent colour.
   const exportIsNext = count > 0 && toGenerate === 0 && generating === 0 && !exportBlocked
   // Counted and priced only when it can start; until then a click shows what stands in the way.
@@ -100,9 +101,9 @@ export default function StoryboardHeader({
           </option>
         ))}
       </select>
-      {/* Only on wide windows: the list beside it shows the same, and the actions need the room. */}
+      {/* Only when the main area is wide: the list beside it shows the same, and the actions need the room. */}
       {count > 0 && (
-        <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted 2xl:inline">
+        <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted @min-[83rem]/main:inline">
           {doneCount === count ? `${count} klipp` : `${doneCount} av ${count} klipp klara`}
           {totalSeconds > 0 && ` · ${formatLength(totalSeconds)}`}
         </span>
@@ -111,9 +112,10 @@ export default function StoryboardHeader({
       <div className="no-drag ml-auto flex shrink-0 items-center gap-2">
         {storyboard.running ? (
           <>
-            <span className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-muted">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+            <span className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-muted" aria-live="polite">
+              <Spinner className="text-text" />
               Skickar saknade…
+              {runDetail && <span className="tabular-nums">{runDetail}</span>}
             </span>
             <button onClick={onStop} disabled={stopping} className={secondaryButton} title="Skickar inga fler klipp">
               {stopping ? 'Stoppar…' : 'Stoppa'}
@@ -143,18 +145,18 @@ export default function StoryboardHeader({
 
         <button onClick={onPreview} disabled={!!previewDisabled} title={previewDisabled ?? 'Spela upp klippen i följd'} className={secondaryButton}>
           <PlayIcon size={11} />
-          <span className="hidden xl:inline">Förhandsvisa</span>
+          <span className="hidden @min-[67rem]/main:inline">Förhandsvisa</span>
         </button>
 
         {exporting ? (
-          <div className="flex w-36 items-center gap-2" title="Exporterar med ffmpeg">
+          <div className="flex w-36 items-center gap-2" title="Exporterar med ffmpeg" role="status" aria-label="Exporterar">
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised">
               <div
                 className="h-full rounded-full bg-accent transition-[width] duration-300"
-                style={{ width: `${Math.max(2, exportState.progress * 100)}%` }}
+                style={{ width: `${Math.max(2, exportProgress * 100)}%` }}
               />
             </div>
-            <span className="w-9 text-right text-[12px] tabular-nums text-muted">{Math.round(exportState.progress * 100)} %</span>
+            <span className="w-9 text-right text-[12px] tabular-nums text-muted">{Math.round(exportProgress * 100)} %</span>
           </div>
         ) : (
           <button
@@ -170,7 +172,7 @@ export default function StoryboardHeader({
         <MoreMenu
           storyboard={storyboard}
           converting={converting}
-          exportStatus={exportState?.status}
+          exporting={exporting}
           onConvert={onConvert}
           onDelete={onDelete}
           onEditExport={onEditExport}
@@ -190,13 +192,13 @@ async function latestExport(storyboardId: string): Promise<ExportSummary | undef
 }
 
 /**
- * The rarer actions: continue in Sekvenser, the latest export into Redigera, the folder in Finder, deleting (asked
- * twice).
+ * The rarer actions: continue in Sekvenser, the latest export into Redigera, the folder in Finder, marking what is
+ * new here as seen, deleting (asked twice).
  */
 function MoreMenu({
   storyboard,
   converting,
-  exportStatus,
+  exporting,
   onConvert,
   onDelete,
   onEditExport,
@@ -204,7 +206,7 @@ function MoreMenu({
 }: {
   storyboard: Storyboard
   converting: boolean
-  exportStatus?: ExportState['status']
+  exporting: boolean
   onConvert: () => void
   onDelete: () => void
   onEditExport: (exportId: string) => void
@@ -215,6 +217,9 @@ function MoreMenu({
   const [confirming, setConfirming] = useState(false)
   // undefined while looking, null when there is no export (yet).
   const [latest, setLatest] = useState<ExportSummary | null>()
+  const news = useOwnerWork(storyboard.id)
+  const newCount = news.unseen + news.failed
+  const newWhat = newCount === 1 ? 'det som är nytt' : `${newCount} saker`
   const close = () => {
     setOpen(false)
     setConfirming(false)
@@ -232,7 +237,7 @@ function MoreMenu({
     return () => {
       current = false
     }
-  }, [open, storyboard.id, exportStatus])
+  }, [open, storyboard.id, exporting])
 
   const reveal = async () => {
     close()
@@ -333,6 +338,27 @@ function MoreMenu({
               <FolderIcon size={13} className="shrink-0 text-muted" />
               Öppna mappen i Finder
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-menu-item
+              disabled={newCount === 0}
+              onClick={() => {
+                close()
+                void markAllSeen({ ownerId: storyboard.id })
+              }}
+              className={`${menuRow} flex-col items-start gap-0.5`}
+            >
+              <span className="flex items-center gap-2">
+                <CheckAllIcon size={13} className="shrink-0 text-muted" />
+                Markera alla som sedda
+              </span>
+              <span className="pl-[21px] text-[11px] leading-snug text-muted">
+                {newCount === 0
+                  ? 'Inget nytt att titta på i storyboarden.'
+                  : `Tar bort markeringen Ny från ${newWhat} i storyboarden.`}
+              </span>
+            </button>
             <div className="mx-2 my-1 border-t border-line" />
             <button
               type="button"
@@ -406,7 +432,7 @@ function NameInput({
       placeholder="Namnlös storyboard"
       title="Byt namn"
       aria-label="Storyboardens namn"
-      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised xl:min-w-28"
+      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised @min-[67rem]/main:min-w-28"
     />
   )
 }

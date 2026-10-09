@@ -3,3 +3,4 @@
 export { recordIpcHandlers } from './local-ipc'
 export { registerAgentIpc } from './ipc'
 export { AgentService } from './service'
+export type { ExecutingApproval } from './approvals'

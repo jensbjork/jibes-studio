@@ -1,5 +1,5 @@
-import { useCallback, useId, type HTMLAttributes, type KeyboardEvent, type Ref } from 'react'
-import type { Asset, AssetKind, BoardImageSource, Still, StoryboardBoard } from '@shared/types'
+import { useCallback, useEffect, useId, useRef, type HTMLAttributes, type KeyboardEvent, type Ref } from 'react'
+import type { Asset, AssetKind, BoardImageSource, FinishedWork, Still, StoryboardBoard } from '@shared/types'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { CloseIcon } from '../sequences/icons'
 import { useDraft, useRegisterFlush, type FlushRegistry } from '../sequences/useDraft'
@@ -23,6 +23,12 @@ interface Props {
   stills: Still[]
   assets: Asset[]
   busy: boolean
+  /** Its picture is being made (Skapa bild, also after the dialog closed, or an agent's request). */
+  making: boolean
+  /** Its picture couldn't be made, not seen yet. */
+  failure?: FinishedWork
+  /** Light up for a moment (a link pointed at this board); a new number lights it up again. */
+  flash?: number
   /** ffmpeg is installed (see BoardImage). */
   ffmpegOk: boolean
   store: StoryboardStore
@@ -53,6 +59,9 @@ export default function BoardCard({
   stills,
   assets,
   busy,
+  making,
+  failure,
+  flash,
   ffmpegOk,
   store,
   flushers,
@@ -69,6 +78,21 @@ export default function BoardCard({
   const { ref, draggable, onDragStart, onDragEnd, onKeyDown, ...rest } = item
   const width = Math.max(CARD_MIN_WIDTH, imageWidth)
 
+  // Pointed at by a link: one soft ring that fades, so the eye finds the board in a long row.
+  const card = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (flash === undefined || !card.current) return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    card.current.animate(
+      [
+        { boxShadow: '0 0 0 2px rgba(236, 236, 241, 0.7)' },
+        { boxShadow: '0 0 0 2px rgba(236, 236, 241, 0.7)', offset: 0.6 },
+        { boxShadow: '0 0 0 2px rgba(236, 236, 241, 0)' }
+      ],
+      { duration: 1600, easing: 'ease-out' }
+    )
+  }, [flash])
+
   // ⌥← / ⌥→ move the board – except in the note, where they move the caret by a word as usual.
   const onCardKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     if ((e.target as HTMLElement).closest('textarea, input, select')) return
@@ -77,7 +101,12 @@ export default function BoardCard({
 
   return (
     <div
-      ref={ref as Ref<HTMLDivElement>}
+      ref={(el) => {
+        card.current = el
+        const forward = ref as Ref<HTMLDivElement>
+        if (typeof forward === 'function') forward(el)
+        else if (forward) forward.current = el
+      }}
       {...rest}
       tabIndex={0}
       onKeyDown={onCardKeyDown}
@@ -121,6 +150,8 @@ export default function BoardCard({
           stills={stills}
           assets={assets}
           busy={busy}
+          making={making}
+          failure={failure}
           ffmpegOk={ffmpegOk}
           onSet={onSetImage}
           onCreateImage={onCreateImage}

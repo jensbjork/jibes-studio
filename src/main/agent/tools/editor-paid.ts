@@ -17,7 +17,7 @@ import { callService } from '../local-ipc'
 import { AssetIndex, audioOf, localTime, q, requireLibrary } from '../studio'
 import { operationInput, operationOutput, operationSummary, segmentIdsOf, type VoiceNames } from './edit-input'
 import { baseVersion, editOperation, jobInfo, loadEdit, planInfo, planOperation, versionInfo, versionName, within } from './editor'
-import { defineTool, priceValue, usd, type ToolContext } from './kit'
+import { defineTool, priceValue, usd, type ToolContext, type ToolOutput } from './kit'
 
 // The two paid requests of Redigera: a paid operation on a version (request_edit_operation) and a new voice for a
 // character (request_voice_design). Like every paid tool they only create an approval request; the user's OK in
@@ -96,6 +96,78 @@ function cloneSource(assets: AssetIndex, audioId: string): { assetName: string; 
   return { assetName: ref.asset.name, consent: ref.audio.cloneConsent === true }
 }
 
+/** Why a stopped job can't be continued (Swedish), as Redigera's own "Fortsätt" would refuse it. */
+function cannotResume(job: EditJob): string {
+  if (job.status === 'running') return `Jobbet ${q(job.label)} pågår redan.`
+  if (job.status === 'completed') return `Jobbet ${q(job.label)} är redan klart.`
+  return `Jobbet ${q(job.label)} kan inte fortsättas (versionen det utgår från finns inte längre, eller det finns inget kvar att skicka). Gör om åtgärden med request_edit_operation och operation i stället.`
+}
+
+/**
+ * "Fortsätt" on a stopped paid job, asked for by an agent: an 'edit' request with resumeJobId. The price is what the
+ * job's unsent and failed parts cost as Studio lists the job; verify lapses the request when the job can no longer be
+ * continued or the price rose, and Redigera's own resume refuses again should Venice's price have risen by the time it
+ * sends (it is given the approved price as its ceiling).
+ */
+async function requestResume(ctx: ToolContext, editId: string, jobId: string, note: string | undefined): Promise<ToolOutput> {
+  const epoch = ctx.approvals.epoch()
+  const edit = await loadEdit(editId)
+  const job = edit.jobs.find((j) => j.id === jobId)
+  if (!job) throw new Error(`Redigeringen ${q(edit.name)} har inget jobb med id ${jobId}. get_edit visar jobben.`)
+  if (!job.canResume) throw new Error(cannotResume(job))
+  const base = job.baseId ? edit.versions.find((v) => v.id === job.baseId) : undefined
+  const price = job.resumePriceUsd
+  const partial = !!job.resumePartialPrice
+  const summary = `Fortsätt jobbet ${q(job.label)}`
+  const request: ApprovalEditRequest = {
+    editId: edit.id,
+    editName: edit.name,
+    ...(base ? { baseId: base.id, baseNumber: base.number } : {}),
+    summary,
+    resumeJobId: job.id,
+    ...(job.resumePriceNote ? { priceNote: job.resumePriceNote } : {}),
+    ...(partial ? { partialPrice: true } : {})
+  }
+  const { request: created, reused } = requestApproval(ctx, epoch, {
+    kind: 'edit',
+    client: ctx.clientName(),
+    note,
+    edit: request,
+    priceUsd: price,
+    fingerprint: `edit-resume:${job.id}:${priceKey({ priceUsd: price, partialPrice: partial })}`,
+    // A newer request to continue the same job replaces one still waiting (at another price, say).
+    target: `edit-resume:${job.id}`,
+    verify: async () => {
+      const now = await loadEdit(edit.id).catch(() => undefined)
+      if (!now) throw new Error('Redigeringen finns inte längre, så förfrågan gäller inte.')
+      const j = now.jobs.find((x) => x.id === job.id)
+      if (!j) throw new Error('Jobbet finns inte längre, så förfrågan gäller inte.')
+      if (!j.canResume) throw new Error(`${cannotResume(j)} Förfrågan gäller inte längre.`)
+      if (priceRose(price, j.resumePriceUsd) || (!partial && j.resumePartialPrice)) {
+        throw new Error(
+          `Priset har ändrats sedan agenten frågade (${usd(price)} → ${usd(j.resumePriceUsd)}${j.resumePartialPrice ? ' + en del utan pris' : ''}), så förfrågan gäller inte längre. Be agenten fråga igen.`
+        )
+      }
+    },
+    // Redigera's own "Fortsätt", with the approved price as its ceiling: it refuses (and the request fails) should
+    // Venice's price have risen past it, or a part have lost its price, by the time the parts are sent.
+    execute: async () => {
+      const resumed = await callService<EditJob>('edits:resume', job.id, approvedPrice(price), partial || price === undefined)
+      return { edit: { jobId: resumed.id, ...(resumed.resultId ? { resultId: resumed.resultId } : {}) } }
+    }
+  })
+  return {
+    data: {
+      edit_id: edit.id,
+      resume_job_id: job.id,
+      job: jobInfo(job),
+      ...pendingAnswer(created, reused)
+    },
+    approvalId: created.id,
+    summary: `vill fortsätta jobbet ${q(job.label)} i ${q(edit.name)} (${usd(price)}${partial ? ' + en del utan pris' : ''}) – väntar på ditt OK`
+  }
+}
+
 /** Voice designs approved in this session: the character's clips before, to name the new one in get_approval. */
 const designs = new Map<string, { assetId: string; before: Set<string> }>()
 
@@ -107,17 +179,24 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Request a paid edit operation (needs approval)',
       description:
-        "💰 Asks the user to approve a paid operation on a version of an edit (default the current one): transcribe, change_voice, speak_lines, music, effect, regenerate, prompt_edit, extend or upscale – the same operation input as plan_edit_operation, which you should call first. Nothing is sent to Venice or paid for until the user approves in Studio; the dialog shows the version's poster (and the frames a picture operation works from: regenerate's start and end frames, extend's last frame, prompt_edit's first and last frame of the range), what changes (prompt, old → new lines, the lines change_voice gives a new voice when you pass segment_ids, the voice), the parts and the price (with \"+\" and partial_price when a part has none, e.g. a voice clone: the user is asked once more then, as for an unknown price or one above $5). A voice cloned from a character's Röst clip needs the user's consent (clone_consent in list_assets): the dialog asks for it; you can't give it. Problems come back as an error and no request is made; free operations are refused (apply_edit). Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval (job progress, then the new version), then review the version with review_generation. The request lapses if the version's file, the plan (range, prompt, model, voice, lines) or the transcript lines it uses change before the user answers, or if Venice's price rises; a newer request for the same operation on the same version replaces a pending older one, and asking again for the very same thing at the same price returns the pending one (reused) – at another price it replaces it.",
+        "💰 Asks the user to approve a paid operation on a version of an edit (default the current one) – or, with resume_job_id instead of operation, continuing a stopped paid job (\"Fortsätt\": get_edit lists it with can_resume; its unsent and failed parts are sent again at the price shown, the parts already paid for are kept): transcribe, change_voice, speak_lines, music, effect, regenerate, prompt_edit, extend or upscale – the same operation input as plan_edit_operation, which you should call first. Nothing is sent to Venice or paid for until the user approves in Studio; the dialog shows the version's poster (and the frames a picture operation works from: regenerate's start and end frames, extend's last frame, prompt_edit's first and last frame of the range), what changes (prompt, old → new lines, the lines change_voice gives a new voice when you pass segment_ids, the voice), the parts and the price (with \"+\" and partial_price when a part has none, e.g. a voice clone: the user is asked once more then, as for an unknown price or one above $5). A voice cloned from a character's Röst clip needs the user's consent (clone_consent in list_assets): the dialog asks for it; you can't give it. Problems come back as an error and no request is made; free operations are refused (apply_edit). Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval (job progress, then the new version), then review the version with review_generation. The request lapses if the version's file, the plan (range, prompt, model, voice, lines) or the transcript lines it uses change before the user answers, or if Venice's price rises; a newer request for the same operation on the same version replaces a pending older one, and asking again for the very same thing at the same price returns the pending one (reused) – at another price it replaces it.",
       input: {
         edit_id: z.string().describe('An edit_id from list_edits.'),
         base_version_id: z.string().optional().describe("The version to work on (get_edit's versions); default the current one."),
-        operation: operationInput,
+        operation: operationInput.optional().describe('The paid operation (as plan_edit_operation takes it). Leave out with resume_job_id.'),
+        resume_job_id: z
+          .string()
+          .optional()
+          .describe("Instead of operation: a stopped paid job of this edit with can_resume (get_edit's jobs), to continue it."),
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog (Swedish): why.')
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       summary: () => 'vill redigera en film'
     },
-    async ({ edit_id, base_version_id, operation, note }) => {
+    async ({ edit_id, base_version_id, operation, resume_job_id, note }) => {
+      if (!operation === !resume_job_id) throw new Error('Ange antingen operation eller resume_job_id.')
+      if (resume_job_id) return requestResume(ctx, edit_id, resume_job_id, note)
+      if (!operation) throw new Error('Ange antingen operation eller resume_job_id.')
       const epoch = ctx.approvals.epoch()
       const edit = await loadEdit(edit_id)
       const base = baseVersion(edit, base_version_id)
@@ -261,7 +340,7 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Request a designed voice (paid, needs approval)',
       description:
-        "💰 Asks the user to approve making a new voice for a character with AI (\"Skapa röst med AI\", seed-audio, about $0.35): a description of the voice and a sample text it reads. Once approved and made, the result is added as a new Röst clip of the character (list_assets / get_asset show it; listen with include_audio) – the only way an agent can add an audio clip, and only with the user's OK. The voice can then be a reference voice (@AudioN) or, once the user allows cloning it, the voice of new lines (speak_lines with clone_audio_id). Write the description in English: age, gender, timbre, pace, accent, mood (\"A calm, deep male voice around fifty, slightly hoarse\"); the sample text in the language the character speaks. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval. One design per character waits at a time: a newer request_voice_design for the same character replaces a pending one (it lapses as \"Ersatt av en nyare förfrågan om samma sak\"), so offer alternatives one after another rather than at once.",
+        "💰 Asks the user to approve making a new voice for a character with AI (\"Skapa röst med AI\", seed-audio, about $0.35): a description of the voice and a sample text it reads. Once approved and made, the result is added as a new Röst clip of the character (list_assets / get_asset show it; listen with include_audio). (A recording you already have goes in with add_asset_audio instead – free.) The voice can then be a reference voice (@AudioN) or, once the user allows cloning it, the voice of new lines (speak_lines with clone_audio_id). Write the description in English: age, gender, timbre, pace, accent, mood (\"A calm, deep male voice around fifty, slightly hoarse\"); the sample text in the language the character speaks. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval. One design per character waits at a time: a newer request_voice_design for the same character replaces a pending one (it lapses as \"Ersatt av en nyare förfrågan om samma sak\"), so offer alternatives one after another rather than at once.",
       input: {
         asset_id: z.string().describe('A character (list_assets).'),
         description: z.string().min(3).max(1000).describe('The voice, in English.'),
@@ -377,6 +456,7 @@ export async function editApprovalInfo(request: ApprovalRequest): Promise<Record
     ...(e.partialPrice ? { partial_price: true } : {}),
     ...(e.voiceLines?.length ? { lines_changed: e.voiceLines.map((l) => ({ at: Math.round(l.at * 10) / 10, text: l.text })) } : {}),
     ...(e.needsCloneConsent ? { clone_consent_needed: e.needsCloneConsent.assetName } : {}),
+    ...(e.resumeJobId ? { resume_job_id: e.resumeJobId } : {}),
     ...(e.jobId ? { job_id: e.jobId } : {}),
     ...(e.resultId ? { result_version_id: e.resultId } : {})
   }

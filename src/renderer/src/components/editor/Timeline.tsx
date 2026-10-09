@@ -210,7 +210,7 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
         ) : (
           <span>Dra över tidslinjen för att markera ett avsnitt.</span>
         )}
-        {cutsNote && <span className="hidden xl:inline">· {cutsNote}</span>}
+        {cutsNote && <span className="hidden @min-[67rem]/main:inline">· {cutsNote}</span>}
         <span className="ml-auto flex items-center gap-0.5">
           <button
             type="button"

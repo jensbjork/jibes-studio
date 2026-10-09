@@ -16,6 +16,7 @@ import { serverInstructions } from './guide'
 import { LOOPBACK, magicDnsName, tailscaleAddresses } from './network'
 import { AgentServer, type AgentSession, type ListenResult } from './server'
 import { registerAgentTools } from './tools'
+import { UploadStore } from './uploads'
 
 // The agent connection as a whole: switched on and off from Settings, listening on this Mac and the tailnet,
 // with the activity log, the approval requests and the bridge to the window.
@@ -34,6 +35,11 @@ export interface AgentServiceOptions {
   broadcast: (channel: string, payload: unknown) => void
   /** Overrides the hosts to listen on (tests); normally 127.0.0.1 plus the Tailscale addresses. */
   hosts?: () => string[]
+  /**
+   * Work that Pågår och klart shows started, moved on or ended without any other broadcast: an upload coming in, an
+   * approved request being carried out ('progress': only an upload's bytes moved).
+   */
+  workChanged?: (kind: 'structure' | 'progress') => void
 }
 
 function listenError(port: number, failure: ListenResult['failures'][number] | undefined): string | undefined {
@@ -51,6 +57,8 @@ export class AgentService {
   readonly activity: ActivityLog
   readonly approvals: ApprovalStore
   readonly bridge: FormBridge
+  /** Files agents send (URL, PUT or base64), shared by every session. */
+  readonly uploads: UploadStore
   private server: AgentServer | undefined
   private token: string | undefined
   private error: string | undefined
@@ -65,8 +73,28 @@ export class AgentService {
 
   constructor(private readonly opts: AgentServiceOptions) {
     this.activity = new ActivityLog((entry) => opts.broadcast('agent:activity', entry))
-    this.approvals = new ApprovalStore((request, created) => this.onApproval(request, created))
+    // An approved request being carried out shows in Pågår och klart, which hears of it through workChanged.
+    this.approvals = new ApprovalStore(
+      (request, created) => this.onApproval(request, created),
+      () => opts.workChanged?.('structure')
+    )
     this.bridge = new FormBridge()
+    this.uploads = new UploadStore({
+      notify: (kind) => opts.workChanged?.(kind),
+      userAgent: `Studio/${app.getVersion()}`,
+      // A fetch or a PUT ends after its tool call answered: the log says how, naming the host (never the URL).
+      onSettled: (entry) => {
+        const what = entry.kind === 'image' ? 'en bild' : entry.kind === 'audio' ? 'ett ljud' : 'en video'
+        const name = `”${entry.fileName}”`
+        const summary =
+          entry.status === 'ready'
+            ? entry.host
+              ? `hämtade ${what} från ${entry.host} (${name})`
+              : `laddade upp ${name}`
+            : `${entry.host ? `kunde inte hämta ${name} från ${entry.host}` : `kunde inte ta emot ${name}`} – ${entry.error ?? 'okänt fel'}`
+        this.activity.record({ client: entry.client, tool: 'begin_upload', summary, ok: entry.status === 'ready' })
+      }
+    })
   }
 
   // ── Status ─────────────────────────────────────────────────────────────────
@@ -161,6 +189,7 @@ export class AgentService {
   async regenerateToken(): Promise<string> {
     this.token = regenerateAgentToken()
     this.approvals.expireAll('Token byttes, så förfrågan gäller inte längre.')
+    this.uploads.expireAll('token byttes')
     await this.server?.closeSessions()
     this.pushStatus()
     return this.token
@@ -169,6 +198,16 @@ export class AgentService {
   /** A library was opened (at start or after a switch): requests made for the previous one no longer apply. */
   libraryOpened(): void {
     this.approvals.expireAll('Biblioteket byttes, så förfrågan gäller inte längre.')
+    // Their files were in the old library's scratch, which opening clears anyway.
+    this.uploads.expireAll('biblioteket byttes')
+  }
+
+  /**
+   * The library is about to be switched or moved: uploads still coming in are stopped and their files removed
+   * before the folder goes (a PUT or a fetch writing into a folder being moved would leave a half file behind).
+   */
+  libraryClosing(): void {
+    this.uploads.expireAll('biblioteket byttes eller flyttades')
   }
 
   /** On quit. */
@@ -177,6 +216,7 @@ export class AgentService {
     clearTimeout(this.statusTimer)
     this.bridge.cancelAll()
     this.approvals.dispose()
+    this.uploads.dispose()
     void this.server?.close()
     this.server = undefined
   }
@@ -199,7 +239,10 @@ export class AgentService {
       port,
       token: () => this.token,
       createMcpServer: (session) => this.createMcpServer(session),
-      onSessionsChanged: () => this.pushStatus()
+      onSessionsChanged: () => this.pushStatus(),
+      uploads: this.uploads,
+      // An agent that reached Studio by its MagicDNS name gets its upload URLs by that name too.
+      hostNames: () => (this.dnsName?.name ? [this.dnsName.name] : [])
     })
     const result = await server.listenOn(this.hosts())
     if (!result.listening.includes(LOOPBACK)) {
@@ -223,7 +266,10 @@ export class AgentService {
     const server = this.server
     this.server = undefined
     this.bridge.cancelAll()
-    if (reason) this.approvals.expireAll(reason)
+    if (reason) {
+      this.approvals.expireAll(reason)
+      this.uploads.expireAll(reason.replace(/\.$/, '').toLowerCase())
+    }
     await server?.close()
     this.pushStatus()
   }
@@ -267,8 +313,12 @@ export class AgentService {
     registerAgentTools(mcp, {
       bridge: this.bridge,
       approvals: this.approvals,
+      uploads: this.uploads,
       promptLanguage: getPromptLanguage,
       clientName: () => session.name,
+      peer: () => session.address,
+      baseUrl: () => session.baseUrl,
+      agentPort: () => this.server?.port ?? getAgentSettings().port,
       // Audio content came with protocol 2025-03-26; older clients would reject a result that has it.
       audioContent: () => !session.protocolVersion || session.protocolVersion >= AUDIO_CONTENT_SINCE,
       // A session that ended (or a server that was stopped) asks the user for nothing more.

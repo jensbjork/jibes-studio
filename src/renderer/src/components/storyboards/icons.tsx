@@ -2,13 +2,14 @@ import type { SVGProps } from 'react'
 
 /**
  * The Storyboards symbol: two milestone pictures with an arc from the first to the second – the clip generated
- * between them. Filled and sized in em like the sidebar's other glyphs, so it follows the surrounding font size.
+ * between them. Sized in em by default, so it follows the surrounding font size; `size` (px) fits it into an icon set
+ * of fixed boxes (the sidebar's 16 px).
  */
-export function StoryboardIcon({ className = '', ...rest }: SVGProps<SVGSVGElement>) {
+export function StoryboardIcon({ className = '', size, ...rest }: SVGProps<SVGSVGElement> & { size?: number }) {
   return (
     <svg
-      width="1.05em"
-      height="1.05em"
+      width={size ?? '1.05em'}
+      height={size ?? '1.05em'}
       viewBox="0 0 16 16"
       fill="currentColor"
       aria-hidden

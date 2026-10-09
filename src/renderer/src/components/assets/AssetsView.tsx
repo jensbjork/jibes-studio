@@ -8,6 +8,7 @@ import type { Intent, Navigate } from '../../lib/navigation'
 import AssetEditor from './AssetEditor'
 import AssetIcon from './AssetIcon'
 import AssetList from './AssetList'
+import type { SoundFocus } from './AssetSounds'
 import { LONG_AUDIO_SECONDS, clipFileName, formatDuration } from './audioUtils'
 import { isFileDrag, sortFiles, sortedFilesNotice } from './imageUtils'
 
@@ -109,7 +110,9 @@ interface Props {
   navigate: Navigate
 }
 
-/** Karaktärer, Miljöer, Kläder or Poser: the list of one kind of asset and an editor for the selected one. */
+/**
+ * Karaktärer, Miljöer, Produkter, Kläder or Poser: the list of one kind of asset and an editor for the selected one.
+ */
 export default function AssetsView({ kind, intent, onIntentHandled, navigate }: Props) {
   const copy = ASSET_COPY[kind]
   // Every kind in one request: characters need the outfits, and outfits show who wears them.
@@ -125,6 +128,8 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
   const [addingAudio, setAddingAudio] = useState<Adding>({})
   const [query, setQuery] = useState('')
   const [notice, setNotice] = useState<Notice>()
+  // A clip to point out in Röst (a new voice opened from Pågår och klart); a new object each time it is asked for.
+  const [focusAudio, setFocusAudio] = useState<SoundFocus>()
 
   const assets = useMemo(() => mergeAssets(listed, overlay, removed), [listed, overlay, removed])
   // The remembered selection if it still exists, otherwise the first one.
@@ -157,12 +162,17 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
 
   useEffect(() => saveSelected(kind, selectedId), [kind, selectedId])
 
-  // "Visa klädseln" and similar links from the other library views.
+  // "Visa klädseln" and similar links from the other library views, Pågår och klart's "Gå dit" (with the new voice's
+  // clip) and an agent's open_in_studio. Opening an asset marks nothing seen, whoever asked: a new voice counts as
+  // heard only once it has been played, so an agent's open (source 'agent') needs no different handling here.
   useEffect(() => {
     if (intent?.type !== 'open-asset') return
     setSelectedId(intent.assetId)
     setCreatedId(undefined)
     setQuery('')
+    setFocusAudio(
+      intent.audioId || intent.jobId ? { audioId: intent.audioId, jobId: intent.jobId } : undefined
+    )
     onIntentHandled()
   }, [intent])
 
@@ -181,6 +191,7 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
   const select = (id: string) => {
     setSelectedId(id)
     setCreatedId(undefined)
+    setFocusAudio(undefined)
   }
 
   const create = async () => {
@@ -286,6 +297,7 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
             autoFocusName={selected.id === createdId}
             addingImages={addingImages[selected.id] ?? 0}
             addingAudio={addingAudio[selected.id] ?? 0}
+            focusAudio={focusAudio}
             navigate={navigate}
             onUpdated={updated}
             onAddFiles={(paths) => addFiles(selected.id, paths)}

@@ -308,7 +308,7 @@ export function toEditOperation(input: OperationInput, defaults: OperationDefaul
     case 'add_audio': {
       if (!input.media_id === !input.asset_audio_id) {
         throw new Error(
-          'Ange precis en ljudkälla: media_id (ljud som redan finns i redigeringen, get_edit) eller asset_audio_id (ett ljudklipp i biblioteket, list_assets). Egna ljudfiler kan bara användaren lägga till.'
+          'Ange precis en ljudkälla: media_id (ljud som redan finns i redigeringen, get_edit) eller asset_audio_id (ett ljudklipp i biblioteket, list_assets). En egen ljudfil lägger du först till i redigeringen med add_edit_audio, som svarar med dess media_id.'
         )
       }
       return clean<EditOperation>({

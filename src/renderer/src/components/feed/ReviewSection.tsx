@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Generation, GenerationReview } from '@shared/types'
+import { workKey, type Generation, type GenerationReview } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { markSeen } from '../../lib/work'
 import { formatWhen } from '../prompts/prompt-utils'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { REVIEW_TAGS, authorLabel, tagChipClass, tagLabel } from './feedText'
@@ -35,7 +36,11 @@ export function YourReview({
   // A stored change (ours echoing back, or made elsewhere) replaces the optimistic tags.
   useEffect(() => setTags(undefined), [review?.updatedAt])
 
+  // Judging a clip – stars, a tag, a note – is looking at it on purpose: it is seen from then on.
+  const judged = () => markSeen([workKey.generation(g.id)])
+
   const toggleTag = async (tag: string) => {
+    judged()
     const next = shownTags.includes(tag) ? shownTags.filter((t) => t !== tag) : [...shownTags, tag]
     setTags(next)
     setError(undefined)
@@ -55,7 +60,14 @@ export function YourReview({
       <div className="rounded-lg border border-line bg-raised/30 p-3">
         <div className="flex items-center gap-3">
           {done ? (
-            <StarRating value={g.rating} onChange={(r) => onRate(g, r)} size="lg" />
+            <StarRating
+              value={g.rating}
+              onChange={(r) => {
+                judged()
+                onRate(g, r)
+              }}
+              size="lg"
+            />
           ) : (
             <span className="text-[12px] text-muted">
               {g.status === 'failed'
@@ -71,7 +83,7 @@ export function YourReview({
         </div>
 
         {loaded ? (
-          <NoteField key={g.id} generationId={g.id} stored={review?.note ?? ''} onError={setError} />
+          <NoteField key={g.id} generationId={g.id} stored={review?.note ?? ''} onError={setError} onSaved={judged} />
         ) : (
           <div className="mt-2.5 h-[58px] rounded-md border border-line bg-raised/60" />
         )}
@@ -128,11 +140,14 @@ export function YourReview({
 function NoteField({
   generationId,
   stored,
-  onError
+  onError,
+  onSaved
 }: {
   generationId: string
   stored: string
   onError: (message: string | undefined) => void
+  /** A note was written (saved). */
+  onSaved?: () => void
 }) {
   const [text, setText] = useState(stored)
   const [state, setState] = useState<'idle' | 'pending' | 'saving' | 'saved'>('idle')
@@ -161,6 +176,7 @@ function NoteField({
     try {
       await window.studio.setUserReview(generationId, { note: note.trim() })
       savedText.current = note.trim()
+      onSaved?.()
       onError(undefined)
       setState(pending.current === null ? 'saved' : 'pending')
     } catch (e) {

@@ -43,6 +43,7 @@ import {
 } from '../studio'
 import { READ_ONLY, WRITE, defineTool, priceValue, quote, usd, type LabeledImage, type ToolContext } from './kit'
 import { isUsableTake } from './sequences'
+import { URL_WAIT_MS, stageFiles, uploadSource, urlSource } from './sources'
 
 // Storyboards: a film planned as milestone pictures. A storyboard is an ordered list of boards – one picture
 // each (made with request_image_generation, a still, a library photo or a frame of a clip) with a short note –
@@ -106,7 +107,7 @@ const BOARD_GONE = 'Det finns ingen ruta med det id:t (längre). get_storyboard 
 export function assertStoryboardIdle(storyboard: Storyboard): void {
   if (storyboard.running) {
     throw new Error(
-      `”Generera saknade” pågår för storyboarden ${q(storyboard.name)}. Vänta tills körningen är klar (eller be användaren stoppa den) innan du ändrar den.`
+      `”Generera saknade” pågår för storyboarden ${q(storyboard.name)}. Vänta tills körningen är klar (eller stoppa den med stop_generation_run) innan du ändrar den.`
     )
   }
 }
@@ -299,19 +300,31 @@ function excerpt(text: string, max: number): string {
 const boardImageInput = z.union([
   z.object({ still_id: z.string() }).strict(),
   z.object({ asset_image_id: z.string() }).strict(),
-  z.object({ generation_id: z.string(), time: z.number().min(0) }).strict()
+  z.object({ generation_id: z.string(), time: z.number().min(0) }).strict(),
+  uploadSource,
+  urlSource
 ])
 
 type BoardImageInput = z.infer<typeof boardImageInput>
 
 const BOARD_IMAGE_HELP =
-  '{still_id} (a still, list_stills – e.g. one made with request_image_generation), {asset_image_id} (a library photo, used where it is) or {generation_id, time} (that frame of a finished clip – the frame review_generation and get_frames show for that time – saved as a still of the storyboard).'
+  '{still_id} (a still, list_stills – e.g. one made with request_image_generation), {asset_image_id} (a library photo, used where it is), {generation_id, time} (that frame of a finished clip – the frame review_generation and get_frames show for that time – saved as a still of the storyboard), or {upload_id} / {url} (a picture you send, copied in as a still of the storyboard).'
 
 /**
  * The picture an input names, checked before anything is changed (the still, the photo, the finished clip and
- * its file exist). A frame is named by the moment it starts, which is how the stills service picks it.
+ * its file exist; an upload ready, a URL fetched). A frame is named by the moment it starts, which is how the stills
+ * service picks it. An upload or URL becomes a file the service copies into the storyboard's stills.
  */
-async function boardImageSource(input: BoardImageInput, assets: AssetIndex, stills: StillIndex): Promise<BoardImageSource> {
+async function boardImageSource(
+  ctx: ToolContext,
+  input: BoardImageInput,
+  assets: AssetIndex,
+  stills: StillIndex
+): Promise<BoardImageSource> {
+  if ('upload_id' in input || 'url' in input) {
+    const [file] = await stageFiles(ctx, 'image', [input], Date.now() + URL_WAIT_MS)
+    return { kind: 'file', path: file.path }
+  }
   if ('still_id' in input) {
     const still = stills.require(input.still_id)
     if (!existsSync(still.path)) throw new Error('Stillbildens fil finns inte längre på disken.')
@@ -365,6 +378,38 @@ function touching(storyboard: Storyboard, boardId: string): Record<string, unkno
   return storyboard.transitions.flatMap((t, i) =>
     t.fromBoardId === boardId || t.toBoardId === boardId ? [transitionInfo(storyboard, i)] : []
   )
+}
+
+/** What boards:moveLoss says a move would remove (B's read-only half of moveBoard). */
+interface MoveLoss {
+  transitions: { id: string; number: number; prompt: string; takeCount: number; selected: boolean }[]
+}
+
+/** A transition worth keeping: it has a prompt, a negative prompt or takes. Removing it needs the user's OK. */
+function valuable(t: StoryboardTransition): boolean {
+  return t.params.prompt.trim() !== '' || !!t.params.negativePrompt?.trim() || t.takes.length > 0
+}
+
+/**
+ * The transition a new board put after `afterId` (or before `beforeId`) would replace: the one between the two
+ * boards it lands between, with their 1-based numbers. Undefined when it lands at an end (nothing is replaced).
+ */
+function transitionReplacedBy(
+  storyboard: Storyboard,
+  afterId: string | undefined,
+  beforeId: string | undefined
+): { transition: StoryboardTransition; number: number; from: number; to: number } | undefined {
+  const boards = storyboard.boards
+  let left: number
+  if (afterId) left = boards.findIndex((b) => b.id === afterId)
+  else if (beforeId) left = boards.findIndex((b) => b.id === beforeId) - 1
+  else return undefined
+  if (left < 0 || left + 1 >= boards.length) return undefined
+  const a = boards[left]
+  const b = boards[left + 1]
+  const index = storyboard.transitions.findIndex((t) => t.fromBoardId === a.id && t.toBoardId === b.id)
+  if (index < 0) return undefined
+  return { transition: storyboard.transitions[index], number: index + 1, from: left + 1, to: left + 2 }
 }
 
 // ── Tools ────────────────────────────────────────────────────────────────────
@@ -519,7 +564,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     'add_board',
     {
       title: 'Add board',
-      description: `Adds a board (one milestone picture of the film) to a storyboard: at the end, or after after_board_id / before before_board_id. note says what the picture shows ("Vad visar bilden?"). image puts a picture in right away: ${BOARD_IMAGE_HELP} Leave it out to plan first and make the picture later (request_image_generation with assign_to: {board_id}). The transitions around the new board are created with empty prompts (write them with update_transition); a transition that went across the place where the board goes is replaced, and its takes return to the user's feed as ordinary generations.`,
+      description: `Adds a board (one milestone picture of the film) to a storyboard: at the end, or after after_board_id / before before_board_id. note says what the picture shows ("Vad visar bilden?"). image puts a picture in right away: ${BOARD_IMAGE_HELP} Leave it out to plan first and make the picture later (request_image_generation with assign_to: {board_id}). The transitions around the new board are created with empty prompts (write them with update_transition). Adding at the end never removes anything. A board put between two boards replaces the transition between them: that is refused when the transition has a prompt or takes (nothing is added) – add the board last and ask the user to move it there with request_delete({items: [{board_move: {board_id, to_board_number}}]}); an empty transition is simply replaced.`,
       input: {
         storyboard_id: z.string(),
         after_board_id: z.string().optional(),
@@ -537,8 +582,15 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       for (const id of [after_board_id, before_board_id]) {
         if (id && !before.boards.some((b) => b.id === id)) throw new Error('Den rutan finns inte i den här storyboarden.')
       }
+      // Between two boards, the transition between them goes: never one with a prompt or takes without the user's OK.
+      const lost = transitionReplacedBy(before, after_board_id, before_board_id)
+      if (lost && valuable(lost.transition)) {
+        throw new Error(
+          `Rutan hamnar mellan ruta ${lost.from} och ${lost.to}, och övergång ${lost.number} med prompt eller tagningar försvinner då. Lägg till rutan sist och be om lov att flytta den dit med request_delete {board_move: {board_id: <den nya rutans id>, to_board_number: ${lost.to}}}.`
+        )
+      }
       const [assets, stills] = await Promise.all([AssetIndex.load(), StillIndex.load()])
-      const source = image ? await boardImageSource(image, assets, stills) : undefined
+      const source = image ? await boardImageSource(ctx, image, assets, stills) : undefined
       const storyboard = await callService<Storyboard>('boards:add', before.id, {
         ...(after_board_id ? { afterBoardId: after_board_id } : {}),
         ...(before_board_id ? { beforeBoardId: before_board_id } : {}),
@@ -547,8 +599,8 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       })
       const known = new Set(before.boards.map((b) => b.id))
       const index = storyboard.boards.findIndex((b) => !known.has(b.id))
-      // A frame becomes a new still when it is put in.
-      const stillsNow = source?.kind === 'frame' ? await StillIndex.load() : stills
+      // A frame or a file becomes a new still when it is put in.
+      const stillsNow = source?.kind === 'frame' || source?.kind === 'file' ? await StillIndex.load() : stills
       const removed = removedTransitions(before, storyboard)
       return {
         data: {
@@ -582,13 +634,13 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       assertStoryboardIdle(before)
       if (note === undefined && image === undefined) throw new Error('Ange note eller image – annars finns inget att ändra.')
       const [assets, stills] = await Promise.all([AssetIndex.load(), StillIndex.load()])
-      const source = image ? await boardImageSource(image, assets, stills) : image
+      const source = image ? await boardImageSource(ctx, image, assets, stills) : image
       const storyboard = await callService<Storyboard>('boards:update', board_id, {
         ...(note !== undefined ? { note } : {}),
         ...(source !== undefined ? { image: source } : {})
       })
       const index = storyboard.boards.findIndex((b) => b.id === board_id)
-      const stillsNow = source?.kind === 'frame' ? await StillIndex.load() : stills
+      const stillsNow = source?.kind === 'frame' || source?.kind === 'file' ? await StillIndex.load() : stills
       return {
         data: {
           ...(index >= 0 ? boardInfo(storyboard, index, assets, stillsNow) : { board_id }),
@@ -606,7 +658,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Move board',
       description:
-        'Moves a board to another place in its storyboard. to_board_number is the 1-based number it should have afterwards. Transitions between boards that are no longer neighbours are removed (their takes return to the user\'s feed as ordinary generations) and new ones, with empty prompts, join the new neighbours; transitions between boards that stay neighbours keep their prompt and takes.',
+        'Moves a board to another place in its storyboard. to_board_number is the 1-based number it should have afterwards. Transitions between boards that are no longer neighbours go and new ones, with empty prompts, join the new neighbours; transitions between boards that stay neighbours keep their prompt and takes. A move that would remove a transition with a prompt or takes is refused: ask the user with request_delete({items: [{board_move: {board_id, to_board_number}}]}) – they approve it in Studio. Moves that only drop empty transitions go ahead.',
       input: {
         board_id: z.string(),
         to_board_number: z.number().int().min(1)
@@ -618,6 +670,24 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       const { storyboard: before, index: from } = await loadBoard(board_id)
       assertStoryboardIdle(before)
       const to = Math.min(to_board_number, before.boards.length) - 1
+      if (to !== from) {
+        // What the move would remove, computed the way the move itself does it.
+        const loss = await callService<MoveLoss>('boards:moveLoss', board_id, to)
+        const lost = loss.transitions.filter((t) => {
+          const known = before.transitions.find((x) => x.id === t.id)
+          return t.prompt.trim() !== '' || t.takeCount > 0 || !!known?.params.negativePrompt?.trim()
+        })
+        if (lost.length) {
+          const numbers = lost.map((t) => t.number)
+          const which =
+            numbers.length === 1
+              ? `övergång ${numbers[0]}`
+              : `övergångarna ${numbers.slice(0, -1).join(', ')} och ${numbers[numbers.length - 1]}`
+          throw new Error(
+            `Flytten tar bort ${which} med prompt eller tagningar. Be om lov med request_delete {board_move: {board_id: "${board_id}", to_board_number: ${to + 1}}}.`
+          )
+        }
+      }
       const storyboard = to === from ? before : await callService<Storyboard>('boards:move', board_id, to)
       const removed = removedTransitions(before, storyboard)
       return {
@@ -630,35 +700,6 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           ...(removed.length ? { removed_transitions: removed, note: REMOVED_NOTE } : {})
         },
         summary: `flyttade ruta ${from + 1} till plats ${storyboard.boards.findIndex((b) => b.id === board_id) + 1} i ${q(storyboard.name)}`
-      }
-    }
-  )
-
-  defineTool(
-    server,
-    ctx,
-    'delete_board',
-    {
-      title: 'Delete board',
-      description:
-        "Removes a board from its storyboard. The transitions to and from it are removed (their takes return to the user's feed as ordinary generations) and its neighbours get a new transition between them, with an empty prompt. The board's picture stays among the storyboard's stills (or in the library, for a library photo).",
-      input: { board_id: z.string() },
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-      summary: () => 'tog bort en ruta'
-    },
-    async ({ board_id }) => {
-      const { storyboard: before, index } = await loadBoard(board_id)
-      assertStoryboardIdle(before)
-      const storyboard = await callService<Storyboard>('boards:delete', board_id)
-      const removed = removedTransitions(before, storyboard)
-      return {
-        data: {
-          deleted: board_id,
-          board_count: storyboard.boards.length,
-          transition_count: storyboard.transitions.length,
-          ...(removed.length ? { removed_transitions: removed, note: REMOVED_NOTE } : {})
-        },
-        summary: `tog bort ruta ${index + 1} i ${q(storyboard.name)}`
       }
     }
   )

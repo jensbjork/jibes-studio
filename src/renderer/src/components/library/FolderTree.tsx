@@ -26,6 +26,12 @@ const ENTRIES: Entry[] = [
     example: () => 'Köket/kväll.jpg, Köket/sorl.wav'
   },
   {
+    target: 'products',
+    name: 'Produkter',
+    explanation: 'En mapp per produkt med produktbilderna och beskrivningen.',
+    example: () => 'Kaffeburken/framsida.jpg'
+  },
+  {
     target: 'outfits',
     name: 'Kläder',
     explanation: 'En mapp per klädsel med bilderna och beskrivningen.',

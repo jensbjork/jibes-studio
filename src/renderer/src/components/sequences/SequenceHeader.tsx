@@ -2,16 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import type { ExportSummary, Sequence } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd } from '../../lib/media'
+import { markAllSeen, useOwnerWork } from '../../lib/work'
 import { ScissorsIcon } from '../feed/icons'
 import OpenFolderButton from '../library/OpenFolderButton'
 import Popover from '../pickers/Popover'
 import { menuRow, onMenuKeyDown } from '../storyboards/ui'
-import { MoreIcon, PlayIcon } from './icons'
-
-export type ExportState =
-  | { status: 'running'; progress: number }
-  | { status: 'done'; path: string }
-  | { status: 'error'; error: string }
+import { Spinner } from '../work/StatusMark'
+import { CheckAllIcon, MoreIcon, PlayIcon } from './icons'
 
 interface Props {
   sequence: Sequence
@@ -23,8 +20,11 @@ interface Props {
   generating: number
   runQuote?: number
   stopping: boolean
+  /** Where "Generera saknade" is ("Klipp 2 av 5"), from Pågår och klart. */
+  runDetail?: string
   previewDisabled?: string
-  exportState?: ExportState
+  /** 0–1 while the film is exported (also an export started elsewhere); undefined otherwise. */
+  exportProgress?: number
   exportBlocked?: string
   autoFocusName: boolean
   onAutoFocused: () => void
@@ -68,8 +68,9 @@ export default function SequenceHeader({
   generating,
   runQuote,
   stopping,
+  runDetail,
   previewDisabled,
-  exportState,
+  exportProgress,
   exportBlocked,
   autoFocusName,
   onAutoFocused,
@@ -83,15 +84,15 @@ export default function SequenceHeader({
   onError
 }: Props) {
   const count = sequence.segments.length
-  const exporting = exportState?.status === 'running'
+  const exporting = exportProgress !== undefined
   // The button for the next sensible step gets the accent colour.
   const exportIsNext = toGenerate === 0 && generating === 0 && count > 0
 
   return (
     <div className="drag flex h-12 shrink-0 items-center gap-3 border-b border-line pl-3 pr-4">
       <NameInput name={sequence.name} onRename={onRename} autoFocus={autoFocusName} onAutoFocused={onAutoFocused} />
-      {/* Only on wide windows: the list beside it shows the same, and the actions need the room. */}
-      <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted 2xl:inline">
+      {/* Only when the main area is wide: the list beside it shows the same, and the actions need the room. */}
+      <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted @min-[83rem]/main:inline">
         {formatSeconds(totalSeconds * 1000)}
         <span className="mx-1.5">·</span>
         {readyCount === count ? `${count} klipp` : `${readyCount} av ${count} klipp klara`}
@@ -108,9 +109,10 @@ export default function SequenceHeader({
         />
         {sequence.running ? (
           <>
-            <span className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-muted">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+            <span className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-muted" aria-live="polite">
+              <Spinner className="text-text" />
               Genererar saknade…
+              {runDetail && <span className="tabular-nums">{runDetail}</span>}
             </span>
             <button onClick={onStop} disabled={stopping} className={secondary} title="Stoppar efter klippet som genereras nu">
               {stopping ? 'Stoppar…' : 'Stoppa'}
@@ -136,19 +138,19 @@ export default function SequenceHeader({
 
         <button onClick={onPreview} disabled={!!previewDisabled} title={previewDisabled ?? 'Spela upp klippen i följd'} className={secondary}>
           <PlayIcon size={11} />
-          <span className="hidden xl:inline">Förhandsvisa</span>
+          <span className="hidden @min-[67rem]/main:inline">Förhandsvisa</span>
         </button>
 
         {exporting ? (
-          <div className="flex w-36 items-center gap-2" title="Exporterar med ffmpeg">
+          <div className="flex w-36 items-center gap-2" title="Exporterar med ffmpeg" role="status" aria-label="Exporterar">
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised">
               <div
                 className="h-full rounded-full bg-accent transition-[width] duration-300"
-                style={{ width: `${Math.max(2, exportState.progress * 100)}%` }}
+                style={{ width: `${Math.max(2, exportProgress * 100)}%` }}
               />
             </div>
             <span className="w-9 text-right text-[12px] tabular-nums text-muted">
-              {Math.round(exportState.progress * 100)} %
+              {Math.round(exportProgress * 100)} %
             </span>
           </div>
         ) : (
@@ -167,7 +169,7 @@ export default function SequenceHeader({
 
         <MoreMenu
           sequence={sequence}
-          exportState={exportState}
+          exporting={exporting}
           onExportHeight={onExportHeight}
           onEditExport={onEditExport}
           onError={onError}
@@ -185,16 +187,16 @@ async function latestExport(sequenceId: string): Promise<ExportSummary | undefin
     .sort((a, b) => b.createdAt - a.createdAt)[0]
 }
 
-/** ⋯: the Exportformat, and the latest export into Redigera. */
+/** ⋯: the Exportformat, the latest export into Redigera, and marking what is new here as seen. */
 function MoreMenu({
   sequence,
-  exportState,
+  exporting,
   onExportHeight,
   onEditExport,
   onError
 }: {
   sequence: Sequence
-  exportState?: ExportState
+  exporting: boolean
   onExportHeight: (height: number | null) => void
   onEditExport: (exportId: string) => void
   onError: (message: string) => void
@@ -203,6 +205,9 @@ function MoreMenu({
   const [open, setOpen] = useState(false)
   // undefined while looking, null when the sequence has no export (yet).
   const [latest, setLatest] = useState<ExportSummary | null>()
+  const news = useOwnerWork(sequence.id)
+  const newCount = news.unseen + news.failed
+  const newWhat = newCount === 1 ? 'det som är nytt' : `${newCount} saker`
 
   // Looked up each time the menu opens: an export may have finished (or its film been deleted) since.
   useEffect(() => {
@@ -220,7 +225,7 @@ function MoreMenu({
     return () => {
       current = false
     }
-  }, [open, sequence.id, exportState?.status])
+  }, [open, sequence.id, exporting])
 
   const height = sequence.exportHeight ?? null
 
@@ -291,6 +296,28 @@ function MoreMenu({
                   : 'Ändra den färdiga filmen med AI i Redigera. Sekvensen rörs inte.'}
             </span>
           </button>
+          <div className="mx-2 my-1 border-t border-line" />
+          <button
+            type="button"
+            role="menuitem"
+            data-menu-item
+            disabled={newCount === 0}
+            onClick={() => {
+              setOpen(false)
+              void markAllSeen({ ownerId: sequence.id })
+            }}
+            className={`${menuRow} flex-col items-start gap-0.5`}
+          >
+            <span className="flex items-center gap-2">
+              <CheckAllIcon size={13} className="shrink-0 text-muted" />
+              Markera alla som sedda
+            </span>
+            <span className="pl-[21px] text-[11px] leading-snug text-muted">
+              {newCount === 0
+                ? 'Inget nytt att titta på i sekvensen.'
+                : `Tar bort markeringen Ny från ${newWhat} i sekvensen.`}
+            </span>
+          </button>
         </div>
       </Popover>
     </>
@@ -352,7 +379,7 @@ function NameInput({
       spellCheck={false}
       placeholder="Namnlös sekvens"
       title="Byt namn"
-      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md xl:min-w-28 border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised"
+      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md @min-[67rem]/main:min-w-28 border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised"
     />
   )
 }

@@ -8,7 +8,8 @@ import type {
   ExportProgress,
   Generation,
   ImportProgress,
-  StudioApi
+  StudioApi,
+  WorkSummary
 } from '@shared/types'
 
 /** Subscribes to a main → renderer event and returns an unsubscribe function. */
@@ -49,7 +50,7 @@ const api: StudioApi = {
   onReviewChange: (cb) => on<string>('review:change', cb),
   onLearningsChange: (cb) => on<void>('learnings:change', () => cb()),
 
-  // Assets (characters, environments, outfits, poses)
+  // Assets (characters, environments, products, outfits, poses)
   listAssets: (kind) => ipcRenderer.invoke('assets:list', kind),
   saveAsset: (input) => ipcRenderer.invoke('assets:save', input),
   deleteAsset: (id) => ipcRenderer.invoke('assets:delete', id),
@@ -137,6 +138,7 @@ const api: StudioApi = {
   listAgentActivity: () => ipcRenderer.invoke('agent:activity:list'),
   listApprovals: () => ipcRenderer.invoke('agent:approvals:list'),
   resolveApproval: (id, approve, reason) => ipcRenderer.invoke('agent:approvals:resolve', id, approve, reason),
+  verifyApproval: (id) => ipcRenderer.invoke('agent:verifyApproval', id),
   onAgentStatus: (cb) => on<AgentStatus>('agent:status', cb),
   onAgentActivity: (cb) => on<AgentActivity>('agent:activity', cb),
   onApproval: (cb) => on<ApprovalRequest>('agent:approval', cb),
@@ -177,6 +179,13 @@ const api: StudioApi = {
   setVoiceCloneConsent: (audioId, consent) => ipcRenderer.invoke('voices:consent', audioId, consent),
   onEditChange: (cb) => on<string>('edit:change', cb),
   onEditProgress: (cb) => on<EditProgress>('edit:progress', cb),
+
+  // Status: Pågår och klart
+  getWorkSummary: () => ipcRenderer.invoke('work:summary'),
+  markSeen: (keys) => ipcRenderer.invoke('work:markSeen', keys),
+  markAllSeen: (scope) => ipcRenderer.invoke('work:markAllSeen', scope),
+  undoMarkAllSeen: (token) => ipcRenderer.invoke('work:undoSeen', token),
+  onWorkChange: (cb) => on<WorkSummary>('work:change', cb),
 
   // Files
   revealFile: (path) => ipcRenderer.invoke('file:reveal', path),

@@ -1,8 +1,15 @@
+import { watchMediaElement } from '../../lib/work'
+
 /** Players that aren't in the document (the shared reference-clip preview), with how to stop them. */
 const offPagePlayers = new Map<HTMLMediaElement, () => void>()
 
-/** A player that plays without being in the document, so pauseOthers can't find it by querying the page. */
+/**
+ * A player that plays without being in the document, so pauseOthers can't find it by querying the page. Its
+ * events never reach the document either, so it also gets Pågår och klart's playback rule: playing a new clip
+ * through it for a second marks it seen, as in any player on the page.
+ */
 export function registerOffPagePlayer(el: HTMLMediaElement, stop: () => void): void {
+  if (!offPagePlayers.has(el)) watchMediaElement(el)
   offPagePlayers.set(el, stop)
 }
 

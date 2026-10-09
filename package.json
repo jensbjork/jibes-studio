@@ -3,7 +3,7 @@
   "productName": "Studio",
   "version": "0.1.0",
   "private": true,
-  "description": "macOS desktop studio for generating videos with the Venice.ai API: reference-aware prompts, a library of characters, environments and outfits, sequences of clips exported with ffmpeg, and an MCP server for your own AI agents.",
+  "description": "macOS desktop studio for generating videos with the Venice.ai API: reference-aware prompts, a library of characters, environments, products, outfits and poses, sequences and storyboards exported with ffmpeg, and an MCP server for your own AI agents.",
   "keywords": [
     "electron",
     "react",

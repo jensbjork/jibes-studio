@@ -4,6 +4,7 @@ import { ASSET_COPY } from '../../lib/assets'
 import AssetAvatar from '../assets/AssetAvatar'
 import { KIND_TONE } from '../pickers/assetKinds'
 import { CloseIcon } from '../sequences/icons'
+import { Spinner, StatusDot } from '../work/StatusMark'
 import {
   PERIOD_OPTIONS,
   PLACEMENT_OPTIONS,
@@ -39,6 +40,10 @@ interface Props {
   searchRef: RefObject<HTMLInputElement | null>
   /** ArrowDown in the search field hands the keyboard to the list. */
   onSearchArrowDown: () => void
+  /** Clips being generated right now (all of them, not just the shown ones): the "◌ n pågår" chip. */
+  pendingCount: number
+  /** Finished clips not looked at yet: the "Nya" chip. */
+  unseenCount: number
   /** Right end of the first row (e.g. the folder button). */
   trailing?: ReactNode
 }
@@ -63,6 +68,8 @@ export default function FeedToolbar({
   index,
   searchRef,
   onSearchArrowDown,
+  pendingCount,
+  unseenCount,
   trailing
 }: Props) {
   const set = (patch: Partial<FeedFilters>) => onFilters({ ...filters, ...patch })
@@ -157,6 +164,27 @@ export default function FeedToolbar({
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
+        {(pendingCount > 0 || filters.status === 'pending') && (
+          <ToggleChip
+            on={filters.status === 'pending'}
+            onToggle={() => set({ status: filters.status === 'pending' ? undefined : 'pending' })}
+            title="Visa bara det som genereras just nu"
+          >
+            <Spinner size={11} />
+            {pendingCount} pågår
+          </ToggleChip>
+        )}
+        {(unseenCount > 0 || filters.unseen) && (
+          <ToggleChip
+            on={!!filters.unseen}
+            onToggle={() => set({ unseen: filters.unseen ? undefined : true })}
+            title="Visa bara klipp som är klara men som du inte har tittat på än"
+          >
+            <StatusDot />
+            Nya
+            {unseenCount > 0 && <span className="text-muted tabular-nums">{unseenCount}</span>}
+          </ToggleChip>
+        )}
         <FilterMenu
           title="Källa"
           value={filters.source}
@@ -248,6 +276,33 @@ export default function FeedToolbar({
   )
 }
 
+/** A one-click filter (Pågår, Nya), styled like the filter menus' chips. */
+function ToggleChip({
+  on,
+  onToggle,
+  title,
+  children
+}: {
+  on: boolean
+  onToggle: () => void
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onToggle}
+      title={title}
+      className={`no-drag flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[12px] outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
+        on ? 'border-accent/50 bg-accent/10 text-text' : 'border-line text-muted hover:border-muted hover:text-text'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
 /** The order of the list (the table's column headers change it too). */
 function SortSelect({ sort, onSort }: { sort: SortKey; onSort: (sort: SortKey) => void }) {
   return (
@@ -274,7 +329,9 @@ function ratingLabel(rating: FeedFilters['rating']): string | undefined {
   return RATING_OPTIONS.find((o) => o.id === rating)?.label
 }
 
-/** The asset filter: every character, environment, outfit and pose that some clip uses, with a search field. */
+/**
+ * The asset filter: every character, environment, product, outfit and pose that some clip uses, with a search field.
+ */
 function AssetFilter({
   value,
   onChange,
@@ -340,7 +397,7 @@ function AssetFilter({
                 e.currentTarget.closest('[role="dialog"]')?.querySelector<HTMLElement>('[data-menu-item]')?.focus()
               }
             }}
-            placeholder="Sök karaktär, miljö, kläder, pose…"
+            placeholder="Sök karaktär, miljö, produkt, kläder, pose…"
             aria-label="Sök tillgång"
             className="w-full rounded-md border border-line bg-raised px-2.5 py-1 text-[12px] outline-none focus:border-muted"
           />

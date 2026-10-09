@@ -55,7 +55,8 @@ import { boardNumbers, selectedTakeOf } from './storyboards'
 // Looking back at results to write better prompts: agents look at finished clips, sequences and exported films
 // (frames, the references they were made from, their sound), record honest reviews, and distil what generalises
 // into learnings that every later session reads first (get_studio_guide, list_learnings). Nothing here spends
-// money; reviews and learnings are the user's data, so agents only change or delete what they wrote themselves.
+// money; reviews and learnings are the user's data, so agents only change what they wrote themselves, and removing
+// one – their own or another agent's – is a request_delete the user approves (delete.ts).
 
 /** Tags agents (and the user) review with; free text is allowed too. */
 export const REVIEW_TAGS = [
@@ -171,20 +172,21 @@ async function listLearnings(query: LearningQuery = {}): Promise<Learning[]> {
 }
 
 /**
- * A learning the agent wrote itself and the user hasn't pinned (one the user has edited is the user's). Studio
- * enforces the same rules; checking first gives the agent a message that says whose it is and what to do instead.
+ * A learning the agent wrote itself and the user hasn't pinned (one the user has edited is the user's), for
+ * update_learning. Studio enforces the same rules; checking first gives the agent a message that says whose it is
+ * and what to do instead.
  */
 async function requireOwnLearning(ctx: ToolContext, id: string): Promise<Learning> {
   const learning = (await listLearnings()).find((l) => l.id === id)
   if (!learning) throw new Error(`Det finns ingen lärdom med id ${id}. Använd list_learnings för att se vilka som finns.`)
   if (!sameName(learning.author, authorName(ctx))) {
     throw new Error(
-      `Lärdomen ${q(learning.title)} skrevs av ${learning.author === 'user' ? 'användaren (eller har ändrats av användaren)' : learning.author}, och du kan bara ändra eller ta bort dina egna. Spara en ny lärdom med save_learning om du har något att lägga till.`
+      `Lärdomen ${q(learning.title)} skrevs av ${learning.author === 'user' ? 'användaren (eller har ändrats av användaren)' : learning.author}, och du kan bara ändra dina egna. Spara en ny lärdom med save_learning om du har något att lägga till.`
     )
   }
   if (learning.pinned) {
     throw new Error(
-      `Användaren har fäst lärdomen ${q(learning.title)}, så den kan inte ändras eller tas bort av agenter. Spara en ny lärdom med save_learning om resultaten säger något annat, och nämn vad den ändrar.`
+      `Användaren har fäst lärdomen ${q(learning.title)}, så den kan inte ändras av agenter. Spara en ny lärdom med save_learning om resultaten säger något annat, och nämn vad den ändrar.`
     )
   }
   return learning
@@ -889,7 +891,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Add review',
       description:
-        "Records your review of a generation, under your name, next to the user's own rating and other agents' reviews (Studio shows them in the clip's details). Be honest and specific: rating 1–5 (5 = exactly what the prompt asked for), tags from the suggested vocabulary, and a note that says what worked and what didn't, naming tokens and moments (\"@Image2's outfit turned blue after t = 4 s; the dolly-in worked\"). Look first with review_generation. Each call adds a new review. Free.",
+        "Records your review of a generation, under your name, next to the user's own rating and other agents' reviews (Studio shows them in the clip's details). Be honest and specific: rating 1–5 (5 = exactly what the prompt asked for), tags from the suggested vocabulary, and a note that says what worked and what didn't, naming tokens and moments (\"@Image2's outfit turned blue after t = 4 s; the dolly-in worked\"). Look first with review_generation. Each call adds a new review; to remove one (a review about the wrong generation, say), ask the user with request_delete. Free.",
       input: {
         generation_id: z.string(),
         rating: z.number().int().min(1).max(5).optional().describe('1–5 stars.'),
@@ -967,32 +969,6 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
     server,
     ctx,
-    'delete_review',
-    {
-      title: 'Delete review',
-      description:
-        "Deletes one of your own reviews (author = your name), e.g. one you wrote about the wrong generation. The user's own rating and other agents' reviews can't be deleted by agents.",
-      input: { review_id: z.string().describe('The review_id from add_review, get_generation or list_reviews.') },
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-      summary: () => 'tog bort ett omdöme'
-    },
-    async ({ review_id }) => {
-      requireLibrary()
-      const mine = await callService<GenerationReview[]>('reviews:list', undefined, { author: authorName(ctx) })
-      const review = mine.find((r) => r.id === review_id)
-      if (!review) {
-        throw new Error(
-          'Det finns inget omdöme med det id:t som du har skrivit. Du kan bara ta bort dina egna omdömen (se list_reviews).'
-        )
-      }
-      await callService('reviews:delete', review.id, ctx.clientName())
-      return { data: { deleted: review.id, generation_id: review.generationId }, summary: 'tog bort ett av sina omdömen' }
-    }
-  )
-
-  defineTool(
-    server,
-    ctx,
     'save_learning',
     {
       title: 'Save learning',
@@ -1029,7 +1005,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Update learning',
       description:
-        'Changes one of your own learnings (the ones whose author is your name): only the fields you pass change; model null makes it apply to every model; evidence replaces the list (pass the old ids plus the new ones to add). Use it when new results confirm, refine or contradict what you wrote. Learnings by the user or other agents cannot be changed, nor can yours once the user has pinned it or edited it (an edited one becomes the user\'s) – save a new one instead. Free.',
+        'Changes one of your own learnings (the ones whose author is your name): only the fields you pass change; model null makes it apply to every model; evidence replaces the list (pass the old ids plus the new ones to add). Use it when new results confirm, refine or contradict what you wrote. Learnings by the user or other agents cannot be changed, nor can yours once the user has pinned it or edited it (an edited one becomes the user\'s) – save a new one instead. To remove one of yours that results proved wrong, ask the user with request_delete. Free.',
       input: {
         learning_id: z.string(),
         title: z.string().min(1).max(120).optional(),
@@ -1091,25 +1067,6 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
           learnings: list.slice(0, limit).map(learningInfo)
         }
       }
-    }
-  )
-
-  defineTool(
-    server,
-    ctx,
-    'delete_learning',
-    {
-      title: 'Delete learning',
-      description:
-        "Deletes one of your own learnings (author = your name), e.g. one that later results proved wrong. Learnings by the user or other agents can't be deleted by agents, nor can yours once the user has pinned or edited it.",
-      input: { learning_id: z.string() },
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-      summary: () => 'tog bort en lärdom'
-    },
-    async ({ learning_id }) => {
-      const learning = await requireOwnLearning(ctx, learning_id)
-      await callService('learnings:delete', learning.id, ctx.clientName())
-      return { data: { deleted: learning.id }, summary: `tog bort lärdomen ${q(learning.title)}` }
     }
   )
 }

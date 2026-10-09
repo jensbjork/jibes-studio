@@ -11,7 +11,15 @@ import { copyFile, link, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { app, ipcMain, shell } from 'electron'
 import { generationTitle } from '@shared/generation-label'
-import type { GenerationParams, ImageModel, SequenceKind, Still, StillParams } from '@shared/types'
+import {
+  NEEDS_CONSENT,
+  type GenerationParams,
+  type ImageModel,
+  type SegmentImageSlot,
+  type SequenceKind,
+  type Still,
+  type StillParams
+} from '@shared/types'
 import * as db from './db'
 import { extractFrame } from './ffmpeg'
 import {
@@ -28,6 +36,7 @@ import {
   toPng,
   type ImageModelInfo
 } from './images'
+import { median } from './jobs'
 import {
   assertRootIntact,
   FOLDERS,
@@ -50,6 +59,7 @@ import {
 } from './paths'
 import { fileErrorReason, importExternalReferences, placeFile } from './references'
 import { parseDefaults, removeDirIfEmpty, type StillRow } from './sequence-store'
+import { assertAgentFiles } from './upload-paths'
 
 /** The aspect ratio of a still when neither the request nor its sequence says (Studio's video default). */
 const DEFAULT_ASPECT_RATIO = '16:9'
@@ -109,6 +119,79 @@ async function stillTask<T>(task: () => Promise<T>): Promise<T> {
 /** Why the library can't be switched or tidied right now (Swedish), or undefined when no still work runs. */
 export function stillWorkBusy(): string | undefined {
   return tasks > 0 ? 'En bild till en storyboard skapas eller sparas just nu.' : undefined
+}
+
+// ── Pictures being made (Pågår och klart) ────────────────────────────────────
+
+/** A picture being made right now, for the status summary (work.ts). */
+export interface StillWork {
+  /** The dialog's workToken, or one of its own. */
+  token: string
+  startedAt: number
+  /** The sequence or storyboard it is a still of. */
+  sequenceId?: string
+  /** Where it is meant to go (StillParams.target), for its label ("Bild till ruta 3 i …"). */
+  boardId?: string
+  segmentId?: string
+  slot?: SegmentImageSlot
+  prompt: string
+  model: string
+}
+
+/** Pictures between the paid request and their row (or their failure), by token. */
+const inFlight = new Map<string, StillWork>()
+let stillWorkListener: () => void = () => {}
+
+/** How long recent pictures took per model (ms, newest last); the median is what one usually takes. */
+const pictureDurations = new Map<string, number[]>()
+/** Durations kept per model. */
+const DURATION_SAMPLE = 20
+/** What a picture is said to take before one of its model has been made in this session. */
+const DEFAULT_PICTURE_MS = 20_000
+
+/** Called whenever a picture starts or stops being made (index.ts points it at the status summary). */
+export function setStillWorkListener(listener: () => void): void {
+  stillWorkListener = listener
+}
+
+function stillWorkChanged(): void {
+  try {
+    stillWorkListener()
+  } catch (err) {
+    console.warn('Announcing a picture being made failed:', err)
+  }
+}
+
+/** The pictures being made right now, oldest first. */
+export function activeStills(): StillWork[] {
+  return [...inFlight.values()].map((w) => ({ ...w }))
+}
+
+/** How long a picture of this model usually takes (ms): the median of this session's, else about 20 seconds. */
+export function typicalStillMs(model: string): number {
+  return median(pictureDurations.get(model) ?? []) ?? DEFAULT_PICTURE_MS
+}
+
+function rememberDuration(model: string, ms: number): void {
+  if (!Number.isFinite(ms) || ms <= 0) return
+  const list = pictureDurations.get(model) ?? []
+  list.push(ms)
+  if (list.length > DURATION_SAMPLE) list.splice(0, list.length - DURATION_SAMPLE)
+  pictureDurations.set(model, list)
+}
+
+/** The informational fields of a picture request (StillParams.workToken, .target), read from the raw IPC input. */
+function workFields(input: unknown): { workToken?: string; target: Pick<StillWork, 'boardId' | 'segmentId' | 'slot'> } {
+  const raw = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
+  const id = (v: unknown): string | undefined => (typeof v === 'string' && /^[\w-]{1,200}$/.test(v) ? v : undefined)
+  const t = raw.target && typeof raw.target === 'object' ? (raw.target as Record<string, unknown>) : {}
+  const slot = t.slot === 'start' || t.slot === 'end' ? t.slot : undefined
+  const boardId = id(t.boardId)
+  const segmentId = id(t.segmentId)
+  return {
+    workToken: id(raw.workToken),
+    target: { ...(boardId ? { boardId } : {}), ...(segmentId ? { segmentId } : {}), ...(slot ? { slot } : {}) }
+  }
 }
 
 // ── Input ────────────────────────────────────────────────────────────────────
@@ -692,77 +775,167 @@ export async function quoteStill(input: unknown): Promise<number | undefined> {
  * outside the library are copied into Referensbilder first, so "Skapa igen" keeps working when the originals go.
  */
 export async function generateStill(input: unknown): Promise<Still> {
+  // readStillParams keeps the fields a still is made with only; the dialog's key and the picture's place are read here.
+  const { workToken, target } = workFields(input)
   return stillTask(async () => {
     // Renames from here on (a sequence folder renamed while Venice works) are followed when the still is recorded.
     const mark = db.rewriteMark()
     const { plan: checked, model } = await plan(input)
     const params = checked.params
-    let refs = params.referenceImages ?? []
-    if (refs.length) {
-      // importExternalReferences works on generation params; only the reference images matter here.
-      const copied = await importExternalReferences({
-        model: model.id,
-        prompt: '',
-        duration: '',
-        referenceImages: refs
-      } satisfies GenerationParams)
-      refs = copied.referenceImages ?? refs
-    }
-
-    const result = await requestImage({
-      model,
+    // From here on the picture shows in "Pågår och klart" (the dialog may be closed while it is made).
+    const work: StillWork = {
+      token: workToken && !inFlight.has(workToken) ? workToken : randomUUID(),
+      startedAt: Date.now(),
+      ...(params.sequenceId ? { sequenceId: params.sequenceId } : {}),
+      ...target,
       prompt: params.prompt,
-      negativePrompt: params.negativePrompt,
-      referenceImages: refs,
-      aspectRatio: params.aspectRatio,
-      resolution: params.resolution,
-      quality: params.quality
-    })
-
-    // Paid for from here on: whatever happens, the picture should end up somewhere the user can find it.
-    const base = `${timeStamp(new Date())} ${promptExcerpt(params.prompt)}`
-    let data = result.data
-    let ext = result.format === 'jpeg' ? '.jpg' : `.${result.format}`
-    let tmp: string | undefined
+      model: model.id
+    }
+    inFlight.set(work.token, work)
+    stillWorkChanged()
+    // The paid request has gone out: a failure from here on is news even when the dialog is gone.
+    let requested = false
     try {
-      const png = toPng(result)
-      if (png) {
-        data = png
-        ext = '.png'
-      }
-      tmp = scratchPath(ext)
-      await writeFile(tmp, data)
-      // Its "Skapa igen" sends these again: where the files are now, not where they were before the request.
-      if (refs.length) {
-        const followed = db.followRewrites({ model: model.id, prompt: '', duration: '', referenceImages: refs }, mark)
-        refs = followed.referenceImages ?? refs
-      }
-      return await saveNewStill(tmp, base, ext, {
-        sequenceId: params.sequenceId,
-        source: 'generated',
-        prompt: params.prompt,
-        model: model.id,
-        params: {
-          negativePrompt: params.negativePrompt,
-          referenceImages: refs.length ? refs : undefined,
-          aspectRatio: params.aspectRatio,
-          resolution: params.resolution,
-          quality: params.quality
-        },
-        cost: checked.priceUsd
+      const still = await makeStill(mark, checked, model, () => {
+        requested = true
       })
+      rememberDuration(model.id, Date.now() - work.startedAt)
+      // Before the row leaves the running list: the summary never shows the picture as neither running nor done.
+      db.addUnseen({
+        stillId: still.id,
+        context: {
+          ...(still.sequenceId ? { sequenceId: still.sequenceId } : {}),
+          ...target,
+          ...(workToken ? { workToken } : {})
+        }
+      })
+      return still
     } catch (err) {
-      // The scratch file is no place to leave it: the folder is hidden and emptied when the library opens next.
-      const rescued = await rescuePicture(data, base, ext)
-      throw new Error(
-        `Bilden skapades men kunde inte sparas i biblioteket: ${fileErrorReason(err).replace(/\.$/, '')}.` +
-          (rescued ? ` Den har sparats i Hämtade filer i stället: ${basename(rescued)}.` : ''),
-        { cause: err }
-      )
+      const message = err instanceof Error ? err.message : String(err)
+      // A consent Venice asks for is a question the dialog puts to the user; nothing failed.
+      if (requested && !message.startsWith(NEEDS_CONSENT)) {
+        db.addUnseen({
+          error: message,
+          label: stillLabel(params.sequenceId, target),
+          context: {
+            ...(params.sequenceId ? { sequenceId: params.sequenceId } : {}),
+            ...target,
+            failureOf: 'still',
+            ...(workToken ? { workToken } : {})
+          }
+        })
+      }
+      throw err
     } finally {
-      if (tmp) await rm(tmp, { force: true }).catch(() => {})
+      inFlight.delete(work.token)
+      stillWorkChanged()
     }
   })
+}
+
+/**
+ * What a picture is called in "Pågår och klart" when it failed (the summary names a finished one from its row):
+ * "Bild till ruta 3 i ”Resa”", "Bild till klipp 2 i ”Sommar”", "Bild i ”Sommar”" or "Bild".
+ */
+function stillLabel(sequenceId: string | undefined, target: Pick<StillWork, 'boardId' | 'segmentId'>): string {
+  try {
+    const name = sequenceId
+      ? (conn().prepare('SELECT name FROM sequences WHERE id = ?').pluck().get(sequenceId) as string | undefined)
+      : undefined
+    if (target.boardId) {
+      const board = conn()
+        .prepare(
+          `SELECT b.position, s.name FROM storyboard_boards b JOIN sequences s ON s.id = b.sequence_id WHERE b.id = ?`
+        )
+        .get(target.boardId) as { position: number; name: string } | undefined
+      if (board) return `Bild till ruta ${board.position + 1} i ”${board.name}”`
+    }
+    if (target.segmentId) {
+      const clip = conn()
+        .prepare(`SELECT g.position, s.name FROM segments g JOIN sequences s ON s.id = g.sequence_id WHERE g.id = ?`)
+        .get(target.segmentId) as { position: number; name: string } | undefined
+      if (clip) return `Bild till klipp ${clip.position + 1} i ”${clip.name}”`
+    }
+    return name ? `Bild i ”${name}”` : 'Bild'
+  } catch {
+    return 'Bild'
+  }
+}
+
+/** generateStill's paid part and the saving; `requested` is called as the request goes out to Venice. */
+async function makeStill(
+  mark: number,
+  checked: StillPlan,
+  model: ImageModelInfo,
+  requested: () => void
+): Promise<Still> {
+  const params = checked.params
+  let refs = params.referenceImages ?? []
+  if (refs.length) {
+    // importExternalReferences works on generation params; only the reference images matter here.
+    const copied = await importExternalReferences({
+      model: model.id,
+      prompt: '',
+      duration: '',
+      referenceImages: refs
+    } satisfies GenerationParams)
+    refs = copied.referenceImages ?? refs
+  }
+
+  requested()
+  const result = await requestImage({
+    model,
+    prompt: params.prompt,
+    negativePrompt: params.negativePrompt,
+    referenceImages: refs,
+    aspectRatio: params.aspectRatio,
+    resolution: params.resolution,
+    quality: params.quality
+  })
+
+  // Paid for from here on: whatever happens, the picture should end up somewhere the user can find it.
+  const base = `${timeStamp(new Date())} ${promptExcerpt(params.prompt)}`
+  let data = result.data
+  let ext = result.format === 'jpeg' ? '.jpg' : `.${result.format}`
+  let tmp: string | undefined
+  try {
+    const png = toPng(result)
+    if (png) {
+      data = png
+      ext = '.png'
+    }
+    tmp = scratchPath(ext)
+    await writeFile(tmp, data)
+    // Its "Skapa igen" sends these again: where the files are now, not where they were before the request.
+    if (refs.length) {
+      const followed = db.followRewrites({ model: model.id, prompt: '', duration: '', referenceImages: refs }, mark)
+      refs = followed.referenceImages ?? refs
+    }
+    return await saveNewStill(tmp, base, ext, {
+      sequenceId: params.sequenceId,
+      source: 'generated',
+      prompt: params.prompt,
+      model: model.id,
+      params: {
+        negativePrompt: params.negativePrompt,
+        referenceImages: refs.length ? refs : undefined,
+        aspectRatio: params.aspectRatio,
+        resolution: params.resolution,
+        quality: params.quality
+      },
+      cost: checked.priceUsd
+    })
+  } catch (err) {
+    // The scratch file is no place to leave it: the folder is hidden and emptied when the library opens next.
+    const rescued = await rescuePicture(data, base, ext)
+    throw new Error(
+      `Bilden skapades men kunde inte sparas i biblioteket: ${fileErrorReason(err).replace(/\.$/, '')}.` +
+        (rescued ? ` Den har sparats i Hämtade filer i stället: ${basename(rescued)}.` : ''),
+      { cause: err }
+    )
+  } finally {
+    if (tmp) await rm(tmp, { force: true }).catch(() => {})
+  }
 }
 
 /**
@@ -943,7 +1116,7 @@ export async function deleteStill(id: unknown): Promise<void> {
  * The image and still handlers ('images:*', 'stills:*'). `changed` fires with the
  * sequence id (undefined for a still without one) after every still that is added or deleted; `filesMoved`
  * after a deleted still's file was kept in Referensbilder, which rewrote the paths clips and generations use.
- * 'stills:get' isn't part of StudioApi; agents use it.
+ * 'stills:get' and 'stills:import' aren't part of StudioApi; agents use them.
  */
 export function registerStillsIpc(
   changed: (sequenceId?: string) => void,
@@ -960,4 +1133,10 @@ export function registerStillsIpc(
   ipcMain.handle('stills:saveFrame', (_e, generationId: unknown, time: unknown, sequenceId?: unknown) =>
     saveFrameAsStill(generationId, time, sequenceId)
   )
+  // Not part of StudioApi: an agent's picture (an upload, or a file the library records) made a still of a sequence or
+  // storyboard, or of none (Referensbilder). The window's drops go through a slot or a board instead.
+  ipcMain.handle('stills:import', (e, path: unknown, sequenceId?: unknown) => {
+    assertAgentFiles(e, [path])
+    return importStillFile(path, sequenceId)
+  })
 }

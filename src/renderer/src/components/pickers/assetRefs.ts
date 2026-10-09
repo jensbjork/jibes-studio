@@ -1,5 +1,5 @@
-// How library assets (characters, environments, outfits, poses) map onto a form's reference images, and the
-// edits the pickers and chips make to that list – with the prompt's @ImageN and @AudioN tokens following their
+// How library assets (characters, environments, products, outfits, poses) map onto a form's reference images, and
+// the edits the pickers and chips make to that list – with the prompt's @ImageN and @AudioN tokens following their
 // pictures and clips. Pure functions, shared by the params form and the generate view.
 
 import { maxReferenceAudios, maxReferenceImages, supportsAudioInput } from '@shared/models'

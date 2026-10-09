@@ -6,9 +6,11 @@ import type { GenerationParams, Learning } from '@shared/types'
 import { isLibraryReady } from '../../paths'
 import { promptWritingGuide, studioGuide } from '../guide'
 import { AssetIndex, asGenerated, audioTokenMap, takesAudio, tokenMap, type AudioTokenEntry, type TokenEntry } from '../studio'
+import { registerDeleteTools } from './delete'
 import { registerEditorTools } from './editor'
 import { registerEditorPaidTools } from './editor-paid'
 import { registerFormTools } from './form'
+import { registerImportTools } from './imports'
 import { readForm, type ToolContext } from './kit'
 import { learningsForGuide, registerLibraryTools } from './library'
 import { registerPaidTools } from './paid'
@@ -16,6 +18,8 @@ import { registerReviewTools } from './review'
 import { continues, endsOnNext, loadClip, registerSequenceTools } from './sequences'
 import { registerStillTools } from './stills'
 import { boardNumbers, loadTransition, registerStoryboardTools } from './storyboards'
+import { registerUploadTools } from './uploads'
+import { registerWorkTools } from './work'
 
 export type { ToolContext } from './kit'
 
@@ -144,17 +148,25 @@ async function promptContext(ctx: ToolContext, segmentId: string | undefined, tr
   }
 }
 
-/** Everything a session offers: the tools, the write_video_prompt prompt and the studio://guide resource. */
+/**
+ * Everything a session offers: the tools, the write_video_prompt prompt and the studio://guide resource. 88 tools:
+ * 34 that only read, 45 that change the library or the form (free), and 9 that only ask the user – the 8 paid
+ * requests and request_delete. No tool removes anything or spends money on its own.
+ */
 export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
   registerLibraryTools(server, ctx)
+  registerUploadTools(server, ctx)
   registerFormTools(server, ctx)
   registerSequenceTools(server, ctx)
+  registerImportTools(server, ctx)
   registerStillTools(server, ctx)
   registerStoryboardTools(server, ctx)
   registerPaidTools(server, ctx)
   registerEditorTools(server, ctx)
   registerEditorPaidTools(server, ctx)
   registerReviewTools(server, ctx)
+  registerDeleteTools(server, ctx)
+  registerWorkTools(server, ctx)
 
   server.registerPrompt(
     'write_video_prompt',

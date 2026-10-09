@@ -145,9 +145,10 @@ export default function AgentSettingsSection() {
     <section className="mb-8">
       <h2 className="mb-1 font-medium">Agentanslutning</h2>
       <p className="mb-3 text-muted">
-        Låt dina egna AI-agenter – till exempel OpenClaw eller Hermes Agent – arbeta i Studio via MCP. De kan läsa
-        biblioteket, välja referenser, skriva prompter och förbereda klipp. Att generera, det som kostar pengar, gör
-        de aldrig på egen hand: varje sådan begäran väntar på ditt OK här i Studio.
+        Låt dina egna AI-agenter – till exempel OpenClaw eller Hermes Agent – arbeta i Studio via MCP. De kan göra
+        nästan allt du kan: skapa karaktärer, produkter och andra tillgångar, lägga till bilder och ljud, skriva
+        prompter och bygga sekvenser och storyboards. Det som kostar pengar och allt som tar bort något gör de aldrig på
+        egen hand: varje sådan begäran väntar på ditt OK här i Studio.
       </p>
 
       {!status ? (

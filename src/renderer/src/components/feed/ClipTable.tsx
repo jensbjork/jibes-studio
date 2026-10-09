@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { generationTitle, sourceBadge } from '@shared/generation-label'
-import type { Generation, VideoModel } from '@shared/types'
+import { workKey, type Generation, type VideoModel } from '@shared/types'
 import { formatUsd, mediaUrl } from '../../lib/media'
+import { markSeen, useIsUnseen, useSeenWhenVisible } from '../../lib/work'
 import AssetAvatar from '../assets/AssetAvatar'
 import { KIND_TONE } from '../pickers/assetKinds'
 import { formatWhen } from '../prompts/prompt-utils'
@@ -10,6 +11,7 @@ import { STATUS_LABEL, clipSeconds, formatClipLength, isPending, progressOf, rev
 import { ReviewIcon } from './icons'
 import { assetsOf, type LibraryIndex } from './references'
 import StarRating from './StarRating'
+import { Spinner, StatusDot } from '../work/StatusMark'
 
 interface Props {
   /** Filtered and sorted. */
@@ -321,8 +323,15 @@ function Row({
   onRate: (g: Generation, rating: number | null) => void
 }) {
   const failed = g.status === 'failed'
+  // Pågår och klart: a dot before the title while the clip (or its failure) is new; a failed row counts as seen
+  // once it has been on screen for a moment.
+  const key = workKey.generation(g.id)
+  const unseen = useIsUnseen(key)
+  const rowRef = useRef<HTMLDivElement>(null)
+  useSeenWhenVisible(rowRef, failed ? key : undefined)
   return (
     <div
+      ref={rowRef}
       id={`clip-row-${g.id}`}
       role="row"
       aria-rowindex={rowIndex + 2}
@@ -339,7 +348,15 @@ function Row({
           role="gridcell"
           className={`flex min-w-0 items-center px-2 ${c.align === 'right' ? 'justify-end' : ''}`}
         >
-          <Cell column={c.id} g={g} failed={failed} modelName={modelName} index={index} onRate={onRate} />
+          <Cell
+            column={c.id}
+            g={g}
+            failed={failed}
+            unseen={unseen}
+            modelName={modelName}
+            index={index}
+            onRate={onRate}
+          />
         </div>
       ))}
     </div>
@@ -350,6 +367,7 @@ function Cell({
   column,
   g,
   failed,
+  unseen,
   modelName,
   index,
   onRate
@@ -357,6 +375,8 @@ function Cell({
   column: ColumnId
   g: Generation
   failed: boolean
+  /** Finished (or failed) and not looked at yet. */
+  unseen: boolean
   modelName: string
   index: LibraryIndex
   onRate: (g: Generation, rating: number | null) => void
@@ -370,6 +390,11 @@ function Cell({
       const title = generationTitle(g)
       return (
         <span className="flex min-w-0 items-center gap-1.5">
+          {unseen && (
+            <span title={failed ? 'Misslyckades – inte sett än' : 'Ny – inte tittad på än'} className="flex shrink-0">
+              <StatusDot failed={failed} />
+            </span>
+          )}
           {badge && (
             <span
               title={badge.description}
@@ -414,7 +439,15 @@ function Cell({
       return <StatusCell g={g} />
     case 'rating':
       return g.status === 'completed' ? (
-        <StarRating value={g.rating} onChange={(r) => onRate(g, r)} size="sm" />
+        <StarRating
+          value={g.rating}
+          onChange={(r) => {
+            // Rating a clip is looking at it on purpose.
+            markSeen([workKey.generation(g.id)])
+            onRate(g, r)
+          }}
+          size="sm"
+        />
       ) : (
         <span className="text-[12px] text-muted">–</span>
       )
@@ -445,25 +478,27 @@ function RowThumb({ g }: { g: Generation }) {
   }
   return (
     <span className={`${box} flex items-center justify-center text-[10px] text-muted`}>
-      {isPending(g) ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" /> : g.status === 'failed' ? '✕' : ''}
+      {isPending(g) ? <Spinner size={10} /> : g.status === 'failed' ? '✕' : ''}
     </span>
   )
 }
 
+/**
+ * The status column in Pågår och klart's vocabulary: a spinner while it runs, an accent dot when it failed, a
+ * quiet dot when done (emerald is kept for "new", shown before the title).
+ */
 function StatusCell({ g }: { g: Generation }) {
   const progress = progressOf(g)
-  const dot =
-    g.status === 'completed'
-      ? 'bg-emerald-400/80'
-      : g.status === 'failed'
-        ? 'bg-accent'
-        : `bg-amber-400 ${g.status === 'processing' ? 'animate-pulse' : ''}`
   return (
     <span
       className={`flex min-w-0 items-center gap-1.5 text-[12px] ${g.status === 'failed' ? 'text-accent' : g.status === 'completed' ? 'text-muted' : ''}`}
       title={g.status === 'failed' ? (g.error ?? 'Misslyckades') : STATUS_LABEL[g.status]}
     >
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+      {isPending(g) ? (
+        <Spinner size={10} />
+      ) : (
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${g.status === 'failed' ? 'bg-accent' : 'bg-muted/40'}`} />
+      )}
       <span className="truncate">
         {STATUS_LABEL[g.status]}
         {g.status === 'processing' && progress !== undefined ? ` ${Math.round(progress * 100)} %` : ''}

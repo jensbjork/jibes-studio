@@ -113,8 +113,8 @@ function PromptLanguageSection({ language, onChanged }: { language: PromptLangua
     <section className="mb-8">
       <h2 className="mb-1 font-medium">Promptspråk</h2>
       <p className="mb-3 text-muted">
-        Språket i texten Studio skriver in när du infogar karaktärer, kläder och miljöer i prompten. Videomodellerna
-        förstår engelska bäst, så skriv gärna hela prompten på engelska.
+        Språket i texten Studio skriver in när du infogar karaktärer, miljöer, produkter, kläder och poser i prompten.
+        Videomodellerna förstår engelska bäst, så skriv gärna hela prompten på engelska.
       </p>
       <select
         value={value}

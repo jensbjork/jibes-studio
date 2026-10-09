@@ -11,13 +11,14 @@ export const GENERATION_SORTS: readonly GenerationSort[] = ['newest', 'oldest', 
 
 /**
  * What filtering and sorting read of a generation (a Generation has all of it). `source` and `title` may be left
- * out: a row without a source is a Venice generation.
+ * out: a row without a source is a Venice generation. `unseen` is not part of a Generation: the caller fills it from
+ * the status summary (finished and not looked at yet) when it wants the "Nya" filter to work.
  */
 export type FilterableGeneration = Pick<
   Generation,
   'id' | 'createdAt' | 'model' | 'prompt' | 'params' | 'status' | 'segmentId' | 'quote' | 'videoDuration' | 'rating'
 > &
-  Partial<Pick<Generation, 'source' | 'title'>> & { reviewCount?: number }
+  Partial<Pick<Generation, 'source' | 'title'>> & { reviewCount?: number; unseen?: boolean }
 
 // ── Assets used by a generation ──────────────────────────────────────────────
 
@@ -125,6 +126,7 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
  * - hasReviews: true for the ones with a review (the user's or an agent's), false for the ones without.
  * - source ("Källa"): 'generated' (made by Venice, also AI takes made in Redigera), 'import' (the user's own
  *   clips) or 'edit' (versions made in Redigera). A row without a source counts as 'generated'.
+ * - unseen ("Nya"): true keeps only the rows marked `unseen: true` (finished, and the user hasn't looked at them).
  */
 export function filterGenerations<T extends FilterableGeneration>(
   list: readonly T[],
@@ -151,6 +153,7 @@ export function filterGenerations<T extends FilterableGeneration>(
     if (f.placement === 'standalone' && g.segmentId) return false
     if (f.placement === 'sequence' && !g.segmentId) return false
     if (typeof f.hasReviews === 'boolean' && ((g.reviewCount ?? 0) > 0) !== f.hasReviews) return false
+    if (f.unseen === true && g.unseen !== true) return false
     if (words.length) {
       const text = fold(`${g.prompt ?? g.params?.prompt ?? ''}\n${g.params?.negativePrompt ?? ''}\n${g.title ?? ''}`)
       if (!words.every((w) => text.includes(w))) return false

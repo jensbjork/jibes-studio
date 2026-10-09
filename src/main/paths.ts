@@ -2,9 +2,10 @@
 // the folders and the database in step. Paths stored in the database are relative to the base folder
 // whenever they point inside it, so the whole library can be moved by moving its folders.
 
-import { constants, lstatSync, mkdirSync, statSync } from 'node:fs'
+import { constants, lstatSync, mkdirSync, realpathSync, statSync } from 'node:fs'
 import { copyFile, cp, lstat, mkdir, readdir, rename, rm, rmdir, stat, utimes } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { AssetKind, GenerationParams, SequenceKind } from '@shared/types'
 import * as db from './db'
@@ -13,6 +14,8 @@ import * as db from './db'
 export const FOLDERS = {
   characters: 'Karaktärer',
   environments: 'Miljöer',
+  /** Products: one folder per product with its photos (packshots) and description. */
+  products: 'Produkter',
   outfits: 'Kläder',
   poses: 'Poser',
   references: 'Referensbilder',
@@ -26,10 +29,11 @@ export const FOLDERS = {
   appData: '.studio'
 } as const
 
-/** The folder each kind of asset (character, environment, outfit, pose) keeps its own folders in. */
+/** The folder each kind of asset (character, environment, product, outfit, pose) keeps its own folders in. */
 export const ASSET_FOLDERS: Readonly<Record<AssetKind, string>> = {
   character: FOLDERS.characters,
   environment: FOLDERS.environments,
+  product: FOLDERS.products,
   outfit: FOLDERS.outfits,
   pose: FOLDERS.poses
 }
@@ -122,6 +126,35 @@ function normalizeAbs(p: string): string {
 
 export function isLibraryReady(): boolean {
   return activeRoot !== undefined
+}
+
+/**
+ * A message with the folders of every local path in it left out – the file names stay: "…/Sekvenser/Sommar/
+ * Tagningar/a.mp4: Invalid data" → "a.mp4: Invalid data". For ffmpeg's stderr and the like, before such a message is
+ * stored or shown outside the window (an unseen row's error, an agent's answer): the library's place on disk and the
+ * user's home folder are nobody else's business.
+ */
+export function withoutLocalPaths(text: string): string {
+  const roots = new Set<string>()
+  if (activeRoot) roots.add(activeRoot)
+  for (const dir of [tmpdir(), homedir()]) {
+    if (!dir) continue
+    roots.add(normalizeAbs(dir))
+    try {
+      roots.add(realpathSync(dir).normalize('NFC'))
+    } catch {
+      // Then only the path as given.
+    }
+  }
+  let out = text.normalize('NFC')
+  // The longest first: the library usually lies inside the home folder.
+  for (const root of [...roots].filter((r) => r.length > 1).sort((a, b) => b.length - a.length)) {
+    const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // The root and every folder after it, up to the file name (names may hold spaces, not quotes, colons or newlines).
+    out = out.replace(new RegExp(`${escaped}(?:/[^/\n'":]*)*/`, 'g'), '')
+    out = out.split(root).join('…')
+  }
+  return out
 }
 
 /** Absolute base folder; throws Error('Välj en biblioteksmapp först.') when not ready. */
@@ -413,7 +446,7 @@ function folderSegment(name: string): string {
   return name
 }
 
-/** Karaktärer, Miljöer, Kläder or Poser by kind [/<folder>] */
+/** Karaktärer, Miljöer, Produkter, Kläder or Poser by kind [/<folder>] */
 export function assetsDir(kind: AssetKind, folder?: string): string {
   if (!isAssetKind(kind)) throw new Error('Okänd sorts bibliotekspost.')
   const base = join(libraryRoot(), ASSET_FOLDERS[kind])
@@ -467,6 +500,22 @@ export function framesDir(): string {
 
 export function tmpDir(): string {
   return appDataDir(APP_DATA.tmp)
+}
+
+/** Inside .studio/tmp: files agents upload, one folder per upload (cleared with tmp at every library open). */
+export const AGENT_UPLOADS_FOLDER = 'agent-uploads'
+
+/** .studio/tmp/agent-uploads (created if needed): where agent uploads are staged until a tool copies them in. */
+export function agentUploadsDir(): string {
+  return appDataDir(APP_DATA.tmp, AGENT_UPLOADS_FOLDER)
+}
+
+/**
+ * Where agentUploadsDir is, without creating anything (for checks); undefined while no library is open. The base
+ * folder may be gone, in which case the path simply doesn't exist.
+ */
+export function agentUploadsPath(): string | undefined {
+  return activeRoot ? join(activeRoot, FOLDERS.appData, APP_DATA.tmp, AGENT_UPLOADS_FOLDER) : undefined
 }
 
 /** .studio/stammar: the voice/background stem cache. */
