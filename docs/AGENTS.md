@@ -178,7 +178,7 @@ connect (see [Troubleshooting](#troubleshooting)).
 
 ## Tools
 
-Studio offers **88 tools** — 34 that read, 45 that write (free) and 9 that only ask for your approval (8 paid ones
+Studio offers **89 tools** — 35 that read, 45 that write (free) and 9 that only ask for your approval (8 paid ones
 and `request_delete`) — plus one prompt and one resource. Tool errors come back as readable tool errors; their
 messages are in Swedish, like the app's UI. Tools that touch the library fail with an explanation until a library is
 open, and the tools that read or fill the Generate form need the Studio window to be open. No tool takes a file path:
@@ -186,7 +186,7 @@ files come as uploads (see [Sending files to Studio](#sending-files-to-studio)) 
 
 | Area | Read | Write | Asks for approval |
 | --- | --- | --- | --- |
-| Guide and library (`tools/library.ts`) | `get_studio_guide`, `list_assets`, `get_asset`, `list_models`, `list_prompts`, `list_generations`, `get_generation` | `create_asset`, `update_asset`, `update_asset_audio`, `add_asset_images`, `reorder_asset_images`, `add_asset_audio`, `reorder_asset_audio`, `save_prompt`, `update_prompt` | |
+| Guide and library (`tools/library.ts`) | `get_studio_guide`, `get_prompt_blocks`, `list_assets`, `get_asset`, `list_models`, `list_prompts`, `list_generations`, `get_generation` | `create_asset`, `update_asset`, `update_asset_audio`, `add_asset_images`, `reorder_asset_images`, `add_asset_audio`, `reorder_asset_audio`, `save_prompt`, `update_prompt` | |
 | Generate form (`tools/form.ts`) | `get_workspace`, `validate_prompt` | `set_form`, `set_references`, `reorder_references`, `open_in_studio` | |
 | Sequences (`tools/sequences.ts`) | `list_sequences`, `get_sequence` | `create_sequence`, `update_sequence`, `add_segment`, `update_segment`, `move_segment`, `export_film`, `stop_generation_run` | |
 | Stills and keyframes (`tools/stills.ts`) | `list_image_models`, `list_stills`, `get_still`, `preview_segment_frames` | `save_frame_as_still`, `bridge_segment`, `import_still` | |
@@ -198,7 +198,7 @@ files come as uploads (see [Sending files to Studio](#sending-files-to-studio)) 
 | Own clips (`tools/imports.ts`) | `get_import` | `import_own_clips`, `cancel_import` | |
 | Removing things (`tools/delete.ts`) | | | `request_delete` |
 | Status (`tools/work.ts`) | `get_work_status` | | |
-| **Total (88)** | **34** | **45** | **9** |
+| **Total (89)** | **35** | **45** | **9** |
 
 **Images and sound.** Tools that return media send pictures as MCP image content (JPEG) and sound as MCP **audio
 content** (MP3, mono), each preceded by a text label that says what it is (`Reference @Audio1 = Anna's voice
@@ -215,6 +215,7 @@ frames, reference images and text work without it.
 | Tool | What it does |
 | --- | --- |
 | `get_studio_guide` | How Studio works and how to write video prompts for it (voices, poses and the review loop included), ending with the learnings recorded so far. Read once at the start of a session. |
+| `get_prompt_blocks` | The building blocks the user inserts into prompts with **/** and the chips under every prompt field: a scene template, framing, camera, light, style, motion and sound (video), framing, light and style (pictures), things to avoid (negative prompts), music and sound effects. Swedish label + the English text it inserts; `context` filters by field. Use the same wording in prompts you write. |
 | `get_workspace` | What the user is looking at (view — `generate`, `sequences`, `storyboards`, `editor`, `prompts`, `settings` or a library view: `characters`, `environments`, `products`, `outfits`, `poses` —, open sequence and clip, open storyboard, or the edit open in Redigera: view `editor`, `edit_id`, `edit_name`) and the Generate form: mode, model, settings, prompt, reference token maps (`@ImageN` and `@AudioN`), pictures past the model's limit (`not_sent`), `composed_prompt` (the prompt as it is sent, with the References legend of the referenced assets' descriptions) and `description_entries`, validation issues, price. |
 | `list_assets` | Characters, environments, products, outfits and poses with ids, descriptions, photo ids, default outfits and — for characters and environments — their audio clips (`audio_id`, role `voice` or `soundscape`, duration, reference window `clip_start` / `clip_length`; for a character's voice `clone_consent`, whether you allow cloning it for new lines); optional `kind` and `query` filters. `get_asset` shows the same per clip. Photos and clips an agent added carry `added_by` (`{agent, host?}`). |
 | `get_asset` | One asset with its photos as images (JPEG, at most 768 px; `max_images` 1–12, default 4), each labelled with its photo number and `image_id` (and `added_by` when an agent added it); for an outfit, the characters wearing it by default. With `include_audio` (the first clip, or the one named by `audio_id`) also a clip's reference window as MP3 audio, exactly as Venice would get it. |

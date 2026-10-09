@@ -12,6 +12,7 @@ import { useClipQuote } from '../sequences/useTotalQuote'
 import TakeStrip, { type PickedBy } from '../takes/TakeStrip'
 import { pendingPhase } from '../takes/takeText'
 import { KEY_SELECT_DELAY, useTakeSelection } from '../takes/useTakeSelection'
+import PromptField from '../prompt/PromptField'
 import { Spinner } from '../work/StatusMark'
 import {
   aspectValue,
@@ -445,21 +446,20 @@ export default function TransitionEditor({
               </button>
             )}
           </div>
-          <textarea
+          <PromptField
             id={promptId}
             value={value.prompt}
-            onChange={(e) => set('prompt', e.target.value)}
+            onChange={(v) => set('prompt', v)}
             onBlur={() => void draft.flush()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !blocked && !submitting) {
-                e.preventDefault()
-                onGenerate()
-              }
+            onSubmit={() => {
+              if (!blocked && !submitting) onGenerate()
             }}
-            rows={5}
-            spellCheck={false}
+            context="video"
+            minRows={4}
+            maxRows={14}
+            title="Vad händer?"
+            focusHint={`Rörelsen från ruta ${fromNumber} till ruta ${toNumber} – gärna på engelska. Skriv / för en byggsten.`}
             placeholder="The camera slowly pushes in as she turns from the window and walks towards the door."
-            className="block max-h-72 min-h-28 w-full resize-none rounded-md border border-line bg-raised px-3 py-2 leading-relaxed outline-none transition [field-sizing:content] placeholder:text-muted/60 focus:border-muted"
           />
           <p className="mt-1 text-[11px] leading-relaxed text-muted">
             Beskriv rörelsen från den första bilden till den andra – skriv gärna på engelska. Klippet börjar exakt på

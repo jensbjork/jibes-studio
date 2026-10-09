@@ -3,6 +3,7 @@ import type { SavedPrompt } from '@shared/types'
 import { ConfirmDeleteButton, CopyButton, FavoriteButton, secondaryButton } from './controls'
 import { formatUses, formatWhen, titleFromBody } from './prompt-utils'
 import TagInput from './TagInput'
+import PromptField from '../prompt/PromptField'
 import { canSave, type Draft, type DraftFields, type SaveStatus } from './usePromptDraft'
 
 interface Props {
@@ -125,22 +126,21 @@ export default function PromptEditor({
           <label className="block">
             <span className="mb-1.5 flex justify-between text-muted">
               <span>Prompt</span>
-              <span className="text-[11px]">{draft.body.length} tecken</span>
             </span>
-            <textarea
-              ref={bodyRef}
+            <PromptField
+              textareaRef={bodyRef}
               value={draft.body}
-              onChange={(e) => onChange({ body: e.target.value })}
+              onChange={(body) => onChange({ body })}
               onBlur={onBlur}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && savable) {
-                  e.preventDefault()
-                  onUse()
-                }
+              onSubmit={() => {
+                if (savable) onUse()
               }}
-              rows={14}
-              placeholder="Beskriv scenen, rörelsen och kameran…"
-              className={`${field} min-h-48 resize-y text-[14px] leading-relaxed`}
+              context="video"
+              minRows={10}
+              maxRows={24}
+              title="Prompt"
+              focusHint="Beskriv scenen, rörelsen och kameran. Skriv / för en byggsten. Allt sparas medan du skriver."
+              placeholder="Beskriv scenen, rörelsen och kameran… (skriv / för byggstenar)"
             />
             <span className="mt-1 block text-[11px] text-muted">
               I referensläget pekar du ut bilderna med @Image1, @Image2 … i den ordning de ligger i formuläret.
@@ -149,13 +149,16 @@ export default function PromptEditor({
 
           <label className="block">
             <span className="mb-1.5 block text-muted">Negativ prompt (valfri)</span>
-            <textarea
+            <PromptField
               value={draft.negativePrompt}
-              onChange={(e) => onChange({ negativePrompt: e.target.value })}
+              onChange={(negativePrompt) => onChange({ negativePrompt })}
               onBlur={onBlur}
-              rows={3}
+              context="negative"
+              minRows={2}
+              maxRows={8}
+              title="Negativ prompt"
+              focusHint="Det modellen ska undvika, gärna på engelska och kommaseparerat."
               placeholder="Det du inte vill se…"
-              className={`${field} resize-y leading-relaxed`}
             />
           </label>
 

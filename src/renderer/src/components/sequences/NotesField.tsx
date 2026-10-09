@@ -1,5 +1,6 @@
 import { useCallback, useId } from 'react'
 import type { Segment } from '@shared/types'
+import PromptField from '../prompt/PromptField'
 import { useDraft, useRegisterFlush, type FlushRegistry } from './useDraft'
 import type { SequenceStore } from './useSequence'
 
@@ -40,15 +41,18 @@ export default function NotesField({ segment, store, flushers, className = '' }:
           {draft.error ? <span className="text-accent" title={draft.error}>Kunde inte spara</span> : draft.status !== 'idle' ? 'Sparar…' : ''}
         </span>
       </div>
-      <textarea
+      <PromptField
         id={id}
         value={draft.value.notes}
-        onChange={(e) => draft.setValue({ notes: e.target.value })}
+        onChange={(notes) => draft.setValue({ notes })}
         onBlur={() => void draft.flush()}
+        context="video"
+        bare
+        minRows={2}
+        maxRows={8}
+        title="Vad händer"
+        focusHint="Vad som ska hända i klippet. Skriv / för en byggsten."
         placeholder="Vad ska hända i bild? T.ex. ”Hon vänder sig om och ler mot kameran.”"
-        spellCheck={false}
-        rows={2}
-        className="block max-h-40 min-h-[3.25rem] w-full resize-none rounded-md border border-line bg-raised/60 px-2.5 py-1.5 leading-snug outline-none transition [field-sizing:content] placeholder:text-muted/70 focus:border-muted focus:bg-raised"
       />
     </div>
   )

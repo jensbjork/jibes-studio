@@ -79,6 +79,7 @@ import { formatClipSeconds } from './pickers/text'
 import DescriptionsBox from './prompt/DescriptionsBox'
 import { assetIdsInForm, withAssetDescription, withDescriptionsIncluded } from './prompt/descriptions'
 import NegativePromptIssues, { negativePromptIssues } from './prompt/NegativePromptIssues'
+import PromptField from './prompt/PromptField'
 import PromptEditor, { type PromptEditorHandle } from './prompt/PromptEditor'
 import { promptReferences, type AssetGroup, type ReferenceGroup } from './prompt/promptText'
 import { usePromptLanguage } from './prompt/usePromptLanguage'
@@ -1057,18 +1058,22 @@ export default function ParamsForm({
             <span className="ml-1.5 text-[11px]">(ifylld)</span>
           )}
         </summary>
-        <textarea
-          ref={negativeRef}
-          value={params.negativePrompt ?? ''}
-          onChange={(e) => set('negativePrompt', e.target.value || undefined)}
-          rows={2}
-          placeholder="Det du inte vill se…"
-          aria-describedby={negativeHasError ? negativeIssuesId : undefined}
-          aria-invalid={negativeHasError || undefined}
-          className={`mt-2 w-full resize-y rounded-md border bg-raised px-3 py-2 outline-none ${
-            negativeHasError ? 'border-accent/50 focus:border-accent/80' : 'border-line focus:border-muted'
-          }`}
-        />
+        <div className="mt-2">
+          <PromptField
+            textareaRef={negativeRef}
+            value={params.negativePrompt ?? ''}
+            onChange={(v) => set('negativePrompt', v || undefined)}
+            context="negative"
+            minRows={2}
+            maxRows={8}
+            title="Undvik"
+            focusHint="Det modellen ska undvika, gärna på engelska och kommaseparerat. Skriv / för vanliga saker att undvika."
+            placeholder="Det du inte vill se… (skriv / för förslag)"
+            ariaLabel="Negativ prompt"
+            ariaDescribedBy={negativeHasError ? negativeIssuesId : undefined}
+            invalid={negativeHasError}
+          />
+        </div>
         <NegativePromptIssues
           id={negativeIssuesId}
           value={params.negativePrompt ?? ''}

@@ -411,7 +411,7 @@ depends on it), and nothing is sent to Venice or removed until you approve it. S
 consents and your own ratings and learnings stay yours.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 88
+Tailscale address. See **[docs/AGENTS.md](docs/AGENTS.md)** for configuration examples, the full list of its 89
 tools, sending files, the review loop and troubleshooting.
 
 ## Security

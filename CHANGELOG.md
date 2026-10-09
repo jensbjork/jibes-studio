@@ -10,6 +10,13 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Writing help in every prompt field** (Generera, Sekvenser, storyboard transitions, *Skapa bild…*, Redigera, Prompter,
+  *Undvik*, descriptions): larger, airier text in a clearly framed field that grows with what you write; **fokusläge**
+  (*⤢ Större* or ⌘⇧F) opens the same field large, with the references and checks still under it; and
+  **byggstenar** – type **/** (or click a chip under the field) for ready-made phrases with Swedish labels that insert
+  English text: a scene template, framing, camera, light, style, motion and sound, things to avoid in negative
+  prompts, music and sound effects in Redigera, plus your saved prompts and learnings. Agents read the same list with
+  the new `get_prompt_blocks`.
 - **Produkter**, a fifth kind of asset next to characters, environments, outfits and poses: a specific item to show
   in the film — a package, a bottle, a gadget — with its packshots (the front with the label first) and a description
   (brand, model, colours, material, size, what the packaging says) that is appended to the prompt like the others.
@@ -57,7 +64,7 @@ breaking changes; they are called out under **Changed** or **Removed**.
   (`cancel_edit_job`) and ask to continue a stopped one (`request_edit_operation` with `resume_job_id`); and see what
   runs and what is new (`get_work_status`; `list_generations` filters `unseen_only` and says `seen_by_user`).
   `set_form` takes an end image, and pictures for the form, references, keyframes and boards can be uploads; agents'
-  photos and sound clips say who added them (*Tillagd av …*, with the host a file came from). 88 tools in all (34
+  photos and sound clips say who added them (*Tillagd av …*, with the host a file came from). 89 tools in all (35
   read, 45 write, 9 ask for approval).
 - **Files from agents as uploads**: `begin_upload` with a URL Studio fetches (public addresses only, plus the agent's
   own machine), with the file's size for a raw `PUT` to the agent port (`curl -T <file> -H "Authorization: Bearer

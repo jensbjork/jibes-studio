@@ -39,9 +39,12 @@ import {
   type ReferenceGroup,
   type TextRange
 } from './promptText'
+import FocusDialog from './FocusDialog'
+import { isFocusShortcut, PROMPT_TEXT, PROMPT_TEXT_LARGE, PromptToolbar, promptFrame, useAutoGrow } from './PromptField'
 import { issueViews, type FixAction } from './quickFixes'
 import ReferenceStrip from './ReferenceStrip'
 import { markAtPoint, replaceRange, textRect } from './textareaDom'
+import { useBlockMenu } from './useBlockMenu'
 import TokenHoverCard from './TokenHoverCard'
 import TokenMenu, { optionId } from './TokenMenu'
 import { refreshPromptLanguage } from './usePromptLanguage'
@@ -97,6 +100,8 @@ interface Props {
   language: PromptLanguage
   /** Shown right under the text field. */
   belowInput?: ReactNode
+  /** Inside fokusläge (internal): the same editor, large. */
+  inFocus?: boolean
 }
 
 interface MenuState {
@@ -163,30 +168,32 @@ function sameRect(a: DOMRect | undefined, b: DOMRect | undefined): boolean {
  * the references, the audio clips and library assets next to the caret. Below: the problems with quick fixes,
  * and the key to the reference images and clips with the ones the prompt doesn't mention marked.
  */
-export default function PromptEditor({
-  ref,
-  id,
-  value,
-  onChange,
-  onSubmit,
-  placeholder,
-  rows = 7,
-  kind,
-  checks,
-  references,
-  audios,
-  maxImages,
-  groups,
-  library,
-  onAddFromLibrary,
-  onSwitchToReference,
-  onAddReferences,
-  onRemoveAudio,
-  onUseAudioModel,
-  audioModelName,
-  language,
-  belowInput
-}: Props) {
+export default function PromptEditor(props: Props) {
+  const {
+    ref,
+    id,
+    value,
+    onChange,
+    onSubmit,
+    placeholder,
+    rows = 7,
+    kind,
+    checks,
+    references,
+    audios,
+    maxImages,
+    groups,
+    library,
+    onAddFromLibrary,
+    onSwitchToReference,
+    onAddReferences,
+    onRemoveAudio,
+    onUseAudioModel,
+    audioModelName,
+    language,
+    belowInput,
+    inFocus
+  } = props
   const textarea = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLDivElement>(null)
   const menuId = useId()
@@ -518,6 +525,36 @@ export default function PromptEditor({
     focus: () => textarea.current?.focus()
   }))
 
+  // ── Writing help: grows with the text, building blocks ("/" and chips), fokusläge ─────────────────────────
+  useAutoGrow(textarea, text, rows, 18, inFocus)
+  const blocks = useBlockMenu({
+    context: 'video',
+    textarea,
+    edit: (start, end, insert) => {
+      edit(start, end, insert)
+      rememberCaret()
+    },
+    measure: (index) => (mirror.current ? textRect(mirror.current, index, index + 1) : undefined)
+  })
+  // Fokusläge opens with the caret at the end of the text, ready to go on writing.
+  useEffect(() => {
+    const el = textarea.current
+    if (!inFocus || !el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+    el.scrollTop = el.scrollHeight
+  }, [inFocus])
+  const [expanded, setExpanded] = useState(false)
+  const expand = (): void => {
+    setMenu(undefined)
+    blocks.onBlur()
+    setExpanded(true)
+  }
+  const collapse = useCallback(() => {
+    setExpanded(false)
+    requestAnimationFrame(() => textarea.current?.focus())
+  }, [])
+
   const choose = (item: MenuItem): void => {
     const el = textarea.current
     const m = menu
@@ -614,6 +651,12 @@ export default function PromptEditor({
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.nativeEvent.isComposing) return
+    if (blocks.onKeyDown(e)) return
+    if (isFocusShortcut(e)) {
+      e.preventDefault()
+      if (!inFocus) expand()
+      return
+    }
     if (menuShown) {
       const plain = !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && plain) {
@@ -656,12 +699,12 @@ export default function PromptEditor({
     hoveredMark?.index !== undefined && reference && hoveredMark.ref === 'audio' ? audios[hoveredMark.index - 1] : undefined
 
   return (
-    <div>
-      <div className="relative rounded-md bg-raised">
+    <div className={inFocus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
+      <div className={`relative rounded-lg bg-raised ${inFocus ? 'flex min-h-[40vh] flex-1 flex-col' : ''}`}>
         <div
           ref={mirror}
           aria-hidden
-          className="pointer-events-none absolute overflow-hidden px-3 py-2 leading-relaxed text-text"
+          className={`pointer-events-none absolute overflow-hidden px-3.5 py-2.5 text-text ${inFocus ? PROMPT_TEXT_LARGE : PROMPT_TEXT}`}
           style={{ whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'normal' }}
         >
           {segments.map((s) =>
@@ -690,10 +733,12 @@ export default function PromptEditor({
             rememberCaret()
             setHover(undefined)
             followTyping(e.currentTarget, text)
+            blocks.onInput(e.currentTarget)
           }}
           onSelect={(e) => {
             rememberCaret()
             followCaret(e.currentTarget)
+            blocks.onSelect(e.currentTarget)
           }}
           onKeyDown={onKeyDown}
           onScroll={() => {
@@ -710,17 +755,23 @@ export default function PromptEditor({
           onBlur={() => {
             focused.current = false
             setMenu(undefined)
+            blocks.onBlur()
           }}
-          aria-autocomplete={reference ? 'list' : undefined}
-          aria-controls={menuShown ? menuId : undefined}
-          aria-activedescendant={menuShown && activeIndex >= 0 ? optionId(menuId, activeIndex) : undefined}
+          aria-autocomplete="list"
+          aria-controls={menuShown ? menuId : blocks.slashOpen ? blocks.menuId : undefined}
+          aria-activedescendant={
+            menuShown && activeIndex >= 0 ? optionId(menuId, activeIndex) : blocks.slashOpen ? blocks.activeId : undefined
+          }
           aria-describedby={views.length ? issuesId : undefined}
           aria-invalid={hasError || undefined}
-          className={`relative block w-full resize-y rounded-md border bg-transparent px-3 py-2 leading-relaxed text-transparent caret-text outline-none placeholder:text-muted selection:bg-sky-500/35 selection:text-transparent ${
-            hasError ? 'border-accent/50 focus:border-accent/80' : 'border-line focus:border-muted'
-          }`}
+          className={`relative block w-full resize-none rounded-lg border bg-transparent px-3.5 py-2.5 text-transparent caret-text outline-none transition-[border-color,box-shadow] placeholder:text-muted/80 selection:bg-sky-500/35 selection:text-transparent ${
+            inFocus ? `min-h-0 flex-1 ${PROMPT_TEXT_LARGE}` : PROMPT_TEXT
+          } ${promptFrame(hasError)}`}
         />
       </div>
+
+      <PromptToolbar blocks={blocks} onExpand={inFocus ? undefined : expand} />
+      {blocks.menu}
 
       {restored !== undefined && restored !== text && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted">
@@ -772,6 +823,16 @@ export default function PromptEditor({
 
       {hover && hoveredMark && !menu && (
         <TokenHoverCard mark={hoveredMark} reference={hoverReference} audio={hoverAudio} rect={hover.rect} />
+      )}
+
+      {expanded && !inFocus && (
+        <FocusDialog
+          title="Prompt"
+          subtitle="Beskriv scenen, rörelsen och kameran. Skriv @ för en referens och / för en byggsten. Allt sparas medan du skriver."
+          onClose={collapse}
+        >
+          <PromptEditor {...props} ref={undefined} id={undefined} inFocus />
+        </FocusDialog>
       )}
     </div>
   )

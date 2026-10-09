@@ -67,3 +67,57 @@ export function placeBeside(anchor: DOMRect, width: number, maxHeight: number, m
   }
   return { bottom: vh - anchor.top + GAP, left, maxHeight: Math.max(80, Math.min(maxHeight, above)) }
 }
+
+/** Styles a measuring copy needs to wrap text exactly like the textarea. */
+const COPIED_STYLES = [
+  'boxSizing',
+  'width',
+  'borderTopWidth',
+  'borderRightWidth',
+  'borderBottomWidth',
+  'borderLeftWidth',
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'fontFamily',
+  'fontSize',
+  'fontWeight',
+  'fontStyle',
+  'letterSpacing',
+  'lineHeight',
+  'textTransform',
+  'wordSpacing',
+  'tabSize'
+] as const
+
+/**
+ * On-screen rectangle of the character at `index` in a plain textarea (one without the prompt editor's mirror):
+ * measured in an invisible copy that wraps the text the same way, then moved to the textarea's place and scroll.
+ */
+export function caretRect(el: HTMLTextAreaElement, index: number): DOMRect | undefined {
+  const style = getComputedStyle(el)
+  const copy = document.createElement('div')
+  for (const prop of COPIED_STYLES) copy.style[prop] = style[prop]
+  copy.style.position = 'absolute'
+  copy.style.visibility = 'hidden'
+  copy.style.whiteSpace = 'pre-wrap'
+  copy.style.overflowWrap = 'break-word'
+  copy.style.top = '0'
+  copy.style.left = '-9999px'
+  copy.textContent = el.value.slice(0, index)
+  const mark = document.createElement('span')
+  mark.textContent = el.value.slice(index, index + 1) || '​'
+  copy.appendChild(mark)
+  document.body.appendChild(copy)
+  try {
+    const box = el.getBoundingClientRect()
+    const top = box.top + mark.offsetTop - el.scrollTop
+    const left = box.left + mark.offsetLeft - el.scrollLeft
+    const height = parseFloat(style.lineHeight) || mark.offsetHeight
+    if (top + height < box.top || top > box.bottom) return undefined
+    return new DOMRect(left, top, Math.max(1, mark.offsetWidth), height)
+  } finally {
+    copy.remove()
+  }
+}

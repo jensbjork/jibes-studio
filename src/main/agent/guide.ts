@@ -56,6 +56,8 @@ export function promptWritingGuide(lang: PromptLanguage): string {
 4. **Lighting and mood** – time of day, light quality and direction, colour palette, atmosphere (golden hour backlight, overcast soft light, neon reflections on wet asphalt).
 5. **Style** – photorealistic / cinematic 35 mm film / documentary handheld / anime / claymation …, plus texture details (shallow depth of field, film grain).
 
+**The user's building blocks:** every prompt field in Studio offers ready-made phrases (Byggstenar, typed "/" or the chips under the field) for framing, camera, light, style, motion and sound. \`get_prompt_blocks\` lists them; using the same wording keeps your prompts familiar to the user.
+
 **Reference people, products, outfits, places, poses and voices by their tokens, right next to their names.** Put all references of one asset together in one parenthesis – its photos first, then its voice:
 \`Anna (@Image1, @Image2, ${voice} @Audio1) ${wearing} the red dress (@Image3) walks along the beach promenade (@Image4) …\`
 - Use the token maps Studio gives you (set_references, get_workspace, get_sequence, validate_prompt). Never guess numbers: @Image3 is whatever the third reference image is and @Audio1 whatever the first reference audio clip is; a wrong token sends the wrong picture or voice in a paid generation.
