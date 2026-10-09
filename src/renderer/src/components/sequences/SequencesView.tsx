@@ -9,7 +9,8 @@ import {
   type GenerationParams,
   type RunningWork,
   type Segment,
-  type Sequence
+  type Sequence,
+  type SequenceSummary
 } from '@shared/types'
 import { ipcErrorMessage, useModels } from '../../lib/hooks'
 import { LAST_SEQUENCE_KEY } from '../../lib/library'
@@ -28,7 +29,8 @@ import { ownEndImageRefused } from './clipChecks'
 import { CloseIcon, FilmIcon } from './icons'
 import PreviewPlayer from './PreviewPlayer'
 import SegmentEditor, { type EditorHandle } from './SegmentEditor'
-import SequenceHeader from './SequenceHeader'
+import Modal from '../pickers/Modal'
+import SequenceHeader, { DELETE_SEQUENCE_TEXT } from './SequenceHeader'
 import SequenceList from './SequenceList'
 import Timeline, { type ClipSource } from './Timeline'
 import TrimControls, { type PlayRequest, type TakePlayerHandle } from './TrimControls'
@@ -142,6 +144,8 @@ interface Props {
 export default function SequencesView({ intent, onIntentHandled, navigate }: Props) {
   const { models, error: modelsError } = useModels()
   const { sequences, reload } = useSequenceList()
+  /** The sequence whose ✕ in the list was clicked: asked about before it goes. */
+  const [confirmDelete, setConfirmDelete] = useState<SequenceSummary>()
   const [selectedId, setSelectedId] = useState<string | undefined>(() =>
     intent?.type === 'open-sequence' ? intent.sequenceId : loadLastOpen()
   )
@@ -887,6 +891,37 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
 
   return (
     <div className="flex h-full">
+      {confirmDelete && (
+        <Modal
+          title={`Radera ”${confirmDelete.name}”?`}
+          onClose={() => setConfirmDelete(undefined)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(undefined)}
+                className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text"
+              >
+                Avbryt
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => {
+                  const id = confirmDelete.id
+                  setConfirmDelete(undefined)
+                  void deleteSequence(id)
+                }}
+                className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover"
+              >
+                Radera sekvensen
+              </button>
+            </>
+          }
+        >
+          <p className="leading-relaxed text-muted">{DELETE_SEQUENCE_TEXT}</p>
+        </Modal>
+      )}
       <SequenceList
         sequences={sequences}
         selectedId={selectedId}
@@ -896,7 +931,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
           setSelectedId(id)
         }}
         onCreate={() => void createSequence()}
-        onDelete={(id) => void deleteSequence(id)}
+        onDelete={(id) => setConfirmDelete(sequences?.find((x) => x.id === id))}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -925,6 +960,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               onExportHeight={setExportHeight}
               onEditExport={(exportId) => navigate('editor', { type: 'open-editor', exportId })}
               onError={(text) => setNotice({ text, sequenceId: sequence.id })}
+              onDelete={() => void deleteSequence(sequence.id)}
             />
             {banners}
             <Timeline

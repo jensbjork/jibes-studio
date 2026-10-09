@@ -39,6 +39,8 @@ interface Props {
   onEditExport: (exportId: string) => void
   /** Problems opening the sequence's folder in Finder. */
   onError: (message: string) => void
+  /** "Radera sekvensen…", after its question. */
+  onDelete: () => void
 }
 
 /** The heights "Exportformat" offers; Automatiskt (null) keeps the first clip's own size. */
@@ -81,7 +83,8 @@ export default function SequenceHeader({
   onExport,
   onExportHeight,
   onEditExport,
-  onError
+  onError,
+  onDelete
 }: Props) {
   const count = sequence.segments.length
   const exporting = exportProgress !== undefined
@@ -173,6 +176,7 @@ export default function SequenceHeader({
           onExportHeight={onExportHeight}
           onEditExport={onEditExport}
           onError={onError}
+          onDelete={onDelete}
         />
       </div>
     </div>
@@ -187,22 +191,33 @@ async function latestExport(sequenceId: string): Promise<ExportSummary | undefin
     .sort((a, b) => b.createdAt - a.createdAt)[0]
 }
 
-/** ⋯: the Exportformat, the latest export into Redigera, and marking what is new here as seen. */
+/** What deleting a sequence does, for its question (also asked from the list's ✕). */
+export const DELETE_SEQUENCE_TEXT =
+  'Klippen försvinner ur sekvensen. Tagningarna finns kvar under Generera, och exporterade filmer ligger kvar i mappen. Sekvensens bilder som inget annat använder flyttas till papperskorgen.'
+
+/** ⋯: the Exportformat, the latest export into Redigera, marking what is new here as seen, and deleting it. */
 function MoreMenu({
   sequence,
   exporting,
   onExportHeight,
   onEditExport,
-  onError
+  onError,
+  onDelete
 }: {
   sequence: Sequence
   exporting: boolean
   onExportHeight: (height: number | null) => void
   onEditExport: (exportId: string) => void
   onError: (message: string) => void
+  onDelete: () => void
 }) {
   const anchor = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const close = () => {
+    setOpen(false)
+    setConfirming(false)
+  }
   // undefined while looking, null when the sequence has no export (yet).
   const [latest, setLatest] = useState<ExportSummary | null>()
   const news = useOwnerWork(sequence.id)
@@ -234,7 +249,7 @@ function MoreMenu({
       <button
         ref={anchor}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? close() : setOpen(true))}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Fler val"
@@ -243,7 +258,33 @@ function MoreMenu({
       >
         <MoreIcon size={14} />
       </button>
-      <Popover anchorRef={anchor} open={open} onClose={() => setOpen(false)} align="end" width={280} label="Fler val">
+      <Popover anchorRef={anchor} open={open} onClose={close} align="end" width={290} label="Fler val">
+        {confirming ? (
+          <div className="p-3">
+            <p className="mb-1 truncate">Radera ”{sequence.name}”?</p>
+            <p className="mb-3 text-[12px] leading-relaxed text-muted">{DELETE_SEQUENCE_TEXT}</p>
+            <div className="flex justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
+              >
+                Avbryt
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => {
+                  close()
+                  onDelete()
+                }}
+                className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
+              >
+                Radera
+              </button>
+            </div>
+          </div>
+        ) : (
         <div role="menu" aria-label="Fler val" onKeyDown={onMenuKeyDown} className="p-1">
           <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
             Exportformat
@@ -318,7 +359,18 @@ function MoreMenu({
                 : `Tar bort markeringen Ny från ${newWhat} i sekvensen.`}
             </span>
           </button>
+          <div className="mx-2 my-1 border-t border-line" />
+          <button
+            type="button"
+            role="menuitem"
+            data-menu-item
+            onClick={() => setConfirming(true)}
+            className={`${menuRow} text-muted hover:text-accent`}
+          >
+            Radera sekvensen…
+          </button>
         </div>
+        )}
       </Popover>
     </>
   )
