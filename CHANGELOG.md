@@ -10,6 +10,12 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Deleting from the lists**: a sequence can be deleted from its ⋯ menu (*Radera sekvensen…*) as well as with the ✕
+  in the list, an edit with the ✕ on its card or row in Redigera – always after a question that says what stays
+  (takes in Generera, exported films, versions in use) and what goes to the Trash.
+- **Redigeringar as a table**: the same *Kort / Tabell* switch as Generera's clip feed (remembered), with poster,
+  name and where it came from, versions, length, cost, what is running or new and when it last changed; the column
+  headers sort.
 - **Writing help in every prompt field** (Generera, Sekvenser, storyboard transitions, *Skapa bild…*, Redigera, Prompter,
   *Undvik*, descriptions): larger, airier text in a clearly framed field that grows with what you write; **fokusläge**
   (*⤢ Större* or ⌘⇧F) opens the same field large, with the references and checks still under it; and

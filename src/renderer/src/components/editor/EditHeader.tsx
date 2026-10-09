@@ -5,7 +5,7 @@ import FolderIcon from '../library/FolderIcon'
 import Popover from '../pickers/Popover'
 import { MoreIcon } from '../sequences/icons'
 import { menuRow, onMenuKeyDown, secondaryButton, SubView } from '../storyboards/ui'
-import { originLabel } from './editorUtils'
+import { DELETE_EDIT_TEXT, originLabel } from './editorUtils'
 import { BackIcon, CameraIcon, ChevronDownIcon } from './icons'
 import SendMenu, { type SentTo } from './SendMenu'
 import { PruneConfirm, usePrune } from './VersionsPanel'
@@ -206,10 +206,7 @@ function MoreMenu({
         ) : view === 'delete' ? (
           <div className="p-3">
             <p className="mb-1 truncate">Radera ”{edit.name}”?</p>
-            <p className="mb-3 text-[12px] leading-relaxed text-muted">
-              Versioner som används i sekvenser eller av andra redigeringar, och AI-tagningarna, finns kvar. Resten flyttas
-              till papperskorgen. Filmen du utgick från lämnas orörd.
-            </p>
+            <p className="mb-3 text-[12px] leading-relaxed text-muted">{DELETE_EDIT_TEXT}</p>
             <div className="flex justify-end gap-1.5">
               <button
                 type="button"

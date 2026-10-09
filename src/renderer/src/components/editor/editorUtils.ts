@@ -21,6 +21,10 @@ const pad2 = (n: number) => String(n).padStart(2, '0')
 /** "0:41,0", "1:04:05,3": the player's and the timeline's times, to a tenth of a second (as plans write them). */
 export const formatClock = formatTimecode
 
+/** What deleting an edit does, for its question (in the edit's ⋯ menu and in the list). */
+export const DELETE_EDIT_TEXT =
+  'Versioner som används i sekvenser eller av andra redigeringar, och AI-tagningarna, finns kvar. Resten flyttas till papperskorgen. Filmen du utgick från lämnas orörd.'
+
 /** "1:04" (whole seconds), for lengths in lists and cards. */
 export function formatLength(seconds: number | undefined): string {
   if (seconds === undefined || !Number.isFinite(seconds)) return '–'

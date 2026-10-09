@@ -5,10 +5,11 @@ import { LAST_EDIT_KEY } from '../../lib/library'
 import type { Intent, Navigate } from '../../lib/navigation'
 import GenerationPickerDialog from '../feed/GenerationPickerDialog'
 import { useImportFlow } from '../feed/ownClips'
+import Modal from '../pickers/Modal'
 import { Banner } from '../storyboards/ui'
 import { ExportPickerDialog, OpenChoiceDialog } from './dialogs'
 import EditList from './EditList'
-import { editsContaining, editsFrom } from './editorUtils'
+import { DELETE_EDIT_TEXT, editsContaining, editsFrom } from './editorUtils'
 import EditWorkspace, { type ShowVersionRequest } from './EditWorkspace'
 
 // Redigera: change one finished film — a clip from the feed, a take, an exported film or the user's own — with free
@@ -65,6 +66,28 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
   // A version to show in the player once its edit is open (open-editor with versionId).
   const [showVersion, setShowVersion] = useState<ShowVersionRequest & { editId: string }>()
   const imports = useImportFlow()
+  /** The edit whose ✕ in the list was clicked: asked about before it goes. */
+  const [confirmDelete, setConfirmDelete] = useState<EditSummary>()
+  const [deleting, setDeleting] = useState(false)
+  const deleteEdit = async (edit: EditSummary) => {
+    setDeleting(true)
+    try {
+      await window.studio.deleteEdit(edit.id)
+      try {
+        if (localStorage.getItem(LAST_EDIT_KEY) === edit.id) localStorage.removeItem(LAST_EDIT_KEY)
+      } catch {
+        // Ignore unavailable storage.
+      }
+      setConfirmDelete(undefined)
+      setNotice({ tone: 'success', text: `”${edit.name}” är raderad.` })
+    } catch (e) {
+      setConfirmDelete(undefined)
+      setNotice({ tone: 'error', text: ipcErrorMessage(e) })
+    } finally {
+      setDeleting(false)
+      void reload()
+    }
+  }
 
   useEffect(() => {
     const read = () => void window.studio.getSettings().then((s) => setHasApiKey(s.hasApiKey))
@@ -269,7 +292,37 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
           }}
           onFromFeed={() => setPicker('feed')}
           onFromExport={() => setPicker('export')}
+          onDelete={setConfirmDelete}
         />
+      )}
+      {confirmDelete && (
+        <Modal
+          title={`Radera ”${confirmDelete.name}”?`}
+          onClose={() => !deleting && setConfirmDelete(undefined)}
+          footer={
+            <>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setConfirmDelete(undefined)}
+                className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
+              >
+                Avbryt
+              </button>
+              <button
+                type="button"
+                autoFocus
+                disabled={deleting}
+                onClick={() => void deleteEdit(confirmDelete)}
+                className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
+              >
+                {deleting ? 'Raderar…' : 'Radera redigeringen'}
+              </button>
+            </>
+          }
+        >
+          <p className="leading-relaxed text-muted">{DELETE_EDIT_TEXT}</p>
+        </Modal>
       )}
       {(notice || (openId && busy)) && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-4">
