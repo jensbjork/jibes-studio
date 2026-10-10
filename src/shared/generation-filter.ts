@@ -3,9 +3,15 @@
 // user and to an agent. Pure (no Node or DOM), like everything in src/shared.
 
 import { durationSeconds } from './models'
-import type { Generation, GenerationFilter } from './types'
+import { THUMBS_DOWN, type Generation, type GenerationFilter } from './types'
 
 export type GenerationSort = NonNullable<GenerationFilter['sort']>
+
+/**
+ * What filterGenerations and queryGenerations take: a GenerationFilter, plus `thumbsDown` – true keeps only the clips
+ * the user gave tumme ner (the feed's Betyg filter "Tumme ner", list_generations' thumbs_down).
+ */
+export type GenerationQuery = GenerationFilter & { thumbsDown?: boolean }
 
 export const GENERATION_SORTS: readonly GenerationSort[] = ['newest', 'oldest', 'rating', 'cost', 'length']
 
@@ -120,7 +126,9 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
  * - model: that model id.
  * - assetId: the params use one of that asset's photos or audio clips (needs `assets`: the asset list or
  *   indexAssetPaths of it; without it nothing matches).
- * - minRating: the user gave at least that many stars. unrated: true for the ones the user hasn't rated.
+ * - minRating: the user gave at least that many stars (1–3). Tumme ner counts below one star, so it never passes:
+ *   a minimum of 1 means "at least one star". unrated: true for the ones the user hasn't graded. thumbsDown: true
+ *   for the ones the user gave tumme ner.
  * - since: created at or after that time (epoch ms).
  * - placement: 'standalone' (not a take) or 'sequence' (a take of a sequence clip or a storyboard transition).
  * - hasReviews: true for the ones with a review (the user's or an agent's), false for the ones without.
@@ -130,10 +138,10 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
  */
 export function filterGenerations<T extends FilterableGeneration>(
   list: readonly T[],
-  filter: GenerationFilter | undefined,
+  filter: GenerationQuery | undefined,
   assets?: AssetPathIndex | readonly IndexableAsset[]
 ): T[] {
-  const f: GenerationFilter = filter && typeof filter === 'object' ? filter : {}
+  const f: GenerationQuery = filter && typeof filter === 'object' ? filter : {}
   const words = searchWords(f.query)
   const index = f.assetId ? toIndex(assets) : undefined
   const minRating = finite(f.minRating) && f.minRating > 0 ? f.minRating : undefined
@@ -147,8 +155,10 @@ export function filterGenerations<T extends FilterableGeneration>(
       if (f.status === 'pending' ? !pending : g.status !== f.status) return false
     }
     if (f.model && g.model !== f.model) return false
+    // Tumme ner is -1, below every star, so a minimum of stars leaves it out.
     if (minRating !== undefined && !(finite(g.rating) && g.rating >= minRating)) return false
     if (f.unrated === true && finite(g.rating)) return false
+    if (f.thumbsDown === true && g.rating !== THUMBS_DOWN) return false
     if (since !== undefined && !(g.createdAt >= since)) return false
     if (f.placement === 'standalone' && g.segmentId) return false
     if (f.placement === 'sequence' && !g.segmentId) return false
@@ -200,7 +210,8 @@ const COMPARE: Record<GenerationSort, Compare<FilterableGeneration>> = {
 
 /**
  * A sorted copy: newest (default) or oldest first, or by the user's rating, the price or the length, largest first
- * with the ones lacking a value last. Ties are newest first, so the order is stable from one call to the next.
+ * with the ones lacking a value last (by rating: three stars, two, one, tumme ner, then the ungraded clips). Ties are
+ * newest first, so the order is stable from one call to the next.
  */
 export function sortGenerations<T extends FilterableGeneration>(list: readonly T[], sort?: GenerationSort): T[] {
   const compare = (sort && COMPARE[sort]) || COMPARE.newest
@@ -210,7 +221,7 @@ export function sortGenerations<T extends FilterableGeneration>(list: readonly T
 /** filterGenerations, then sortGenerations by filter.sort. */
 export function queryGenerations<T extends FilterableGeneration>(
   list: readonly T[],
-  filter: GenerationFilter | undefined,
+  filter: GenerationQuery | undefined,
   assets?: AssetPathIndex | readonly IndexableAsset[]
 ): T[] {
   return sortGenerations(filterGenerations(list, filter, assets), filter?.sort)

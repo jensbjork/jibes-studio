@@ -1,7 +1,8 @@
 // Swedish wording and number formatting for the clip feed: statuses, the summary line, review tags.
 
+import { agentDisplayName } from '@shared/agent-name'
 import { generationSeconds, type GenerationTotals } from '@shared/generation-filter'
-import type { Generation, GenerationStatus } from '@shared/types'
+import { THUMBS_DOWN, type Generation, type GenerationStatus } from '@shared/types'
 
 export const STATUS_LABEL: Record<GenerationStatus, string> = {
   queued: 'I kö',
@@ -53,9 +54,10 @@ export function reviewCountText(n: number): string {
   return `${n} ${n === 1 ? 'granskning' : 'granskningar'}`
 }
 
-/** "★★★★☆" for screen readers and tooltips: "4 av 5 stjärnor". */
-export function ratingText(rating: number | undefined): string {
-  return rating ? `${rating} av 5 stjärnor` : 'Inte betygsatt'
+/** What a grade says next to the drawer's rating control: "Dåligt" for tumme ner, then "Okej", "Bra", "Mycket bra". */
+export function ratingWord(rating: number | undefined): string | undefined {
+  if (rating === THUMBS_DOWN) return 'Dåligt'
+  return rating === 1 ? 'Okej' : rating === 2 ? 'Bra' : rating === 3 ? 'Mycket bra' : undefined
 }
 
 // ── Review tags ──────────────────────────────────────────────────────────────
@@ -103,7 +105,7 @@ export function tagChipClass(tag: string): string {
   return 'bg-line/70 text-muted'
 }
 
-/** "Du" for the user's own review, else the agent's name. */
+/** "Du" for the user's own review, else the agent's name ("Agenten" for a generic MCP client name like "mcp"). */
 export function authorLabel(author: string): string {
-  return author === 'user' ? 'Du' : author
+  return author === 'user' ? 'Du' : agentDisplayName(author)
 }

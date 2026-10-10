@@ -262,10 +262,10 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
         data: {
           default_text_to_image: text?.id ?? null,
           default_with_references: edit?.id ?? null,
-          // Read-only for agents: only the user switches it, in Inställningar → Bilder.
+          // Read-only for agents: only the user switches it, in Inställningar → Generering → Bilder.
           safe_mode: safeMode,
           safe_mode_note: safeMode
-            ? '"Säkert läge för bilder" is on: Venice blurs adult content in the pictures it makes. Only the user can switch it off (Inställningar → Bilder).'
+            ? '"Säkert läge för bilder" is on: Venice blurs adult content in the pictures it makes. Only the user can switch it off (Inställningar → Generering → Bilder).'
             : '"Säkert läge för bilder" is off: Venice does not blur adult content.',
           models: models.map((m, i) => ({
             id: m.id,

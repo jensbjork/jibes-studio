@@ -1,14 +1,15 @@
 // The clip feed's filters as the toolbar shows them, and how they translate into the shared GenerationFilter
 // (src/shared/generation-filter.ts), which the agents' list_generations tool applies the same way.
 
+import type { GenerationQuery } from '@shared/generation-filter'
 import type { Asset, GenerationFilter, GenerationSource, VideoModel } from '@shared/types'
 import { ASSET_COPY } from '../../lib/assets'
 
 export type FeedView = 'cards' | 'table'
 export type SortKey = NonNullable<GenerationFilter['sort']>
 export type StatusChoice = 'completed' | 'pending' | 'failed'
-/** A number is "at least that many stars". */
-export type RatingChoice = 1 | 2 | 3 | 4 | 5 | 'unrated' | 'reviewed'
+/** A number is "at least that many stars" (tumme ner never counts); 'thumbsDown' is the clips given tumme ner. */
+export type RatingChoice = 1 | 2 | 3 | 'thumbsDown' | 'unrated' | 'reviewed'
 export type PeriodChoice = 'today' | '7d' | '30d'
 export type PlacementChoice = NonNullable<GenerationFilter['placement']>
 
@@ -43,11 +44,10 @@ export const STATUS_OPTIONS: { id: StatusChoice; label: string }[] = [
 ]
 
 export const RATING_OPTIONS: { id: RatingChoice; label: string }[] = [
-  { id: 5, label: '★★★★★' },
-  { id: 4, label: '★★★★ eller mer' },
-  { id: 3, label: '★★★ eller mer' },
+  { id: 3, label: '★★★' },
   { id: 2, label: '★★ eller mer' },
   { id: 1, label: '★ eller mer' },
+  { id: 'thumbsDown', label: 'Tumme ner' },
   { id: 'unrated', label: 'Ej betygsatt' },
   { id: 'reviewed', label: 'Har granskningar' }
 ]
@@ -80,8 +80,8 @@ export function periodStart(period: PeriodChoice, now: number): number {
   return now - (period === '7d' ? 7 : 30) * DAY
 }
 
-export function toGenerationFilter(f: FeedFilters, sort: SortKey, now: number): GenerationFilter {
-  const filter: GenerationFilter = { sort }
+export function toGenerationFilter(f: FeedFilters, sort: SortKey, now: number): GenerationQuery {
+  const filter: GenerationQuery = { sort }
   const query = f.query.trim()
   if (query) filter.query = query
   if (f.source) filter.source = f.source
@@ -89,6 +89,7 @@ export function toGenerationFilter(f: FeedFilters, sort: SortKey, now: number): 
   if (f.model) filter.model = f.model
   if (f.assetId) filter.assetId = f.assetId
   if (typeof f.rating === 'number') filter.minRating = f.rating
+  else if (f.rating === 'thumbsDown') filter.thumbsDown = true
   else if (f.rating === 'unrated') filter.unrated = true
   else if (f.rating === 'reviewed') filter.hasReviews = true
   if (f.period) filter.since = periodStart(f.period, now)

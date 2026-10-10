@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { continuationFrameOf } from '@shared/seams'
 import { canUseAgain } from '@shared/generation-label'
 import { DEFAULT_MODEL } from '@shared/models'
 import { NEEDS_CONSENT, type ConsentRequest, type Generation, type GenerationParams } from '@shared/types'
@@ -162,7 +163,15 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
   // own film's or a version's are placeholders, and a take made from a video in Redigera can't be made here.
   const reuse = useCallback(
     (g: Generation) => {
-      if (canUseAgain(g)) setParams({ ...g.params })
+      if (!canUseAgain(g)) return
+      // A sequence clip continued in reference mode carries the previous clip's last frame as its last reference;
+      // that frame only meant something in the sequence, so the form gets the clip's own references without it.
+      const frame = continuationFrameOf(g.params)
+      if (frame?.mode === 'references') {
+        setParams({ ...g.params, referenceImages: (g.params.referenceImages ?? []).slice(0, -1) })
+        return
+      }
+      setParams({ ...g.params })
     },
     [setParams]
   )

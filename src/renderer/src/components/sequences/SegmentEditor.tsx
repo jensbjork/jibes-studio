@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { ownReferences, type CarriedReferences } from '@shared/continuation'
 import { generationTitle } from '@shared/generation-label'
-import type { ConsentRequest, Generation, GenerationParams, Segment, Sequence, VideoModel } from '@shared/types'
+import type {
+  ConsentRequest,
+  ContinueMode,
+  Generation,
+  GenerationParams,
+  Segment,
+  Sequence,
+  VideoModel
+} from '@shared/types'
 import { ipcErrorMessage, useQuote } from '../../lib/hooks'
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
@@ -15,7 +24,9 @@ import KeyframeBox from './KeyframeBox'
 import NotesField from './NotesField'
 import {
   clipKey,
+  continuationOf,
   continues,
+  effectiveParams,
   formatClock,
   isOwnTake,
   parseConsent,
@@ -88,21 +99,48 @@ export default function SegmentEditor({
   const { value: params, setValue: setParams, flush, discard } = draft
   useRegisterFlush(flushers, flush)
 
+  const continuing = continues(segment, index)
+  const endFromNext = segment.endFromNext && index < sequence.segments.length - 1
+  // How the clip continues from the previous one, as its draft says: in reference mode with the references it carries
+  // (its own, or the clip's it continues from) and the previous clip's last frame after them; or exactly.
+  const plan = continuing ? continuationOf({ ...segment, params }, index, sequence) : undefined
+  const referenceForm = plan?.form === 'reference-to-video'
+  // Without references of its own, the clip shows the ones it carries from the clip before as if they were its own:
+  // they can be used in the prompt, and changing them (adding, removing, reordering) makes them the clip's own, which
+  // then override the inherited ones. Left as they are, nothing is saved and the clip keeps carrying them.
+  const inherited = plan?.mode === 'references' && plan.carried?.inherited ? plan.carried : undefined
+  const inheritedRef = useRef<CarriedReferences | undefined>(inherited)
+  inheritedRef.current = inherited
+  const shown = inherited ? withReferences(params, inherited) : params
+  const setShown = useCallback<Dispatch<SetStateAction<GenerationParams>>>(
+    (update) =>
+      setParams((p) => {
+        const carried = inheritedRef.current && !ownReferences(p) ? inheritedRef.current : undefined
+        const view = carried ? withReferences(p, carried) : p
+        const next = typeof update === 'function' ? update(view) : update
+        // The inherited references untouched: they stay the clip before's, not copied into this clip (whatever the
+        // draft held instead was no reference it sends: left over from another mode, which main drops too).
+        if (carried && sameReferences(next, view)) return { ...next, referenceImages: undefined, referenceAudios: undefined }
+        return next
+      }),
+    [setParams]
+  )
+
   useEffect(() => {
     const handle: EditorHandle = {
       // Against the references in the editor as they are now, so a reorder since the take doesn't move its words.
-      applyPrompt: (take) => setParams((p) => ({ ...p, ...takePromptsFor(take, p) }))
+      applyPrompt: (take) => setShown((p) => ({ ...p, ...takePromptsFor(take, p) }))
     }
     handleRef.current = handle
     return () => {
       if (handleRef.current === handle) handleRef.current = null
     }
-  }, [handleRef, setParams])
+  }, [handleRef, setShown])
 
-  const continuing = continues(segment, index)
-  const endFromNext = segment.endFromNext && index < sequence.segments.length - 1
-  const model = models.find((m) => m.id === params.model)
-  const quote = useQuote(params, model)
+  // Priced as it is sent: a continuation with its family's model for the way it starts.
+  const sent = effectiveParams({ ...segment, params }, index, sequence)
+  const model = models.find((m) => m.id === sent.model)
+  const quote = useQuote(sent, model)
 
   const [submitting, setSubmitting] = useState(false)
   const [toggling, setToggling] = useState(false)
@@ -163,6 +201,20 @@ export default function SegmentEditor({
     try {
       await flush()
       await patchSegment(segmentId, { continueFromPrevious: on })
+    } catch (e) {
+      setError(ipcErrorMessage(e))
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  const chooseContinueMode = async (mode: ContinueMode) => {
+    setToggling(true)
+    setError(undefined)
+    try {
+      // Main switches the clip to its family's reference-to-video or image-to-video model, keeping these params.
+      await flush()
+      await patchSegment(segmentId, { continueMode: mode })
     } catch (e) {
       setError(ipcErrorMessage(e))
     } finally {
@@ -297,7 +349,9 @@ export default function SegmentEditor({
               ffmpegOk={ffmpegOk}
               busy={toggling}
               justBridged={justBridged}
+              plan={plan}
               onContinue={(on) => void toggleContinue(on)}
+              onContinueMode={(mode) => void chooseContinueMode(mode)}
               onEndFromNext={(on) => void toggleEndFromNext(on)}
               onBridge={() => void bridge()}
             />
@@ -305,11 +359,22 @@ export default function SegmentEditor({
             <ParamsForm
               models={models}
               modelsError={modelsError}
-              params={params}
-              setParams={setParams}
-              // A frame from a neighbour makes the clip image-to-video.
-              kinds={continuing || endFromNext ? ['image-to-video'] : undefined}
-              continuing={continuing}
+              params={shown}
+              setParams={setShown}
+              // A frame from a neighbour makes the clip image-to-video, except a continuation in reference mode.
+              kinds={referenceForm ? ['reference-to-video'] : continuing || endFromNext ? ['image-to-video'] : undefined}
+              continuing={continuing && !referenceForm}
+              continuationFrame={
+                !referenceForm
+                  ? undefined
+                  : plan?.mode === 'references'
+                    ? `+ sista bildrutan i klipp ${index} skickas efter dessa (som @Image${plan.frameToken ?? 1}), och prompten börjar med att klippet ska starta på den.${
+                        inherited
+                          ? ` Bilderna och rösterna kommer från klipp ${inherited.fromClip} – ändrar du dem blir de klippets egna.`
+                          : ''
+                      }`
+                    : `Utan referenser börjar klippet exakt på sista bildrutan i klipp ${index}. Lägg till referenser här (eller i klippet före), så skickas de med tillsammans med bildrutan.`
+              }
               endImageRequired
               startImageNote={continuing ? `Sista bildrutan från klipp ${index} används som startbild.` : undefined}
               endImageNote={endFromNext ? `Första bildrutan från klipp ${index + 2} används som slutbild.` : undefined}
@@ -337,6 +402,23 @@ export default function SegmentEditor({
         </div>
       )}
     </div>
+  )
+}
+
+/** The params with these references in place of their own (a continuation showing what it carries). */
+function withReferences(params: GenerationParams, carried: CarriedReferences): GenerationParams {
+  return {
+    ...params,
+    referenceImages: carried.images.length ? [...carried.images] : undefined,
+    referenceAudios: carried.audios.length ? carried.audios.map((a) => ({ ...a })) : undefined
+  }
+}
+
+/** The same reference images and audio clips (windows included), in the same order. */
+function sameReferences(a: GenerationParams, b: GenerationParams): boolean {
+  return (
+    stableJson(a.referenceImages ?? []) === stableJson(b.referenceImages ?? []) &&
+    stableJson(a.referenceAudios ?? []) === stableJson(b.referenceAudios ?? [])
   )
 }
 

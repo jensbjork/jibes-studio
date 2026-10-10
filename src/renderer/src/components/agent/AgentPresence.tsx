@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AgentActivity } from '@shared/types'
 import { useAgentWorking } from '../../lib/agent'
-import { presenceText } from './agentText'
+import { presenceText, workingLabel } from './agentText'
 
 interface Props {
   /** The activity drawer is open: it shows the same thing, so the pill steps aside. */
@@ -10,9 +10,9 @@ interface Props {
 }
 
 /**
- * A small pill at the bottom of the window while an agent works: a pulsing dot, "Agenten arbetar" and what it just
- * did, with the step before it fading above. It fades out a few seconds after the agent goes quiet; a click opens
- * the activity drawer.
+ * A small pill at the bottom of the window while an agent works: a pulsing dot, "Agenten arbetar" (or the agent's
+ * own name, "OpenClaw arbetar") and what it just did, with the step before it fading above. It fades out a few
+ * seconds after the agent goes quiet; a click opens the activity drawer.
  */
 export default function AgentPresence({ hidden, onOpen }: Props) {
   const working = useAgentWorking()
@@ -48,7 +48,7 @@ export default function AgentPresence({ hidden, onOpen }: Props) {
         <span className="min-w-0">
           {previous && <span className="block truncate text-xs text-muted/70">{presenceText(previous)}</span>}
           <span className="block truncate">
-            <span className="font-medium text-text">Agenten arbetar</span>
+            <span className="font-medium text-text">{workingLabel(latest)}</span>
             <span className="text-muted"> · {presenceText(latest)}</span>
           </span>
         </span>

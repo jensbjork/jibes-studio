@@ -20,12 +20,11 @@ import { markSeen, useRunning, useSeenWhenVisible, useUnseen } from '../../lib/w
 import ConsentDialog from '../ConsentDialog'
 import GenerationPickerDialog from '../feed/GenerationPickerDialog'
 import { useImportCards, useImportFlow, type ImportOutcome } from '../feed/ownClips'
-import { missingInput } from '../ParamsForm'
 import { aspectValue } from '../storyboards/storyboardUtils'
 import { isPlayable } from '../takes/takeText'
 import TakeStrip, { type PickedBy } from '../takes/TakeStrip'
 import { KEY_SELECT_DELAY, useTakeSelection } from '../takes/useTakeSelection'
-import { ownEndImageRefused } from './clipChecks'
+import { ownEndImageRefused, sendInputProblem } from './clipChecks'
 import { CloseIcon, FilmIcon } from './icons'
 import PreviewPlayer from './PreviewPlayer'
 import SegmentEditor, { type EditorHandle } from './SegmentEditor'
@@ -99,17 +98,19 @@ function findRunProblem(sequence: Sequence, ffmpegOk: boolean): { segmentId: str
     const continuing = continues(s, i)
     // The run waits for a neighbour that is generated in the same run, so only what can never work is checked here.
     const endFromNext = s.endFromNext && i < sequence.segments.length - 1
-    const params = effectiveParams(s, i)
+    const params = effectiveParams(s, i, sequence)
+    // The prompt and its references as the take is sent (a continuation in reference mode with what it carries).
+    const input = sendInputProblem(sequence, i)
     // An own film that went missing isn't a clip waiting for a prompt: say what happened to it (as main does).
     const chosen = selectedTake(s)
-    if (isOwnTake(chosen) && chosen?.fileMissing && missingInput(params, continuing)) {
+    if (isOwnTake(chosen) && chosen?.fileMissing && input) {
       return {
         segmentId: s.id,
         message: `Klipp ${i + 1}:s egna video saknas (flyttad eller raderad i Finder). Lägg till filen igen eller generera en AI-tagning.`
       }
     }
     const reason =
-      missingInput(params, continuing) ??
+      input ??
       (continuing && !ffmpegOk ? 'ffmpeg krävs för att fortsätta från föregående klipp' : undefined) ??
       (endFromNext && !ffmpegOk ? 'ffmpeg krävs för att ta slutbilden från nästa klipp' : undefined) ??
       (endFromNext && !supportsEndImage(params.model) ? 'modellen tar ingen slutbild – välj en annan' : undefined) ??
@@ -704,7 +705,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     sequence?.segments.forEach((s, i) => {
       if (!needsTake(s)) return
       if (pendingTake(s)) generating++
-      else toGenerate.push(effectiveParams(s, i))
+      else toGenerate.push(effectiveParams(s, i, sequence))
     })
     return { toGenerate, generating }
   }, [sequence])

@@ -4,7 +4,7 @@ import type { Generation, VideoModel } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { authorLabel, isPending } from '../feed/feedText'
 import { PinIcon } from '../feed/icons'
-import StarRating from '../feed/StarRating'
+import RatingControl from '../feed/RatingControl'
 import { CloseIcon } from '../sequences/icons'
 import { ConfirmDeleteButton, CopyButton, secondaryButton } from './controls'
 import { MAX_INSIGHT_LENGTH, MAX_TITLE_LENGTH, titleFromInsight } from './learning-utils'
@@ -288,7 +288,7 @@ function EvidenceThumb({
         )}
         {g.rating ? (
           <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 py-0.5 backdrop-blur">
-            <StarRating value={g.rating} size="sm" filledOnly />
+            <RatingControl value={g.rating} size="sm" filledOnly />
           </span>
         ) : null}
       </span>

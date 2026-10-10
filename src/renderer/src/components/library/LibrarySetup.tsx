@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import type { LibraryStatus } from '@shared/types'
+import { useEffect, useState } from 'react'
+import type { ArchiveProgress, LibraryStatus } from '@shared/types'
+import { ipcErrorMessage } from '../../lib/hooks'
 import { displayPath, folderName } from '../../lib/library'
 import DevBadge from '../DevBadge'
 import FolderDecision from './FolderDecision'
@@ -170,6 +171,8 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
             {choice.error && <p className="mt-3 text-[12px] text-accent select-text">{choice.error}</p>}
           </div>
 
+          <ImportArchive disabled={busy || choice.checking} />
+
           <p className="mt-8 text-[11px] leading-relaxed text-muted">
             Du kan byta mapp senare under Inställningar. Allt du gör sparas i grundmappen, så den går att
             säkerhetskopiera eller flytta i ett stycke.
@@ -177,6 +180,56 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
         </div>
       </div>
       <SwitchingOverlay phase={switcher.phase} />
+    </div>
+  )
+}
+
+/**
+ * "Har du ett exporterat bibliotek?": on a new Mac the zip from Inställningar → Export och import is opened from here,
+ * since the rest of the app (and Inställningar) waits for a library. Main unpacks it into a folder the user chooses
+ * and opens it; the window reloads into the library.
+ */
+function ImportArchive({ disabled }: { disabled: boolean }) {
+  const [progress, setProgress] = useState<ArchiveProgress>()
+  const [error, setError] = useState<string>()
+  const running = !!progress && !['done', 'failed', 'cancelled'].includes(progress.phase)
+
+  useEffect(() => window.studio.onArchiveProgress((p) => p.kind === 'import' && setProgress(p)), [])
+
+  const start = async () => {
+    setError(undefined)
+    try {
+      await window.studio.importLibraryArchive()
+    } catch (e) {
+      setError(ipcErrorMessage(e))
+      setProgress(undefined)
+    }
+  }
+
+  const percent =
+    progress?.total && progress.done !== undefined ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : undefined
+
+  return (
+    <div className="mt-6 rounded-lg border border-line px-4 py-3">
+      <p className="text-[12px] leading-relaxed text-muted">
+        Har du ett bibliotek som du exporterat från Studio på en annan dator (en zip-fil)? Öppna det här i stället.
+      </p>
+      {running ? (
+        <div className="mt-2 flex items-center gap-3 text-[12px]">
+          <span className="min-w-0 flex-1 truncate text-muted">
+            {progress?.message ?? 'Importerar…'}
+            {percent !== undefined && ` · ${percent} %`}
+          </span>
+          <button onClick={() => void window.studio.cancelLibraryArchive()} className={link}>
+            Avbryt
+          </button>
+        </div>
+      ) : (
+        <button onClick={() => void start()} disabled={disabled} className={`mt-2 ${link} text-text underline-offset-2 hover:underline`}>
+          Importera ett bibliotek…
+        </button>
+      )}
+      {error && <p className="mt-2 text-[12px] text-accent select-text">{error}</p>}
     </div>
   )
 }

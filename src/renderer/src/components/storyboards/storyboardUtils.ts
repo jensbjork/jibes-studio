@@ -460,6 +460,8 @@ export function asPreviewSequence(storyboard: Storyboard): Sequence {
       position: i,
       params: t.params,
       continueFromPrevious: false,
+      // Transitions go from one board's picture to the next one's (image-to-video with both); they never continue.
+      continueMode: 'exact',
       endFromNext: false,
       notes: '',
       selectedGenerationId: t.selectedGenerationId,

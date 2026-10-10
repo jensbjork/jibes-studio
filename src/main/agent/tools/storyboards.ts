@@ -227,7 +227,8 @@ export function transitionInfo(storyboard: Storyboard, index: number): Record<st
           ...(take.error ? { error: take.error } : {}),
           ...(take.videoDuration !== undefined ? { video_seconds: seconds(take.videoDuration) } : {}),
           ...(take.fileMissing ? { file_missing: true } : {}),
-          ...(take.rating ? { rating: take.rating } : {}),
+          // The user's grade: -1 = tumme ner, 1–3 = stars.
+          ...(take.rating !== undefined ? { rating: take.rating } : {}),
           // Made before a board's picture changed: it doesn't go from today's picture to today's picture.
           ...(t.staleTake ? { made_from_earlier_pictures: true } : {})
         }
@@ -237,7 +238,7 @@ export function transitionInfo(storyboard: Storyboard, index: number): Record<st
       status: g.status,
       created: localTime(g.createdAt),
       ...(g.id === t.selectedGenerationId ? { selected: true } : {}),
-      ...(g.rating ? { rating: g.rating } : {}),
+      ...(g.rating !== undefined ? { rating: g.rating } : {}),
       ...(g.reviewCount ? { review_count: g.reviewCount } : {})
     })),
     take_count: t.takes.length,

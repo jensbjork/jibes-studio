@@ -1,4 +1,5 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { agentDisplayName } from '@shared/agent-name'
 import type { AgentActivity, AgentStatus, ApprovalRequest } from '@shared/types'
 import { ipcErrorMessage } from './hooks'
 
@@ -51,14 +52,17 @@ export function getAgentState(): AgentState {
 /** How long after its latest tool call an agent counts as working. */
 export const AGENT_WORKING_MS = 12_000
 
+const NOT_WORKING: AgentActivity[] = []
+
 /**
  * While an agent is working (a tool call in the last few seconds): its recent calls, newest first, the ones close
- * together. Empty otherwise. Re-renders by itself when the agent goes quiet.
+ * together. Empty otherwise. Re-renders by itself when the agent goes quiet. The same array until the activity
+ * changes or the agent goes quiet, so it can be an effect's dependency.
  */
 export function useAgentWorking(): AgentActivity[] {
   const { activity } = useAgentState()
   const latest = activity[0]
-  const [, setTick] = useState(0)
+  const [tick, setTick] = useState(0)
   useEffect(() => {
     if (!latest) return
     const left = latest.at + AGENT_WORKING_MS - Date.now()
@@ -66,15 +70,18 @@ export function useAgentWorking(): AgentActivity[] {
     const timer = setTimeout(() => setTick((n) => n + 1), left + 50)
     return () => clearTimeout(timer)
   }, [latest])
-  if (!latest || Date.now() - latest.at >= AGENT_WORKING_MS) return []
-  // One burst of work: calls no more than the working window apart.
-  const burst: AgentActivity[] = []
-  for (const a of activity) {
-    const previous = burst[burst.length - 1] ?? latest
-    if (previous.at - a.at > AGENT_WORKING_MS) break
-    burst.push(a)
-  }
-  return burst
+  return useMemo(() => {
+    if (!latest || Date.now() - latest.at >= AGENT_WORKING_MS) return NOT_WORKING
+    // One burst of work: calls no more than the working window apart.
+    const burst: AgentActivity[] = []
+    for (const a of activity) {
+      const previous = burst[burst.length - 1] ?? latest
+      if (previous.at - a.at > AGENT_WORKING_MS) break
+      burst.push(a)
+    }
+    return burst
+    // `tick` makes it look again once the working window has passed.
+  }, [activity, latest, tick])
 }
 
 // ── Merging what main sends ─────────────────────────────────────────────────
@@ -135,7 +142,8 @@ function notifyNewApproval(a: ApprovalRequest): void {
             : a.kind === 'delete'
               ? 'vill ta bort något'
               : 'vill generera'
-    const note = new Notification(`${a.client} ${what}`, {
+    // "Agenten vill generera" for a generic MCP client name, "OpenClaw vill generera" for a real one.
+    const note = new Notification(`${agentDisplayName(a.client)} ${what}`, {
       body: 'Öppna Studio för att godkänna eller avböja.',
       silent: false
     })

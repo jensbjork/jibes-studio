@@ -609,7 +609,7 @@ export class StoryboardService {
       }
     })
     const byId = new Map(boards.map((b) => [b.id, b]))
-    // The segments with their takes (and the user's stars on them), as the sequence editor gets them.
+    // The segments with their takes (and the user's grades on them), as the sequence editor gets them.
     const loaded = store.loadSequence(id, { running: false })
     const rows = store.listSegmentRows(id)
     const transitions = loaded.segments.map((segment, i): StoryboardTransition => {

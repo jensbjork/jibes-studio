@@ -334,7 +334,44 @@ const migrations: string[] = [
   CREATE INDEX take_trims_by_generation ON take_trims(generation_id);
   CREATE INDEX storyboard_boards_by_still ON storyboard_boards(still_id);
   ALTER TABLE asset_images ADD COLUMN origin TEXT;
-  ALTER TABLE asset_audio ADD COLUMN origin TEXT;`
+  ALTER TABLE asset_audio ADD COLUMN origin TEXT;`,
+
+  // Phase 12. Grades: a rating (the user's or an agent's) is tumme ner (-1) or one to three stars, no longer one to
+  // five. SQLite can't change a CHECK, so generation_reviews is rebuilt (same columns, the same two indexes) with the
+  // old stars mapped: 1–2 → -1, 3 → 1, 4 → 2, 5 → 3 (by range, so nothing can land outside the new CHECK). Foreign
+  // keys stay on: the table is only a child (nothing references it), so dropping it cascades nothing, and the copy
+  // leaves out reviews of generations that no longer exist (possible only in a database edited with foreign keys
+  // off), which would otherwise fail the whole migration. segments.continue_mode: how a clip that continues from the
+  // previous one starts on its last frame ('references': in reference mode, the frame as one more reference;
+  // 'exact': image-to-video from the frame, as before).
+  `CREATE TABLE generation_reviews_v13 (
+    id TEXT PRIMARY KEY,
+    generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
+    author TEXT NOT NULL,
+    rating INTEGER CHECK (rating IN (-1, 1, 2, 3)),
+    tags TEXT NOT NULL DEFAULT '[]',
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  INSERT INTO generation_reviews_v13 (id, generation_id, author, rating, tags, note, created_at, updated_at)
+    SELECT id, generation_id, author,
+      CASE
+        WHEN rating IS NULL THEN NULL
+        WHEN rating < 3 THEN -1
+        WHEN rating < 4 THEN 1
+        WHEN rating < 5 THEN 2
+        ELSE 3
+      END,
+      tags, note, created_at, updated_at
+    FROM generation_reviews
+    WHERE generation_id IN (SELECT id FROM generations);
+  DROP TABLE generation_reviews;
+  ALTER TABLE generation_reviews_v13 RENAME TO generation_reviews;
+  CREATE INDEX generation_reviews_by_generation ON generation_reviews(generation_id);
+  CREATE UNIQUE INDEX generation_reviews_user ON generation_reviews(generation_id) WHERE author = 'user';
+  ALTER TABLE segments ADD COLUMN continue_mode TEXT NOT NULL DEFAULT 'references'
+    CHECK (continue_mode IN ('references', 'exact'));`
 ]
 
 

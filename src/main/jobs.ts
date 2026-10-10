@@ -6,6 +6,7 @@ import { paramsForSubmit } from '@shared/models'
 import {
   composeOptionsFor,
   composePrompt,
+  continuationLeadIn,
   knowsPromptLimit,
   promptLimitOf,
   rememberPromptLimits
@@ -99,20 +100,34 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
+ * The instruction in front of the prompt of a sequence clip that continues in reference mode, whose previous clip's
+ * last frame is sent as @Image{frameToken} (continuationLeadIn, in the user's prompt language); '' without a frame.
+ */
+export function continuationLeadInFor(frameToken: number | undefined): string {
+  return frameToken ? continuationLeadIn(frameToken, getPromptLanguage()) : ''
+}
+
+/**
  * The prompt as a submission of these params sends it (composePrompt): the user's prompt with the References legend
  * of the referenced assets' descriptions appended – the descriptions as the database has them right now, the
  * params' own switches (includeDescriptions, excludedDescriptionAssetIds), the user's prompt language – and kept
  * within the model's prompt limit: `characterLimit` when given, else the one remembered from the model list.
+ * `continuationFrame`: a sequence clip continuing in reference mode, whose last reference image (@Image{n}) is the
+ * previous clip's last frame; the instruction to start on it goes in front of the prompt (continuationLeadInFor).
  * Tokens are canonicalised first, as they are sent. Synchronous, so a check (an approval's) can compare it on the
  * very database state a submit reads. Needs an open library.
  */
 export function composeSubmission(
   params: GenerationParams,
-  opts: { characterLimit?: number } = {}
+  opts: { characterLimit?: number; continuationFrame?: number } = {}
 ): ComposedPrompt {
   const p = canonicalizeParams(params)
   const limit = opts.characterLimit ?? promptLimitOf(p.model)
-  return composePrompt(p, describedAssetsFor(paramsForSubmit(p)), composeOptionsFor(p, getPromptLanguage(), limit))
+  const leadIn = continuationLeadInFor(opts.continuationFrame)
+  return composePrompt(p, describedAssetsFor(paramsForSubmit(p)), {
+    ...composeOptionsFor(p, getPromptLanguage(), limit),
+    ...(leadIn ? { leadIn } : {})
+  })
 }
 
 /**
@@ -304,10 +319,15 @@ export interface SubmitOptions {
    * The prompt to send, composed by the caller from these params (composeSubmission) when it read them: a sequence
    * take composes it together with the reads its approval's check runs on, and an agent's approved form request
    * passes the text the user approved, so each sends exactly what was checked however long the frames, the quote
-   * and the upload take. Checked like a prompt composed here; one that doesn't start with the params' prompt is
-   * ignored. Default: composed when the job is sent.
+   * and the upload take. Checked like a prompt composed here; one that doesn't start with the params' prompt (after
+   * the continuation's instruction, with `continuationFrame`) is ignored. Default: composed when the job is sent.
    */
   sentPrompt?: string
+  /**
+   * A sequence clip continuing in reference mode: its last reference image is the previous clip's last frame,
+   * @Image{continuationFrame}, and the prompt sent starts with the instruction to begin on it (composeSubmission).
+   */
+  continuationFrame?: number
 }
 
 type MediaInfo = Pick<db.StoredGeneration, 'videoDuration' | 'thumbPath'>
@@ -499,10 +519,14 @@ export class JobManager extends EventEmitter<JobEvents> {
     // row keeps the user's prompt in `prompt` and `params`, and this one as sentPrompt.
     const given = opts.sentPrompt
     const own = params.prompt.trimEnd()
+    // A continuation in reference mode sends its instruction in front of the prompt.
+    const frame = opts.continuationFrame
+    const leadIn = continuationLeadInFor(frame)
+    const head = leadIn && own ? `${leadIn}\n\n${own}` : own
     const composed =
-      typeof given === 'string' && (given === params.prompt || (own !== '' && given.startsWith(own)))
+      typeof given === 'string' && (given === params.prompt || (head !== '' && given.startsWith(head)))
         ? { prompt: given }
-        : composeSubmission(params, { characterLimit: limit })
+        : composeSubmission(params, { characterLimit: limit, ...(frame ? { continuationFrame: frame } : {}) })
     checkComposed(params, composed)
     // Outside images and audio are copied into Referensbilder first, so the stored params point at the copies.
     params = await importExternalReferences(params)

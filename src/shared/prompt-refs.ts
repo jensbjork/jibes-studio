@@ -90,6 +90,14 @@ export interface ValidateOptions {
    */
   continuing?: boolean
   /**
+   * A sequence clip that continues from the previous clip in reference mode: after the reference images counted here,
+   * the previous clip's last frame is sent as one more (@Image{count+1}), and the instruction Studio puts in front of
+   * the prompt names it. So the clip needs no reference image of its own, the frame's token is valid and never
+   * "unused", and the frame takes the model's last place: a reference image that has to give way for it is not sent,
+   * and a token naming that one is an error.
+   */
+  continuationFrame?: boolean
+  /**
    * The reference audio clips in the params, in order (@Audio1 is the first): each one's window length in
    * seconds, or undefined where it isn't known yet (main measures the files before anything is sent).
    * Omitted: no audio clips.
@@ -583,6 +591,18 @@ function describeNumbers(numbers: readonly number[], ref: ReferenceKind = 'image
 
 const quoted = (raw: string): string => `”${raw.replace(INVISIBLE_ALL, '')}”`
 
+/** Why a reference image gives way in a continuation sent in reference mode (see ValidateOptions.continuationFrame). */
+const FRAME_PLACE = 'plats behövs för startbilden (sista bildrutan i föregående klipp)'
+
+/**
+ * "Referensbild 9 skickas inte – plats behövs för startbilden (…)": the reference images (1-based numbers) a
+ * continuation in reference mode leaves out to make room for the previous clip's last frame.
+ */
+export function droppedForFrameMessage(numbers: readonly number[]): string {
+  const sorted = [...new Set(numbers)].sort((a, b) => a - b).map(String)
+  return `Referensbild ${swedishList(sorted)} skickas inte – ${FRAME_PLACE}.`
+}
+
 function images(n: number): string {
   return n === 1 ? '1 bild' : `${n} bilder`
 }
@@ -751,7 +771,13 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
     }
   } else {
     const videosSent = Math.max(0, Math.floor(Number(opts.referenceVideos)) || 0)
-    if (count === 0 && field === 'prompt' && (videosSent === 0 || tokens.length > 0)) {
+    // A continuation in reference mode sends the previous clip's last frame after the pictures: they get every place
+    // but the model's last, which is the frame's, and its token (frameIndex) names it. With more pictures than that
+    // room, the frame takes the place of the last one that fits no more, and that number names no picture at all.
+    const frame = !!opts.continuationFrame
+    const room = frame ? Math.max(0, max - 1) : max
+    const frameIndex = frame && count <= room ? count + 1 : 0
+    if (count === 0 && field === 'prompt' && !frame && (videosSent === 0 || tokens.length > 0)) {
       // Venice refuses reference audio on its own, so that is worth saying when audio is all there is.
       const audioOnly = !tokens.length && audioSent > 0
       general.push({
@@ -765,13 +791,24 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
         ...(audioOnly ? { ref: 'audio' as const } : {})
       })
     }
-    if (count > 0) {
+    if (count > 0 || frame) {
       for (const t of tokens) {
+        // The frame itself: named by the instruction in front of the prompt, and fine to name here too.
+        if (t.index === frameIndex) continue
         if (t.index > count) {
           placed.push({
             severity: 'error',
             code: 'out-of-range',
-            message: `${prefix}${canonicalText(t)} finns inte – bara ${images(count)} ${count === 1 ? 'är vald' : 'är valda'}.`,
+            message: frame
+              ? `${prefix}${canonicalText(t)} finns inte – klippet skickar ${count ? `${images(count)} och ` : ''}startbilden (${imageToken(Math.min(count, room) + 1)}).`
+              : `${prefix}${canonicalText(t)} finns inte – bara ${images(count)} ${count === 1 ? 'är vald' : 'är valda'}.`,
+            ...at(t)
+          })
+        } else if (frame && t.index > room) {
+          placed.push({
+            severity: 'error',
+            code: 'over-model-limit',
+            message: `${prefix}${canonicalText(t)} skickas inte – ${FRAME_PLACE}.`,
             ...at(t)
           })
         } else if (t.index > max) {
@@ -800,7 +837,7 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
 
     // Advice is about the main prompt only: the negative prompt doesn't introduce the pictures.
     if (field === 'prompt' && count > 0) {
-      const sent = Math.min(count, max)
+      const sent = Math.min(count, room)
       const mentioned = new Set([...tokens.map((t) => t.index), ...malformed.flatMap((m) => m.meant)])
       const unused: number[] = []
       for (let n = 1; n <= sent; n++) if (!mentioned.has(n)) unused.push(n)
@@ -815,6 +852,12 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
                 ? `${imageToken(unused[0])} nämns inte i prompten, så modellen vet inte vad bilden ska användas till.`
                 : `${describeNumbers(unused)} nämns inte i prompten, så modellen vet inte vad bilderna ska användas till.`
         })
+      }
+      // A picture whose place the continuation frame takes is not sent (a token naming it is an error above).
+      const givenWay: number[] = []
+      for (let n = room + 1; n <= Math.min(count, max); n++) if (!mentioned.has(n)) givenWay.push(n)
+      if (givenWay.length) {
+        advice.push({ severity: 'warning', code: 'over-model-limit', message: droppedForFrameMessage(givenWay) })
       }
       // Pictures past the model's limit are dropped when sending; tokens pointing at them are errors above.
       const dropped: number[] = []
@@ -1022,7 +1065,7 @@ type PromptParams = Pick<
  */
 export function validationContext(
   params: PromptParams,
-  extra: { continuing?: boolean } = {}
+  extra: { continuing?: boolean; continuationFrame?: boolean } = {}
 ): { referenceCount: number; options: ValidateOptions } {
   const kind = kindOfModelId(params.model)
   const referenceCount = kind === 'reference-to-video' ? (params.referenceImages?.length ?? 0) : 0
@@ -1035,6 +1078,7 @@ export function validationContext(
       ...(videos ? { referenceVideos: videos } : {}),
       maxImages: maxReferenceImages(params.model),
       ...(extra.continuing ? { continuing: true } : {}),
+      ...(extra.continuationFrame && kind === 'reference-to-video' ? { continuationFrame: true } : {}),
       audioLengths: audios.map((a) => (a.length === undefined ? undefined : referenceAudioWindow(a).length)),
       audioInput: supportsAudioInput(params.model),
       maxAudios: maxReferenceAudios(params.model)
@@ -1042,12 +1086,19 @@ export function validationContext(
   }
 }
 
-/** Both prompts of a generation checked as it would be sent (see validationContext). */
-export function validateGenerationParams(params: PromptParams): {
+/**
+ * Both prompts of a generation checked as it would be sent (see validationContext). `continuationFrame`: a sequence
+ * clip continuing in reference mode, whose params hold the references it carries (the previous clip's last frame is
+ * sent after them; see ValidateOptions.continuationFrame).
+ */
+export function validateGenerationParams(
+  params: PromptParams,
+  extra: { continuationFrame?: boolean } = {}
+): {
   prompt: PromptIssue[]
   negativePrompt: PromptIssue[]
 } {
-  const { referenceCount, options } = validationContext(params)
+  const { referenceCount, options } = validationContext(params, extra)
   return {
     prompt: validatePromptReferences(params.prompt, referenceCount, options),
     negativePrompt: params.negativePrompt ? validateNegativePrompt(params.negativePrompt, referenceCount, options) : []
@@ -1058,8 +1109,11 @@ export function validateGenerationParams(params: PromptParams): {
  * Why the params must not be sent, in Swedish (the first blocking issue, and how many more there are), or
  * undefined when nothing blocks. What the main process refuses a submission with.
  */
-export function blockingPromptError(params: PromptParams): string | undefined {
-  const { prompt, negativePrompt } = validateGenerationParams(params)
+export function blockingPromptError(
+  params: PromptParams,
+  extra: { continuationFrame?: boolean } = {}
+): string | undefined {
+  const { prompt, negativePrompt } = validateGenerationParams(params, extra)
   const errors = [...prompt, ...negativePrompt].filter((i) => i.severity === 'error')
   if (!errors.length) return undefined
   const more = errors.length - 1
@@ -1067,29 +1121,40 @@ export function blockingPromptError(params: PromptParams): string | undefined {
   return `${errors[0].message} Prompten har ${more === 1 ? 'ett fel' : `${more} fel`} till.`
 }
 
-/** A continuing clip's text names reference images or audio, which it doesn't send: which ones, and what to do. */
-function continuationReferencesMessage(text: string, where: string): string {
+/**
+ * A continuing clip's text names reference images or audio, which it doesn't send: which ones, and what to do.
+ * `referencesPossible`: the clip could be sent with references instead ("Med referensbilder"), so that is offered.
+ */
+function continuationReferencesMessage(text: string, where: string, referencesPossible = false): string {
   const named = scan(text).filter(isReference)
   const { shown } = namedList(named)
   const sends = named.some((s) => s.ref === 'audio') ? 'inga referensbilder eller ljudklipp' : 'inga referensbilder'
+  const instead = referencesPossible
+    ? 'eller välj ”Med referensbilder” för klippet'
+    : 'eller slå av ”Fortsätt från föregående klipp”'
   return (
     `Klippet fortsätter från sista bildrutan i föregående klipp och skickar ${sends} – ta bort ` +
-    `${shown} ur ${where}, eller slå av ”Fortsätt från föregående klipp”.`
+    `${shown} ur ${where}, ${instead}.`
   )
 }
 
 /**
- * blockingPromptError for a sequence clip that continues from the previous clip: it is generated
- * image-to-video from that clip's last frame and sends no reference images or audio. Its mode is fixed, so
- * references in it are reported with what can be done about them there, rather than "switch to reference mode".
+ * blockingPromptError for a sequence clip that continues from the previous clip with an exact start frame ("Exakt
+ * startbild"): it is generated image-to-video from that clip's last frame and sends no reference images or audio. Its
+ * mode is fixed, so references in it are reported with what can be done about them there, rather than "switch to
+ * reference mode". `referencesPossible`: the clip could continue in reference mode instead, which the message offers.
  */
-export function blockingContinuationError(params: PromptParams): string | undefined {
+export function blockingContinuationError(
+  params: PromptParams,
+  opts: { referencesPossible?: boolean } = {}
+): string | undefined {
   const sent = { ...params, model: imageToVideoVariant(params.model), referenceAudios: undefined }
   const { prompt, negativePrompt } = validateGenerationParams(sent)
   const isModeIssue = (i: PromptIssue): boolean => i.code === 'not-reference-mode' || i.code === 'audio-not-supported'
-  if (prompt.some(isModeIssue)) return continuationReferencesMessage(sent.prompt, 'prompten')
+  const possible = !!opts.referencesPossible
+  if (prompt.some(isModeIssue)) return continuationReferencesMessage(sent.prompt, 'prompten', possible)
   if (negativePrompt.some(isModeIssue)) {
-    return continuationReferencesMessage(sent.negativePrompt ?? '', 'den negativa prompten')
+    return continuationReferencesMessage(sent.negativePrompt ?? '', 'den negativa prompten', possible)
   }
   return blockingPromptError(sent)
 }

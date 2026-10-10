@@ -15,7 +15,7 @@ import { readForm, type ToolContext } from './kit'
 import { learningsForGuide, registerLibraryTools } from './library'
 import { registerPaidTools } from './paid'
 import { registerReviewTools } from './review'
-import { continues, endsOnNext, loadClip, registerSequenceTools } from './sequences'
+import { asSent, continuationOf, continues, endsOnNext, loadClip, registerSequenceTools } from './sequences'
 import { registerStillTools } from './stills'
 import { boardNumbers, loadTransition, registerStoryboardTools } from './storyboards'
 import { registerUploadTools } from './uploads'
@@ -121,6 +121,19 @@ async function promptContext(ctx: ToolContext, segmentId: string | undefined, tr
       const notes = segment.notes?.trim()
         ? `\nThe clip's notes ("Vad händer"):\n"""${segment.notes.trim()}"""`
         : ''
+      // A continuation in reference mode is written with the references it carries; the frame goes after them.
+      const plan = continuing ? continuationOf(sequence, index) : undefined
+      if (plan?.mode === 'references') {
+        const sent = asSent(sequence, index)
+        const from = plan.carried?.inherited ? `carried from clip ${plan.carried.fromClip}` : 'its own'
+        const previous = sequence.segments[index - 1].params.prompt
+        const frame =
+          `It continues from clip ${index} in reference mode: the references below are ${from}, and clip ${index}'s ` +
+          `last frame is sent after them as @Image${plan.frameToken}. Studio puts "Start exactly on @Image${plan.frameToken} …" ` +
+          `in front of the prompt itself – don't write it. Use the tokens for the people and their voices and write only ` +
+          `what happens next. Clip ${index}'s prompt was:\n"""${previous}"""`
+        return `${head}\n${frame}\n${referenceContext(sent, assets, '- none')}${notes}${await learningLines(sent.model)}`
+      }
       if (continuing || ending || kindOfModelId(generated.model) === 'image-to-video') {
         const start = continuing
           ? `It starts on the last frame of clip ${index}, whose prompt was:\n"""${sequence.segments[index - 1].params.prompt}"""`

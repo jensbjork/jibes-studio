@@ -3,16 +3,18 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { kindOfModelId } from '@shared/models'
 import { generationTitle } from '@shared/generation-label'
+import { ratingLabel } from '@shared/rating'
 import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
-import type {
-  ExportSummary,
-  Generation,
-  GenerationReview,
-  Learning,
-  LearningInput,
-  Segment,
-  Sequence,
-  Storyboard
+import {
+  THUMBS_DOWN,
+  type ExportSummary,
+  type Generation,
+  type GenerationReview,
+  type Learning,
+  type LearningInput,
+  type Segment,
+  type Sequence,
+  type Storyboard
 } from '@shared/types'
 import * as db from '../../db'
 import { agentAuthor } from '../../reviews'
@@ -48,7 +50,7 @@ import {
 } from '../studio'
 import { READ_ONLY, WRITE, defineTool, priceValue, type LabeledAudio, type LabeledImage, type ToolContext } from './kit'
 import { isStoryboardId } from '../storyboard-rows'
-import { learningInfo, recipeInfo, reviewInfo, sourceFields, takeOf } from './library'
+import { learningInfo, minStarsInput, ratingInput, recipeInfo, reviewInfo, sourceFields, takeOf } from './library'
 import { continues, endsOnNext, isUsableTake, loadSequence, ownTake, selectedTake } from './sequences'
 import { boardNumbers, selectedTakeOf } from './storyboards'
 
@@ -86,7 +88,7 @@ const CLIP_CHECKLIST = [
   'Camera and light: shot size, angle and movement, light and mood as asked? (camera-good / camera-wrong, lighting-good / lighting-wrong)',
   'Motion and quality: natural movement, no warped hands or faces, no flicker or melting. (good-motion / bad-motion / artifacts)',
   "Sound (include_audio): does the voice match @AudioN's timbre and pacing, are spoken lines right? (voice-match / voice-mismatch)",
-  'Then add_review with an honest rating and tags, and save_learning for anything that would help the next prompt.'
+  'Then add_review with an honest grade (-1 = tumme ner, or 1–3 stars) and tags, and save_learning for anything that would help the next prompt.'
 ]
 
 /** Added to CLIP_CHECKLIST for a take of a storyboard transition. */
@@ -242,6 +244,9 @@ async function referenceMedia(
   }
   return { images, audio, missing }
 }
+
+/** A grade in the activity line: "tumme ner", "2 stjärnor". */
+const gradeText = (rating: number): string => ratingLabel(rating).toLocaleLowerCase('sv')
 
 /** The take's reviews and the user's rating, as the review tools show them. */
 async function reviewsOf(generationId: string): Promise<{ rating: number | null; reviews: Record<string, unknown>[] }> {
@@ -472,7 +477,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Review a generation',
       description:
-        "Look closely at what a finished generation – or the user's own clip, or a version made in Redigera – actually became, to learn how prompts translate into video: returns its prompt (and sent_prompt, the prompt as Venice got it with the descriptions of its referenced assets appended, when that differs; an own clip or a version has its source, title and recipe instead), settings, the reference token maps, price, the user's rating and every review so far, then `frames` frames evenly spaced from the first to the last (JPEG, 512 px wide, each captioned \"t = 2.4 s\"), followed by the reference images it was made from (include_references) so you can compare identity, outfit, pose and place – and with include_audio the clip's own sound (MP3, up to 30 s from audio_start) plus the reference voice windows (@AudioN), for clients that take audio. Afterwards record what you saw with add_review, and anything that generalises with save_learning. Free; changes nothing.",
+        "Look closely at what a finished generation – or the user's own clip, or a version made in Redigera – actually became, to learn how prompts translate into video: returns its prompt (and sent_prompt, the prompt as Venice got it with the descriptions of its referenced assets appended, when that differs; an own clip or a version has its source, title and recipe instead), settings, the reference token maps, price, the user's rating (-1 = tumme ner, 1–3 = stars) and every review so far, then `frames` frames evenly spaced from the first to the last (JPEG, 512 px wide, each captioned \"t = 2.4 s\"), followed by the reference images it was made from (include_references) so you can compare identity, outfit, pose and place – and with include_audio the clip's own sound (MP3, up to 30 s from audio_start) plus the reference voice windows (@AudioN), for clients that take audio. Afterwards record what you saw with add_review, and anything that generalises with save_learning. Free; changes nothing.",
       input: {
         generation_id: z.string(),
         frames: z.number().int().min(1).max(12).default(6).describe('How many frames, first to last. Default 6.'),
@@ -891,15 +896,15 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Add review',
       description:
-        "Records your review of a generation, under your name, next to the user's own rating and other agents' reviews (Studio shows them in the clip's details). Be honest and specific: rating 1–5 (5 = exactly what the prompt asked for), tags from the suggested vocabulary, and a note that says what worked and what didn't, naming tokens and moments (\"@Image2's outfit turned blue after t = 4 s; the dolly-in worked\"). Look first with review_generation. Each call adds a new review; to remove one (a review about the wrong generation, say), ask the user with request_delete. Free.",
+        "Records your review of a generation, under your name, next to the user's own rating and other agents' reviews (Studio shows them in the clip's details). Be honest and specific: a grade – rating -1 (tumme ner, thumbs down: the prompt wasn't followed, or it is unusable) or 1–3 stars (1 = usable with clear flaws, 2 = good with small flaws, 3 = exactly what the prompt asked for) – tags from the suggested vocabulary, and a note that says what worked and what didn't, naming tokens and moments (\"@Image2's outfit turned blue after t = 4 s; the dolly-in worked\"). Look first with review_generation. Each call adds a new review; to remove one (a review about the wrong generation, say), ask the user with request_delete. Free.",
       input: {
         generation_id: z.string(),
-        rating: z.number().int().min(1).max(5).optional().describe('1–5 stars.'),
+        rating: ratingInput.optional().describe('-1 = tumme ner (dålig), 1–3 = stjärnor'),
         tags: tagList.optional(),
         note: z.string().min(1).max(2000).describe('What you saw, in English or Swedish.')
       },
       annotations: WRITE,
-      summary: ({ rating }) => (rating ? `recenserade en generering (${rating} av 5)` : 'recenserade en generering')
+      summary: ({ rating }) => (rating ? `recenserade en generering (${gradeText(rating)})` : 'recenserade en generering')
     },
     async ({ generation_id, rating, tags, note }) => {
       const g = requireGeneration(generation_id)
@@ -911,7 +916,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
       )
       return {
         data: reviewInfo(review),
-        summary: `recenserade ${q(generationTitle(g, 40))}${rating ? ` (${rating} av 5)` : ''}`
+        summary: `recenserade ${q(generationTitle(g, 40))}${rating ? ` (${gradeText(rating)})` : ''}`
       }
     }
   )
@@ -923,25 +928,31 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List reviews',
       description:
-        "Reviews of generations, newest first: the user's own (author \"user\": their rating and note – the most important signal of what they like) and agents'. Filter by generation_id, by author, or by tag (e.g. \"identity-drift\" to see when characters drift). Each review outside a single generation comes with that generation's prompt and model, so you can see which prompts got which verdicts.",
+        "Reviews of generations, newest first: the user's own (author \"user\": their rating and note – the most important signal of what they like) and agents'. Filter by generation_id, by author, by tag (e.g. \"identity-drift\" to see when characters drift), or by grade (min_rating for stars, thumbs_down for tumme ner). Each review outside a single generation comes with that generation's prompt and model, so you can see which prompts got which verdicts.",
       input: {
         generation_id: z.string().optional(),
         author: z.string().optional().describe('"user" for the user\'s own reviews, or an agent\'s name.'),
         tag: z.string().optional(),
-        min_rating: z.number().int().min(1).max(5).optional(),
+        min_rating: minStarsInput
+          .optional()
+          .describe('Only reviews with at least this many stars (1–3); a tumme ner (-1) never passes.'),
+        thumbs_down: z.boolean().optional().describe('true: only reviews that gave tumme ner (thumbs down, -1).'),
         limit: z.number().int().min(1).max(100).default(20)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'läste recensionerna'
     },
-    async ({ generation_id, author, tag, min_rating, limit }) => {
+    async ({ generation_id, author, tag, min_rating, thumbs_down, limit }) => {
       requireLibrary()
       const scope = generation_id ? requireGeneration(generation_id).id : undefined
       const all = await callService<GenerationReview[]>('reviews:list', scope, author?.trim() ? { author: author.trim() } : {})
       const wantedTag = tag ? cleanTags([tag])[0] : undefined
       const list = all.filter(
         (r) =>
-          (!wantedTag || r.tags.some((t) => sameName(t, wantedTag))) && (!min_rating || (r.rating ?? 0) >= min_rating)
+          (!wantedTag || r.tags.some((t) => sameName(t, wantedTag))) &&
+          // Tumme ner is -1, below every star.
+          (!min_rating || (r.rating ?? 0) >= min_rating) &&
+          (!thumbs_down || r.rating === THUMBS_DOWN)
       )
       const generations = new Map<string, Generation | undefined>()
       const about = (id: string): Record<string, unknown> | undefined => {

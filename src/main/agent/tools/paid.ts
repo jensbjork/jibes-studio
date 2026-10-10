@@ -2,9 +2,10 @@ import { statSync } from 'node:fs'
 import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
+import { withContinuationFrame, type ContinuationPlan } from '@shared/continuation'
 import { paramsForSubmit } from '@shared/models'
 import type { ComposedPrompt } from '@shared/prompt-compose'
-import { canonicalizeParams } from '@shared/prompt-refs'
+import { blockingPromptError, canonicalizeParams } from '@shared/prompt-refs'
 import type {
   ApprovalImageReference,
   ApprovalRequest,
@@ -19,12 +20,19 @@ import type {
   StoryboardTransition
 } from '@shared/types'
 import * as db from '../../db'
-import { composeSubmission, prepareSubmission } from '../../jobs'
-import { missingClipProblem, type MissingClip, type SubmitGuard } from '../../sequences'
+import { composeSubmission, continuationLeadInFor, prepareSubmission } from '../../jobs'
+import {
+  composeTakePrompt,
+  continuationAt,
+  missingClipProblem,
+  takeParams,
+  type MissingClip,
+  type SubmitGuard
+} from '../../sequences'
 import * as store from '../../sequence-store'
 import { getImageSafeMode } from '../../settings'
 import { planStill } from '../../stills'
-import { ensureImagesExist } from '../../venice'
+import { ensureImagesExist, resolveReferenceAudios } from '../../venice'
 import { type MissingTransition } from '../../storyboards'
 import type { ApprovalPlan } from '../approvals'
 import { callService } from '../local-ipc'
@@ -32,7 +40,6 @@ import { boardImagePath, boardIndex, isStoryboardId, storyboardOfBoard, transiti
 import {
   AssetIndex,
   StillIndex,
-  asGenerated,
   blockingProblem,
   errorText,
   loadModels,
@@ -44,7 +51,18 @@ import {
 import { READ_ONLY, defineTool, priceValue, quote, readForm, usd, type ToolContext } from './kit'
 import { deleteApprovalInfo } from './delete'
 import { editApprovalInfo } from './editor-paid'
-import { assertNotRunning, continues, endsOnNext, isUsableTake, loadClip, loadSequence, selectedTake } from './sequences'
+import {
+  asSent,
+  assertNotRunning,
+  continuationOf,
+  continues,
+  endsOnNext,
+  isUsableTake,
+  loadClip,
+  loadSequence,
+  selectedTake,
+  sendProblem
+} from './sequences'
 import {
   assertStoryboardIdle,
   loadBoard,
@@ -102,13 +120,14 @@ const NO_LIBRARY_PROMPT: ComposedPrompt = {
 
 /**
  * The prompt a generation sends: the user's prompt with the References legend composed from the descriptions of
- * its references as they are in the database right now (as main composes it at submit). An approval holds on to
- * the text, so a description edited while the request waits – which would change what Venice gets – makes it
- * lapse.
+ * its references as they are in the database right now (as main composes it at submit) – for a sequence clip that
+ * continues in reference mode (`plan`) with the instruction to start on the previous clip's last frame in front. An
+ * approval holds on to the text, so a description edited while the request waits – which would change what Venice
+ * gets – makes it lapse.
  */
-function sentPromptOf(params: GenerationParams): ComposedPrompt {
+function sentPromptOf(params: GenerationParams, plan?: ContinuationPlan): ComposedPrompt {
   try {
-    return composeSubmission(paramsForSubmit(params))
+    return plan?.mode === 'references' ? composeTakePrompt(params, plan) : composeSubmission(paramsForSubmit(params))
   } catch {
     return NO_LIBRARY_PROMPT
   }
@@ -119,13 +138,16 @@ function composedFields(sent: ComposedPrompt): Pick<ApprovalPlan, 'composedPromp
   return sent.legend ? { composedPrompt: sent.prompt, descriptionLegend: sent.legend } : {}
 }
 
-/** Compares what a generation would send, independent of key order and of fields that don't matter. */
-function paramsKey(p: GenerationParams, silent?: SilentModels): string {
+/**
+ * Compares what a generation would send, independent of key order and of fields that don't matter. `plan`: a sequence
+ * clip continuing from the previous clip (how it is sent, and the frame's place among its references).
+ */
+function paramsKey(p: GenerationParams, silent?: SilentModels, plan?: ContinuationPlan): string {
   const s = paramsForSubmit(p)
   return JSON.stringify([
     s.model,
     // The prompt as sent: the user's text plus the descriptions of its references (minus those switched off).
-    sentPromptOf(s).prompt,
+    sentPromptOf(s, plan).prompt,
     s.negativePrompt ?? '',
     s.duration,
     s.resolution ?? '',
@@ -135,7 +157,9 @@ function paramsKey(p: GenerationParams, silent?: SilentModels): string {
     s.endImage ?? '',
     s.referenceImages ?? [],
     // The windows count: moving a voice's window changes what Venice hears.
-    (s.referenceAudios ?? []).map((a) => [a.path, a.start ?? 0, a.length ?? null])
+    (s.referenceAudios ?? []).map((a) => [a.path, a.start ?? 0, a.length ?? null]),
+    // A continuation: sent with its references and the frame after them, or exactly.
+    plan ? [plan.mode, plan.frameToken ?? null] : null
   ])
 }
 
@@ -153,11 +177,19 @@ interface Neighbours {
   nextFrame?: string
 }
 
-/** A clip as it would be generated: its params, and which neighbours it takes its start and end frames from. */
-function clipKey(params: GenerationParams, from: Neighbours, silent?: SilentModels): string {
-  const generated = asGenerated(params, !!from.previousId, !!from.nextId)
+/**
+ * A clip as it would be generated: what its take sends (`generated`: the params as sent, the references a continuation
+ * carries included; see asSent / takeParams), how a continuation is sent (`plan`), and which neighbours it takes its
+ * start and end frames from.
+ */
+function clipKey(
+  generated: GenerationParams,
+  plan: ContinuationPlan | undefined,
+  from: Neighbours,
+  silent?: SilentModels
+): string {
   return [
-    paramsKey(generated, silent),
+    paramsKey(generated, silent, plan),
     from.previousId ? `continues:${from.previousId}${from.previousFrame ? `:${from.previousFrame}` : ''}` : 'own',
     from.nextId ? `ends-on:${from.nextId}${from.nextFrame ? `:${from.nextFrame}` : ''}` : 'own-end'
   ].join('|')
@@ -195,13 +227,25 @@ function clipNeighbours(sequence: Sequence, index: number, pinned = false): Neig
   }
 }
 
-/** The same key for a clip as the database has it right now; undefined when the clip is gone. */
+/**
+ * The same key for a clip as the database has it right now (the references a continuation carries from the clips
+ * before it included); undefined when the clip is gone.
+ */
 function storedClipKey(segmentId: string, silent?: SilentModels, pinned = false): string | undefined {
   const row = store.getSegmentRow(segmentId)
   if (!row) return undefined
   const rows = store.listSegmentRows(row.sequence_id)
   const index = rows.findIndex((r) => r.id === row.id)
-  return clipKey(store.parseParams(row.params), rowNeighbours(rows, index, pinned), silent)
+  return clipKey(takeParams(rows, index), continuationAt(rows, index), rowNeighbours(rows, index, pinned), silent)
+}
+
+/** The prompt a clip's take would be sent with, as the database has the clip right now (see storedClipKey). */
+function storedSentPrompt(segmentId: string): string | undefined {
+  const row = store.getSegmentRow(segmentId)
+  if (!row) return undefined
+  const rows = store.listSegmentRows(row.sequence_id)
+  const index = rows.findIndex((r) => r.id === row.id)
+  return sentPromptOf(takeParams(rows, index), continuationAt(rows, index)).prompt
 }
 
 /**
@@ -502,8 +546,12 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const clip = index + 1
       const continuing = continues(sequence, index)
       const endFromNext = endsOnNext(sequence, index)
-      const generated = asGenerated(segment.params, continuing, endFromNext)
-      const problem = blockingProblem(generated, continuing, endFromNext)
+      // As the take will be sent: a continuation in reference mode with the references it carries (its own, or the
+      // clip's it continues from) – the previous clip's last frame goes after them.
+      const plan = continuationOf(sequence, index)
+      const references = plan?.mode === 'references'
+      const generated = asSent(sequence, index)
+      const problem = sendProblem(generated, continuing, endFromNext, plan)
       if (problem) throw new Error(`Klipp ${clip}: ${problem}`)
       if (continuing && !isUsableTake(selectedTake(sequence.segments[index - 1]))) {
         throw new Error(
@@ -517,42 +565,53 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       }
       // The frames from the neighbours are checked the way the take will use them (a model without an end image,
       // a frame that can't be read …), so the user isn't asked to pay for a take that would be refused.
+      let startFrame: string | undefined
       if (continuing || endFromNext) {
         const preview = await callService<SegmentFramePreview>('segments:previewFrames', segment.id)
         if (preview.problems.length) throw new Error(`Klipp ${clip}: ${preview.problems[0]}`)
+        startFrame = preview.start?.source === 'previous' ? preview.start.path : undefined
       }
       ensureImagesExist(paramsForSubmit(generated))
-      if (!continuing && !endFromNext) {
+      // In reference mode the frame goes along as the last reference image: checked (and its audio measured) with it.
+      const withFrame = references && startFrame ? withContinuationFrame(generated, startFrame) : undefined
+      if ((!continuing && !endFromNext) || withFrame) {
         // Its audio clips are measured like the take's submit will, so a bad window is refused before approval.
-        await prepareSubmission(generated).catch((err: unknown) => {
+        await prepareSubmission(withFrame ?? generated).catch((err: unknown) => {
           throw new Error(`Klipp ${clip}: ${errorText(err)}`)
         })
       }
       const [price, silent] = await Promise.all([quote(generated), silentModels()])
       // Pinned to the neighbours' takes and trims too: the dialog shows the frames they give now.
       const neighbours = clipNeighbours(sequence, index, true)
-      const key = clipKey(segment.params, neighbours, silent)
-      // The prompt as it will be sent, with the descriptions of its references as they are now (what the user sees).
-      const sent = sentPromptOf(generated)
+      const key = clipKey(generated, plan, neighbours, silent)
+      // The prompt as it will be sent, with the descriptions of its references as they are now (what the user sees),
+      // and in reference mode the instruction to start on the frame in front.
+      const sent = sentPromptOf(generated, plan)
       /** Why the clip as stored now isn't the one the user is shown, or undefined. */
       const changed = (): string | undefined => {
         const now = storedClipKey(segment.id, silent, true)
         if (!now) return 'Klippet finns inte längre.'
-        const params = db.followRewrites(segment.params, mark)
-        if (now === clipKey(params, neighbours, silent)) {
+        // What was asked for, with files renamed since followed to where they are (the carried references too).
+        const asked = db.followRewrites(generated, mark)
+        if (now === clipKey(asked, plan, neighbours, silent)) {
           // Both keys are built from today's descriptions; only the text kept from the request tells an edit apart.
-          const prompt = sentPromptOf(asGenerated(params, continuing, endFromNext)).prompt
-          return prompt === sent.prompt ? undefined : SENT_PROMPT_CHANGED
+          return storedSentPrompt(segment.id) === sent.prompt ? undefined : SENT_PROMPT_CHANGED
         }
         // The clip itself is as it was: a neighbour's other take or trim gives another frame.
         const same = { previousId: neighbours.previousId, nextId: neighbours.nextId }
-        if (storedClipKey(segment.id, silent) === clipKey(params, same, silent)) {
+        if (storedClipKey(segment.id, silent) === clipKey(asked, plan, same, silent)) {
           return `Bildrutan som klippet tar från ett grannklipp ${CHANGED}`
         }
         return `Klippet ${CHANGED}`
       }
       const guard: SubmitGuard = (id) => (id === segment.id ? changed() : 'Fel klipp.')
-      const shown = paramsForSubmit(generated)
+      // What the dialog shows. In reference mode the frame is the last reference image and the prompt starts with the
+      // instruction that names it, as Venice gets them.
+      const leadIn = references ? continuationLeadInFor(plan.frameToken) : ''
+      const shown =
+        withFrame && leadIn
+          ? { ...paramsForSubmit(withFrame), prompt: `${leadIn}\n\n${generated.prompt.trimEnd()}` }
+          : paramsForSubmit(generated)
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'segment',
         client: ctx.clientName(),
@@ -615,14 +674,31 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         const index = sequence.segments.findIndex((s) => s.id === segmentId)
         if (index < 0) throw new Error('Sekvensen ändrades just nu. Försök igen.')
         const neighbours = clipNeighbours(sequence, index)
-        const params = sequence.segments[index].params
-        const generated = asGenerated(params, !!neighbours.previousId, !!neighbours.nextId)
-        return { id: segmentId, clip: index + 1, params, generated, neighbours }
+        // As each take will be sent: a continuation in reference mode with the references it carries.
+        const plan = continuationOf(sequence, index)
+        const generated = asSent(sequence, index)
+        return { id: segmentId, clip: index + 1, generated, plan, neighbours }
       })
       for (const c of clips) ensureImagesExist(paramsForSubmit(c.generated))
       // Each clip's audio is measured like its take's submit will: a voice that was shortened on disk (or can't
       // be read) is refused before approval, not after the run has paid for the clips before it.
       for (const c of clips) {
+        if (c.plan?.mode === 'references') {
+          // A continuation in reference mode carries voices too; its frame comes from a take this run may make first,
+          // so the audio is measured and the prompt checked with the frame's place kept (as continuationProblem).
+          if (!c.generated.referenceAudios?.length) continue
+          const measured = await resolveReferenceAudios(paramsForSubmit(canonicalizeParams(c.generated))).catch(
+            (err: unknown) => {
+              throw new Error(`Klipp ${c.clip}: ${errorText(err)}`)
+            }
+          )
+          const late = blockingPromptError(
+            { ...measured, referenceImages: c.plan.carried?.images ?? [] },
+            { continuationFrame: true }
+          )
+          if (late) throw new Error(`Klipp ${c.clip}: ${late}`)
+          continue
+        }
         if (c.neighbours.previousId || c.neighbours.nextId) continue
         await prepareSubmission(c.generated).catch((err: unknown) => {
           throw new Error(`Klipp ${c.clip}: ${errorText(err)}`)
@@ -630,18 +706,19 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       }
       const [prices, silent] = await Promise.all([Promise.all(clips.map((c) => quote(c.generated))), silentModels()])
       const price = prices.every((p) => p !== undefined) ? prices.reduce<number>((sum, p) => sum + (p ?? 0), 0) : undefined
-      const keys = clips.map((c) => `${c.id}:${clipKey(c.params, c.neighbours, silent)}`)
+      const keys = clips.map((c) => `${c.id}:${clipKey(c.generated, c.plan, c.neighbours, silent)}`)
       const clipNumbers = clips.map((c) => c.clip)
-      // Each clip's prompt as it will be sent, with the descriptions of its references as they are now.
-      const composed = new Map(clips.map((c) => [c.id, sentPromptOf(c.generated)]))
+      // Each clip's prompt as it will be sent, with the descriptions of its references as they are now (and in reference
+      // mode the instruction to start on the previous clip's last frame).
+      const composed = new Map(clips.map((c) => [c.id, sentPromptOf(c.generated, c.plan)]))
       const sent = new Map([...composed].map(([id, c]) => [id, c.prompt]))
       const approved = new Map(clips.map((c) => [c.id, c]))
+      // What was approved, with files renamed since followed (the references a continuation carries too). A change to a
+      // clip a continuation carries its references from changes that continuation's key as well.
       const approvedKey = (c: (typeof clips)[number]): string =>
-        clipKey(db.followRewrites(c.params, mark), c.neighbours, silent)
+        clipKey(db.followRewrites(c.generated, mark), c.plan, c.neighbours, silent)
       /** The clip's prompt as it would be sent now differs from the one the user approved (a description changed). */
-      const promptChanged = (c: (typeof clips)[number]): boolean =>
-        sentPromptOf(asGenerated(db.followRewrites(c.params, mark), !!c.neighbours.previousId, !!c.neighbours.nextId))
-          .prompt !== sent.get(c.id)
+      const promptChanged = (c: (typeof clips)[number]): boolean => storedSentPrompt(c.id) !== sent.get(c.id)
       // The run reads the sequence as it goes; this keeps it to the clips, and the settings, the user approved.
       const guard: SubmitGuard = (segmentId) => {
         const c = approved.get(segmentId)

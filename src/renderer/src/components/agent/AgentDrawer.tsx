@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
+import { agentDisplayName } from '@shared/agent-name'
 import type { AgentStatus, ApprovalRequest } from '@shared/types'
 import { APPROVAL_TTL_MS, pendingApprovals, showApproval, useAgentState } from '../../lib/agent'
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import { CloseIcon } from '../sequences/icons'
+import { SETTINGS_SECTION, showSettingsSection } from '../settings/SettingsLayout'
 import {
   activityText,
   agentSummary,
   approvalTitle,
   approvalVerb,
+  clientDetail,
   expiresText,
   formatTime,
   thingsText,
@@ -43,8 +46,10 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
 
   if (!open) return null
 
+  // Straight to Agentanslutning, not the top of Inställningar.
   const openSettings = () => {
     onClose()
+    showSettingsSection(SETTINGS_SECTION.agent)
     navigate('settings')
   }
 
@@ -152,11 +157,11 @@ function StatusCard({
           {status.clients.length > 0 && (
             <ul className="mt-2 space-y-0.5 text-[12px]">
               {status.clients.map((c) => (
-                <li key={`${c.name}-${c.address}`} className="flex gap-2">
-                  <span className="min-w-0 flex-1 truncate">
-                    {c.name}
-                    {c.version ? <span className="text-muted"> {c.version}</span> : null}
-                    <span className="text-muted"> · {c.address}</span>
+                <li key={`${c.name}-${c.address}`} className="flex items-baseline gap-2">
+                  {/* The agent as the user knows it; how it connects (MCP, the client's own name) in small print. */}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{agentDisplayName(c.name)}</span>
+                    <span className="block truncate text-[11px] text-muted select-text">{clientDetail(c)}</span>
                   </span>
                   <span className="shrink-0 text-muted" title="Senast aktiv">
                     {formatTime(c.lastSeen)}
@@ -191,7 +196,7 @@ function PendingCard({ approval: a, now }: { approval: ApprovalRequest; now: num
   return (
     <div className="rounded-lg border border-accent/40 bg-accent/5 p-3">
       <p className="text-[12px]">
-        <span className="font-medium">{a.client}</span> {approvalVerb(a)}{' '}
+        <span className="font-medium">{agentDisplayName(a.client)}</span> {approvalVerb(a)}{' '}
         {removal ? thingsText(a.delete?.items.length ?? 0) : lowerFirst(approvalTitle(a, a.sequenceName))}
       </p>
       {removal && a.delete?.summary && (

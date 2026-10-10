@@ -10,6 +10,19 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Export och import** under Inställningar: the whole library – a consistent copy of the database and every file,
+  without caches, settings, the API key or the agent token – packed into one zip (streamed, Zip64, progress and
+  *Avbryt*), and such a zip imported in another Studio (also from the first screen on a new Mac): checked, unpacked
+  into a new folder and opened as the library, the previous one left where it is. Agents can't do either.
+- **Continuations keep their references** (*Startbild från föregående klipp*): a clip that continues from the
+  previous one is now sent in reference mode by default (*Med referensbilder*) – the reference photos and voices it
+  carries (its own, or those of the clip it continues from) plus the previous clip's last frame as one more
+  reference, with an instruction to start on it – so characters stay themselves across clips, also after leaving the
+  picture. *Exakt startbild* keeps the exact image-to-video start. When the references change in the clip they come
+  from, the clips that carry them keep their `@` tokens on the same pictures and voices. An older continuation, stored
+  without a format, takes that clip's format. Agents choose it with `continue_mode` on `add_segment` /
+  `update_segment`; `get_sequence` shows `carried_references`, and `request_generate_all` measures the carried voices
+  before it asks.
 - **One-command install**: `install.sh` checks the Mac, installs ffmpeg with Homebrew if needed, downloads the newest
   `Studio-mac-arm64.zip` from GitHub Releases into Applications and opens it. A release workflow builds the ZIP and a
   DMG on an Apple Silicon runner when a version tag is pushed.
@@ -304,6 +317,17 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- **Ratings are tumme ner or one to three stars** (was 1–5), for your own rating and agents' reviews: 👎 ★★★ on
+  cards, in the table and the drawer (click the set grade to clear it; arrow keys, 1–3, − and Delete work too). The
+  *Betyg* filter offers ★★★, ★★ eller mer, ★ eller mer, *Tumme ner* and *Ej betygsatt*; sorting by rating puts tumme
+  ner after one star. The library database is migrated to version 13, which converts existing ratings (1–2 → tumme
+  ner, 3 → ★, 4 → ★★, 5 → ★★★) and adds the clips' continuation mode. Agents: `add_review` takes `rating` -1 or 1–3;
+  `list_generations` and `list_reviews` take `min_rating` 1–3 and a new `thumbs_down`.
+- **A tidier sidebar bottom and Inställningar**: Pågår och klart and the agent connection are two slim status rows
+  above a divider, with Inställningar last; Inställningar is split into sections (Venice, Generering, Bibliotek,
+  Export och import, Agentanslutning, Verktyg, Om Studio) with a navigation that follows the scroll; an agent whose
+  MCP client only calls itself "mcp" is shown as *Agenten* in the log, the dialogs, notifications, reviews and Pågår
+  och klart.
 - The library database is migrated to version 12: `unseen` (finished work you haven't looked at; empty at first, so
   an existing library starts with everything seen), `take_trims` (each take's own trims) and an `origin` on asset
   photos and sound clips. From this version `Produkter` belongs to the library; an older library whose base folder
@@ -402,6 +426,7 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Fixed
 
+- The agent's presence pill no longer re-renders in a loop while an agent works.
 - A picture that failed after its *Skapa bild…* dialog was closed is no longer lost: it shows in *Pågår och klart*
   and on its board.
 - A free render in Redigera now shows the edit as running.

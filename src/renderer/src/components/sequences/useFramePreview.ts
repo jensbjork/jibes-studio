@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Segment, SegmentFramePreview, Sequence } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
-import { selectedTake, stableJson } from './sequenceUtils'
+import { effectiveParams, selectedTake, stableJson } from './sequenceUtils'
 
 export interface FramePreviewState {
   /** The last answer; kept while a newer one loads so the pictures don't flicker. */
@@ -56,7 +56,8 @@ function neighbourKey(s: Segment | undefined, trim: number | undefined): unknown
 
 /**
  * Everything the preview of a segment's start and end frames depends on: its flags and params (the problems
- * include what is wrong with the prompt too), and the selected take and trim of the neighbour each automatic
+ * include what is wrong with the prompt too – for a continuation in reference mode against the references it carries
+ * from the clips before, so those count as well), and the selected take and trim of the neighbour each automatic
  * frame comes from. Clip numbers appear in the problems' wording, so the position counts as well.
  */
 export function framePreviewKey(sequence: Sequence, index: number): string {
@@ -67,8 +68,10 @@ export function framePreviewKey(sequence: Sequence, index: number): string {
   return stableJson([
     index,
     s.continueFromPrevious,
+    s.continueMode,
     s.endFromNext,
     s.params,
+    s.continueFromPrevious ? effectiveParams(s, index, sequence) : null,
     s.continueFromPrevious ? neighbourKey(previous, previous?.trimEnd) : null,
     s.endFromNext ? neighbourKey(next, next?.trimStart) : null
   ])

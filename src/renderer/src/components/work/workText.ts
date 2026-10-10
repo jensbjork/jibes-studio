@@ -1,4 +1,5 @@
 import type { FinishedWork, RunningWork, WorkCounts, WorkView } from '@shared/types'
+import { agentInSentence } from '../agent/agentText'
 
 // Swedish wording of Pågår och klart: the tooltips of sidebar rows and list rows, the accessible labels of the
 // marks, and the phase, estimate and time lines of the panel. Main writes the labels and phases themselves.
@@ -173,14 +174,14 @@ export function runningMeta(w: RunningWork, now: number): string {
   const eta = etaText(w, now)
   // "Snart klar" from main already says it.
   if (eta && !(eta === 'Snart klar' && w.detail === 'Snart klar')) parts.push(eta)
-  if (w.via) parts.push(`via ${w.via}`)
+  if (w.via) parts.push(`via ${agentInSentence(w.via)}`)
   return parts.join(' · ')
 }
 
 /** "Klar 14:32", "Exporterad 13:58", "Misslyckades 14:30 – {fel}". */
 export function finishedMeta(w: FinishedWork, now = Date.now()): string {
   const at = timeOfDay(w.finishedAt, now)
-  const via = w.via ? ` · via ${w.via}` : ''
+  const via = w.via ? ` · via ${agentInSentence(w.via)}` : ''
   if (w.status === 'failed') return `Misslyckades ${at}${w.error ? ` – ${w.error}` : ''}${via}`
   return `${w.kind === 'export' ? 'Exporterad' : 'Klar'} ${at}${via}`
 }
