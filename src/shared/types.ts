@@ -146,7 +146,7 @@ export interface Generation {
    * an edit started from): the take list's "Ta bort" then only takes it off the clip, and that is what main does.
    */
   keptByEdit?: boolean
-  /** The user's own rating (1–5 stars), if they have rated it. */
+  /** The user's own rating (a RatingValue: -1 = tumme ner, 1–3 stjärnor), if they have rated it. */
   rating?: number
   /** Reviews recorded for it: the user's (when it has a rating, note or tags) and agents'. */
   reviewCount: number
@@ -157,6 +157,15 @@ export interface Generation {
 // ── Reviews and learnings ────────────────────────────────────────────────────
 
 /**
+ * Every grade in Studio (the user's rating, an agent's review): tumme ner, or one to three stars. Stored as these
+ * numbers; migration 13 turned the old 1–5 stars into them (1–2 → -1, 3 → 1, 4 → 2, 5 → 3).
+ */
+export type RatingValue = -1 | 1 | 2 | 3
+export const THUMBS_DOWN = -1
+export const RATING_VALUES: readonly RatingValue[] = [-1, 1, 2, 3]
+export const MAX_STARS = 3
+
+/**
  * What someone thought of a generation: the user's own (author 'user', at most one per generation) or an
  * agent's (author = the MCP client's name, any number).
  */
@@ -165,7 +174,7 @@ export interface GenerationReview {
   generationId: string
   /** 'user', or the agent's name. */
   author: string
-  /** 1–5 stars. */
+  /** A RatingValue: -1 = tumme ner, 1–3 stjärnor. */
   rating?: number
   /** E.g. "prompt-followed", "identity-drift" (see the suggested vocabulary in the agent guide). */
   tags: string[]
@@ -563,6 +572,13 @@ export interface Segment {
   /** Use the previous segment's (trimmed) last frame as this segment's start image. Never set on the first clip. */
   continueFromPrevious: boolean
   /**
+   * How a continuing clip starts on that frame (only meaningful with continueFromPrevious):
+   * 'references' (default) – sent in reference mode with the carried reference images and voices plus the last frame
+   * as one more reference the composed prompt says to start on; 'exact' – image-to-video from the frame itself
+   * (exact first frame, no references), as before.
+   */
+  continueMode: ContinueMode
+  /**
    * "Slutbild från nästa klipp": use the next segment's first displayed frame (its selected take at its
    * trimStart) as this segment's end image. Never set on the last clip. Together with continueFromPrevious the
    * clip is regenerated "between its neighbours", which stay untouched.
@@ -609,6 +625,9 @@ export interface SequenceSummary {
   updatedAt: number
 }
 
+/** See Segment.continueMode. */
+export type ContinueMode = 'references' | 'exact'
+
 export interface SegmentInit {
   /** Insert after this segment; default is at the end. */
   afterSegmentId?: string
@@ -620,6 +639,7 @@ export interface SegmentInit {
   /** Use an existing generation as the first (selected) take; its params seed the segment. */
   fromGenerationId?: string
   continueFromPrevious?: boolean
+  continueMode?: ContinueMode
   /** Refused for a clip added at the end (it has no next clip). */
   endFromNext?: boolean
   notes?: string
@@ -628,6 +648,7 @@ export interface SegmentInit {
 export interface SegmentPatch {
   params?: GenerationParams
   continueFromPrevious?: boolean
+  continueMode?: ContinueMode
   /** Refused for the last clip. Turning it on switches the clip to an image-to-video model that takes an end image. */
   endFromNext?: boolean
   notes?: string
@@ -2327,6 +2348,44 @@ export interface StudioApi {
   pickImages(multiple: boolean): Promise<string[]>
   /** File dialog for audio files; [] when cancelled. */
   pickAudio(multiple: boolean): Promise<string[]>
+
+  // ── Export and import of the whole library (Inställningar) ──
+  /**
+   * Packs the open library – database snapshot and every file Studio keeps (no settings, API key or agent token) –
+   * into one zip the user chooses with a save dialog. Resolves null when the dialog is cancelled. Refused (Swedish
+   * error) while something runs that writes to the library.
+   */
+  exportLibraryArchive(): Promise<ArchiveResult | null>
+  /**
+   * Opens a zip made by exportLibraryArchive: the user picks the zip and an empty folder (or a new one), Studio
+   * unpacks it there, checks it, and opens it as the library (the library open before is left as it was). Resolves
+   * null when a dialog is cancelled.
+   */
+  importLibraryArchive(): Promise<ArchiveResult | null>
+  /** Stops a running export or import; partial files are removed. */
+  cancelLibraryArchive(): Promise<void>
+  onArchiveProgress(cb: (p: ArchiveProgress) => void): () => void
   /** Absolute path of a file dropped onto the window. */
   pathForFile(file: File): string
+}
+
+// ── Library archive (export / import) ────────────────────────────────────────
+
+export interface ArchiveProgress {
+  kind: 'export' | 'import'
+  phase: 'preparing' | 'packing' | 'unpacking' | 'checking' | 'opening' | 'done' | 'failed' | 'cancelled'
+  /** Bytes handled so far and in all, when known. */
+  done?: number
+  total?: number
+  /** Swedish, for the progress line or the error. */
+  message?: string
+}
+
+export interface ArchiveResult {
+  /** The zip written (export) or the folder the library was unpacked into (import). */
+  path: string
+  /** Bytes of the zip. */
+  bytes: number
+  /** What it holds, for the confirmation line. */
+  counts: { generations: number; assets: number; sequences: number; edits: number }
 }

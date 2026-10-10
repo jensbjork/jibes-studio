@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { agentDisplayName } from '@shared/agent-name'
 import { KINDS, kindOfModelId, paramsForSubmit } from '@shared/models'
 import { composeOptionsFor, composePrompt, describedAssets, type ComposedPrompt } from '@shared/prompt-compose'
 import { canonicalizeParams } from '@shared/prompt-refs'
@@ -39,7 +40,15 @@ import {
 } from '../pickers/audioRefs'
 import Modal from '../pickers/Modal'
 import { effectiveParams, needsTake, parseConsent, pendingTake } from '../sequences/sequenceUtils'
-import { approvalHeading, approvalOutcome, approvalTitle, approveLabel, expiresText, slotName } from './agentText'
+import {
+  agentInSentence,
+  approvalHeading,
+  approvalOutcome,
+  approvalTitle,
+  approveLabel,
+  expiresText,
+  slotName
+} from './agentText'
 import { DeleteSummary, useDeleteCheck } from './DeleteApproval'
 import { EditSummary, ResumeSummary, VoiceDesignSummary, useEditApproval } from './EditApproval'
 import PromptText, { type TokenTarget } from './PromptText'
@@ -524,7 +533,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
 
   return (
     <Modal
-      title={`${a.client} ${approvalHeading(a)}`}
+      title={`${agentDisplayName(a.client)} ${approvalHeading(a)}`}
       subtitle={subtitle}
       onClose={close}
       footer={footer}
@@ -545,7 +554,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
 
         {a.note && (
           <div className="rounded-md border border-line bg-raised/60 px-3 py-2.5">
-            <p className="mb-1 text-[11px] text-muted">{a.client} skriver:</p>
+            <p className="mb-1 text-[11px] text-muted">{agentDisplayName(a.client)} skriver:</p>
             <p className="whitespace-pre-wrap leading-relaxed select-text">{a.note}</p>
           </div>
         )}
@@ -652,7 +661,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         {/* A removal says what changed at the top of its list (DeleteSummary). */}
         {blocking && removal === undefined && (
           <p className="text-[12px] text-accent">
-            {cannot} som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {a.client}{' '}
+            {cannot} som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {agentInSentence(a.client)}{' '}
             {askAgain ? 'fråga igen' : 'rätta det'}, eller avböj.
           </p>
         )}
@@ -792,12 +801,20 @@ function endsAtClip(segment: Segment, index: number, count: number): number | un
   return segment.endFromNext && index < count - 1 ? index + 2 : undefined
 }
 
-function segmentClip(segment: Segment, index: number, count: number): Clip {
+function segmentClip(segment: Segment, index: number, sequence: Sequence): Clip {
+  const count = sequence.segments.length
   const continuing = segment.continueFromPrevious && index > 0
   const endsAt = endsAtClip(segment, index, count)
   // The last clip has no next one to end on, so main generates it as it is (its model, its references).
   const own = endsAt === undefined && segment.endFromNext ? { ...segment, endFromNext: false } : segment
-  return clipOf(segment.id, effectiveParams(own, index), `Klipp ${index + 1}`, continuing ? index : undefined, endsAt)
+  // With the sequence, a continuation shows as main sends it: in reference mode with the references it carries.
+  return clipOf(
+    segment.id,
+    effectiveParams(own, index, sequence),
+    `Klipp ${index + 1}`,
+    continuing ? index : undefined,
+    endsAt
+  )
 }
 
 /** The clips a request would generate, in order (none for an image request, an edit, a voice or a removal). */
@@ -813,14 +830,14 @@ function clipsOf(a: ApprovalRequest, sequence: Sequence | undefined): Clip[] {
     const endsAt = hit ? endsAtClip(hit.segment, hit.index, count) : undefined
     // Main submits exactly the settings in the request (and refuses if the clip has changed since).
     if (a.params) return [clipOf(a.id, a.params, number ? `Klipp ${number}` : undefined, continuesFrom, endsAt)]
-    return hit ? [segmentClip(hit.segment, hit.index, count)] : []
+    return hit && sequence ? [segmentClip(hit.segment, hit.index, sequence)] : []
   }
   if (!sequence) return []
   const ids = a.segmentIds
   const chosen = ids?.length
     ? indexed.filter(({ segment }) => ids.includes(segment.id))
     : indexed.filter(({ segment }) => needsTake(segment) && !pendingTake(segment))
-  return chosen.map(({ segment, index }) => segmentClip(segment, index, count))
+  return chosen.map(({ segment, index }) => segmentClip(segment, index, sequence))
 }
 
 function ClipSummary({

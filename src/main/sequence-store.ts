@@ -4,11 +4,20 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readdir, rm, rmdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
+import { continueModeOf, isContinueMode, type ChainClip } from '@shared/continuation'
 import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios } from '@shared/models'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import { generationSource, isVeniceGeneration } from '@shared/generation-label'
-import { isExtractedFirstFrame, isExtractedFrame } from '@shared/seams'
-import type { Generation, GenerationParams, Segment, Sequence, SequenceKind, SequenceSummary } from '@shared/types'
+import { continuationFrameOf, isExtractedFirstFrame } from '@shared/seams'
+import type {
+  ContinueMode,
+  Generation,
+  GenerationParams,
+  Segment,
+  Sequence,
+  SequenceKind,
+  SequenceSummary
+} from '@shared/types'
 import * as db from './db'
 import { toPublic } from './jobs'
 import { attachKeptByEdit } from './edit-store'
@@ -57,6 +66,11 @@ export interface SegmentRow {
   continue_from_previous: number
   /** 1: the clip's end image is the next clip's first frame (never on the last clip). */
   end_from_next: number
+  /**
+   * How a continuing clip starts on the previous clip's last frame: 'references' (the default) or 'exact' (see
+   * Segment.continueMode). Absent before schema 13 (read as 'references').
+   */
+  continue_mode?: string | null
   notes: string
   selected_generation_id: string | null
   trim_start: number
@@ -190,6 +204,28 @@ export function renumberSegments(orderedIds: string[]): void {
 /** Notes as stored: any string (the user's text, kept exactly as typed); anything else is none. */
 export function cleanNotes(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+/** The row's continue mode (see Segment.continueMode); 'references' unless it says 'exact'. */
+export function continueModeOfRow(row: Pick<SegmentRow, 'continue_mode'>): ContinueMode {
+  return continueModeOf(row.continue_mode)
+}
+
+/** A continue mode from the window or an agent, or a Swedish refusal; undefined stays undefined (no change). */
+export function cleanContinueMode(value: unknown): ContinueMode | undefined {
+  if (value === undefined) return undefined
+  if (isContinueMode(value)) return value
+  throw new Error('Okänt sätt att fortsätta: välj ”Med referensbilder” (references) eller ”Exakt startbild” (exact).')
+}
+
+/** A segment row as the shared continuation rules read it (continuation.ts). */
+export function chainClip(row: SegmentRow): ChainClip {
+  return {
+    params: parseParams(row.params),
+    continueFromPrevious: !!row.continue_from_previous,
+    endFromNext: !!row.end_from_next,
+    continueMode: continueModeOfRow(row)
+  }
 }
 
 // ── Params ───────────────────────────────────────────────────────────────────
@@ -353,7 +389,11 @@ export function clampTrims(
 export function seamTrims(row: SegmentRow, take: Generation): { trimStart: number; trimEnd: number } {
   const start = take.params.startImage
   const end = take.params.endImage
-  const startMet = row.continue_from_previous ? isExtractedFrame(start) : !!start && isOwnFrameStill(row.id, start)
+  // A take made from the previous clip's last frame, sent either way (its start image, or in reference mode its last
+  // reference image: it starts close to that frame).
+  const startMet = row.continue_from_previous
+    ? !!continuationFrameOf(take.params)
+    : !!start && isOwnFrameStill(row.id, start)
   const endMet = !!row.end_from_next && isExtractedFirstFrame(end)
   return { trimStart: startMet ? 0 : row.trim_start, trimEnd: endMet ? 0 : row.trim_end }
 }
@@ -452,6 +492,7 @@ function toSegment(row: SegmentRow, takes: Generation[]): Segment {
     position: row.position,
     params: parseParams(row.params),
     continueFromPrevious: !!row.continue_from_previous,
+    continueMode: continueModeOfRow(row),
     endFromNext: !!row.end_from_next,
     notes: row.notes ?? '',
     selectedGenerationId: row.selected_generation_id ?? undefined,
@@ -484,7 +525,7 @@ export function loadSequence(id: string, run: RunInfo): Sequence {
     }
     return toSegment(r, takes)
   })
-  // The user's stars and the review count, like the feed shows them (one query for every take).
+  // The user's grade and the review count, like the feed shows them (one query for every take).
   attachReviewSummary(segments.flatMap((s) => s.takes))
   // Which takes Redigera keeps, so the take list offers "Ta bort" (off the clip) rather than "Radera" for them.
   attachKeptByEdit(segments.flatMap((s) => s.takes))

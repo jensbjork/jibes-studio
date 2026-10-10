@@ -1,7 +1,8 @@
 // The review loop: what the user and their agents thought of generations, the learnings distilled from that, and
 // the exported films agents review like clips.
 //
-// The user has at most one review per generation (stars, note and tags, edited in place; removed once empty).
+// The user has at most one review per generation (a grade, note and tags, edited in place; removed once empty). A
+// grade is tumme ner (-1) or one to three stars (RatingValue), the same for the user and for agents.
 // Agents add as many as they like, each under its own name, and can never write as the user. Learnings are short
 // insights about prompting with the generations they rest on as evidence; agents read them before writing new
 // prompts. Every change is broadcast ('review:change' with the generation id, 'learnings:change'), also when an
@@ -11,7 +12,8 @@ import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { titleFromBody } from '@shared/prompts'
-import type { ExportSummary, GenerationReview, Learning, LearningInput } from '@shared/types'
+import { isRatingValue } from '@shared/rating'
+import type { ExportSummary, GenerationReview, Learning, LearningInput, RatingValue } from '@shared/types'
 import { isAgentCall } from './agent/local-ipc'
 import { getDb, isDbOpen } from './db'
 import { probe } from './ffmpeg'
@@ -104,12 +106,12 @@ function cleanTags(tags: unknown): string[] {
   return result
 }
 
-/** undefined: leave as it is. null: clear it. Otherwise a whole number of stars, 1–5. */
-function parseRating(value: unknown): number | null | undefined {
+/** undefined: leave as it is. null: clear it. Otherwise a grade: -1 (tumme ner), 1, 2 or 3 (stars). */
+function parseRating(value: unknown): RatingValue | null | undefined {
   if (value === undefined) return undefined
   if (value === null) return null
-  if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5) return value
-  throw new Error('Betyget ska vara ett heltal från 1 till 5.')
+  if (isRatingValue(value)) return value
+  throw new Error('Betyget ska vara -1 (tumme ner) eller 1, 2 eller 3 stjärnor.')
 }
 
 /** Line breaks are kept: a note can be a few paragraphs. */
@@ -217,7 +219,7 @@ export function getUserReview(generationId: string): GenerationReview | undefine
 }
 
 export interface UserReviewInput {
-  /** null clears the stars; left out keeps them. */
+  /** A grade (-1 = tumme ner, 1–3 stars); null clears it; left out keeps it. */
   rating?: number | null
   /** '' clears it; left out keeps it. */
   note?: string
@@ -227,7 +229,7 @@ export interface UserReviewInput {
 
 /**
  * Sets the user's own review of a generation: the fields given replace the current ones, the others stay. When
- * nothing is left (no stars, note or tags) the review is removed and null comes back.
+ * nothing is left (no grade, note or tags) the review is removed and null comes back.
  */
 export function setUserReview(generationId: string, input: UserReviewInput): GenerationReview | null {
   const id = requireGeneration(generationId)
@@ -280,12 +282,13 @@ export function setUserReview(generationId: string, input: UserReviewInput): Gen
 }
 
 export interface AgentReviewInput {
+  /** A grade: -1 = tumme ner, 1–3 stars. */
   rating?: number | null
   tags?: string[]
   note?: string
 }
 
-/** Adds a review by an agent, under its client name (see agentAuthor). It needs stars, tags or a note. */
+/** Adds a review by an agent, under its client name (see agentAuthor). It needs a grade, tags or a note. */
 export function addReview(generationId: string, agent: string, input: AgentReviewInput): GenerationReview {
   const id = requireGeneration(generationId)
   const fields: AgentReviewInput = input && typeof input === 'object' ? input : {}
@@ -322,10 +325,10 @@ export function deleteReview(reviewId: string, opts: { agent?: string } = {}): v
 }
 
 /**
- * Fills in `rating` (the user's stars), `reviewCount` (the user's review plus agents') and `agentReviewCount` (the
- * agents' alone) on generations, in place, with one query however many there are; returns the same array.
- * Generations without reviews get 0 and no rating. The agents' count is separate because the user's own review
- * may be only a note or tags (no stars), so the count can't be told apart from the rating.
+ * Fills in `rating` (the user's grade: -1 = tumme ner, 1–3 stars), `reviewCount` (the user's review plus agents')
+ * and `agentReviewCount` (the agents' alone) on generations, in place, with one query however many there are;
+ * returns the same array. Generations without reviews get 0 and no rating. The agents' count is separate because
+ * the user's own review may be only a note or tags (no grade), so the count can't be told apart from the rating.
  * Never throws: without a library, or if the query fails, the counts stay as they were (0 from the database row).
  */
 export function attachReviewSummary<

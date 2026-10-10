@@ -1,9 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState } from 'react'
+import { agentDisplayName } from '@shared/agent-name'
 import type { AgentStatus } from '@shared/types'
 import { refreshAgentStatus, restartAgent, setAgentEnabled, setAgentPort, useAgentState } from '../../lib/agent'
 import { ipcErrorMessage } from '../../lib/hooks'
 import ConfirmButton from '../sequences/ConfirmButton'
-import { formatTime } from './agentText'
+import { MoreAbout, SettingsItem } from '../settings/SettingsLayout'
+import Switch from '../settings/Switch'
+import { clientDetail, formatTime } from './agentText'
 import CopyButton from './CopyButton'
 
 const MASK = '•'.repeat(28)
@@ -77,9 +80,12 @@ function hermesConfig(url: string, token: string): string {
   ].join('\n')
 }
 
+type SnippetId = 'openclaw' | 'hermes'
+
 /**
- * Settings → Agentanslutning: the MCP server the user's own agents (e.g. OpenClaw, Hermes Agent) connect to.
- * Off by default; reachable only from this Mac and the tailnet, and only with the token shown here.
+ * Inställningar → Agentanslutning (the section's heading and one-line description are SettingsView's): the MCP
+ * server the user's own agents (e.g. OpenClaw, Hermes Agent) connect to. Off by default; reachable only from this
+ * Mac and the tailnet, and only with the token shown here.
  */
 export default function AgentSettingsSection() {
   const { status, statusError } = useAgentState()
@@ -89,6 +95,8 @@ export default function AgentSettingsSection() {
   const [revealed, setRevealed] = useState(false)
   const [tokenNotice, setTokenNotice] = useState<string>()
   const [endpointId, setEndpointId] = useState<EndpointId>()
+  const [snippet, setSnippet] = useState<SnippetId>('openclaw')
+  const switchLabel = useId()
 
   // Fresh status when Settings opens: Tailscale may have been started or stopped since.
   useEffect(() => {
@@ -141,165 +149,191 @@ export default function AgentSettingsSection() {
   const withToken = (build: (url: string, token: string) => string) => async () =>
     build(endpoint!.url, await loadToken())
 
-  return (
-    <section className="mb-8">
-      <h2 className="mb-1 font-medium">Agentanslutning</h2>
-      <p className="mb-3 text-muted">
-        Låt dina egna AI-agenter – till exempel OpenClaw eller Hermes Agent – arbeta i Studio via MCP. De kan göra
-        nästan allt du kan: skapa karaktärer, produkter och andra tillgångar, lägga till bilder och ljud, skriva
-        prompter och bygga sekvenser och storyboards. Det som kostar pengar och allt som tar bort något gör de aldrig på
-        egen hand: varje sådan begäran väntar på ditt OK här i Studio.
-      </p>
+  if (!status) {
+    return <p className={statusError ? 'text-accent' : 'text-muted'}>{statusError ?? 'Läser av anslutningen…'}</p>
+  }
 
-      {!status ? (
-        <p className={statusError ? 'text-accent' : 'text-muted'}>{statusError ?? 'Läser av anslutningen…'}</p>
-      ) : (
-        <>
-          <div className="rounded-lg border border-line bg-raised/40 p-3">
-            <div className="flex items-start gap-3">
-              <Switch on={status.enabled} disabled={busy} onChange={(on) => void run(() => setAgentEnabled(on))} />
-              <span className="min-w-0">
-                <span className="block">Tillåt agenter att ansluta</span>
-                <span className="mt-0.5 block text-[11px] leading-snug text-muted">
-                  Av som standard. När den är på nås Studio bara från den här Macen och från datorer i ditt tailnet
-                  (Tailscale) – och bara med token nedan.
-                </span>
+  return (
+    <>
+      <div>
+        <div className="rounded-lg border border-line bg-raised/40 p-3">
+          <div className="flex items-start gap-3">
+            <Switch
+              on={status.enabled}
+              disabled={busy}
+              onChange={(on) => void run(() => setAgentEnabled(on))}
+              labelledBy={switchLabel}
+            />
+            <span className="min-w-0">
+              <span id={switchLabel} className="block">
+                Tillåt agenter att ansluta
               </span>
-            </div>
-            {status.enabled && <StatusLines status={status} busy={busy} onRestart={restart} />}
+              <span className="mt-0.5 block text-[12px] leading-snug text-muted">
+                Av som standard. När den är på nås Studio bara från den här Macen och från datorer i ditt tailnet
+                (Tailscale) – och bara med token nedan.
+              </span>
+            </span>
+          </div>
+          {status.enabled && <StatusLines status={status} busy={busy} onRestart={restart} />}
+        </div>
+        {error && <p className="mt-2 text-[12px] text-accent select-text">{error}</p>}
+        <div className="mt-3">
+          <MoreAbout summary="Mer om vad agenter kan göra">
+            <p>
+              En ansluten agent kan göra nästan allt du kan: skapa karaktärer, produkter och andra tillgångar, lägga
+              till bilder och ljud, skriva prompter och bygga sekvenser och storyboards.
+            </p>
+            <p>
+              Det som kostar pengar och allt som tar bort något gör den aldrig på egen hand: varje sådan begäran
+              väntar på ditt OK här i Studio.
+            </p>
+            <p>
+              MCP är sättet agenten ansluter på. Studio visar agentens namn i loggen och när den ber om lov – eller
+              ”Agenten” när klienten bara kallar sig något allmänt, som ”mcp”.
+            </p>
+          </MoreAbout>
+        </div>
+      </div>
+
+      <SettingsItem title="Token" help="Agenten skickar den som ”Authorization: Bearer …”. Dela den inte med någon annan.">
+        <div className="flex items-center gap-2">
+          <code className={`min-w-0 flex-1 truncate ${code}`}>{revealed && token ? token : MASK}</code>
+          <button onClick={toggleReveal} disabled={busy} className={secondary}>
+            {revealed ? 'Dölj' : 'Visa'}
+          </button>
+          <CopyButton text={loadToken} title="Kopiera token" className={secondary} />
+        </div>
+        <div className="mt-1.5">
+          <ConfirmButton
+            question="Byta token? Anslutna agenter behöver den nya."
+            confirmLabel="Byt"
+            onConfirm={regenerate}
+            disabled={busy}
+            className="text-[11px] text-muted underline-offset-2 hover:text-text hover:underline disabled:opacity-40"
+          >
+            Byt token…
+          </ConfirmButton>
+        </div>
+        {tokenNotice && <p className="mt-1.5 text-[12px] text-amber-300">{tokenNotice}</p>}
+      </SettingsItem>
+
+      <SettingsItem title="Adresser" help="Där agenten når Studio. Välj den som passar var agenten körs.">
+        <ul className="space-y-2.5">
+          {endpoints.map((e) => (
+            <li key={e.id}>
+              <div className="flex items-center gap-2">
+                <code className={`min-w-0 flex-1 truncate ${code}`} title={e.url}>
+                  {e.url}
+                </code>
+                <CopyButton text={e.url} className={secondary} />
+              </div>
+              <p className="mt-0.5 text-[11px] text-muted">
+                <span className="text-text">{e.label}</span> – {e.hint}
+              </p>
+            </li>
+          ))}
+        </ul>
+        {!status.tailscaleAddress &&
+          (status.enabled && status.running ? (
+            <p className="mt-2 text-[12px] leading-relaxed text-amber-300">
+              Tailscale är inte igång på den här Macen, så agenter på andra datorer kan inte nå Studio. Starta
+              Tailscale och tryck på Sök igen ovan.
+            </p>
+          ) : (
+            !status.enabled && (
+              <p className="mt-2 text-[11px] text-muted">
+                Tailscale-adressen, som agenter på andra datorer behöver, visas när anslutningen är på.
+              </p>
+            )
+          ))}
+      </SettingsItem>
+
+      {endpoint && (
+        <SettingsItem
+          title="Konfiguration för agenten"
+          help="Klistra in i agentens inställningar. Kopiera tar med den riktiga token."
+        >
+          <div className="mb-2.5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px]">
+            <Segmented
+              label="Agent"
+              options={[
+                { id: 'openclaw', label: 'OpenClaw' },
+                { id: 'hermes', label: 'Hermes' }
+              ]}
+              value={snippet}
+              onChange={setSnippet}
+            />
+            {endpoints.length > 1 && (
+              <Segmented
+                label="Adress"
+                options={endpoints.map((e) => ({ id: e.id, label: e.label }))}
+                value={endpoint.id}
+                onChange={setEndpointId}
+              />
+            )}
           </div>
 
-          {error && <p className="mt-2 text-[12px] text-accent select-text">{error}</p>}
-
-          <Field label="Token">
-            <div className="flex items-center gap-2">
-              <code className={`min-w-0 flex-1 truncate ${code}`}>{revealed && token ? token : MASK}</code>
-              <button onClick={toggleReveal} disabled={busy} className={secondary}>
-                {revealed ? 'Dölj' : 'Visa'}
-              </button>
-              <CopyButton text={loadToken} title="Kopiera token" className={secondary} />
-            </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="text-[11px] text-muted">
-                Agenten skickar den som ”Authorization: Bearer …”. Dela den inte med någon annan.
-              </span>
-              <ConfirmButton
-                question="Byta token? Anslutna agenter behöver den nya."
-                confirmLabel="Byt"
-                onConfirm={regenerate}
-                disabled={busy}
-                className="text-[11px] text-muted underline-offset-2 hover:text-text hover:underline disabled:opacity-40"
-              >
-                Byt token…
-              </ConfirmButton>
-            </div>
-            {tokenNotice && <p className="mt-1.5 text-[12px] text-amber-300">{tokenNotice}</p>}
-          </Field>
-
-          <Field label="Port">
-            <PortField port={status.port} disabled={busy} onSave={(port) => run(() => setAgentPort(port))} />
-          </Field>
-
-          <Field label="Adresser">
-            <ul className="space-y-2">
-              {endpoints.map((e) => (
-                <li key={e.id}>
-                  <div className="flex items-center gap-2">
-                    <code className={`min-w-0 flex-1 truncate ${code}`} title={e.url}>
-                      {e.url}
-                    </code>
-                    <CopyButton text={e.url} className={secondary} />
-                  </div>
-                  <p className="mt-0.5 text-[11px] text-muted">
-                    <span className="text-text">{e.label}</span> – {e.hint}
-                  </p>
-                </li>
-              ))}
-            </ul>
-            {!status.tailscaleAddress &&
-              (status.enabled && status.running ? (
-                <p className="mt-2 text-[12px] leading-relaxed text-amber-300">
-                  Tailscale är inte igång på den här Macen, så agenter på andra datorer kan inte nå
-                  Studio. Starta Tailscale och tryck på Sök igen ovan.
-                </p>
-              ) : (
-                !status.enabled && (
-                  <p className="mt-2 text-[11px] text-muted">
-                    Tailscale-adressen, som agenter på andra datorer behöver, visas när anslutningen är på.
-                  </p>
-                )
-              ))}
-          </Field>
-
-          {endpoint && (
-            <Field label="Konfiguration för agenten">
-              {endpoints.length > 1 && (
-                <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[12px]">
-                  <span className="mr-1 text-muted">Adress i exemplen:</span>
-                  {endpoints.map((e) => (
-                    <button
-                      key={e.id}
-                      onClick={() => setEndpointId(e.id)}
-                      className={`rounded-md px-2 py-1 transition ${
-                        e.id === endpoint.id ? 'bg-line text-text' : 'text-muted hover:bg-raised hover:text-text'
-                      }`}
-                    >
-                      {e.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <Snippet
-                title="OpenClaw"
-                hint="Läggs i OpenClaws konfiguration under mcp.servers. Kopiera tar med den riktiga token. Namnet i X-Studio-Agent-Name är det Studio visar i loggen och när agenten ber om lov."
-                text={openClawConfig(endpoint.url, shownToken)}
-                copy={withToken(openClawConfig)}
-              />
-              <Snippet
-                title="Hermes"
-                hint={
-                  'Hermes Agent ansluter också över HTTP. Kontrollera i Hermes dokumentation exakt var MCP-servrar ' +
-                  'anges – nyckeln kan heta olika i olika versioner.'
-                }
-                text={hermesConfig(endpoint.url, shownToken)}
-                copy={withToken(hermesConfig)}
-              />
-              <p className="mt-3 text-[11px] leading-relaxed text-muted">
-                Be sedan agenten börja med verktyget <span className="font-mono text-text">get_studio_guide</span> – där
-                står hur Studio fungerar och hur bra videoprompter skrivs.
-              </p>
-            </Field>
+          {snippet === 'openclaw' ? (
+            <Snippet
+              hint="Läggs i OpenClaws konfiguration under mcp.servers. Namnet i X-Studio-Agent-Name är det Studio visar i loggen och när agenten ber om lov."
+              text={openClawConfig(endpoint.url, shownToken)}
+              copy={withToken(openClawConfig)}
+            />
+          ) : (
+            <Snippet
+              hint={
+                'Hermes Agent ansluter också över HTTP. Var MCP-servrar anges kan skilja mellan versioner – se Hermes ' +
+                'dokumentation.'
+              }
+              text={hermesConfig(endpoint.url, shownToken)}
+              copy={withToken(hermesConfig)}
+            />
           )}
-        </>
+          <p className="mt-3 text-[12px] leading-relaxed text-muted">
+            Be sedan agenten börja med verktyget <span className="font-mono text-text">get_studio_guide</span> – där
+            står hur Studio fungerar och hur bra videoprompter skrivs.
+          </p>
+        </SettingsItem>
       )}
-    </section>
+
+      <SettingsItem title="Port">
+        <PortField port={status.port} disabled={busy} onSave={(port) => run(() => setAgentPort(port))} />
+      </SettingsItem>
+    </>
   )
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+/** A row of choices with a quiet label in front: "Agent: [OpenClaw] Hermes". */
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange
+}: {
+  label: string
+  options: { id: T; label: string }[]
+  value: T
+  onChange: (id: T) => void
+}) {
   return (
-    <div className="mt-5">
-      <h3 className="mb-1.5 text-muted">{label}</h3>
-      {children}
+    <div role="group" aria-label={label} className="flex flex-wrap items-center gap-1">
+      <span aria-hidden className="mr-1 text-muted">
+        {label}:
+      </span>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          aria-pressed={o.id === value}
+          className={`rounded-md px-2 py-1 transition ${
+            o.id === value ? 'bg-line text-text' : 'text-muted hover:bg-raised hover:text-text'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
-  )
-}
-
-function Switch({ on, disabled, onChange }: { on: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
-  return (
-    <button
-      role="switch"
-      aria-checked={on}
-      aria-label="Tillåt agenter att ansluta"
-      disabled={disabled}
-      onClick={() => onChange(!on)}
-      className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition disabled:opacity-60 ${on ? 'bg-accent' : 'bg-line'}`}
-    >
-      <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${on ? 'left-[18px]' : 'left-0.5'}`}
-      />
-    </button>
   )
 }
 
@@ -342,13 +376,13 @@ function StatusLines({ status, busy, onRestart }: { status: AgentStatus; busy: b
         <div>
           <p className="text-muted">{status.clients.length ? 'Anslutna agenter:' : 'Ingen agent är ansluten än.'}</p>
           {status.clients.length > 0 && (
-            <ul className="mt-1 space-y-0.5">
+            <ul className="mt-1 space-y-1">
               {status.clients.map((c) => (
-                <li key={`${c.name}-${c.address}`} className="flex gap-2">
+                <li key={`${c.name}-${c.address}`} className="flex items-baseline gap-2">
+                  {/* The agent as the user knows it; how it connects (MCP, the client's own name) in small print. */}
                   <span className="min-w-0 flex-1 truncate">
-                    {c.name}
-                    {c.version && <span className="text-muted"> {c.version}</span>}
-                    <span className="text-muted"> · {c.address}</span>
+                    {agentDisplayName(c.name)}
+                    <span className="text-[11px] text-muted select-text"> · {clientDetail(c)}</span>
                   </span>
                   <span className="shrink-0 text-muted">senast {formatTime(c.lastSeen)}</span>
                 </li>
@@ -415,25 +449,18 @@ function PortField({
   )
 }
 
-function Snippet({
-  title,
-  hint,
-  text,
-  copy
-}: {
-  title: string
-  hint: string
-  text: string
-  copy: () => Promise<string>
-}) {
+function Snippet({ hint, text, copy }: { hint: string; text: string; copy: () => Promise<string> }) {
   return (
-    <div className="mb-4">
-      <div className="mb-1.5 flex items-center gap-2">
-        <span className="flex-1">{title}</span>
-        <CopyButton text={copy} title="Kopiera konfigurationen med token" className={secondary} />
+    <div>
+      <div className="relative">
+        <pre className={`overflow-x-auto whitespace-pre pr-24 leading-relaxed ${code}`}>{text}</pre>
+        <CopyButton
+          text={copy}
+          title="Kopiera konfigurationen med token"
+          className={`absolute right-2 top-2 bg-panel ${secondary}`}
+        />
       </div>
-      <pre className={`overflow-x-auto whitespace-pre leading-relaxed ${code}`}>{text}</pre>
-      <p className="mt-1 text-[11px] leading-relaxed text-muted">{hint}</p>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">{hint}</p>
     </div>
   )
 }

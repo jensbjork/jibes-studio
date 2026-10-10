@@ -11,6 +11,19 @@ import { copyFile, lstat, mkdir, rm, stat, utimes } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { ipcMain, shell } from 'electron'
 import {
+  CONTINUATION_FRAME_PLACEHOLDER,
+  continuationPlan,
+  continuationProblem,
+  inheritedTokensAt,
+  inheritedTokensChanged,
+  ownReferences,
+  remapInheritedTokens,
+  sendParams,
+  withContinuationFrame,
+  type ChainClip,
+  type ContinuationPlan
+} from '@shared/continuation'
+import {
   audioForModel,
   DEFAULT_PARAMS,
   endImageVariant,
@@ -19,19 +32,16 @@ import {
   paramsForSubmit,
   pickOption,
   PREFERRED,
+  referenceToVideoVariant,
   supportsAudioInput,
   supportsEndImage
 } from '@shared/models'
 import { knowsPromptLimit, rememberPromptLimits } from '@shared/prompt-compose'
-import {
-  blockingContinuationError,
-  blockingPromptError,
-  findAudioTokens,
-  findImageTokens
-} from '@shared/prompt-refs'
+import { blockingContinuationError, blockingPromptError, findAudioTokens, findImageTokens } from '@shared/prompt-refs'
 import { NEEDS_CONSENT } from '@shared/types'
 import type {
   ComposedPrompt,
+  ContinueMode,
   ExportProgress,
   Generation,
   GenerationParams,
@@ -284,36 +294,64 @@ function linksOf(rows: readonly store.SegmentRow[], index: number): ClipLinks {
   }
 }
 
+/** A sequence's clips as the shared continuation rules read them (continuation.ts). */
+export function chainOf(rows: readonly store.SegmentRow[]): ChainClip[] {
+  return rows.map(store.chainClip)
+}
+
 /**
- * The params a take of the clip is sent with. A clip that takes a frame from a neighbour always generates
- * with the image-to-video sibling of its model, which takes no reference audio; that frame is only filled in
- * when the take is generated (until then the slot is empty, not a stale image of its own).
+ * The params a take of the clip at `index` is sent with (continuation.ts sendParams): a clip that continues in
+ * reference mode gets its family's reference-to-video model and the references it carries – its own, or those of the
+ * clip it continues from – with the previous clip's last frame going after them when the take is made; a clip that
+ * otherwise takes a frame from a neighbour gets the image-to-video sibling of its model and no references. A
+ * neighbour's frame is only filled in when the take is generated (until then the slot is empty, not a stale image).
  */
-function takeParams(row: store.SegmentRow, links: ClipLinks): GenerationParams {
-  const params = store.parseParams(row.params)
-  if (!links.continuing && !links.ending) return params
-  return {
-    ...params,
-    model: imageToVideoVariant(params.model),
-    referenceAudios: undefined,
-    ...(links.continuing ? { startImage: undefined } : {}),
-    ...(links.ending ? { endImage: undefined } : {})
-  }
+export function takeParams(rows: readonly store.SegmentRow[], index: number, chain = chainOf(rows)): GenerationParams {
+  return sendParams(chain, index)
+}
+
+/** How the clip at `index` continues from the previous clip (continuation.ts), or undefined when it doesn't. */
+export function continuationAt(
+  rows: readonly store.SegmentRow[],
+  index: number,
+  chain = chainOf(rows)
+): ContinuationPlan | undefined {
+  return continuationPlan(chain, index)
+}
+
+/**
+ * The prompt a take with these params is sent with (composeSubmission). A continuation in reference mode gets the
+ * previous clip's last frame (a placeholder until it is extracted) as its last reference image and the instruction
+ * to start on it in front of its prompt, exactly as submitTake sends it.
+ */
+export function composeTakePrompt(
+  params: GenerationParams,
+  plan: ContinuationPlan | undefined,
+  opts: { characterLimit?: number } = {}
+): ComposedPrompt {
+  if (plan?.mode !== 'references' || !plan.frameToken) return composeSubmission(params, opts)
+  return composeSubmission(withContinuationFrame(params, CONTINUATION_FRAME_PLACEHOLDER), {
+    ...opts,
+    continuationFrame: plan.frameToken
+  })
 }
 
 /**
  * The prompt a take of the clip would be sent with right now (composeSubmission): its prompt with the References
  * legend of the descriptions of the assets it references, as the library has them now and as the clip's switches
- * (includeDescriptions, excludedDescriptionAssetIds) say. A clip that takes a frame from a neighbour is generated
- * image-to-video and sends no references, so it gets no legend; neither does one with keyframes of its own. For
- * showing it (an agent's get_sequence) and for an approval to compare with what the user was shown. `characterLimit`:
- * the model's prompt limit, when the caller has the model list (default: the one remembered from it).
+ * (includeDescriptions, excludedDescriptionAssetIds) say. A clip that continues in reference mode references what it
+ * carries, and its prompt starts with the instruction to begin on the previous clip's last frame; one that otherwise
+ * takes a frame from a neighbour is generated image-to-video and sends no references, so it gets no legend; neither
+ * does one with keyframes of its own. For showing it (an agent's get_sequence) and for an approval to compare with
+ * what the user was shown. `characterLimit`: the model's prompt limit, when the caller has the model list (default:
+ * the one remembered from it).
  */
 export function composeClipPrompt(segmentId: string, opts: { characterLimit?: number } = {}): ComposedPrompt {
   const row = store.requireSegmentRow(segmentId)
   const rows = store.listSegmentRows(row.sequence_id)
-  const links = linksOf(rows, rows.findIndex((r) => r.id === row.id))
-  return composeSubmission(takeParams(row, links), opts)
+  const index = rows.findIndex((r) => r.id === row.id)
+  const chain = chainOf(rows)
+  return composeTakePrompt(takeParams(rows, index, chain), continuationAt(rows, index, chain), opts)
 }
 
 /** The clip would be sent with an end image (its own or the next clip's frame) that its model can't take. */
@@ -336,16 +374,17 @@ function endImageProblem(params: GenerationParams, links: ClipLinks): string | u
  * "generate all" pays for anything and again right before each take is sent; JobManager.submit checks the
  * prompt's references once more on what actually goes to Venice, and measures the audio clips (whose windows
  * this checks only as far as the clip states them). Whether the neighbours have the takes its frames come
- * from is checked where the frames are taken.
+ * from is checked where the frames are taken. `plan`: how a continuing clip is sent (continuationAt).
  */
-function clipProblem(params: GenerationParams, links: ClipLinks): string | undefined {
+function clipProblem(params: GenerationParams, links: ClipLinks, plan?: ContinuationPlan): string | undefined {
   const kind = kindOfModelId(params.model)
   if (!params.prompt.trim()) return PROMPT_FIRST
   // Before the prompt's references: an end image the model can't take is a keyframe the user would pay to lose.
   const end = endImageProblem(params, links)
   if (end) return end
-  // The general message advises switching to reference mode, which a continuation can't do.
-  if (links.continuing) return blockingContinuationError(params)
+  // The general message advises switching to reference mode, which an exact continuation can't do; in reference mode
+  // the prompt is checked against what it carries, with the frame after it.
+  if (links.continuing) return plan ? continuationProblem(params, plan) : blockingContinuationError(params)
   if (kind === 'reference-to-video' && !params.referenceImages?.length) {
     // Venice refuses reference audio without a picture, so a clip with only a voice needs one too.
     return params.referenceAudios?.length && supportsAudioInput(params.model)
@@ -366,9 +405,10 @@ function clipProblemAt(
   rows: readonly store.SegmentRow[],
   index: number,
   params: GenerationParams,
-  links: ClipLinks
+  links: ClipLinks,
+  plan?: ContinuationPlan
 ): string | undefined {
-  const problem = clipProblem(params, links)
+  const problem = clipProblem(params, links, plan)
   const row = rows[index]
   return problem === PROMPT_FIRST && row && store.ownClipMissing(row) ? store.ownClipMissingMessage(index + 1) : problem
 }
@@ -469,6 +509,34 @@ function asKeyframed(
     referenceAudios: undefined
   }
   return model !== params.model ? fitToModel(next, models) : next
+}
+
+/**
+ * The clip's params once it continues from the previous clip in reference mode: its family's reference-to-video model
+ * (with the options that model offers) and no start or end image. The references it already sent as a
+ * reference-to-video clip stay its own, with their tokens (they override the ones it would carry from the clip
+ * before); references left over from another mode (an image-to-video clip sends none) go, so it carries the clip
+ * before's instead. Extracted frames never count. Undefined when the family has no reference-to-video model: the clip
+ * then continues exactly (asKeyframed).
+ */
+function asContinuing(params: GenerationParams, models: readonly VideoModel[] | undefined): GenerationParams | undefined {
+  const model = referenceToVideoVariant(params.model, models?.map((m) => m.id))
+  if (!model) return undefined
+  const own = ownReferences(params)
+  const next: GenerationParams = {
+    ...params,
+    model,
+    startImage: undefined,
+    endImage: undefined,
+    referenceImages: own?.images.length ? own.images : undefined,
+    referenceAudios: own?.audios.length ? own.audios : undefined
+  }
+  return model !== params.model ? fitToModel(next, models) : next
+}
+
+/** The clip has an end image of its own (a keyframe of an image-to-video clip), which reference mode can't send. */
+function hasOwnEndImage(params: GenerationParams): boolean {
+  return kindOfModelId(params.model) === 'image-to-video' && !!params.endImage
 }
 
 /**
@@ -583,6 +651,12 @@ export interface MissingClip {
   problem?: string
   /** It and another clip wait on each other's takes (see generationOrder); `problem` names both clips. */
   waiting?: boolean
+  /**
+   * A clip that continues from the previous one: how it is sent ('references': `params` holds the references it
+   * carries, and the previous clip's last frame goes after them as @Image{frameToken}; 'exact': image-to-video).
+   */
+  continueMode?: ContinueMode
+  frameToken?: number
 }
 
 /**
@@ -924,6 +998,8 @@ export class SequenceService {
     caller: Caller = {}
   ): Promise<{ sequence: Sequence; segmentId: string }> {
     init = init ?? {}
+    // Checked before anything is read or written.
+    const mode = store.cleanContinueMode(init.continueMode) ?? 'references'
     // Taking a frame from a neighbour may switch the model: the list says which sibling Venice offers and what
     // options it has. Fetched before the rows are read, so what is written below is built from what was read. A
     // clip made from a generation doesn't continue unless asked to, so it needs no list for that.
@@ -947,12 +1023,15 @@ export class SequenceService {
     const seedsFromSource = !!source && !store.isOwnClip(source) && !usesVideoInput(source.params)
 
     let params: GenerationParams
+    // Settings copied from the previous clip: its references are its own, which a continuation carries anyway.
+    let copied = false
     if (source && seedsFromSource) params = store.sanitizeParams(source.params)
     else if (init.params) params = store.sanitizeParams(init.params)
     // The previous clip's settings, but not what belongs to its shot: its prompt, and its keyframes (a new clip
     // starts without a start or end image).
     else if (previous) {
       params = { ...store.parseParams(previous.params), prompt: '', startImage: undefined, endImage: undefined }
+      copied = true
     }
     else params = store.sanitizeParams({ ...DEFAULT_PARAMS, ...store.parseDefaults(sequence.defaults) })
 
@@ -977,13 +1056,20 @@ export class SequenceService {
     const continuing = !!previous && (init.continueFromPrevious ?? !source)
     if (continuing) {
       // The start frame comes from the previous clip at generation time; image inputs would be stale. That
-      // includes an end image copied from the previous clip: it is where that clip was meant to end. The
-      // image-to-video model takes no reference audio either.
-      params = {
+      // includes an end image copied from the previous clip: it is where that clip was meant to end. In reference
+      // mode (not for a clip that also ends on the next one) it gets its family's reference-to-video model and keeps
+      // references it was given as its own; references copied from the previous clip are left out, so it carries
+      // that clip's as they are when its take is made. Exactly, the image-to-video model takes no references.
+      const cleared: GenerationParams = {
         ...params,
-        model: imageToVideoVariant(params.model),
         startImage: undefined,
         endImage: undefined,
+        ...(copied ? { referenceImages: undefined, referenceAudios: undefined } : {})
+      }
+      const asReferences = !ending && mode === 'references' ? asContinuing(cleared, models) : undefined
+      params = asReferences ?? {
+        ...cleared,
+        model: imageToVideoVariant(params.model),
         referenceImages: undefined,
         referenceAudios: undefined
       }
@@ -997,8 +1083,8 @@ export class SequenceService {
       this.sql()
         .prepare(
           `INSERT INTO segments (id, sequence_id, position, params, continue_from_previous, end_from_next, notes,
-             selected_generation_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             selected_generation_id, created_at, continue_mode)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -1009,7 +1095,8 @@ export class SequenceService {
           ending ? 1 : 0,
           store.cleanNotes(init.notes),
           source?.id ?? null,
-          Date.now()
+          Date.now(),
+          mode
         )
       const order = rows.map((r) => r.id)
       order.splice(index, 0, id)
@@ -1097,9 +1184,12 @@ export class SequenceService {
 
   async updateSegment(segmentId: string, patch: SegmentPatch, caller: Caller = {}): Promise<Sequence> {
     patch = patch ?? {}
-    // Turning a neighbour's frame on may switch the model (see below); fetched before the row is read, so the
-    // write works on what was read.
-    const models = patch.endFromNext || patch.continueFromPrevious ? await this.modelList() : undefined
+    // Checked before anything is read or written.
+    const chosenMode = store.cleanContinueMode(patch.continueMode)
+    // Turning a neighbour's frame on (or choosing how to continue) may switch the model (see below); fetched before
+    // the row is read, so the write works on what was read.
+    const models =
+      patch.endFromNext || patch.continueFromPrevious || chosenMode !== undefined ? await this.modelList() : undefined
     const row = store.requireSegmentRow(segmentId)
     this.refuseWhileRunning(row.sequence_id, caller)
     const rows = store.listSegmentRows(row.sequence_id)
@@ -1120,11 +1210,21 @@ export class SequenceService {
       ending = !!patch.endFromNext
     }
 
+    const mode = chosenMode ?? store.continueModeOfRow(row)
     let params = patch.params ? store.sanitizeParams(patch.params) : store.parseParams(row.params)
     const chosen = params.model
-    // A segment that takes a frame from a neighbour always generates with the image-to-video sibling; keep the
-    // stored model honest.
-    if (continuing || ending) params.model = imageToVideoVariant(params.model)
+    // A segment that continues in reference mode generates with its family's reference-to-video model (keeping its own
+    // references, which override the ones it carries); one that otherwise takes a frame from a neighbour always
+    // generates with the image-to-video sibling. Keep the stored model honest. A family without a reference model, and
+    // a clip with an end image of its own, continue exactly.
+    const asReferences =
+      continuing && !ending && mode === 'references' && !hasOwnEndImage(params) ? asContinuing(params, models) : undefined
+    if (asReferences) params = asReferences
+    else if (continuing && !ending && chosenMode === 'exact' && store.continueModeOfRow(row) !== 'exact') {
+      // "Exakt startbild" chosen: image-to-video from the frame, which sends no references, so they go and their tokens
+      // leave the prompt (as for any keyframe), and it can be generated as it stands.
+      params = asKeyframed(params, hasOwnEndImage(params), models)
+    } else if (continuing || ending) params.model = imageToVideoVariant(params.model)
     // Switching "end from the next clip" on makes the clip a keyframed one, as an end slot that gets the next clip's
     // frame and "Gör om mellan grannarna" do (asKeyframed): a model that can take an end image, and no references,
     // which image-to-video can't send (their tokens leave the prompt, so it can be generated as it stands). Later
@@ -1166,7 +1266,7 @@ export class SequenceService {
       this.sql()
         .prepare(
           `UPDATE segments SET params = ?, continue_from_previous = ?, end_from_next = ?, notes = ?,
-             selected_generation_id = ?, trim_start = ?, trim_end = ? WHERE id = ?`
+             selected_generation_id = ?, trim_start = ?, trim_end = ?, continue_mode = ? WHERE id = ?`
         )
         .run(
           store.serializeParams(params),
@@ -1176,8 +1276,10 @@ export class SequenceService {
           selectedId,
           trimStart,
           trimEnd,
+          mode,
           row.id
         )
+      this.keepInheritedTokens(row.sequence_id, rows, row.id)
       if (adoptId) db.updateGeneration(adoptId, { segmentId: row.id })
     })()
 
@@ -1235,7 +1337,9 @@ export class SequenceService {
   /**
    * Puts an image into the clip's start or end slot, or empties it (null). 'previous' / 'next' make the slot
    * automatic (continue_from_previous / end_from_next); any image makes the slot explicit. A slot that gets
-   * something makes the clip a keyframed one (asKeyframed: image-to-video, references dropped).
+   * something makes the clip a keyframed one (asKeyframed: image-to-video, references dropped) – except 'previous' for
+   * a clip that continues in reference mode (its continue mode, no end image of any kind): it gets its family's
+   * reference-to-video model and keeps its references (asContinuing).
    */
   async setSegmentImage(
     segmentId: string,
@@ -1277,7 +1381,11 @@ export class SequenceService {
       params.endImage = image
       ending = kind === 'next'
     }
-    if (source) params = asKeyframed(params, ending || !!params.endImage, models)
+    const inReferenceMode =
+      continuing && !ending && store.continueModeOfRow(row) === 'references' && !hasOwnEndImage(params)
+    const asReferences = source && slot === 'start' && inReferenceMode ? asContinuing(params, models) : undefined
+    if (asReferences) params = asReferences
+    else if (source) params = asKeyframed(params, ending || !!params.endImage, models)
     this.writeKeyframes(row.id, params, continuing, ending)
     return this.changed(row.sequence_id)
   }
@@ -1375,10 +1483,48 @@ export class SequenceService {
     }
   }
 
-  private writeKeyframes(segmentId: string, params: GenerationParams, continuing: boolean, ending: boolean): void {
+  /**
+   * Keeps the @ImageN / @AudioN tokens of the clips that inherit their references (continuing in reference mode with
+   * none of their own) on the same pictures, voices and frame after `changedId` – the clip they carry them from – got
+   * other references: reordered, removed or added there, as that clip's own prompt follows them in the window (see
+   * continuation.ts remapInheritedTokens). For the window and agents alike. A clip whose references now come from
+   * another clip (the chain itself changed) is left as it is; its tokens are checked before anything is sent.
+   */
+  private keepInheritedTokens(sequenceId: string, beforeRows: readonly store.SegmentRow[], changedId: string): void {
+    const afterRows = store.listSegmentRows(sequenceId)
+    const before = chainOf(beforeRows)
+    const after = chainOf(afterRows)
+    const update = this.sql().prepare('UPDATE segments SET params = ? WHERE id = ?')
+    afterRows.forEach((row, j) => {
+      if (row.id === changedId) return
+      const i = beforeRows.findIndex((r) => r.id === row.id)
+      const was = i === -1 ? undefined : inheritedTokensAt(before, i)
+      const now = inheritedTokensAt(after, j)
+      if (!was || !now || beforeRows[was.fromIndex]?.id !== afterRows[now.fromIndex]?.id) return
+      if (!inheritedTokensChanged(was, now)) return
+      const params = store.parseParams(row.params)
+      const prompt = remapInheritedTokens(params.prompt, was, now)
+      const negativePrompt =
+        params.negativePrompt === undefined ? undefined : remapInheritedTokens(params.negativePrompt, was, now)
+      if (prompt === params.prompt && negativePrompt === params.negativePrompt) return
+      update.run(store.serializeParams({ ...params, prompt, negativePrompt }), row.id)
+    })
+  }
+
+  /** Writes a clip's keyframe switches and params; `mode` also its continue mode (else it is kept). */
+  private writeKeyframes(
+    segmentId: string,
+    params: GenerationParams,
+    continuing: boolean,
+    ending: boolean,
+    mode?: ContinueMode
+  ): void {
     this.sql()
-      .prepare('UPDATE segments SET params = ?, continue_from_previous = ?, end_from_next = ? WHERE id = ?')
-      .run(store.serializeParams(params), continuing ? 1 : 0, ending ? 1 : 0, segmentId)
+      .prepare(
+        `UPDATE segments SET params = ?, continue_from_previous = ?, end_from_next = ?,
+           continue_mode = coalesce(?, continue_mode) WHERE id = ?`
+      )
+      .run(store.serializeParams(params), continuing ? 1 : 0, ending ? 1 : 0, mode ?? null, segmentId)
   }
 
   /**
@@ -1436,7 +1582,15 @@ export class SequenceService {
       startImage: continuing ? undefined : (opening ?? ownStartImage(params)),
       endImage: ending ? undefined : ownEnd
     }
-    this.writeKeyframes(row.id, asKeyframed(keyframes, ending || !!keyframes.endImage, models), continuing, ending)
+    // It starts exactly on the previous clip's last frame (also the last clip, which keeps no end frame from a next one):
+    // that is what it is redone for, so it continues exactly ("Exakt startbild"), not in reference mode.
+    this.writeKeyframes(
+      row.id,
+      asKeyframed(keyframes, ending || !!keyframes.endImage, models),
+      continuing,
+      ending,
+      continuing ? 'exact' : undefined
+    )
     return this.changed(row.sequence_id)
   }
 
@@ -1451,7 +1605,9 @@ export class SequenceService {
     const rows = store.listSegmentRows(row.sequence_id)
     const index = rows.findIndex((r) => r.id === row.id)
     const links = linksOf(rows, index)
-    const params = takeParams(row, links)
+    const chain = chainOf(rows)
+    const params = takeParams(rows, index, chain)
+    const plan = continuationAt(rows, index, chain)
     const problems: string[] = []
     const preview: SegmentFramePreview = { problems }
     const note = (problem: string | undefined): void => {
@@ -1490,9 +1646,12 @@ export class SequenceService {
       if (!existsSync(params.endImage)) note(`Slutbilden finns inte längre: ${basename(params.endImage)}.`)
     }
 
-    // The frames stand in for the slots they fill when the clip's own settings are checked.
-    const startImage = preview.start?.path ?? params.startImage
-    note(clipProblemAt(rows, index, { ...params, startImage, endImage: preview.end?.path ?? params.endImage }, links))
+    // The frames stand in for the slots they fill when the clip's own settings are checked (in reference mode the start
+    // frame goes along as the last reference image instead, which the check counts by itself).
+    const startImage = plan?.mode === 'references' ? undefined : (preview.start?.path ?? params.startImage)
+    note(
+      clipProblemAt(rows, index, { ...params, startImage, endImage: preview.end?.path ?? params.endImage }, links, plan)
+    )
     return preview
   }
 
@@ -1552,17 +1711,27 @@ export class SequenceService {
     const refused = guard?.(row.id)
     if (refused) throw new Error(refused)
 
-    const params = takeParams(row, links)
+    const chain = chainOf(rows)
+    let params = takeParams(rows, index, chain)
+    // A continuation in reference mode: the references it carries, with the previous clip's last frame after them.
+    const plan = continuationAt(rows, index, chain)
+    const frameToken = plan?.mode === 'references' ? plan.frameToken : undefined
     // Before the frame grabs and the quote: a clip that can't be sent as it stands costs nothing to refuse.
-    const problem = clipProblemAt(rows, index, params, links)
+    const problem = clipProblemAt(rows, index, params, links, plan)
     if (problem) throw new Error(problem)
     // The descriptions appended to its prompt are read here too, with the clip and the guard: a description edited
-    // while the frames are taken and the pictures uploaded doesn't change what the take sends.
-    const sentPrompt = composeSubmission(params).prompt
+    // while the frames are taken and the pictures uploaded doesn't change what the take sends. In reference mode the
+    // instruction to start on the frame goes in front.
+    const sentPrompt = composeTakePrompt(params, plan).prompt
     // Both neighbours are checked before either frame is extracted, so a missing take is reported at once.
     if (links.continuing) this.requireNeighbourTake(rows[index - 1], index)
     if (links.ending) this.requireNeighbourTake(rows[index + 1], index + 2)
-    if (links.continuing) params.startImage = (await this.lastFrameOf(rows[index - 1], index)).path
+    if (links.continuing) {
+      const frame = (await this.lastFrameOf(rows[index - 1], index)).path
+      // Exactly: its start image. In reference mode: its last reference image, the one the instruction names.
+      if (frameToken) params = withContinuationFrame(params, frame)
+      else params.startImage = frame
+    }
     if (links.ending) params.endImage = (await this.firstFrameOf(rows[index + 1], index + 2)).path
 
     ensureImagesExist(paramsForSubmit(params))
@@ -1572,7 +1741,12 @@ export class SequenceService {
     const quote = await this.deps.venice.quote(p).catch(() => undefined)
     if (cancelled?.()) throw new RunStopped()
     // Consent errors (NEEDS_CONSENT…) propagate unchanged so the renderer can ask and retry.
-    const generation = await this.deps.jobs.submit(p, { quote, segmentId: row.id, sentPrompt })
+    const generation = await this.deps.jobs.submit(p, {
+      quote,
+      segmentId: row.id,
+      sentPrompt,
+      ...(frameToken ? { continuationFrame: frameToken } : {})
+    })
     this.useImportedCopies(row.id, p, generation.params)
     if (store.getSequenceRow(row.sequence_id)) {
       store.touchSequence(row.sequence_id)
@@ -1600,6 +1774,7 @@ export class SequenceService {
       if (!copies.size) return
       const row = store.getSegmentRow(segmentId)
       if (!row) return
+      // Only the clip's own files are followed: references it carries from the clip before stay that clip's.
       const params = store.parseParams(row.params)
       const use = (path: string | undefined): string | undefined => (path && copies.get(path)) || path
       const next: GenerationParams = {
@@ -2107,20 +2282,24 @@ export class SequenceService {
     const rows = store.listSegmentRows(store.requireSequenceRow(sequenceId).id)
     const { order, stuck } = generationOrder(rows)
     const blocked = stuck.length ? waitingMessage(rows, stuck) : undefined
+    const chain = chainOf(rows)
     return [...order, ...stuck].flatMap((index): MissingClip[] => {
       const row = rows[index]
       if (this.pendingTake(row) || this.submitting.has(row.id)) return []
       const links = linksOf(rows, index)
-      const params = takeParams(row, links)
+      const params = takeParams(rows, index, chain)
+      const plan = continuationAt(rows, index, chain)
       const waiting = stuck.includes(index)
-      const problem = waiting ? blocked : clipProblemAt(rows, index, params, links)
+      const problem = waiting ? blocked : clipProblemAt(rows, index, params, links, plan)
       return [
         {
           segmentId: row.id,
           clip: index + 1,
           params: paramsForSubmit(params),
           ...(problem ? { problem } : {}),
-          ...(waiting ? { waiting } : {})
+          ...(waiting ? { waiting } : {}),
+          ...(plan ? { continueMode: plan.mode } : {}),
+          ...(plan?.frameToken ? { frameToken: plan.frameToken } : {})
         }
       ]
     })

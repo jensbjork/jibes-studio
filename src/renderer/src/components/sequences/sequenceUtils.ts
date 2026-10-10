@@ -1,4 +1,11 @@
-import { durationSeconds, endImageVariant, imageToVideoVariant } from '@shared/models'
+import { continuationPlan, sendParams, type ContinuationPlan } from '@shared/continuation'
+import {
+  durationSeconds,
+  endImageVariant,
+  imageToVideoVariant,
+  kindOfModelId,
+  referenceToVideoVariant
+} from '@shared/models'
 import { remapPromptReferences } from '@shared/prompt-remap'
 import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
 import {
@@ -105,15 +112,40 @@ export function continues(segment: Segment, index: number): boolean {
 }
 
 /**
- * The params a new take of the segment will actually be generated with: a clip whose start or end frame comes
- * from a neighbour is generated with the image-to-video sibling of its model, exactly as main's takeParams does.
- * Not the end-capable model: main switches to one when "Slutbild från nästa klipp" is turned on (and
- * patchSegmentLocally does until its answer arrives), but a model the user picks afterwards is theirs, and one that
- * can't take an end image is refused (clipBlocked says so) rather than priced as another model.
+ * The params a new take of the segment will actually be generated with, as main's takeParams works them out (the
+ * shared continuation.ts sendParams): a clip that continues in reference mode gets its family's reference-to-video
+ * model and the references it carries – its own, or the clip's it continues from, so `sequence` is needed for those
+ * (the previous clip's last frame goes after them when the take is made); a clip that otherwise takes a frame from a
+ * neighbour gets the image-to-video sibling of its model and no references. `segment` stands in for the sequence's
+ * clip at `index` (the editor's draft). Not the end-capable model: main switches to one when "Slutbild från nästa
+ * klipp" is turned on (and patchSegmentLocally does until its answer arrives), but a model the user picks afterwards
+ * is theirs, and one that can't take an end image is refused (clipBlocked says so) rather than priced as another
+ * model. Without `sequence` only the clip's own references are known (an inheriting clip is then shown exactly).
  */
-export function effectiveParams(segment: Segment, index: number): GenerationParams {
+export function effectiveParams(segment: Segment, index: number, sequence?: Sequence): GenerationParams {
   if (!continues(segment, index) && !segment.endFromNext) return segment.params
-  return { ...segment.params, model: imageToVideoVariant(segment.params.model) }
+  return sendParams(chainWith(segment, index, sequence), index)
+}
+
+/** How the clip continues from the previous clip (continuation.ts), with `segment` in its place; see effectiveParams. */
+export function continuationOf(segment: Segment, index: number, sequence?: Sequence): ContinuationPlan | undefined {
+  return continuationPlan(chainWith(segment, index, sequence), index)
+}
+
+/** A stand-in for a clip that isn't known (effectiveParams without the sequence): no references, no links. */
+const UNKNOWN_CLIP: Segment['params'] = { model: '', prompt: '', duration: '' }
+
+/** The sequence's clips with `segment` at `index`; without the sequence, unknown clips around it. */
+function chainWith(segment: Segment, index: number, sequence: Sequence | undefined): Segment[] {
+  if (sequence) return sequence.segments.map((s, i) => (i === index ? segment : s))
+  const unknown = (i: number): Segment => ({ ...segment, id: `unknown-${i}`, params: UNKNOWN_CLIP, takes: [] })
+  const before = Array.from({ length: Math.max(0, index) }, (_, i) => ({
+    ...unknown(i),
+    continueFromPrevious: false,
+    endFromNext: false
+  }))
+  const after = segment.endFromNext ? [{ ...unknown(index + 1), continueFromPrevious: false, endFromNext: false }] : []
+  return [...before, segment, ...after]
 }
 
 /**
@@ -126,9 +158,11 @@ export function clipKey(sequence: Sequence, index: number): string {
   if (!s) return ''
   const before = continues(s, index) ? sequence.segments[index - 1] : undefined
   const after = s.endFromNext ? sequence.segments[index + 1] : undefined
+  const plan = continuationOf(s, index, sequence)
   return stableJson([
     s.id,
-    effectiveParams(s, index),
+    effectiveParams(s, index, sequence),
+    plan ? [plan.mode, plan.frameToken ?? null] : null,
     before ? [before.id, before.selectedGenerationId, before.trimEnd] : null,
     after ? [after.id, after.selectedGenerationId, after.trimStart] : null
   ])
@@ -206,9 +240,19 @@ export function patchSegmentLocally(sequence: Sequence, segmentId: string, patch
       if (s.id !== segmentId) return s
       const next: Segment = { ...s }
       if (patch.params) next.params = patch.params
-      if (patch.continueFromPrevious !== undefined) {
-        next.continueFromPrevious = patch.continueFromPrevious
-        if (patch.continueFromPrevious) next.params = { ...next.params, model: imageToVideoVariant(next.params.model) }
+      if (patch.continueMode !== undefined) next.continueMode = patch.continueMode
+      if (patch.continueFromPrevious !== undefined) next.continueFromPrevious = patch.continueFromPrevious
+      if (patch.continueFromPrevious || patch.continueMode !== undefined) {
+        // As main does it: a continuation in reference mode takes its family's reference-to-video model, any other
+        // the image-to-video one (main has the final word when its answer arrives).
+        const reference =
+          next.continueFromPrevious &&
+          !next.endFromNext &&
+          next.continueMode === 'references' &&
+          !(kindOfModelId(next.params.model) === 'image-to-video' && next.params.endImage)
+        const model = reference ? referenceToVideoVariant(next.params.model) : undefined
+        if (model) next.params = { ...next.params, model }
+        else if (next.continueFromPrevious) next.params = { ...next.params, model: imageToVideoVariant(next.params.model) }
       }
       if (patch.endFromNext !== undefined) {
         next.endFromNext = patch.endFromNext

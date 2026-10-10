@@ -1913,7 +1913,8 @@ export async function revealLibraryFolder(target: LibraryFolderTarget, id?: stri
 
 // ── IPC ──────────────────────────────────────────────────────────────────────
 
-function reloadWindows(): void {
+/** Every window reloads (onto the library now open), shortly after the IPC reply in flight has reached it. */
+export function reloadWindows(): void {
   // After the IPC reply has reached the renderer, so its promise settles before the page goes away.
   setTimeout(() => {
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.reload()

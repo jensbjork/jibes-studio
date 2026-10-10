@@ -1,3 +1,4 @@
+import { isGenericAgentName } from '@shared/agent-name'
 import { MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
 import {
   ASSET_KINDS,
@@ -253,7 +254,9 @@ export function originText(origin: AssetFileOrigin | undefined, now = Date.now()
       .replace(/\.(?=\s|$)/g, '')
     when = ` ${day} ${originClock.format(d)}`
   }
-  return `Tillagd av ${origin.agent}${when}${origin.host ? ` · från ${origin.host}` : ''}`
+  // "Tillagd av agenten" for a generic MCP client name ("mcp"), "Tillagd av OpenClaw" for a real one.
+  const who = isGenericAgentName(origin.agent) ? 'agenten' : origin.agent.trim()
+  return `Tillagd av ${who}${when}${origin.host ? ` · från ${origin.host}` : ''}`
 }
 
 /** "Anna", "Anna och Kalle", "Anna, Kalle och Lisa". */

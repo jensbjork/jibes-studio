@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AgentActivity,
+  ArchiveProgress,
   AgentCommand,
   AgentStatus,
   ApprovalRequest,
@@ -122,6 +123,10 @@ const api: StudioApi = {
 
   // Library folder
   libraryStatus: () => ipcRenderer.invoke('library:status'),
+  exportLibraryArchive: () => ipcRenderer.invoke('archive:export'),
+  importLibraryArchive: () => ipcRenderer.invoke('archive:import'),
+  cancelLibraryArchive: () => ipcRenderer.invoke('archive:cancel'),
+  onArchiveProgress: (cb) => on<ArchiveProgress>('archive:progress', cb),
   chooseLibraryFolder: () => ipcRenderer.invoke('library:choose'),
   inspectLibraryFolder: (path) => ipcRenderer.invoke('library:inspect', path),
   setLibraryRoot: (path, mode) => ipcRenderer.invoke('library:setRoot', path, mode),

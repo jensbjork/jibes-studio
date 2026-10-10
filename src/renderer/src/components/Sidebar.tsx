@@ -4,7 +4,7 @@ import { ASSET_COPY, ASSET_KINDS, ASSET_VIEW } from '../lib/assets'
 import type { View } from '../lib/navigation'
 import { useRunning, useUnseen, useViewWork } from '../lib/work'
 import DevBadge from './DevBadge'
-import AgentIndicator, { useAgentIndicatorText } from './agent/AgentIndicator'
+import AgentIndicator from './agent/AgentIndicator'
 import AssetIcon from './assets/AssetIcon'
 import { ScissorsIcon } from './editor/icons'
 import { FilmIcon, GearIcon, QuoteIcon, SidebarIcon } from './icons'
@@ -140,20 +140,6 @@ function Group({ title, items, view, collapsed, onSelect }: GroupProps) {
   )
 }
 
-/** The agent's row; in the rail its 40 px button is centred on the icon column and explains itself in a rail tooltip. */
-function AgentRow({ collapsed, active, onClick }: { collapsed: boolean; active: boolean; onClick: () => void }) {
-  const { label, status } = useAgentIndicatorText()
-  const { trigger, tooltip } = useRailTooltip(collapsed, label, status || undefined)
-  return (
-    <>
-      <div className={collapsed ? 'flex justify-center' : undefined} {...trigger}>
-        <AgentIndicator compact={collapsed} nativeTooltip={false} active={active} onClick={onClick} />
-      </div>
-      {tooltip}
-    </>
-  )
-}
-
 interface Props {
   view: View
   onChange: (v: View) => void
@@ -169,8 +155,9 @@ interface Props {
 
 /**
  * The window's navigation: Skapa (the places that make things) and Bibliotek (what they are made from), each row
- * with what runs there and what is new; then Pågår och klart, the agent and Inställningar. Collapses to a 72 px
- * icon rail (⌃⌘S) whose rows keep their status as badges and explain themselves in tooltips.
+ * with what runs there and what is new. At the bottom two slim status rows – Pågår och klart and the agent
+ * connection – and, below a divider, Inställningar as the last row. Collapses to a 72 px icon rail (⌃⌘S) whose rows
+ * keep their status as badges and explain themselves in tooltips.
  */
 export default function Sidebar({
   view,
@@ -230,9 +217,13 @@ export default function Sidebar({
         <Group title="Bibliotek" items={LIBRARY} view={view} collapsed={collapsed} onSelect={onChange} />
       </nav>
 
-      <div className="no-drag mt-auto flex shrink-0 flex-col gap-0.5 border-t border-line pt-2">
-        <WorkIndicator collapsed={collapsed} active={panel === 'work'} onClick={() => onTogglePanel('work')} />
-        <AgentRow collapsed={collapsed} active={panel === 'agent'} onClick={() => onTogglePanel('agent')} />
+      <div className="no-drag mt-auto flex shrink-0 flex-col border-t border-line pt-2">
+        {/* Status, not places: slimmer rows that open their panel beside the sidebar. */}
+        <div role="group" aria-label="Status" className="flex flex-col gap-0.5">
+          <WorkIndicator collapsed={collapsed} active={panel === 'work'} onClick={() => onTogglePanel('work')} />
+          <AgentIndicator collapsed={collapsed} active={panel === 'agent'} onClick={() => onTogglePanel('agent')} />
+        </div>
+        <div aria-hidden className="mx-3 my-2 h-px shrink-0 bg-line" />
         <Row item={SETTINGS} active={view === 'settings'} collapsed={collapsed} onSelect={onChange} />
       </div>
     </aside>

@@ -51,7 +51,7 @@ export interface GenerationsState {
   remove: (g: Generation) => Promise<boolean>
   /** A locally patched copy, e.g. with segmentId set after "Lägg i sekvens". */
   patch: (g: Generation) => void
-  /** Sets (or with null clears) the user's star rating, showing it right away. */
+  /** Sets (or with null clears) the user's rating (-1 = tumme ner, 1–3 stars), showing it right away. */
   rate: (g: Generation, rating: number | null) => Promise<void>
 }
 

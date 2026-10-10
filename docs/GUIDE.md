@@ -30,12 +30,12 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   generation's settings.
 - **A live clip feed built for many clips.** Queued, rendering and finished videos as big cards or a compact table
   (*Kort* / *Tabell*, with keyboard navigation), search in the prompts, filters (status, model, the asset whose
-  photos or voice were used, rating, unrated or reviewed, time, standalone or a take, *Nya* — not watched yet),
-  sorting (newest, oldest,
+  photos or voice were used, rating (★★★, ★★ or more, ★ or more, *Tumme ner*), unrated or reviewed, time,
+  standalone or a take, *Nya* — not watched yet), sorting (newest, oldest,
   rating, cost, length) and a summary of the filtered clips. A detail drawer shows the player, the prompt with its
   tokens (and *Skickad prompt*, the prompt exactly as it was sent, when descriptions were appended), the references
-  and voices that were sent, the settings, and your own rating (1–5 stars), note and tags next to the agents'
-  reviews.
+  and voices that were sent, the settings, and your own rating (👎 *tumme ner* or one to three stars), note and tags
+  next to the agents' reviews.
 - **A reference-aware prompt editor.** In reference mode the prompt points at the photos as `@Image1`, `@Image2` …
   and at the voice and sound clips as `@Audio1`, `@Audio2` …; the editor colours each token like the asset it points
   at, shows the photo on hover and plays the voice, offers an `@` menu, flags wrong or malformed tokens with one-click
@@ -58,8 +58,10 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   notes, any number of takes in a strip under the player — **click a take and it becomes the clip's take** and plays,
   with sound; ← / → choose with the keyboard, ⌥-click previews without choosing — and start/end trims that each take
   remembers for itself. A clip can start on the previous clip's last
-  (trimmed) frame (*Startbild från föregående klipp*) and end on the next clip's first frame (*Slutbild från nästa
-  klipp*), both taken out automatically with ffmpeg, or on start and end images of its own. *Generate missing*
+  (trimmed) frame (*Startbild från föregående klipp*) — by default with the reference photos and voices it carries,
+  so the characters stay themselves (*Med referensbilder*), or as an exact cut (*Exakt startbild*) — and end on the
+  next clip's first frame (*Slutbild från nästa klipp*), both taken out automatically with ffmpeg, or on start and
+  end images of its own. *Generate missing*
   renders the clips in the order their frames allow; *Export* cuts the selected takes into one mp4 with ffmpeg.
 - **Storyboards** (their own view, next to Sekvenser): mock up a film's milestones as pictures, one per board
   (*ruta*), then generate the clips between them. A board's picture is made with **Skapa bild…** (Venice's image
@@ -102,15 +104,17 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   taken out automatically, with live previews — and a new take fits the cut without touching the neighbours.
 - **Pågår och klart** (in progress and done): every sidebar view shows what runs there (a spinner and a count) and
   what has finished that you haven't looked at yet (a dot), and so do the lists, the cards, the takes, the
-  transitions, the versions and the voices. The panel at the bottom of the sidebar lists everything that runs — with
-  its progress and an estimate —, what is ready to watch and what failed, with *Markera alla som sedda* (and
-  *Ångra*). A video counts as seen once it has played for a second or you chose it; the Dock icon shows the number of
-  new results.
+  transitions, the versions and the voices. The *Pågår och klart* row at the bottom of the sidebar opens a panel that
+  lists everything that runs — with its progress and an estimate —, what is ready to watch and what failed, with
+  *Markera alla som sedda* (and *Ångra*). A video counts as seen once it has played for a second or you chose it; the
+  Dock icon shows the number of new results.
 - **A grouped sidebar that folds away:** *Skapa* (Generera, Sekvenser, Storyboards, Redigera) and *Bibliotek* (the
-  five kinds and Prompter), one icon set, and a 72 px icon rail (⌃⌘S, or the button by the wordmark) that gives the
+  five kinds and Prompter), one icon set, two slim status rows at the bottom — *Pågår och klart* and the agent
+  connection — above *Inställningar*, and a 72 px icon rail (⌃⌘S, or the button by the wordmark) that gives the
   views more room.
 - **Your own folder:** a base folder you choose, with Swedish, human-readable folders and file names. Paths in the
   database are stored relative to it, so the library can be moved, switched or tidied up from Settings.
+- **Export och import** of the whole library as one zip, for moving it to another Mac.
 - **Agent connection (MCP):** an optional Streamable HTTP MCP server (off by default, loopback + Tailscale only,
   bearer token) through which your own agents work much as you do: they create assets of every kind and give them
   photos and sound (sent as uploads or URLs Studio fetches — never paths on your Mac), set references, voices and
@@ -139,7 +143,8 @@ changes.
   neighbours (and their previews), saving a frame as a still, exports, voice and sound clips (measuring them and
   cutting out the part that is sent), own clips, everything in Redigera and the frames agents review; generating
   without voices works without it.
-- **A Venice.ai API key** — added under **Inställningar** (Settings). Generations cost money on your Venice account.
+- **A Venice.ai API key** — added under **Inställningar → Venice** (Settings). Generations cost money on your Venice
+  account.
 - **Optional: the Xcode Command Line Tools** (`xcode-select --install`), to build the small Swift helper that
   separates voice and background (`npm run build:helpers`, run automatically by `dev`, `build` and `app`). Without
   it Studio works as before, and Redigera says that voice separation isn't available.
@@ -242,6 +247,16 @@ the whole library can be moved by moving its folders. Files of your own elsewher
 alone. A library from an earlier layout (`studio.db`, `generations/`, `thumbs/` … directly in the folder) is
 converted to this layout when it is opened.
 
+**Export och import.** *Inställningar → Export och import → Exportera biblioteket…* packs the whole library into one
+zip (default `~/Downloads/Studio-bibliotek <date>.zip`): a consistent copy of the database and every file in the
+library's folders. Caches Studio rebuilds by itself (posters, frames, stems, filmstrips, scratch) stay out, except a
+frame a take was started from; your own files elsewhere in the base folder, settings, the API key and the agent token
+never come along. *Importera ett bibliotek…* checks the zip (it must be a Studio export, not from a newer Studio),
+unpacks it into a new or empty folder (suggested: `~/Movies/<zip name>`), checks the database and files, and opens it
+as your library; the library you had open stays where it is. On a new Mac the first screen offers *Importera ett
+bibliotek…* too. Posters are made again in the background. While an export runs, switching libraries and *Städa upp*
+have to wait until it is done; an export and an import can both be cancelled (*Avbryt*).
+
 ## Prompts, `@ImageN` and `@AudioN` references
 
 In **reference mode** the model receives the reference images in order, and the prompt refers to them as
@@ -252,8 +267,8 @@ the reference images, and a label for each asset inserts the right tokens, for e
 Anna (@Image1, @Image2) wearing Red dress (@Image3) walks along the beach promenade (@Image4) …
 ```
 
-The connecting word follows **Inställningar → Promptspråk** (prompt language): `wearing` in English (the default;
-the models understand English best) or `i` in Swedish.
+The connecting word follows **Inställningar → Generering → Promptspråk** (prompt language): `wearing` in English
+(the default; the models understand English best) or `i` in Swedish.
 
 **Voices and sounds.** With a model that takes reference audio (Seedance's reference-to-video models among them),
 adding a character that has a voice also adds its first voice clip (*Ta med rösten* on the chip turns it off; an
@@ -321,15 +336,26 @@ agent tools.
 
 A **sequence** is an ordered list of clips (*Klipp*). Each clip stores the settings for new takes; every
 generation for it is a **take**, and one take per clip is selected for the cut and can be trimmed at the start and
-end. A clip that **continues from the previous one** (*Startbild från föregående klipp*) is generated
-image-to-video: when it is generated, the previous clip's selected take is cut at its trim point and that last frame
-(extracted with ffmpeg) becomes the start image, so it sends no reference photos or voices of its own. A clip can
-likewise take its **end image from the next clip** (*Slutbild från nästa klipp*): the next clip's first frame after
-its start trim, sent as the end image to a model that takes one (Seedance's image-to-video models do; turning the
-switch on picks one). **Generera saknade** (generate missing) generates every clip without a finished selected
-take, each after the clips whose frames it needs, waiting for each one; if two clips wait on each other's frames it
-says which switch to turn off before anything is paid for. **Exportera** renders the selected, trimmed takes into
-one H.264/AAC mp4 in the sequence's folder, showing a picture two clips share at a cut only once.
+end. A clip that **continues from the previous one** (*Startbild från föregående klipp*) starts on the previous
+clip's last frame: when it is generated, the previous clip's selected take is cut at its trim point and that frame is
+extracted with ffmpeg. Under the switch you choose how. **Med referensbilder** (the default) sends the clip in
+reference mode with the reference photos and voices it carries — its own if you give it any, otherwise those of the
+clip it continues from (back to the first clip with references) — plus the frame as one more reference image, and
+the prompt as sent starts with an instruction to begin on it; *Skickar med: Anna, Strandpromenad + sista bildrutan*
+says what goes along. The characters stay themselves, also when they leave the picture and come back; the first
+frame comes very close to the previous clip's last one but isn't guaranteed identical. Reorder, remove or add
+references in the clip they come from, and the clips that carry them keep each `@Image` and `@Audio` on the same
+picture or voice (and the frame's token on the frame); a token whose picture no longer goes along is taken out. **Exakt startbild** sends
+image-to-video from the frame itself — an exact cut, but no references (the clip's own references and their `@`
+tokens are taken out). A clip that also ends on the next clip (*Slutbild från nästa klipp*, *Gör om mellan
+grannarna*) or has an end image of its own is always sent exactly. If the model takes 9 reference images and the
+clip carries 9, the 9th gives way for the frame (*Referensbild 9 skickas inte – plats behövs för startbilden*). A
+clip can likewise take its **end image from the next clip** (*Slutbild från nästa klipp*): the next clip's first
+frame after its start trim, sent as the end image to a model that takes one (Seedance's image-to-video models do;
+turning the switch on picks one). **Generera saknade** (generate missing) generates every clip without a finished
+selected take, each after the clips whose frames it needs, waiting for each one; if two clips wait on each other's
+frames it says which switch to turn off before anything is paid for. **Exportera** renders the selected, trimmed
+takes into one H.264/AAC mp4 in the sequence's folder, showing a picture two clips share at a cut only once.
 
 **Takes.** Every take of a clip is a thumbnail in the strip under the player, newest first (so one being made comes
 first), each keeping its place when it finishes. Click one and it becomes the clip's take and plays from its kept start,
@@ -394,8 +420,8 @@ one is the base picture the model edits) — with model, format (the storyboard'
 to choose, the price on the button and *Skapa igen* for another attempt. **Använd föregående bild som referens** (on
 by default when the previous board has a picture) puts that picture first among the references, so place, light and
 people carry over from one milestone to the next. The finished picture goes onto the board, and every result is
-kept in the storyboard's `Bilder/` folder. **Säkert läge för bilder** (Inställningar → Bilder, on by default, also
-switchable in the dialog) lets Venice blur adult content.
+kept in the storyboard's `Bilder/` folder. **Säkert läge för bilder** (Inställningar → Generering → Bilder, on by
+default, also switchable in the dialog) lets Venice blur adult content.
 
 ## Connecting your own agent
 

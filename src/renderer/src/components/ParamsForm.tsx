@@ -101,6 +101,13 @@ interface Props {
    */
   continuing?: boolean
   /**
+   * A sequence clip that continues from the previous clip in reference mode: the previous clip's last frame is sent as
+   * one more reference image after the ones shown, and the instruction in front of the prompt names it. Its text is
+   * shown under the references. The frame takes the model's last place (one picture fewer fits), the clip needs no
+   * picture of its own, and the prompt checks count the frame (see ValidateOptions.continuationFrame).
+   */
+  continuationFrame?: string
+  /**
    * A sequence clip: an end image its model can't take stops the take (main refuses it rather than paying for one
    * without the keyframe), where the Generate form just leaves the picture out. The note under it says which.
    */
@@ -230,6 +237,7 @@ export default function ParamsForm({
   startImageNote,
   endImageNote,
   continuing = false,
+  continuationFrame,
   endImageRequired = false,
   onSubmit,
   navigate
@@ -318,7 +326,9 @@ export default function ParamsForm({
   }
 
   const refs = params.referenceImages ?? []
-  const maxRefs = maxReferenceImages(params.model)
+  // A continuation's frame takes the model's last place (see continuationFrame).
+  const framed = !!continuationFrame && kind === 'reference-to-video'
+  const maxRefs = Math.max(1, maxReferenceImages(params.model) - (framed ? 1 : 0))
   const [refNote, setRefNote] = useState<string>()
 
   useEffect(() => {
@@ -675,7 +685,7 @@ export default function ParamsForm({
   const negativeRef = useRef<HTMLTextAreaElement>(null)
   const negativeIssuesId = useId()
   // What both prompts are checked against: exactly what the main process checks before sending.
-  const checks = validationContext(params, { continuing })
+  const checks = validationContext(params, { continuing, continuationFrame: framed })
   // @ImageN and @AudioN mistakes in the negative prompt block generating as well.
   const negativeHasError = negativePromptIssues(params.negativePrompt ?? '', checks).some((i) => i.severity === 'error')
   const switchToReference = kinds.includes('reference-to-video') ? () => switchKind('reference-to-video') : undefined
@@ -862,6 +872,7 @@ export default function ParamsForm({
             onManageOutfits={manageKind && (() => manageKind('outfit'))}
           />
           {refNote && <p className="mt-1 text-[11px] text-accent">{refNote}</p>}
+          {framed && <p className="mt-1.5 text-[11px] leading-snug text-muted">{continuationFrame}</p>}
         </div>
       )}
 

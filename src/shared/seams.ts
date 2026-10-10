@@ -8,7 +8,7 @@
 /** What one side of a cut needs to say: the take's id, the pictures it was generated from and its length. */
 export interface SeamTake {
   id: string
-  params: { startImage?: string; endImage?: string }
+  params: { startImage?: string; endImage?: string; referenceImages?: readonly string[] }
   /** Seconds, when measured. */
   videoDuration?: number
 }
@@ -29,14 +29,35 @@ export function isExtractedFrame(path: string | undefined): boolean {
 }
 
 /**
- * The take was made to start on `previous`'s last shown frame as it is now: its start image is the frame main
- * extracted from that take (`<id>-last.png`, or `<id>-v2-<ms>.png` / `<id>-<ms>.png` where an end trim cuts it) at
- * the end trim the previous clip has now. What can't be told (a name without a time, a length not measured yet)
- * counts as a match.
+ * The previous clip's last frame a take of a continuing clip was made from, and how it was sent: as its start image
+ * ('exact': image-to-video, the frame is the take's first frame) or as its last reference image ('references': the
+ * frame went along after the carried reference images, and the prompt said to start on it, so the take starts close to
+ * it). Undefined for a take made from no such frame. A frame main extracted for an end image (`-first-`) never counts.
+ */
+export function continuationFrameOf(
+  params: SeamTake['params']
+): { path: string; mode: 'exact' | 'references' } | undefined {
+  const start = params.startImage
+  if (start && isExtractedFrame(start)) return { path: start, mode: 'exact' }
+  const refs = params.referenceImages
+  const last = Array.isArray(refs) && refs.length ? refs[refs.length - 1] : undefined
+  if (typeof last === 'string' && isExtractedFrame(last) && !isExtractedFirstFrame(last)) {
+    return { path: last, mode: 'references' }
+  }
+  return undefined
+}
+
+/**
+ * The take was made to start on `previous`'s last shown frame as it is now: its start image (or, made in reference
+ * mode, its last reference image; see continuationFrameOf) is the frame main extracted from that take
+ * (`<id>-last.png`, or `<id>-v2-<ms>.png` / `<id>-<ms>.png` where an end trim cuts it) at the end trim the previous
+ * clip has now. What can't be told (a name without a time, a length not measured yet) counts as a match. A take made
+ * in reference mode starts close to that frame rather than exactly on it; it still counts, and the export still drops
+ * one frame at the cut (harmless either way).
  */
 export function startsOnLastFrameOf(take: SeamTake, previous: SeamTake, previousTrimEnd: number): boolean {
-  const start = take.params.startImage
-  if (!start || !isExtractedFrame(start)) return false
+  const start = continuationFrameOf(take.params)?.path
+  if (!start) return false
   const name = fileName(start)
   if (!name.startsWith(previous.id)) return false
   const at = /-(last|\d+)\.png$/.exec(name)?.[1]

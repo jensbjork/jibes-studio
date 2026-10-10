@@ -1,7 +1,25 @@
 // Swedish wording for the agent connection: the sidebar indicator, the activity drawer and the approval dialog.
+// An agent is named by agentDisplayName (shared/agent-name.ts): a generic MCP client name ("mcp", "mcp-remote")
+// reads "Agenten", a real one ("OpenClaw") is kept. MCP is how the agent connects, not who it is.
 
-import type { AgentActivity, AgentStatus, ApprovalRequest, SegmentImageSlot } from '@shared/types'
+import { agentDisplayName, isGenericAgentName } from '@shared/agent-name'
+import type { AgentActivity, AgentClientInfo, AgentStatus, ApprovalRequest, SegmentImageSlot } from '@shared/types'
 import { swedishList } from '../../lib/assets'
+
+/** The agent's name inside a sentence: "agenten" for a generic or missing name ("Be agenten fråga igen"), else it. */
+export function agentInSentence(name: string | undefined): string {
+  return isGenericAgentName(name) ? 'agenten' : (name ?? '').trim()
+}
+
+/**
+ * The technical side of a connected client, for small muted text: "klient: mcp 1.2 · 127.0.0.1" when the name
+ * shown is "Agenten", else "1.2 · 192.0.2.7" (the name already says it).
+ */
+export function clientDetail(c: AgentClientInfo): string {
+  const generic = isGenericAgentName(c.name)
+  const client = generic ? `klient: ${c.name.trim() || 'okänd'}${c.version ? ` ${c.version}` : ''}` : c.version
+  return ['via MCP', client, c.address].filter(Boolean).join(' · ')
+}
 
 /** "1 sak", "3 saker": how many things a 'delete' request removes. */
 export function thingsText(n: number): string {
@@ -42,21 +60,47 @@ export function agentSummary(status: AgentStatus | undefined): AgentSummary {
   if (!names.length) {
     return { tone: 'waiting', label: 'Agent: på – väntar', detail: 'Anslutningen är på och väntar på en agent.' }
   }
-  // The sidebar says what is there, an agent, whatever its client calls itself ("mcp", "OpenClaw"…); the name is in
-  // the detail and the drawer.
-  const who = swedishList(names)
+  // The sidebar says what is there, an agent, whatever its client calls itself ("mcp", "OpenClaw"…); a real name is
+  // in the detail and the drawer, a generic one reads "en agent".
   const label = names.length === 1 ? 'Agent ansluten' : `${names.length} agenter anslutna`
-  return { tone: 'connected', label, detail: `Ansluten till Studio: ${who}.` }
+  return { tone: 'connected', label, detail: connectedDetail(names) }
+}
+
+/**
+ * The drawer's line on who is connected: "OpenClaw är ansluten via MCP.", "En agent är ansluten via MCP.",
+ * "OpenClaw och en agent till är anslutna via MCP."
+ */
+function connectedDetail(names: string[]): string {
+  const named = names.filter((n) => !isGenericAgentName(n))
+  const unnamed = names.length - named.length
+  const others = named.length
+    ? unnamed === 1
+      ? ['en agent till']
+      : unnamed > 1
+        ? [`${unnamed} agenter till`]
+        : []
+    : [unnamed === 1 ? 'En agent' : `${unnamed} agenter`]
+  const verb = names.length === 1 ? 'är ansluten' : 'är anslutna'
+  return `${swedishList([...named, ...others])} ${verb} via MCP.`
+}
+
+/** "Agenten arbetar", "OpenClaw arbetar": who is working right now. */
+export function workingLabel(a: AgentActivity): string {
+  return `${agentDisplayName(a.client)} arbetar`
+}
+
+/** The summary without the agent's name in front, when main (or an older entry) put it there. */
+function ownSummary(a: AgentActivity): string {
+  const summary = a.summary.trim()
+  const client = a.client.trim()
+  return client && summary.toLocaleLowerCase('sv').startsWith(client.toLocaleLowerCase('sv'))
+    ? summary.slice(client.length).trim()
+    : summary
 }
 
 /** "Satte prompten": what the agent just did, for the working indicator (without its name, capitalised). */
 export function presenceText(a: AgentActivity): string {
-  const summary = a.summary.trim()
-  const client = a.client.trim()
-  const own =
-    client && summary.toLocaleLowerCase('sv').startsWith(client.toLocaleLowerCase('sv'))
-      ? summary.slice(client.length).trim()
-      : summary
+  const own = ownSummary(a)
   return own ? own.charAt(0).toLocaleUpperCase('sv') + own.slice(1) : 'Arbetar i Studio'
 }
 
@@ -76,12 +120,13 @@ export function formatTime(at: number): string {
     : date.toLocaleString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
-/** "OpenClaw satte prompten": the summary from main, prefixed with the client unless it already names it. */
+/**
+ * "Agenten satte prompten", "OpenClaw satte prompten": the summary from main after the agent's name as the user
+ * knows it (never the MCP client's technical name, which is in the drawer's connection details).
+ */
 export function activityText(a: AgentActivity): string {
-  const summary = a.summary.trim()
-  const client = a.client.trim()
-  if (!client || summary.toLocaleLowerCase('sv').startsWith(client.toLocaleLowerCase('sv'))) return summary
-  return `${client} ${summary}`
+  const own = ownSummary(a)
+  return own ? `${agentDisplayName(a.client)} ${own}` : agentDisplayName(a.client)
 }
 
 /** What an approval would generate (or remove), in a few words. `sequenceName`: the sequence's or storyboard's name. */
@@ -146,7 +191,10 @@ export function approvalVerb(a: ApprovalRequest): string {
   return a.kind === 'image' || a.kind === 'voice-design' ? 'vill skapa' : 'vill generera'
 }
 
-/** The dialog's heading after the agent's name: "vill generera", "vill skapa en bild", "vill redigera en film". */
+/**
+ * The dialog's heading after the agent's name (agentDisplayName): "vill generera", "vill skapa en bild", "vill
+ * redigera en film".
+ */
 export function approvalHeading(a: ApprovalRequest): string {
   switch (a.kind) {
     case 'image':

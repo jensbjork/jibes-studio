@@ -202,8 +202,8 @@ Add a rating by the user, an agent's review and a pinned learning the same way (
 ```bash
 sqlite3 "$LIB/.studio/studio.db" <<'SQL'
 INSERT INTO generation_reviews (id, generation_id, author, rating, tags, note, created_at, updated_at)
-VALUES ('fake-review-1', 'fake-1', 'user', 4, '["good-motion"]', 'Nice motion.', 1767268800000, 1767268800000),
-       ('fake-review-2', 'fake-1', 'Test agent', 2, '["identity-drift"]', 'The face drifts after t = 3 s.',
+VALUES ('fake-review-1', 'fake-1', 'user', 2, '["good-motion"]', 'Nice motion.', 1767268800000, 1767268800000),
+       ('fake-review-2', 'fake-1', 'Test agent', -1, '["identity-drift"]', 'The face drifts after t = 3 s.',
         1767268900000, 1767268900000);
 INSERT INTO learnings (id, title, insight, model, tags, evidence, author, pinned, created_at, updated_at)
 VALUES ('fake-learning-1', 'Test learning', 'Short prompts drift less.', NULL, '["test"]', '["fake-1"]', 'user', 1,
@@ -211,8 +211,9 @@ VALUES ('fake-learning-1', 'Test learning', 'Short prompts drift less.', NULL, '
 SQL
 ```
 
-Author `user` is the user's own review (at most one per generation); any other author is an agent. Tags and
-evidence are JSON lists; evidence holds generation ids.
+Author `user` is the user's own review (at most one per generation); any other author is an agent. A rating is
+tumme ner (`-1`) or 1–3 stars; since migration 13 the table's `CHECK` allows nothing else. Tags and evidence are JSON
+lists; evidence holds generation ids.
 
 ### Fake status rows
 
@@ -461,8 +462,8 @@ macOS's own AUSoundIsolation audio unit through a small Swift command-line helpe
   the flags and the compiler version) skips an up-to-date helper in a fraction of a second; `--force` rebuilds
   (`npm run build:helpers -- --force`);
 - without the Swift compiler, or off macOS, it prints a note and skips; `STUDIO_SKIP_HELPERS=1` skips it on purpose.
-  Studio then runs without voice separation: *Inställningar* says *"Röstseparering är inte byggd. Kör npm run
-  build:helpers …"*, and Redigera offers only what works without stems.
+  Studio then runs without voice separation: *Inställningar → Verktyg* says *"Röstseparering är inte byggd. Kör npm
+  run build:helpers …"*, and Redigera offers only what works without stems.
 
 `src/main/voice-separation.ts` looks for the helper in `<app>/Contents/Resources/bin/` when packaged (electron-builder
 copies it there through `extraResources`) and in `build/bin/` in development. Try it by hand:
@@ -545,7 +546,9 @@ change the schema:
    existing library has already run them. Several statements in one entry are fine; each entry runs in its own
    transaction, together with the `user_version` bump.
 2. Write SQL that works on every earlier state reachable by the previous migrations (SQLite's `ALTER TABLE` is
-   limited; renames carry rows and foreign keys along, as migration 6 shows).
+   limited; renames carry rows and foreign keys along, as migration 6 shows). A `CHECK` can't be changed in place:
+   migration 13 rebuilds `generation_reviews` — a new table with the new `CHECK`, the rows copied and converted, the
+   old one dropped, the new one renamed and its indexes created again.
 3. If the new data holds **file paths**, store them relative to the base folder and teach every place that
    rewrites or looks for stored paths about it, or library moves, renames and *Städa upp* will break it (migration
    7 did this for `asset_audio.file_path` and `referenceAudios[].path`):

@@ -225,10 +225,23 @@ export default function FeedToolbar({
         <FilterMenu
           title="Betyg"
           value={filters.rating}
-          valueLabel={ratingLabel(filters.rating)}
+          valueLabel={ratingFilterLabel(filters.rating)}
           options={RATING_OPTIONS.map((o) => ({
             id: o.id,
-            label: typeof o.id === 'number' ? <span className="text-amber-400">{o.label}</span> : o.label
+            label:
+              typeof o.id === 'number' ? (
+                <span className="text-amber-400">{o.label}</span>
+              ) : o.id === 'thumbsDown' ? (
+                <span>
+                  <span aria-hidden className="mr-1.5">
+                    👎
+                  </span>
+                  {o.label}
+                </span>
+              ) : (
+                o.label
+              ),
+            text: o.label
           }))}
           onChange={(rating) => set({ rating })}
         />
@@ -323,9 +336,9 @@ function SortSelect({ sort, onSort }: { sort: SortKey; onSort: (sort: SortKey) =
   )
 }
 
-function ratingLabel(rating: FeedFilters['rating']): string | undefined {
+/** What the Betyg chip says: "★★ eller mer", "★★★", "Tumme ner", "Ej betygsatt". */
+function ratingFilterLabel(rating: FeedFilters['rating']): string | undefined {
   if (rating === undefined) return undefined
-  if (typeof rating === 'number') return rating === 5 ? '★★★★★' : `${'★'.repeat(rating)} eller mer`
   return RATING_OPTIONS.find((o) => o.id === rating)?.label
 }
 

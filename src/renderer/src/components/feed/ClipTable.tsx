@@ -9,8 +9,8 @@ import { formatWhen } from '../prompts/prompt-utils'
 import type { SortKey } from './feedFilter'
 import { STATUS_LABEL, clipSeconds, formatClipLength, isPending, progressOf, reviewCountText } from './feedText'
 import { ReviewIcon } from './icons'
+import RatingControl from './RatingControl'
 import { assetsOf, type LibraryIndex } from './references'
-import StarRating from './StarRating'
 import { Spinner, StatusDot } from '../work/StatusMark'
 
 interface Props {
@@ -143,7 +143,7 @@ export default function ClipTable({
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    // Keys typed in the rating stars or a button inside a row are theirs.
+    // Keys typed in the rating control or a button inside a row are theirs.
     if (e.target !== e.currentTarget) return
     const at = selectedIndex
     switch (e.key) {
@@ -439,7 +439,7 @@ function Cell({
       return <StatusCell g={g} />
     case 'rating':
       return g.status === 'completed' ? (
-        <StarRating
+        <RatingControl
           value={g.rating}
           onChange={(r) => {
             // Rating a clip is looking at it on purpose.

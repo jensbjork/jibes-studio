@@ -8,7 +8,7 @@ import { markSeen, useIsUnseen, useSeenWhenVisible } from '../lib/work'
 import { isPending, progressOf, reviewCountText } from './feed/feedText'
 import { CameraIcon, ExpandIcon, ReviewIcon, ScissorsIcon } from './feed/icons'
 import { pauseOthers } from './feed/playback'
-import StarRating from './feed/StarRating'
+import RatingControl from './feed/RatingControl'
 import Popover from './pickers/Popover'
 import SequencePicker, { type AddedToSequence } from './pickers/SequencePicker'
 import { PlayIcon } from './sequences/icons'
@@ -25,7 +25,7 @@ interface Props {
   onChange?: (g: Generation) => void
   /** Opens the clip in the detail drawer. */
   onOpen?: (g: Generation) => void
-  /** Sets (or with null clears) the user's star rating. */
+  /** Sets (or with null clears) the user's rating: -1 = tumme ner, 1–3 stars. */
   onRate?: (g: Generation, rating: number | null) => void
   /** The clip is the one shown in the detail drawer. */
   selected?: boolean
@@ -129,7 +129,7 @@ function GenerationCard({
   }
 
   const keepActionsVisible = pickerOpen || confirmingDelete
-  // Agents' reviews only: the user's own (stars, or just a note or tags) isn't a "granskning" to read.
+  // Agents' reviews only: the user's own (a rating, or just a note or tags) isn't a "granskning" to read.
   const otherReviews = g.agentReviewCount
   // Own films and versions from Redigera: named by their title, marked, without a model; their settings aren't a form.
   const badge = sourceBadge(g)
@@ -276,7 +276,7 @@ function GenerationCard({
                 g.rating ? '' : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100'
               }`}
             >
-              <StarRating value={g.rating} onChange={rate} size="sm" />
+              <RatingControl value={g.rating} onChange={rate} size="sm" />
             </div>
           )}
           {onOpen && (

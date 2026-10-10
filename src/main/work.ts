@@ -16,6 +16,7 @@
 import { randomUUID } from 'node:crypto'
 import { basename, extname } from 'node:path'
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { agentDisplayName } from '@shared/agent-name'
 import { generationTitle } from '@shared/generation-label'
 import {
   workKey,
@@ -612,7 +613,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
     items.push({
       key: `upload:${u.id}`,
       kind: 'upload',
-      label: `${u.client} laddar upp ${u.fileName}`,
+      label: `${agentDisplayName(u.client)} laddar upp ${u.fileName}`,
       detail,
       startedAt: u.startedAt,
       ...(fraction !== undefined && u.status !== 'checking' ? { progress: fraction } : {}),
@@ -642,7 +643,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       kind: 'approval',
       ...(view ? { view } : {}),
       ...(view && a.sequenceId && names.sequences[a.sequenceId] ? { ownerId: a.sequenceId } : {}),
-      label: `${a.client}: ${a.summary}`,
+      label: `${agentDisplayName(a.client)}: ${a.summary}`,
       detail: 'Genomförs…',
       startedAt: a.startedAt,
       measuredAt: now,

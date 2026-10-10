@@ -129,6 +129,23 @@ export function imageToVideoVariant(modelId: string): string {
   return modelId.replace(/(reference|text)-to-video/, 'image-to-video')
 }
 
+/**
+ * The reference-to-video sibling of a model (seedance-2-5-image-to-video-basic → seedance-2-5-reference-to-video-basic),
+ * or undefined when its family has none: a sequence clip that continues from the previous clip in reference mode is
+ * sent with it (see continuation.ts). `available` (the model list's ids) decides when given; otherwise the model list
+ * main and the window remember (rememberModelKinds), and before that has arrived the families known to have one
+ * (Seedance 2.x).
+ */
+export function referenceToVideoVariant(modelId: string, available?: readonly string[]): string | undefined {
+  if (typeof modelId !== 'string' || !modelId) return undefined
+  if (kindOfModelId(modelId) === 'reference-to-video') return modelId
+  const sibling = modelId.replace(/(image|text)-to-video/, 'reference-to-video')
+  if (sibling === modelId) return undefined
+  if (available) return available.includes(sibling) ? sibling : undefined
+  if (knownKinds.size) return knownKinds.get(sibling) === 'reference-to-video' ? sibling : undefined
+  return /^seedance-2-/.test(sibling) ? sibling : undefined
+}
+
 // ── Keyframes: start and end image ──────────────────────────────────────────
 // Venice's /video/queue takes `image_url` (the first frame) and, with some image-to-video models, `end_image_url`
 // (the last frame). The model list has no flag for the latter, so the models known to take it are listed here

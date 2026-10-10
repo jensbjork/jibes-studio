@@ -19,6 +19,7 @@ import { ffmpegStatus, stopAllFfmpeg } from './ffmpeg'
 import { registerImportIpc, VIDEO_FILE_TYPES, type ImportService } from './imports'
 import { JobManager, prepareSubmission, toPublic } from './jobs'
 import { assetWorkBusy, AUDIO_FILE_TYPES, registerLibraryIpc } from './library'
+import { archiveBusyReason, registerArchiveIpc, stopLibraryArchive } from './library-archive'
 import { prepareLibrary, registerLibraryRootIpc } from './library-root'
 import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty, toStoredPath } from './paths'
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
@@ -152,7 +153,7 @@ function sendWork(summary: WorkSummary): void {
 }
 
 /**
- * Sends a changed generation to the feed with the user's stars and its review count: rows carry neither, and
+ * Sends a changed generation to the feed with the user's rating and its review count: rows carry neither, and
  * an update without them would wipe the rating off its card.
  */
 function broadcastGeneration(g: Generation): void {
@@ -186,8 +187,16 @@ function libraryBusyReason(): string | undefined {
     return 'En agents förfrågan genomförs just nu. Vänta tills den är klar och försök igen.'
   }
   // An import copying a film in, or an edit job (a half-sent paid job's runner must never be carried into another
-  // library), would otherwise write into the wrong folder.
-  return sequencesBusy() ?? importsService?.isBusy() ?? editsService?.isBusy() ?? assetWorkBusy() ?? stillWorkBusy()
+  // library), would otherwise write into the wrong folder. An export of the whole library (Export och import) reads
+  // every file: it is last, so the export itself can still ask whether anything else runs.
+  return (
+    sequencesBusy() ??
+    importsService?.isBusy() ??
+    editsService?.isBusy() ??
+    assetWorkBusy() ??
+    stillWorkBusy() ??
+    archiveBusyReason()
+  )
 }
 
 /** The video model list, fetched at most every ten minutes unless forced (GET /models is free). */
@@ -405,7 +414,7 @@ function registerIpc(): void {
     }
   )
   // Reviews and learnings, from the window and from agents; changes go to every window. A review also changes
-  // the stars and count its generation's card shows, so the generation is sent again too.
+  // the rating and count its generation's card shows, so the generation is sent again too.
   registerReviewIpc((channel, payload) => {
     broadcast(channel, payload)
     if (channel !== 'review:change' || typeof payload !== 'string' || !db.isDbOpen()) return
@@ -522,6 +531,9 @@ function registerIpc(): void {
     }
   })
 
+  // Export och import: the whole library to a zip and back, only from the window (agents are refused).
+  registerArchiveIpc({ busy: libraryBusyReason })
+
   registerAgentIpc(agent)
 }
 
@@ -560,8 +572,10 @@ app.on('will-quit', () => {
       console.error('Stopping a service failed:', err)
     }
   }
-  // Exports and frame grabs must not outlive the app or leave their half-written files behind.
+  // Exports and frame grabs must not outlive the app or leave their half-written files behind; nor may a library
+  // export or import (its partial zip or unpacked folder goes).
   stopAllFfmpeg()
+  stopLibraryArchive()
   // Folds the WAL back into studio.db, leaving a single file in .studio.
   db.closeDb()
 })

@@ -39,6 +39,27 @@ const AUDIO_WORD: Record<PromptLanguage, { voice: string; sound: string }> = {
 /** What is put after a shortened description. */
 const ELLIPSIS = '…'
 
+/**
+ * The instruction a sequence clip that continues from the previous clip in reference mode is sent with, in front of
+ * its prompt (never written into the prompt the user edits): the previous clip's last frame goes along as the last
+ * reference image, @Image{frameToken}, and the model is told to start on it. Per prompt language.
+ */
+export function continuationLeadIn(frameToken: number, language: PromptLanguage): string {
+  const token = `@Image${Math.max(1, Math.floor(frameToken) || 1)}`
+  return language === 'sv'
+    ? `Börja exakt på ${token} (sista bildrutan i föregående klipp) och fortsätt handlingen därifrån.`
+    : `Start exactly on ${token} (the last frame of the previous shot) and continue the action from there.`
+}
+
+/** Options for composePrompt beyond the stored ComposeOptions. */
+export interface ComposeExtras {
+  /**
+   * Text sent in front of the user's prompt, separated by a blank line (continuationLeadIn). Counted against the
+   * character limit like the prompt; not sent with an empty prompt (nothing is).
+   */
+  leadIn?: string
+}
+
 /** "@" and its full-width form: what starts a reference token (prompt-refs). */
 const AT_SIGNS = /[@\uFF20]/g
 
@@ -175,6 +196,8 @@ function shorten(text: string, max: number): string {
  * - The user's prompt is never changed: `prompt` is it with trailing whitespace trimmed and the legend appended,
  *   or exactly it when nothing is appended. A blank prompt gets no legend (there is nothing to explain, and a
  *   prompt made of descriptions alone must not be sent), though its entries are still listed.
+ * - `opts.leadIn` (a continuation's instruction, continuationLeadIn) goes in front of a non-blank prompt with a blank
+ *   line after it, counted against the limit like the prompt.
  * - With a character limit, descriptions that would take the prompt past it are shortened in proportion to their
  *   length, at word boundaries, ending in "…" (`truncated`); if not even the names and tokens fit, no legend is
  *   appended at all (`dropped`). Entries are listed either way.
@@ -185,10 +208,13 @@ function shorten(text: string, max: number): string {
 export function composePrompt(
   params: GenerationParams,
   assets: readonly DescribedAsset[],
-  opts: ComposeOptions
+  opts: ComposeOptions & ComposeExtras
 ): ComposedPrompt {
   const userPrompt = typeof params.prompt === 'string' ? params.prompt : ''
-  const none: ComposedPrompt = { prompt: userPrompt, legend: '', entries: [], truncated: false, dropped: false }
+  // The lead-in (a continuation's instruction) goes in front of a prompt that has something to say.
+  const leadIn = typeof opts.leadIn === 'string' && userPrompt.trim() ? opts.leadIn.trim() : ''
+  const lead = leadIn ? `${leadIn}\n\n` : ''
+  const none: ComposedPrompt = { prompt: lead + userPrompt, legend: '', entries: [], truncated: false, dropped: false }
   if (!opts.include) return none
   const language: PromptLanguage = opts.language === 'sv' ? 'sv' : 'en'
 
@@ -238,8 +264,9 @@ export function composePrompt(
     description,
     ...(description !== d.description ? { shortened: true } : {})
   })
-  const base = userPrompt.trimEnd()
-  if (!base) return { ...none, entries: list.map((d) => entry(d, d.description)) }
+  const own = userPrompt.trimEnd()
+  if (!own) return { ...none, entries: list.map((d) => entry(d, d.description)) }
+  const base = lead + own
 
   const heading = `\n\n${HEADING[language]}`
   const full = heading + list.map((d) => line(d, d.description, language)).join('')
@@ -262,7 +289,7 @@ export function composePrompt(
   const fixed = base.length + heading.length + list.reduce((sum, d) => sum + line(d, '', language).length, 0)
   if (fixed > limit) {
     const entries = list.map((d) => entry(d, d.description))
-    return { prompt: userPrompt, legend: '', entries, truncated: false, dropped: true }
+    return { prompt: lead + userPrompt, legend: '', entries, truncated: false, dropped: true }
   }
   const shortened = fitDescriptions(list.map((d) => d.description), limit - fixed)
   const legend = heading + list.map((d, i) => line(d, shortened[i], language)).join('')

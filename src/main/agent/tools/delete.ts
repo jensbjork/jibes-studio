@@ -4,6 +4,8 @@ import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { generationTitle } from '@shared/generation-label'
+import { agentInSentence } from '@shared/agent-name'
+import { ratingLabel } from '@shared/rating'
 import type {
   ApprovalDeleteItem,
   ApprovalDeleteRequest,
@@ -580,13 +582,14 @@ async function planReview(input: DeleteInput, id: string): Promise<Planned> {
     row<ReviewRow>('SELECT generation_id, author, rating, note, updated_at FROM generation_reviews WHERE id = ?', id)
   const review = read() ?? refuse(`Det finns inget omdöme med id ${id}.`)
   const g = db.getGeneration(review.generation_id)
-  const what = review.rating ? `${review.rating} av 5${review.note.trim() ? ' · ' : ''}` : ''
+  // The grade as the approval shows it: "Tumme ner", "2 stjärnor".
+  const what = review.rating ? `${ratingLabel(review.rating)}${review.note.trim() ? ' · ' : ''}` : ''
   return planned(
     input,
     {
       kind: 'review',
       id,
-      label: `Omdömet av ${review.author === 'user' ? 'användaren' : review.author} på ${q(g ? generationTitle(g, 40) : 'en video')}`,
+      label: `Omdömet av ${review.author === 'user' ? 'användaren' : agentInSentence(review.author)} på ${q(g ? generationTitle(g, 40) : 'en video')}`,
       group: 'Omdömen',
       ...(g?.thumbPath ? { preview: g.thumbPath } : {}),
       text: excerpt(`${what}${review.note}`, 200),

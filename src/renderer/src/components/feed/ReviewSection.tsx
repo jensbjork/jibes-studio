@@ -4,16 +4,16 @@ import { ipcErrorMessage } from '../../lib/hooks'
 import { markSeen } from '../../lib/work'
 import { formatWhen } from '../prompts/prompt-utils'
 import ConfirmButton from '../sequences/ConfirmButton'
-import { REVIEW_TAGS, authorLabel, tagChipClass, tagLabel } from './feedText'
-import StarRating from './StarRating'
+import { REVIEW_TAGS, authorLabel, ratingWord, tagChipClass, tagLabel } from './feedText'
+import RatingControl from './RatingControl'
 
 const NOTE_DELAY = 700
 
 const sectionTitle = 'mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted'
 
 /**
- * The user's own verdict on a clip: 1–5 stars, a note and optional tags. Agents read these (list_reviews) when
- * they look for what works, so even a one-line note helps them write better prompts.
+ * The user's own verdict on a clip: a grade (tumme ner or one to three stars), a note and optional tags. Agents read
+ * these (list_reviews) when they look for what works, so even a one-line note helps them write better prompts.
  */
 export function YourReview({
   generation: g,
@@ -36,7 +36,7 @@ export function YourReview({
   // A stored change (ours echoing back, or made elsewhere) replaces the optimistic tags.
   useEffect(() => setTags(undefined), [review?.updatedAt])
 
-  // Judging a clip – stars, a tag, a note – is looking at it on purpose: it is seen from then on.
+  // Judging a clip – a grade, a tag, a note – is looking at it on purpose: it is seen from then on.
   const judged = () => markSeen([workKey.generation(g.id)])
 
   const toggleTag = async (tag: string) => {
@@ -60,7 +60,7 @@ export function YourReview({
       <div className="rounded-lg border border-line bg-raised/30 p-3">
         <div className="flex items-center gap-3">
           {done ? (
-            <StarRating
+            <RatingControl
               value={g.rating}
               onChange={(r) => {
                 judged()
@@ -77,7 +77,7 @@ export function YourReview({
           )}
           {done && (
             <span className="text-[12px] text-muted">
-              {g.rating ? ['', 'Dåligt', 'Svagt', 'Okej', 'Bra', 'Mycket bra'][g.rating] : 'Hur blev det?'}
+              {ratingWord(g.rating) ?? 'Hur blev det?'}
             </span>
           )}
         </div>
@@ -230,8 +230,10 @@ export function AgentReviews({ reviews, onDelete }: { reviews: GenerationReview[
         {reviews.map((r) => (
           <li key={r.id} className="group rounded-lg border border-line bg-raised/30 p-3">
             <div className="flex items-center gap-2 text-[12px]">
-              <span className="min-w-0 truncate font-medium">{authorLabel(r.author)}</span>
-              {r.rating ? <StarRating value={r.rating} size="sm" /> : null}
+              <span className="min-w-0 truncate font-medium" title={r.author}>
+                {authorLabel(r.author)}
+              </span>
+              {r.rating !== undefined && <RatingControl value={r.rating} size="sm" />}
               <span className="ml-auto shrink-0 text-[11px] text-muted" title={new Date(r.updatedAt).toLocaleString('sv-SE')}>
                 {formatWhen(r.updatedAt)}
               </span>

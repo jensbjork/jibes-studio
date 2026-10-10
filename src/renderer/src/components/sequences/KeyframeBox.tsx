@@ -1,7 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { droppedImagesNote, type ContinuationPlan } from '@shared/continuation'
 import { endImageVariant, supportsEndImage } from '@shared/models'
-import type { Segment, Sequence, VideoModel } from '@shared/types'
+import type { Asset, ContinueMode, Segment, Sequence, VideoModel } from '@shared/types'
+import { useAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
+import { assetsByPath } from '../pickers/assetRefs'
+import { audioSourcesByPath } from '../pickers/audioRefs'
 import { BridgeIcon } from './icons'
 import {
   bridgeDescription,
@@ -37,9 +41,43 @@ interface Props {
   busy: boolean
   /** "Gör om mellan grannarna" just configured this clip: say what to do next. */
   justBridged: boolean
+  /** How the clip continues from the previous one, as its draft says (sequenceUtils continuationOf). */
+  plan?: ContinuationPlan
   onContinue: (on: boolean) => void
+  /** "Med referensbilder" / "Exakt startbild". */
+  onContinueMode: (mode: ContinueMode) => void
   onEndFromNext: (on: boolean) => void
   onBridge: () => void
+}
+
+/** "Annas röst", "Lukas röst", "Hamnens ljud". */
+function soundOf(asset: Asset): string {
+  const name = asset.name.trim()
+  return `${name}${/[sxz]$/i.test(name) ? '' : 's'} ${asset.kind === 'character' ? 'röst' : 'ljud'}`
+}
+
+/**
+ * "Skickar med: Anna, Strandpromenad, Annas röst + sista bildrutan (@Image4)" – what a continuation in reference mode
+ * sends, by asset (pictures that belong to none are counted), and where it carries it from.
+ */
+function carriedText(plan: ContinuationPlan, assets: readonly Asset[]): string {
+  const byPath = assetsByPath(assets)
+  const sounds = audioSourcesByPath(assets)
+  const parts: string[] = []
+  let loose = 0
+  for (const path of plan.images) {
+    const asset = byPath.get(path)
+    if (!asset) loose++
+    else if (!parts.includes(asset.name)) parts.push(asset.name)
+  }
+  if (loose) parts.push(loose === 1 ? '1 bild' : `${loose} bilder`)
+  for (const clip of plan.audios) {
+    const source = sounds.get(clip.path)
+    const label = source ? soundOf(source.asset) : 'ett ljudklipp'
+    if (!parts.includes(label)) parts.push(label)
+  }
+  const from = plan.carried?.inherited ? ` från klipp ${plan.carried.fromClip}` : ''
+  return `Skickar med${from}: ${parts.join(', ')} + sista bildrutan (@Image${plan.frameToken ?? plan.images.length + 1})`
 }
 
 /**
@@ -56,7 +94,9 @@ export default function KeyframeBox({
   ffmpegOk,
   busy,
   justBridged,
+  plan,
   onContinue,
+  onContinueMode,
   onEndFromNext,
   onBridge
 }: Props) {
@@ -77,12 +117,19 @@ export default function KeyframeBox({
   const hasReferences = !!(segment.params.referenceImages?.length || segment.params.referenceAudios?.length)
   const dropsReferences = hasReferences ? ' Referenserna tas bort, eftersom bild-till-video inte kan skicka dem.' : ''
 
+  const references = startOn && plan?.mode === 'references'
+  const assets = useAssets()
+  const carried = useMemo(() => (references && plan ? carriedText(plan, assets) : undefined), [references, plan, assets])
+  const dropped = references ? droppedImagesNote(plan) : undefined
+  const trimmed = previous && previous.trimEnd > 0 ? ' (efter trim)' : ''
   const startText = !previous
     ? 'Det första klippet startar från din prompt och dina egna bilder.'
     : !ffmpegOk && !startOn
       ? 'Kräver ffmpeg (brew install ffmpeg).'
       : startOn
-        ? `Startbilden hämtas från slutet av klipp ${index}${previous.trimEnd > 0 ? ' (efter trim)' : ''} när tagningen genereras, så övergången blir sömlös.`
+        ? references
+          ? `Sista bildrutan i klipp ${index}${trimmed} skickas med som referensbild efter klippets referenser, och klippet börjar på den – nära, men inte alltid exakt samma bild.`
+          : `Startbilden hämtas från slutet av klipp ${index}${trimmed} när tagningen genereras, så övergången blir sömlös.`
         : `Använd sista bildrutan i klipp ${index} som startbild för en sömlös övergång.`
 
   const endText = !next
@@ -127,15 +174,17 @@ export default function KeyframeBox({
         disabled={!previous || busy || (!startOn && !ffmpegOk)}
         onChange={onContinue}
       >
+        {startOn && plan && <ContinueModeChoice plan={plan} disabled={busy} onChange={onContinueMode} />}
         {startOn && (
           <FramePreview
             path={start?.path}
             loading={loading}
             caption={
               start
-                ? fromOwnStart
-                  ? `Fortsätter från sista bildrutan i ditt klipp${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`
-                  : `Startbild: sista bildrutan från klipp ${start.fromClip ?? index}${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`
+                ? (fromOwnStart
+                    ? `Fortsätter från sista bildrutan i ditt klipp${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`
+                    : `Startbild: sista bildrutan från klipp ${start.fromClip ?? index}${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`) +
+                  (references ? ` – skickas som @Image${plan?.frameToken ?? 1}` : '')
                 : previous && !readyTake(previous)
                   ? `Klipp ${index} behöver en färdig vald tagning innan det här klippet kan genereras.`
                   : loading
@@ -143,6 +192,11 @@ export default function KeyframeBox({
                     : 'Bildrutan kunde inte tas fram.'
             }
           />
+        )}
+        {carried && <p className="mt-2 pl-12 text-[11px] leading-snug text-text">{carried}</p>}
+        {dropped && <p className="mt-1 pl-12 text-[11px] leading-snug text-amber-300">{dropped}</p>}
+        {startOn && plan?.applies && plan.chosen === 'references' && plan.mode === 'exact' && plan.note && (
+          <p className="mt-1.5 pl-12 text-[11px] leading-snug text-muted">{plan.note}</p>
         )}
       </ToggleRow>
 
@@ -274,6 +328,69 @@ function ToggleRow({
         </span>
       </div>
       {children}
+    </div>
+  )
+}
+
+/**
+ * "Med referensbilder – håller karaktärerna (rekommenderas)" / "Exakt startbild – utan referenser": how a clip that
+ * continues from the previous one starts on its last frame. Greyed out, with the reason, where it doesn't apply (the
+ * clip also ends on the next clip's first frame, or has an end image of its own).
+ */
+function ContinueModeChoice({
+  plan,
+  disabled,
+  onChange
+}: {
+  plan: ContinuationPlan
+  disabled: boolean
+  onChange: (mode: ContinueMode) => void
+}) {
+  const options: { mode: ContinueMode; label: string; hint: string; title: string }[] = [
+    {
+      mode: 'references',
+      label: 'Med referensbilder',
+      hint: 'håller karaktärerna (rekommenderas)',
+      title:
+        'Skickar med referensbilderna och rösterna – klippets egna, annars dem från klippet före – och sista bildrutan som en referensbild till. Klippet börjar nära bildrutan, och karaktärer som går ur bild kommer tillbaka som sig själva.'
+    },
+    {
+      mode: 'exact',
+      label: 'Exakt startbild',
+      hint: 'utan referenser',
+      title:
+        'Bild-till-video från sista bildrutan: klippet börjar exakt på den, men skickar inga referenser. Klippets egna referenser och deras @-hänvisningar tas bort ur prompten.'
+    }
+  ]
+  return (
+    <div className="mt-3 pl-12">
+      <div
+        role="radiogroup"
+        aria-label="Hur klippet börjar på bildrutan"
+        className={`grid grid-cols-2 gap-1 rounded-lg bg-raised p-1 ${plan.applies ? '' : 'opacity-50'}`}
+      >
+        {options.map((o) => {
+          const on = plan.applies ? plan.chosen === o.mode : o.mode === 'exact'
+          return (
+            <button
+              key={o.mode}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              title={o.title}
+              disabled={disabled || !plan.applies}
+              onClick={() => !on && onChange(o.mode)}
+              className={`rounded-md px-2 py-1.5 text-left transition disabled:cursor-default ${
+                on ? 'bg-line text-text' : 'text-muted hover:text-text'
+              }`}
+            >
+              <span className="block text-[12px]">{o.label}</span>
+              <span className="block text-[11px] leading-snug text-muted">{o.hint}</span>
+            </button>
+          )
+        })}
+      </div>
+      {!plan.applies && plan.note && <p className="mt-1.5 text-[11px] leading-snug text-muted">{plan.note}</p>}
     </div>
   )
 }
