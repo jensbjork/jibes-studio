@@ -10,6 +10,8 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **AI-assisted contributions** in CONTRIBUTING.md: AI tools are welcome, the person submitting is the author and
+  responsible, AI help is disclosed with an `Assisted-by:` trailer, and a tool is never listed as a co-author.
 - **Deleting from the lists**: a sequence can be deleted from its ⋯ menu (*Radera sekvensen…*) as well as with the ✕
   in the list, an edit with the ✕ on its card or row in Redigera – always after a question that says what stays
   (takes in Generera, exported films, versions in use) and what goes to the Trash.

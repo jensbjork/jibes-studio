@@ -35,3 +35,4 @@ without them. Add screenshots or a short recording for UI changes.
 - [ ] UI text is in Swedish and addresses the user as "du"; code comments and docs are in English.
 - [ ] README, `docs/` and `CHANGELOG.md` (*Unreleased*) are updated if behaviour, settings or agent tools changed.
 - [ ] No API keys, tokens, personal names, personal paths or private library content in code, screenshots or logs.
+- [ ] If an AI tool helped: the commits carry an `Assisted-by:` trailer (not `Co-authored-by:`) and the summary says so.

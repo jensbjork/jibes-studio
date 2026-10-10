@@ -57,6 +57,8 @@
 #   Closes #123
 #   Refs #45
 #   BREAKING CHANGE: <what breaks, and how to migrate>
+# Made with an AI tool? Say so with a trailer (never Co-authored-by for a tool):
+#   Assisted-by: Claude Code (Claude Opus 5.5)
 # A breaking change can also be marked with "!" after the type or scope:
 #   feat(mcp)!: rename the list_assets tool to list_library
 #
