@@ -1,6 +1,7 @@
 // Types shared between the main process, preload and renderer.
 
 import type { PromptIssue } from './prompt-refs'
+import type { GenerateSession, MediaTab } from './session'
 
 export type VideoModelType = 'text-to-video' | 'image-to-video' | 'reference-to-video' | 'video-to-video' | 'other'
 
@@ -218,6 +219,8 @@ export interface ExportSummary {
   /** Undefined when the sequence has been deleted since. */
   sequenceId?: string
   sequenceName?: string
+  /** Whether it was exported from a sequence or a storyboard; undefined when that is deleted. */
+  sequenceKind?: 'sequence' | 'storyboard'
   /** Absolute. */
   path: string
   createdAt: number
@@ -1464,6 +1467,8 @@ export interface ApprovalEditRequest {
 /** The sidebar view an item counts under (the renderer's View ids). */
 export type WorkView =
   | 'generate'
+  /** The Mediabank: a picture with no sequence or storyboard, and Generera's work from an earlier session. */
+  | 'media'
   | 'sequences'
   | 'storyboards'
   | 'editor'
@@ -1887,6 +1892,8 @@ export interface AgentFormState {
   storyboardId?: string
   /** The edit open in Redigera, if any (view 'editor'). */
   editId?: string
+  /** The Mediabank tab on screen (view 'media'). */
+  mediaTab?: MediaTab
   /** The Generate form. */
   params: GenerationParams
   references: AgentFormReference[]
@@ -1955,7 +1962,7 @@ export interface AgentReorderReferencesArgs {
 export type AssetViewId = 'characters' | 'environments' | 'products' | 'outfits' | 'poses'
 
 /** The views an agent can open. */
-export type AgentOpenView = 'generate' | 'sequences' | 'storyboards' | 'editor' | 'prompts' | AssetViewId
+export type AgentOpenView = 'generate' | 'media' | 'sequences' | 'storyboards' | 'editor' | 'prompts' | AssetViewId
 
 /** open: brings a place in Studio to the front. */
 export interface AgentOpenArgs {
@@ -1972,8 +1979,14 @@ export interface AgentOpenArgs {
   versionId?: string
   /** For an asset view: the asset to open. */
   assetId?: string
-  /** For 'generate': the clip to open in the clip drawer. */
+  /** For 'generate': the clip to open in the clip drawer; for 'media': the clip to open in Videor's drawer. */
   generationId?: string
+  /** For 'media': the tab (none: the one an item is in, else the one it last showed). */
+  tab?: MediaTab
+  /** For 'media': the picture to open in Bilder. */
+  stillId?: string
+  /** For 'media': the film to open in Filmer. */
+  exportId?: string
 }
 
 /** What the window shows after an open command. */
@@ -1996,8 +2009,12 @@ export interface AgentOpenResult {
   /** The asset on screen (asset views). */
   assetId?: string
   assetName?: string
-  /** The clip open in the clip drawer (view 'generate'). */
+  /** The clip open in the clip drawer (view 'generate', or Videor in view 'media'). */
   generationId?: string
+  /** The Mediabank tab on screen (view 'media'), and the picture or film opened in it. */
+  tab?: MediaTab
+  stillId?: string
+  exportId?: string
   /** Swedish, when the window couldn't show exactly what was asked for. */
   note?: string
 }
@@ -2054,6 +2071,11 @@ export interface StudioApi {
   deleteLearning(id: string): Promise<void>
   /** Exported films, newest first. */
   listExports(): Promise<ExportSummary[]>
+  /**
+   * This session (since Studio started; closing the window keeps it): Generera's list shows what was made there
+   * since `startedAt` (ms) and what was still being made when it started (see shared/session.ts).
+   */
+  getSession(): Promise<GenerateSession>
   /** Fires with the generation id whenever its reviews change (also an agent's). */
   onReviewChange(cb: (generationId: string) => void): () => void
   onLearningsChange(cb: () => void): () => void

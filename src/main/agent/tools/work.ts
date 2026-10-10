@@ -12,6 +12,7 @@ import { READ_ONLY, defineTool, type ToolContext } from './kit'
 
 const VIEWS = [
   'generate',
+  'media',
   'sequences',
   'storyboards',
   'editor',
@@ -21,6 +22,9 @@ const VIEWS = [
   'outfits',
   'poses'
 ] as const satisfies readonly WorkView[]
+
+/** The library views, whose items belong to an asset. */
+const ASSET_VIEWS: ReadonlySet<WorkView> = new Set(['characters', 'environments', 'products', 'outfits', 'poses'])
 
 /** The part of a key after its prefix ("upload:<id>" → "<id>"), for the kinds whose key carries their id. */
 function keyId(key: string, prefix: string): string | undefined {
@@ -38,7 +42,7 @@ function ownerIds(view: WorkView | undefined, ownerId: string | undefined, segme
     if (segmentId) out.segment_id = segmentId
   } else if (view === 'editor') {
     if (ownerId) out.edit_id = ownerId
-  } else if (view && view !== 'generate' && ownerId) {
+  } else if (view && ASSET_VIEWS.has(view) && ownerId) {
     out.asset_id = ownerId
   }
   return out
@@ -103,7 +107,7 @@ export function registerWorkTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get what is running and what is new',
       description:
-        "What Studio is doing right now and what has finished that the user hasn't looked at yet – the window's \"Pågår och klart\". running: videos at Venice (queued or generating, with progress and eta_seconds or usually_takes_seconds), takes being sent, \"Generera saknade\" runs (\"Klipp 2 av 5\"), pictures being made, Redigera jobs and renders, exports, imports of own clips, approved requests being carried out and your uploads – each with its label, phase (detail), when it started, the agent it was done for (via) and the ids to follow it with (generation_id, sequence_id, segment_id, storyboard_id, transition_id, edit_id, job_id, asset_id, upload_id). unseen (include_finished): finished videos, versions, pictures, exports and voices – and failures, with their error – that the user hasn't played or opened yet, newest first. counts: totals and per view (running, unseen, failed). view narrows it to one of Studio's views. Use it after an approval instead of polling every generation. Studio marks things seen when the user plays or opens them; you can read that but never mark anything seen. Free; changes nothing.",
+        "What Studio is doing right now and what has finished that the user hasn't looked at yet – the window's \"Pågår och klart\". running: videos at Venice (queued or generating, with progress and eta_seconds or usually_takes_seconds), takes being sent, \"Generera saknade\" runs (\"Klipp 2 av 5\"), pictures being made, Redigera jobs and renders, exports, imports of own clips, approved requests being carried out and your uploads – each with its label, phase (detail), when it started, the agent it was done for (via) and the ids to follow it with (generation_id, sequence_id, segment_id, storyboard_id, transition_id, edit_id, job_id, asset_id, upload_id). unseen (include_finished): finished videos, versions, pictures, exports and voices – and failures, with their error – that the user hasn't played or opened yet, newest first. counts: totals and per view (running, unseen, failed). view narrows it to one of Studio's views: \"generate\" is what Generera made this session (its list only shows this session's), \"media\" the Mediabank – pictures that belong to no sequence or storyboard and Generera's clips from an earlier session. Use it after an approval instead of polling every generation. Studio marks things seen when the user plays or opens them; you can read that but never mark anything seen. Free; changes nothing.",
       input: {
         view: z.enum(VIEWS).optional().describe('Only what counts under this view of Studio.'),
         include_finished: z

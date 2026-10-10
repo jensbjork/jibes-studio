@@ -13,6 +13,7 @@ import {
 } from '@shared/prompt-compose'
 import { generationTitle } from '@shared/generation-label'
 import { blockingPromptError, canonicalizeParams } from '@shared/prompt-refs'
+import { isGenerateOrigin } from '@shared/session'
 import {
   NEEDS_CONSENT,
   type ComposedPrompt,
@@ -39,6 +40,7 @@ import {
   tmpDir
 } from './paths'
 import { importExternalReferences, placeFile } from './references'
+import { noteCarriedOver } from './session'
 import { getAcceptedConsents, getPromptLanguage } from './settings'
 import {
   buildRequestBody,
@@ -376,7 +378,10 @@ export class JobManager extends EventEmitter<JobEvents> {
     const epoch = ++this.epoch
     // Typical durations are the open library's; another library measures its own.
     this.typical.clear()
-    for (const g of db.listPendingGenerations()) this.track(g)
+    const pending = db.listPendingGenerations()
+    // Generera's list keeps these once they settle (shared/session.ts): they were on their way when the session began.
+    noteCarriedOver(pending.filter(isGenerateOrigin).map((g) => g.id))
+    for (const g of pending) this.track(g)
     void this.backfill(epoch).catch((err: unknown) => console.warn('Media backfill stopped:', err))
   }
 

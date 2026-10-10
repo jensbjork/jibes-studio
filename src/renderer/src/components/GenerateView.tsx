@@ -22,7 +22,6 @@ import OpenFolderButton from './library/OpenFolderButton'
 import ParamsForm, { missingInput, modelForKind, unavailableModel } from './ParamsForm'
 import { addAssetToForm } from './pickers/assetRefs'
 import { stableJson } from './sequences/sequenceUtils'
-import NewPictures from './work/NewPictures'
 
 interface Props {
   intent?: Intent
@@ -32,7 +31,8 @@ interface Props {
 
 export default function GenerateView({ intent, onIntentHandled, navigate }: Props) {
   const { models, error: modelsError } = useModels()
-  // Every generation, live (jobs and reviews), for the clip feed on the right.
+  // Every generation, live (jobs and reviews): the list on the right shows this session's, "Använd igen" from the
+  // Mediabank finds any of them.
   const feed = useGenerations()
   // The form lives in an app-level store (remembered across views and restarts; an agent may fill it too).
   const [params, setParams] = useGenerateParams()
@@ -72,19 +72,21 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
     rememberImageIds(imageIds.current)
   }, [params, assets, assetsLoaded])
 
-  // Intents from the library and prompt views. Tracked by identity so StrictMode's double effect and
+  // Intents from the library, prompt and Mediabank views. Tracked by identity so StrictMode's double effect and
   // re-renders don't apply one twice.
   const handledIntent = useRef<Intent>(undefined)
   const modelsReady = models.length > 0 || !!modelsError
 
   useEffect(() => {
-    if (!intent || (intent.type !== 'use-asset' && intent.type !== 'use-prompt')) return
+    if (!intent || (intent.type !== 'use-asset' && intent.type !== 'use-prompt' && intent.type !== 'use-generation'))
+      return
     if (handledIntent.current === intent) return
-    // The reference model is chosen from the model list, so wait for it.
+    // The reference model is chosen from the model list, so wait for it; a clip is looked up in the loaded list.
     if (intent.type === 'use-asset' && !modelsReady) return
+    if (intent.type === 'use-generation' && !feed.loaded) return
     handledIntent.current = intent
     void applyIntent(intent).finally(onIntentHandled)
-  }, [intent, modelsReady])
+  }, [intent, modelsReady, feed.loaded])
 
   async function applyIntent(i: Intent) {
     setError(undefined)
@@ -119,6 +121,19 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
         setParams((p) => ({ ...p, prompt: prompt.body, negativePrompt: prompt.negativePrompt || undefined }))
         setNotice(undefined)
         await window.studio.markPromptUsed(prompt.id)
+      } else if (i.type === 'use-generation') {
+        // "Använd igen" in the Mediabank: the same as on a card here, for any clip in the library.
+        const g = feed.generations.find((x) => x.id === i.generationId)
+        if (!g) {
+          setNotice('Klippet finns inte längre i biblioteket.')
+          return
+        }
+        if (!canUseAgain(g)) {
+          setNotice('Klippets inställningar kan inte fyllas i här: det är inte gjort av Venice från en prompt.')
+          return
+        }
+        reuse(g)
+        setNotice(undefined)
       }
     } catch (e) {
       setError(ipcErrorMessage(e))
@@ -224,17 +239,17 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
         </div>
       </section>
 
-      {/* Feed */}
+      {/* This session's clips; everything older is in the Mediabank. */}
       <section className="flex min-w-0 flex-1 flex-col">
         <ClipFeed
           feed={feed}
           models={models}
           navigate={navigate}
+          mode="session"
           onReuse={reuse}
-          emptyText="Dina videor hamnar här. Börja med en prompt till vänster."
+          emptyText="Det du genererar nu hamnar här. Allt du gjort tidigare finns i Mediabanken."
           openRequest={intent?.type === 'open-generation' ? intent : undefined}
           onOpenRequestHandled={onIntentHandled}
-          banner={<NewPictures view="generate" />}
           trailing={
             <>
               {folderError && (

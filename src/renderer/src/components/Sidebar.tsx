@@ -7,7 +7,7 @@ import DevBadge from './DevBadge'
 import AgentIndicator from './agent/AgentIndicator'
 import AssetIcon from './assets/AssetIcon'
 import { ScissorsIcon } from './editor/icons'
-import { FilmIcon, GearIcon, QuoteIcon, SidebarIcon } from './icons'
+import { FilmIcon, GearIcon, MediaIcon, QuoteIcon, SidebarIcon } from './icons'
 import { fade, IconBox, rowClass, useRailTooltip } from './RailTooltip'
 import { SparkleIcon } from './sequences/icons'
 import { StoryboardIcon } from './storyboards/icons'
@@ -34,8 +34,10 @@ const CREATE: Item[] = [
   { id: 'editor', label: 'Redigera', icon: <ScissorsIcon size={16} /> }
 ]
 
-// Every asset kind in the app's order (Karaktärer, Miljöer, Produkter, Kläder, Poser), then the prompt library.
+// The Mediabank (everything made: videos, pictures, films), every asset kind in the app's order (Karaktärer, Miljöer,
+// Produkter, Kläder, Poser), then the prompt library.
 const LIBRARY: Item[] = [
+  { id: 'media', label: 'Mediabank', icon: <MediaIcon /> },
   ...ASSET_KINDS.map((kind) => ({
     id: ASSET_VIEW[kind],
     label: ASSET_COPY[kind].plural,
@@ -48,6 +50,7 @@ const SETTINGS: Item = { id: 'settings', label: 'Inställningar', icon: <GearIco
 
 const WORK_VIEWS = new Set<View>([
   'generate',
+  'media',
   'sequences',
   'storyboards',
   'editor',
@@ -154,7 +157,8 @@ interface Props {
 }
 
 /**
- * The window's navigation: Skapa (the places that make things) and Bibliotek (what they are made from), each row
+ * The window's navigation: Skapa (the places that make things) and Bibliotek (what was made, and what it is made
+ * from), each row
  * with what runs there and what is new. At the bottom two slim status rows – Pågår och klart and the agent
  * connection – and, below a divider, Inställningar as the last row. Collapses to a 72 px icon rail (⌃⌘S) whose rows
  * keep their status as badges and explain themselves in tooltips.

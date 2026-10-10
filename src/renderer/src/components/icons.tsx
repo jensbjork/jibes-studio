@@ -35,6 +35,17 @@ export function FilmIcon(props: IconProps) {
   )
 }
 
+/** Mediabank: a frame with a play mark in front of another, everything made gathered in one place. */
+export function MediaIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="1.75" y="5" width="10" height="8.25" rx="1.5" />
+      <path d="M4.75 2.75h8c.83 0 1.5.67 1.5 1.5v6.25" />
+      <path d="M5.75 7.6v3.05l2.6-1.52z" fill="currentColor" strokeWidth={1} />
+    </Icon>
+  )
+}
+
 /** Prompter: a quotation mark, filled like the library's other kinds. */
 export function QuoteIcon(props: IconProps) {
   return (

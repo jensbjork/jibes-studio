@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from 'react'
 import { queryGenerations, summarizeGenerations } from '@shared/generation-filter'
+import { inGenerateSession } from '@shared/session'
 import type { Generation, VideoModel } from '@shared/types'
 import { useAssetsState } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
@@ -25,37 +26,50 @@ import {
   loadSessionFilters,
   loadSort,
   loadView,
+  NO_FILTERS,
   saveSessionFilters,
   saveSort,
   saveView,
   toGenerationFilter,
   withoutFilter,
   type FeedFilters,
+  type FeedMode,
   type FeedView,
   type SortKey
 } from './feedFilter'
 import { isPending, summaryText } from './feedText'
-import FeedToolbar from './FeedToolbar'
+import FeedToolbar, { MediaLink, SessionToolbar } from './FeedToolbar'
 import { ImportIcon } from './icons'
 import { carriesFiles, DropHint, droppedVideoPaths, ImportCardView, useImportCards, useImportFlow } from './ownClips'
 import { buildLibraryIndex } from './references'
 import type { GenerationsState } from './useGenerations'
+import { useSession } from './useSession'
 
 interface Props {
   feed: GenerationsState
   models: readonly VideoModel[]
   navigate: Navigate
+  /**
+   * library (the Mediabank's Videor): every clip, with search, filters and order. session (Generera): only what was
+   * made in Generera this session (shared/session.ts), newest first, under a short header.
+   */
+  mode?: FeedMode
   /** "Använd igen": fill the Generate form with the clip's settings. */
   onReuse: (g: Generation) => void
-  /** Shown while there are no generations at all. */
+  /** The drawer's tooltip for "Använd igen", when it also leaves for Generera. */
+  reuseTitle?: string
+  /** Shown while the list has nothing at all (in session mode: nothing made this session). */
   emptyText: ReactNode
+  /** Left end of the toolbar's first row (the Mediabank's tabs). */
+  leading?: ReactNode
   /** Right end of the toolbar's first row (e.g. the folder button). */
   trailing?: ReactNode
-  /** A row under the toolbar (Generera's new pictures with no place of their own). */
-  banner?: ReactNode
-  /** Open this clip in the drawer (Pågår och klart, an agent's open_in_studio); `source: 'agent'` marks nothing seen. */
+  /**
+   * Open this clip in the drawer (Pågår och klart, an agent's open_in_studio); `source: 'agent'` marks nothing seen.
+   * In session mode a clip from outside the session is shown in the Mediabank instead.
+   */
   openRequest?: { generationId: string; source?: 'agent' }
-  /** The request was carried out (or the clip no longer exists). */
+  /** The request was carried out (or the clip no longer exists, or it went on to the Mediabank). */
   onOpenRequestHandled?: () => void
 }
 
@@ -65,26 +79,42 @@ const CARD_PAGE = 60
 /**
  * The clip feed: every generation as large cards or as a table, with search, filters, sorting, a summary of
  * what is shown and a detail drawer for one clip. Filtering follows the shared rules the agents'
- * list_generations tool uses, so "the 4-star clips with Anna" means the same thing to both.
+ * list_generations tool uses, so "the 4-star clips with Anna" means the same thing to both. In session mode
+ * (Generera) it lists only this session's clips, newest first, with no search, filters or order to choose.
  */
 export default function ClipFeed({
   feed,
   models,
   navigate,
+  mode = 'library',
   onReuse,
+  reuseTitle,
   emptyText,
+  leading,
   trailing,
-  banner,
   openRequest,
   onOpenRequestHandled
 }: Props) {
-  const { generations, loaded, rate, remove, patch } = feed
+  const { generations, loaded: feedLoaded, rate, remove, patch } = feed
   const { assets, loaded: assetsLoaded } = useAssetsState()
   const index = useMemo(() => buildLibraryIndex(assets), [assets])
 
-  const [view, setViewState] = useState<FeedView>(loadView)
-  const [sort, setSortState] = useState<SortKey>(loadSort)
-  const [filters, setFiltersState] = useState<FeedFilters>(loadSessionFilters)
+  // Session mode: the clips made in Generera since Studio started (and any on their way from before).
+  const session = mode === 'session'
+  const current = useSession()
+  const loaded = feedLoaded && (!session || current !== undefined)
+  const pool = useMemo(
+    () =>
+      !session ? generations : current === undefined ? [] : generations.filter((g) => inGenerateSession(g, current)),
+    [session, generations, current]
+  )
+
+  const [view, setViewState] = useState<FeedView>(() => loadView(mode))
+  const [sortChoice, setSortState] = useState<SortKey>(loadSort)
+  const [filterChoice, setFiltersState] = useState<FeedFilters>(loadSessionFilters)
+  // The session list neither filters nor sorts; the Mediabank's choices stay as they were.
+  const sort: SortKey = session ? 'newest' : sortChoice
+  const filters = session ? NO_FILTERS : filterChoice
   const [selectedId, setSelectedId] = useState<string>()
   const [openId, setOpenId] = useState<string>()
   // Who opened the drawer: an agent's request shows the clip without counting as the user looking at it.
@@ -131,7 +161,7 @@ export default function ClipFeed({
 
   const setView = (v: FeedView) => {
     setViewState(v)
-    saveView(v)
+    saveView(v, mode)
   }
   const setSort = (s: SortKey) => {
     setSortState(s)
@@ -163,17 +193,18 @@ export default function ClipFeed({
   }, [active.unseen, unseenIds])
 
   const shown = useMemo(() => {
-    const pool = newIds ? generations.filter((g) => newIds.has(g.id)) : generations
-    return queryGenerations(pool, toGenerationFilter({ ...active, unseen: undefined }, sort, Date.now()), index.paths)
-  }, [generations, newIds, active, sort, index])
+    const listed = newIds ? pool.filter((g) => newIds.has(g.id)) : pool
+    return queryGenerations(listed, toGenerationFilter({ ...active, unseen: undefined }, sort, Date.now()), index.paths)
+  }, [pool, newIds, active, sort, index])
   const pendingCount = useMemo(() => generations.filter(isPending).length, [generations])
   const unseenCount = useMemo(() => generations.filter((g) => unseenIds.has(g.id)).length, [generations, unseenIds])
   const filtering = hasFilters(active)
 
   const summary = useMemo(() => {
     const text = summaryText(summarizeGenerations(shown))
+    if (session) return `Den här sessionen · ${text}`
     return filtering ? text.replace(/^(\d+) klipp/, `$1 av ${generations.length} klipp`) : text
-  }, [shown, filtering, generations.length])
+  }, [shown, session, filtering, generations.length])
 
   // A generation that starts while filters hide it would look like nothing happened.
   const hiddenPending = useMemo(() => {
@@ -182,6 +213,8 @@ export default function ClipFeed({
     return generations.filter((g) => isPending(g) && !visible.has(g.id)).length
   }, [filtering, generations, shown])
 
+  const showAll = useCallback(() => navigate('media', { type: 'open-media', tab: 'videos' }), [navigate])
+
   // New filters or order: the cards start from the top (the table keeps its selected row in view itself).
   const filterKey = JSON.stringify([active, sort])
   useEffect(() => {
@@ -189,8 +222,9 @@ export default function ClipFeed({
     scrollRef.current?.scrollTo({ top: 0 })
   }, [filterKey])
 
-  // ⌘F searches the clips.
+  // ⌘F searches the clips (the session list has no search).
   useEffect(() => {
+    if (session) return
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.defaultPrevented && e.key.toLowerCase() === 'f') {
         e.preventDefault()
@@ -200,7 +234,7 @@ export default function ClipFeed({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [session])
 
   // ── The drawer ───────────────────────────────────────────────────────────────
 
@@ -223,7 +257,8 @@ export default function ClipFeed({
   }, [])
 
   // "Gå dit" from Pågår och klart, or an agent showing the user a clip: open it in the drawer. A filter that hides
-  // it is lifted, with a note, rather than opening a clip the list doesn't show.
+  // it is lifted, with a note, rather than opening a clip the list doesn't show. The session list sends a clip from
+  // outside the session on to the Mediabank, which lists every clip (still on the agent's behalf if it asked).
   const handledRequest = useRef<typeof openRequest>(undefined)
   useEffect(() => {
     if (!openRequest || !loaded || handledRequest.current === openRequest) return
@@ -231,6 +266,16 @@ export default function ClipFeed({
     const g = generations.find((x) => x.id === openRequest.generationId)
     if (!g) {
       setImportNotice({ text: 'Klippet finns inte längre i biblioteket.', error: false })
+    } else if (session && !pool.some((x) => x.id === g.id)) {
+      // Handled first: App keeps the intent the navigation sets, not the cleared one.
+      onOpenRequestHandled?.()
+      navigate('media', {
+        type: 'open-media',
+        tab: 'videos',
+        generationId: g.id,
+        ...(openRequest.source ? { source: openRequest.source } : {})
+      })
+      return
     } else {
       if (!shown.some((x) => x.id === g.id) && hasFilters(filters)) {
         setFilters({ query: '' })
@@ -309,48 +354,63 @@ export default function ClipFeed({
 
   const modelOf = (id: string) => models.find((m) => m.id === id)
 
+  const importLabel = importFlow.inspecting ? 'Läser filerna…' : 'Importera egna klipp…'
+  const toolbarTrailing = (
+    <>
+      <button
+        type="button"
+        onClick={() => void pickFiles()}
+        disabled={importFlow.inspecting}
+        title="Lägg till dina egna filmer i klippflödet (eller dra in dem hit)"
+        aria-label={session ? importLabel : undefined}
+        className="no-drag flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
+      >
+        <ImportIcon size={13} />
+        {/* Beside Generera's form the list is narrow: the label shows once the work area has room for it. */}
+        <span className={session ? 'hidden @min-[67rem]/main:inline' : undefined}>{importLabel}</span>
+      </button>
+      {trailing}
+    </>
+  )
+
   return (
     <div className="relative flex h-full min-w-0 flex-col">
-      <FeedToolbar
-        view={view}
-        onView={setView}
-        filters={filters}
-        onFilters={setFilters}
-        sort={sort}
-        onSort={setSort}
-        summary={loaded ? summary : ''}
-        generations={generations}
-        models={models}
-        assets={assets}
-        index={index}
-        searchRef={searchRef}
-        pendingCount={pendingCount}
-        unseenCount={unseenCount}
-        onSearchArrowDown={() => {
-          if (view === 'table') {
-            tableRef.current?.focus()
-            if (!selectedId && shown[0]) setSelectedId(shown[0].id)
-          } else {
-            scrollRef.current?.querySelector<HTMLElement>('[data-card-open]')?.focus()
-          }
-        }}
-        trailing={
-          <>
-            <button
-              type="button"
-              onClick={() => void pickFiles()}
-              disabled={importFlow.inspecting}
-              title="Lägg till dina egna filmer i klippflödet (eller dra in dem hit)"
-              className="no-drag flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
-            >
-              <ImportIcon size={13} />
-              {importFlow.inspecting ? 'Läser filerna…' : 'Importera egna klipp…'}
-            </button>
-            {trailing}
-          </>
-        }
-      />
-      {banner}
+      {session ? (
+        <SessionToolbar
+          view={view}
+          onView={setView}
+          summary={loaded ? summary : ''}
+          onShowAll={showAll}
+          trailing={toolbarTrailing}
+        />
+      ) : (
+        <FeedToolbar
+          view={view}
+          onView={setView}
+          filters={filters}
+          onFilters={setFilters}
+          sort={sort}
+          onSort={setSort}
+          summary={loaded ? summary : ''}
+          generations={generations}
+          models={models}
+          assets={assets}
+          index={index}
+          searchRef={searchRef}
+          pendingCount={pendingCount}
+          unseenCount={unseenCount}
+          onSearchArrowDown={() => {
+            if (view === 'table') {
+              tableRef.current?.focus()
+              if (!selectedId && shown[0]) setSelectedId(shown[0].id)
+            } else {
+              scrollRef.current?.querySelector<HTMLElement>('[data-card-open]')?.focus()
+            }
+          }}
+          leading={leading}
+          trailing={toolbarTrailing}
+        />
+      )}
 
       {importNotice && (
         <div
@@ -413,9 +473,10 @@ export default function ClipFeed({
         }}
       >
         {dropping && <DropHint text="Släpp för att importera som egna klipp" />}
-        {!loaded ? null : generations.length === 0 ? (
+        {!loaded ? null : pool.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted">
-            {emptyText}
+            <p className="max-w-md leading-relaxed text-balance">{emptyText}</p>
+            {session && <MediaLink onClick={showAll} className="mb-2" />}
             <span className="text-[12px]">Har du egna filmer? Dra in dem hit eller välj Importera egna klipp.</span>
           </div>
         ) : shown.length === 0 ? (
@@ -449,7 +510,7 @@ export default function ClipFeed({
             models={models}
             index={index}
             sort={sort}
-            onSort={setSort}
+            onSort={session ? undefined : setSort}
             selectedId={selectedId}
             onSelect={setSelectedId}
             openId={openId}
@@ -492,6 +553,7 @@ export default function ClipFeed({
             onNext={step(1)}
             onClose={close}
             onReuse={onReuse}
+            reuseTitle={reuseTitle}
             onDelete={(g) => void removeGeneration(g)}
             onChange={patch}
             onRate={rate}

@@ -6,7 +6,7 @@
 //   <FramePickerDialog open sequenceId? anyGeneration? generationId? segment? at? onClose onPicked(still) />
 //     anyGeneration: any finished video in the library, with a search; else the sequence's takes.
 //   <StillThumb still onOpen? draggable />  (drag payload STILL_DRAG_TYPE = still id)
-//   <StillViewer still? stills? onClose deletable? actions? />
+//   <StillViewer still? stills? onClose deletable? actions? openedByAgent? />
 
 export { CreateImageDialog, type CreateImageDialogProps, type CreateImageTarget } from './CreateImageDialog'
 export { FramePickerDialog, type FramePickerDialogProps } from './FramePickerDialog'

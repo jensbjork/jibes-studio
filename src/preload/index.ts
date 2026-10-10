@@ -48,6 +48,7 @@ const api: StudioApi = {
   saveLearning: (input) => ipcRenderer.invoke('learnings:save', input),
   deleteLearning: (id) => ipcRenderer.invoke('learnings:delete', id),
   listExports: () => ipcRenderer.invoke('exports:list'),
+  getSession: () => ipcRenderer.invoke('app:session'),
   onReviewChange: (cb) => on<string>('review:change', cb),
   onLearningsChange: (cb) => on<void>('learnings:change', () => cb()),
 

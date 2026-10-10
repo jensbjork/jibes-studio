@@ -10,6 +10,12 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Mediabank**, first under *Bibliotek* in the sidebar: everything you've made in one place, in three tabs.
+  *Videor* is the full clip feed – every generation, take, own film and version, with the filters, *Kort* / *Tabell*,
+  *Importera egna klipp…* and the detail drawer; *Använd igen* there fills Generera's form. *Bilder* holds every
+  picture, filtered by *Källa* and *Plats*, each opened large. *Filmer* lists the exported films: play one, open it
+  in Redigera or go to its sequence or storyboard. Agents open it with `open_in_studio({view: "media", tab,
+  generation_id | still_id | export_id})`, and `get_workspace` says which tab is on screen (`media_tab`).
 - **Export och import** under Inställningar: the whole library – a consistent copy of the database and every file,
   without caches, settings, the API key or the agent token – packed into one zip (streamed, Zip64, progress and
   *Avbryt*), and such a zip imported in another Studio (also from the first screen on a new Mac): checked, unpacked
@@ -317,6 +323,13 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- **Generera lists this session**: the right side of Generera shows what was made there since Studio started (and
+  clips that were still being made when it started); closing the window keeps the session, quitting ends it. Everything older is in the
+  Mediabank. *Pågår och klart* counts Generera's clips from an earlier session, and pictures that belong to no
+  sequence or storyboard, under the Mediabank. Agents: `list_generations({session: true})` lists exactly Generera's
+  list (with `session_started`), `get_work_status` takes `view: "media"`, and `open_in_studio` opens a clip that
+  isn't in Generera's list in the Mediabank instead (`shown: "media"`). Removal requests say that the takes of a
+  removed sequence, clip, storyboard or board become ordinary clips in the Mediabank.
 - **Ratings are tumme ner or one to three stars** (was 1–5), for your own rating and agents' reviews: 👎 ★★★ on
   cards, in the table and the drawer (click the set grade to clear it; arrow keys, 1–3, − and Delete work too). The
   *Betyg* filter offers ★★★, ★★ eller mer, ★ eller mer, *Tumme ner* and *Ej betygsatt*; sorting by rating puts tumme

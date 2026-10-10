@@ -10,14 +10,20 @@ function placeless(w: FinishedWork, view: WorkView): boolean {
   return w.kind === 'still' || (w.kind === 'failure' && w.failureOf === 'still')
 }
 
+/** A picture with no place that couldn't be made. */
+function placelessFailure(w: FinishedWork, view: WorkView): boolean {
+  return placeless(w, view) && w.kind === 'failure'
+}
+
 /**
  * New pictures with no board, clip or sequence to be shown in – an agent's picture made for nothing, say – in the
- * view they count under (Generera), so they can be seen there and not only in Pågår och klart. Each counts as seen
- * once it has been on screen a moment (D4) and stays listed until ✕ or the view is left, so it can still be clicked
- * (it opens in the picture viewer). A picture that failed shows its error the same way.
+ * view they count under, so they can be seen there and not only in Pågår och klart. Each counts as seen once it has
+ * been on screen a moment (D4) and stays listed until ✕ or the view is left, so it can still be clicked (it opens in
+ * the picture viewer). A picture that failed shows its error the same way. `failuresOnly`: just the failures, for a
+ * view that shows the new pictures themselves (the Mediabank's Bilder marks them "Ny" in its grid).
  */
-export default function NewPictures({ view }: { view: WorkView }) {
-  const unseen = useUnseen((w) => placeless(w, view))
+export default function NewPictures({ view, failuresOnly = false }: { view: WorkView; failuresOnly?: boolean }) {
+  const unseen = useUnseen((w) => (failuresOnly ? placelessFailure(w, view) : placeless(w, view)))
   const [kept, setKept] = useState<FinishedWork[]>([])
   // What ✕ closed; a picture that arrives later shows the row again.
   const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set())
@@ -47,7 +53,9 @@ export default function NewPictures({ view }: { view: WorkView }) {
             ? 'Ny bild'
             : 'Nya bilder'
           : pictures === 0
-            ? 'Bild som misslyckades'
+            ? visible.length === 1
+              ? 'Bild som misslyckades'
+              : 'Bilder som misslyckades'
             : 'Nya bilder och fel'}
       </span>
       <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto py-0.5">

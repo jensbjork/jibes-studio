@@ -32,6 +32,7 @@
 #
 # Scopes (optional, pick the closest one):
 #   generate   the Generate view and the job queue
+#   media      the Mediabank: videos, pictures and exported films
 #   prompt     the prompt editor and @ImageN reference checks
 #   library    characters, environments, outfits and the prompt library
 #   assets     reference images and asset folders on disk

@@ -16,6 +16,7 @@ import {
 import { canonicalizeTokens, findAudioTokens, findImageTokens, findMalformedTokens } from '@shared/prompt-refs'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import { referenceMoves, reorderReferences } from '@shared/prompt-remap'
+import { isMediaTab, type MediaTab } from '@shared/session'
 import type {
   AgentCommand,
   AgentCommandReply,
@@ -36,14 +37,15 @@ import { ASSET_VIEW } from './assets'
 import { followGenerateAudio, generateParamsFrozen, getGenerateParams, setGenerateParams } from './generateStore'
 import { ipcErrorMessage, loadModels } from './hooks'
 import { SELECTED_ASSET_KEYS, followAssetImages, readRememberedImageIds } from './library'
+import { getMediaTab, setMediaTab } from './mediaTab'
 import type { Intent, Navigate, View } from './navigation'
 import { promptIssuesOf } from './promptIssues'
 import { openEditInEditor, openInSequenceEditor, openStoryboard } from './workspace'
 
 // The renderer half of the agent connection. Tools that read or fill the Generate form (get_workspace,
-// set_form, set_references, reorder_references) and open_in_studio (Generate or a clip in its drawer, a sequence, a
-// storyboard or one of its transitions, an edit or one of its versions in Redigera, an asset, the prompt library)
-// reach main's MCP server as an 'agent:command';
+// set_form, set_references, reorder_references) and open_in_studio (Generate or a clip in its drawer, the Mediabank
+// on a tab or with a clip, picture or film open, a sequence, a storyboard or one of its transitions, an edit or one
+// of its versions in Redigera, an asset, the prompt library) reach main's MCP server as an 'agent:command';
 // this applies them to the form store with the same rules the form itself uses (mode switching, model options,
 // the reference caps for images and audio, tokens following a reorder) and answers with 'agent:reply'.
 // Everything else the agent does goes straight to main's services. Error messages are Swedish: they are shown
@@ -60,6 +62,8 @@ export type FormImage = Omit<AgentFormReference, 'token'>
  */
 export interface FormSnapshot extends AgentFormState {
   view: View
+  /** The Mediabank tab on screen (view 'media'). */
+  mediaTab?: MediaTab
   /** The start (and end) image in image-to-video mode, tied to its library photo. */
   startImage?: FormImage
   endImage?: FormImage
@@ -673,7 +677,7 @@ function audioReferences(audios: readonly ReferenceAudio[], assets: readonly Ass
 export function describeForm(
   params: GenerationParams,
   assets: readonly Asset[],
-  where: { view: View; sequenceId?: string; segmentId?: string; storyboardId?: string; editId?: string },
+  where: Where,
   notes: string[] = []
 ): FormSnapshot {
   const sent = paramsForSubmit(params)
@@ -736,14 +740,18 @@ async function assetsFollowingForm(): Promise<Asset[]> {
   return assets
 }
 
-/** Where the user is: the view, and the sequence and clip, the storyboard or the edit open in it. */
-export function whereNow(view: View): {
+/** Where the user is: the view, and the sequence and clip, the storyboard, the edit or the Mediabank tab open in it. */
+export interface Where {
   view: View
   sequenceId?: string
   segmentId?: string
   storyboardId?: string
   editId?: string
-} {
+  mediaTab?: MediaTab
+}
+
+export function whereNow(view: View): Where {
+  if (view === 'media') return { view, mediaTab: getMediaTab() }
   if (view === 'sequences') return { view, ...openInSequenceEditor() }
   if (view === 'storyboards') {
     const storyboardId = openStoryboard()
@@ -776,14 +784,15 @@ function optionalId(value: unknown): string | undefined {
 const ASSET_VIEWS = new Set<View>(Object.values(ASSET_VIEW))
 
 /**
- * open_in_studio: brings a place to the front – the Generate view (or a clip in its drawer), a sequence (and clip),
- * a storyboard (or one of its transitions), an edit (or one of its versions), an asset in its library view or the
- * prompt library. Every intent is marked as the agent's (`source: 'agent'`): opening a place for an agent never
- * counts as the user having looked at it.
+ * open_in_studio: brings a place to the front – the Generate view (or a clip in its drawer), the Mediabank (on a tab,
+ * or with a clip, picture or film open), a sequence (and clip), a storyboard (or one of its transitions), an edit (or
+ * one of its versions), an asset in its library view or the prompt library. Every intent is marked as the agent's
+ * (`source: 'agent'`): opening a place for an agent never counts as the user having looked at it.
  */
 export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<AgentOpenResult> {
   const args = asArgs(rawArgs)
   const view = args.view as View
+  if (view === 'media') return openMediaView(args, ctx)
   if (view === 'generate') {
     const generationId = optionalId(field(args, 'generation_id'))
     if (!generationId) {
@@ -802,7 +811,7 @@ export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<A
   if (view === 'editor') return openEditorView(args, ctx)
   if (args.view !== 'sequences' && args.view !== 'sequence') {
     throw new BridgeError(
-      'view ska vara ”generate”, ”sequences”, ”storyboards”, ”editor”, ”prompts” eller en biblioteksvy (”characters”, ”environments”, ”products”, ”outfits”, ”poses”).'
+      'view ska vara ”generate”, ”media”, ”sequences”, ”storyboards”, ”editor”, ”prompts” eller en biblioteksvy (”characters”, ”environments”, ”products”, ”outfits”, ”poses”).'
     )
   }
   const segmentId = optionalId(field(args, 'segment_id'))
@@ -831,6 +840,41 @@ export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<A
     segmentId: onScreen.sequenceId === sequenceId ? onScreen.segmentId : undefined,
     ...(shown || !segmentId ? {} : { note: 'Sekvensen öppnades, men ett annat klipp än det begärda visas.' })
   }
+}
+
+/** The Mediabank tab each kind of item opens in. */
+const MEDIA_ITEM_TABS = [
+  ['generation_id', 'videos'],
+  ['still_id', 'pictures'],
+  ['export_id', 'films']
+] as const satisfies readonly (readonly [string, MediaTab])[]
+
+/**
+ * Shows the Mediabank on a tab – the one an item is in, the one asked for, or the one it last showed – with a clip in
+ * Videor's drawer, a picture in Bilder or a film in Filmer (main has checked that it exists). The tab is set before
+ * the view opens, so it opens on it.
+ */
+function openMediaView(args: Args, ctx: BridgeContext): AgentOpenResult {
+  const asked = field(args, 'tab')
+  if (given(asked) && !isMediaTab(asked)) throw new BridgeError('tab ska vara ”videos”, ”pictures” eller ”films”.')
+  const items = MEDIA_ITEM_TABS.flatMap(([key, tab]) => {
+    const id = optionalId(field(args, key))
+    return id ? [{ key, tab, id }] : []
+  })
+  if (items.length > 1) throw new BridgeError('Ange bara ett av generation_id, still_id och export_id.')
+  const item = items[0]
+  if (item && isMediaTab(asked) && asked !== item.tab) {
+    throw new BridgeError(`${item.key} öppnas i fliken ”${item.tab}”, inte ”${asked}”.`)
+  }
+  const tab = item?.tab ?? (isMediaTab(asked) ? asked : getMediaTab())
+  const ids = {
+    ...(item?.key === 'generation_id' ? { generationId: item.id } : {}),
+    ...(item?.key === 'still_id' ? { stillId: item.id } : {}),
+    ...(item?.key === 'export_id' ? { exportId: item.id } : {})
+  }
+  setMediaTab(tab)
+  ctx.show('media', { type: 'open-media', tab, ...ids, source: 'agent' })
+  return { view: 'media', tab, ...ids }
 }
 
 /** The asset a library view has selected (it remembers it as soon as it has taken the intent). */

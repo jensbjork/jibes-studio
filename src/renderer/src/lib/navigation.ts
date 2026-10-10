@@ -1,5 +1,8 @@
+import type { MediaTab } from '@shared/session'
+
 export type View =
   | 'generate'
+  | 'media'
   | 'characters'
   | 'environments'
   | 'products'
@@ -41,8 +44,15 @@ export type Intent = (
    * versionId shows that version in the player.
    */
   | { type: 'open-editor'; editId?: string; generationId?: string; exportId?: string; versionId?: string }
-  /** Generera: open that clip in the detail drawer (lifting a filter that hides it, with a note). */
+  /** Generera: open that clip in the detail drawer (one from outside this session's list opens in the Mediabank). */
   | { type: 'open-generation'; generationId: string }
+  /**
+   * Mediabank: show a tab; generationId opens that clip in the Videor drawer (lifting a filter that hides it, with a
+   * note), stillId that picture in Bilder, exportId that film in Filmer.
+   */
+  | { type: 'open-media'; tab?: MediaTab; generationId?: string; stillId?: string; exportId?: string }
+  /** Generera: fill the form with that clip's settings ("Använd igen" from the Mediabank). */
+  | { type: 'use-generation'; generationId: string }
 ) & {
   /** Opened by an agent (open_in_studio): no seen marks on opening. */
   source?: 'agent'
