@@ -14,6 +14,7 @@ const types = ['feat', 'fix', 'docs', 'refactor', 'perf', 'test', 'build', 'ci',
 
 const scopes = [
   'generate',
+  'media',
   'prompt',
   'library',
   'assets',

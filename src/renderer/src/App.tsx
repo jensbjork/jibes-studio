@@ -7,6 +7,7 @@ import AssetsView from './components/assets/AssetsView'
 import EditorView from './components/editor/EditorView'
 import GenerateView from './components/GenerateView'
 import LibrarySetup from './components/library/LibrarySetup'
+import MediaView from './components/media/MediaView'
 import SwitchingOverlay from './components/library/SwitchingOverlay'
 import PromptsView from './components/prompts/PromptsView'
 import SequencesView from './components/sequences/SequencesView'
@@ -184,6 +185,7 @@ function Workspace() {
       {/* A size container: views lay out by the width they get, so collapsing the sidebar gives them room. */}
       <main className="@container/main min-w-0 flex-1">
         {view === 'generate' && <GenerateView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />}
+        {view === 'media' && <MediaView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />}
         {/* Keyed so Karaktärer, Miljöer, Produkter, Kläder and Poser each start with their own selection, search,
             drafts and sound players. */}
         {assetKind && (

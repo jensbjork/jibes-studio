@@ -164,24 +164,28 @@ export function withoutFilter(f: FeedFilters, key: keyof FeedFilters): FeedFilte
 
 // ── Remembered choices ───────────────────────────────────────────────────────
 
-const VIEW_KEY = 'feed:view'
+/** Kort or Tabell, remembered apart for the Mediabank's Videor ('library') and Generera's session list. */
+const VIEW_KEYS = { library: 'feed:view', session: 'feed:view:session' } as const
 const SORT_KEY = 'feed:sort'
+
+/** Which list a ClipFeed is: every clip (the Mediabank) or what was made in Generera this session. */
+export type FeedMode = keyof typeof VIEW_KEYS
 
 export function isSortKey(value: unknown): value is SortKey {
   return SORT_OPTIONS.some((o) => o.id === value)
 }
 
-export function loadView(): FeedView {
+export function loadView(mode: FeedMode = 'library'): FeedView {
   try {
-    return localStorage.getItem(VIEW_KEY) === 'table' ? 'table' : 'cards'
+    return localStorage.getItem(VIEW_KEYS[mode]) === 'table' ? 'table' : 'cards'
   } catch {
     return 'cards'
   }
 }
 
-export function saveView(view: FeedView): void {
+export function saveView(view: FeedView, mode: FeedMode = 'library'): void {
   try {
-    localStorage.setItem(VIEW_KEY, view)
+    localStorage.setItem(VIEW_KEYS[mode], view)
   } catch {
     // Remembering the view is only a convenience.
   }

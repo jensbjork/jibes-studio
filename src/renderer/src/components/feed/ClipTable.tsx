@@ -19,7 +19,8 @@ interface Props {
   models: readonly VideoModel[]
   index: LibraryIndex
   sort: SortKey
-  onSort: (sort: SortKey) => void
+  /** Clicking a sortable header changes the order; without it the headers are plain (Generera's session list). */
+  onSort?: (sort: SortKey) => void
   selectedId?: string
   onSelect: (id: string) => void
   /** The clip shown in the detail drawer, if it is open. */
@@ -196,7 +197,7 @@ export default function ClipTable({
   }
 
   const headerSort = (c: Column) => {
-    if (!c.sort) return
+    if (!c.sort || !onSort) return
     if (c.id === 'created') onSort(sort === 'newest' ? 'oldest' : 'newest')
     else onSort(c.sort)
   }
@@ -258,10 +259,10 @@ export default function ClipTable({
             <div
               key={c.id}
               role="columnheader"
-              aria-sort={direction ?? (c.sort ? 'none' : undefined)}
+              aria-sort={direction ?? (c.sort && onSort ? 'none' : undefined)}
               className={`min-w-0 px-2 ${c.align === 'right' ? 'text-right' : ''}`}
             >
-              {c.sort ? (
+              {c.sort && onSort ? (
                 <button
                   type="button"
                   tabIndex={-1}

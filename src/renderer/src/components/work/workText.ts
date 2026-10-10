@@ -189,6 +189,7 @@ export function finishedMeta(w: FinishedWork, now = Date.now()): string {
 /** The panel's group heading of a place: "Sekvenser", "Generera", "Redigera" … */
 export const VIEW_LABEL: Record<WorkView, string> = {
   generate: 'Generera',
+  media: 'Mediabank',
   sequences: 'Sekvenser',
   storyboards: 'Storyboards',
   editor: 'Redigera',

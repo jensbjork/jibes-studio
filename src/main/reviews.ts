@@ -576,6 +576,8 @@ interface ExportRow {
   id: string
   sequence_id: string | null
   sequence_name: string | null
+  /** The sequences row's kind ('sequence' or 'storyboard'); null when it has been deleted. */
+  sequence_kind: string | null
   file_path: string
   created_at: number
   /** JSON number[] (seconds), recorded at export since schema 11; NULL for older exports. */
@@ -639,12 +641,13 @@ async function summarizeExports(rows: ExportRow[]): Promise<ExportSummary[]> {
     }
   }
   await Promise.all(Array.from({ length: Math.min(PROBE_CONCURRENCY, items.length) }, worker))
-  return items.map(({ row, path }, i) => {
+  return items.map(({ row, path }, i): ExportSummary => {
     const cuts = parseCuts(row.cuts)
     return {
       id: row.id,
       sequenceId: row.sequence_id ?? undefined,
       sequenceName: row.sequence_name ?? undefined,
+      ...(row.sequence_kind ? { sequenceKind: row.sequence_kind === 'storyboard' ? 'storyboard' : 'sequence' } : {}),
       path,
       createdAt: row.created_at,
       duration: files[i].duration,
@@ -654,7 +657,8 @@ async function summarizeExports(rows: ExportRow[]): Promise<ExportSummary[]> {
   })
 }
 
-const EXPORT_COLUMNS = `SELECT e.id, e.sequence_id, e.file_path, e.created_at, e.cuts, s.name AS sequence_name
+const EXPORT_COLUMNS = `SELECT e.id, e.sequence_id, e.file_path, e.created_at, e.cuts, s.name AS sequence_name,
+    s.kind AS sequence_kind
   FROM exports e LEFT JOIN sequences s ON s.id = e.sequence_id`
 
 /**

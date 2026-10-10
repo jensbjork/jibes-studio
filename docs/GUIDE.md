@@ -27,12 +27,14 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 - **Generate** with Venice's video models in three modes: text-to-video, image-to-video (start and optional end
   image) and reference-to-video (up to 9 reference photos for Seedance, plus up to 3 voice or sound clips with the
   models that take reference audio). Price quote before you generate, *Använd igen* ("use again") to reload a
-  generation's settings.
-- **A live clip feed built for many clips.** Queued, rendering and finished videos as big cards or a compact table
-  (*Kort* / *Tabell*, with keyboard navigation), search in the prompts, filters (status, model, the asset whose
-  photos or voice were used, rating (★★★, ★★ or more, ★ or more, *Tumme ner*), unrated or reviewed, time,
-  standalone or a take, *Nya* — not watched yet), sorting (newest, oldest,
-  rating, cost, length) and a summary of the filtered clips. A detail drawer shows the player, the prompt with its
+  generation's settings. The list beside the form shows what you made there this session; everything older is in the
+  Mediabank.
+- **Mediabank:** everything you've made in one place, in three tabs — *Videor*, *Bilder* and *Filmer* (see
+  [Mediabank](#mediabank)). *Videor* is a live clip feed built for many clips: queued, rendering and finished videos
+  as big cards or a compact table (*Kort* / *Tabell*, with keyboard navigation), search in the prompts, filters
+  (status, model, the asset whose photos or voice were used, rating (★★★, ★★ or more, ★ or more, *Tumme ner*),
+  unrated or reviewed, time, standalone or a take, *Nya* — not watched yet), sorting (newest, oldest, rating, cost,
+  length) and a summary of the filtered clips. A detail drawer shows the player, the prompt with its
   tokens (and *Skickad prompt*, the prompt exactly as it was sent, when descriptions were appended), the references
   and voices that were sent, the settings, and your own rating (👎 *tumme ner* or one to three stars), note and tags
   next to the agents' reviews.
@@ -71,8 +73,8 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   from the first picture to the second (*Vad händer?*, length, price, takes). *Generera saknade* makes every missing
   one, *Förhandsvisa* plays them in order, *Exportera* cuts them into one film, and *Gör om till sekvens* carries
   them over to Sekvenser for further editing.
-- **Your own clips** (*Egna klipp*): bring your own video files into the library — *Importera egna klipp…* in the clip
-  feed, *Fler sätt → Eget klipp från fil…* under *Lägg till klipp* or a drop on a sequence's timeline, *Lägg till
+- **Your own clips** (*Egna klipp*): bring your own video files into the library — *Importera egna klipp…* in the
+  Mediabank's *Videor*, *Fler sätt → Eget klipp från fil…* under *Lägg till klipp* or a drop on a sequence's timeline, *Lägg till
   tagning från fil…* on a clip — and use them like any clip: AI clips continue from their last frame, end on their
   first, or redo a clip between them. Files are copied into `Egna klipp/<day>/` as an APFS clone where the disk allows
   (no extra space); a phone or camera film that can't be used as it is (HDR, 10-bit, 4K, a variable frame
@@ -108,8 +110,8 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   lists everything that runs — with its progress and an estimate —, what is ready to watch and what failed, with
   *Markera alla som sedda* (and *Ångra*). A video counts as seen once it has played for a second or you chose it; the
   Dock icon shows the number of new results.
-- **A grouped sidebar that folds away:** *Skapa* (Generera, Sekvenser, Storyboards, Redigera) and *Bibliotek* (the
-  five kinds and Prompter), one icon set, two slim status rows at the bottom — *Pågår och klart* and the agent
+- **A grouped sidebar that folds away:** *Skapa* (Generera, Sekvenser, Storyboards, Redigera) and *Bibliotek*
+  (Mediabank, the five kinds and Prompter), one icon set, two slim status rows at the bottom — *Pågår och klart* and the agent
   connection — above *Inställningar*, and a 72 px icon rail (⌃⌘S, or the button by the wordmark) that gives the
   views more room.
 - **Your own folder:** a base folder you choose, with Swedish, human-readable folders and file names. Paths in the
@@ -257,6 +259,28 @@ as your library; the library you had open stays where it is. On a new Mac the fi
 bibliotek…* too. Posters are made again in the background. While an export runs, switching libraries and *Städa upp*
 have to wait until it is done; an export and an import can both be cancelled (*Avbryt*).
 
+## Mediabank
+
+The **Mediabank**, first under *Bibliotek* in the sidebar, holds everything you've made, in three tabs (the one you
+used last opens again):
+
+- **Videor** — every video: generations, takes of sequence clips and storyboard transitions, your own films and
+  Redigera's versions. Cards or a table (*Kort* / *Tabell*), search, the filters and sorting described under
+  [Features](#features), *Importera egna klipp…* (or drop video files on it), and the detail drawer with the player,
+  the prompt, the references, the settings and your rating, note and tags. *Använd igen* opens Generera with the
+  clip's settings in the form.
+- **Bilder** — every picture: made with *Skapa bild…*, uploaded or dropped, frames saved from clips. *Källa* (where
+  it came from) and *Plats* (the sequence or storyboard it belongs to, or none) filter them; click one to see it
+  large.
+- **Filmer** — the films exported from sequences and storyboards. Play one, open it in Redigera (*Öppna i Redigera*)
+  or go to the sequence or storyboard it came from.
+
+**Generera** shows only this session beside its form: what you made there since Studio started, and clips that were
+still being made when it started (they stay once they are done). Closing the window keeps the session; quitting Studio ends it, and next time the list starts
+empty — the clips are all in the Mediabank, which Generera links to. *Pågår och klart* counts Generera's clips under
+Generera while they are in its list and under the Mediabank after that, together with pictures that belong to no
+sequence or storyboard.
+
 ## Prompts, `@ImageN` and `@AudioN` references
 
 In **reference mode** the model receives the reference images in order, and the prompt refers to them as
@@ -312,7 +336,7 @@ asset with its tokens and an excerpt, a switch per asset, *Ta med beskrivningar*
 *Ändra beskrivning* to open the asset, and the composed length against the model's prompt limit. If the legend
 would make the prompt too long, the descriptions are shortened at word boundaries (marked *förkortad*); if not even
 the names fit, none are appended. The heading and words follow **Promptspråk** (`Referenser:` and `röst` in
-Swedish). The clip feed keeps both texts: the prompt you wrote and, as *Skickad prompt*, what Venice got.
+Swedish). A clip's drawer keeps both texts: the prompt you wrote and, as *Skickad prompt*, what Venice got.
 
 In the prompt editor:
 
@@ -398,7 +422,7 @@ and it lives in its own view, **Storyboards** — storyboards never show up in S
   boards' notes — and its length (5 s by default), resolution (480p), sound and model (only image-to-video models that
   take an end image; Seedance by default). **Generera** shows the price first; every take is kept, and you choose the
   one that is used. Moving, inserting or removing a board removes the transitions between boards that are no longer
-  neighbours — their prompts go, their takes go back to the clip feed in Generera, nothing is deleted — and new
+  neighbours — their prompts go, their takes become ordinary clips in the Mediabank, nothing is deleted — and new
   neighbours get a new, empty transition; Studio asks first when a move or a new board would remove a transition with
   a prompt or takes. A take made before one of its boards got another picture is marked *Tidigare bild*; a new take
   made from the pictures there now takes its place when it is done, and deleting the selected take selects another

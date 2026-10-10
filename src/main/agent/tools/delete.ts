@@ -638,7 +638,7 @@ async function planSequence(input: DeleteInput, id: string, r: Reader): Promise<
   const stills = store.listStillRows(id).length
   const exported = row<{ n: number }>('SELECT COUNT(*) AS n FROM exports WHERE sequence_id = ?', id)?.n ?? 0
   const effects: string[] = []
-  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Generera`)
+  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Mediabanken`)
   if (stills) {
     effects.push(
       `${count(stills, 'stillbild', 'stillbilder')} flyttas till papperskorgen – det som används någon annanstans sparas i Referensbilder`
@@ -689,7 +689,7 @@ async function planSegment(input: DeleteInput, id: string, r: Reader): Promise<P
   const previous = all[i - 1]
   const takes = takeCount([id])
   const effects: string[] = []
-  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Generera`)
+  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Mediabanken`)
   if (next?.continue_from_previous) {
     effects.push(
       i > 0
@@ -771,7 +771,7 @@ async function planStoryboard(input: DeleteInput, id: string, r: Reader): Promis
   const effects: string[] = []
   const prompts = storyboard.transitions.filter((t) => hasPrompt(t.params)).length
   if (prompts) effects.push(`${count(prompts, 'övergång', 'övergångar')} med prompt försvinner`)
-  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Generera`)
+  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Mediabanken`)
   if (stills) {
     effects.push(
       `${count(stills, 'bild', 'bilder')} flyttas till papperskorgen – det som används någon annanstans sparas i Referensbilder`
@@ -839,7 +839,7 @@ async function planBoard(input: DeleteInput, id: string, r: Reader): Promise<Pla
       `${transitionsText(lost.map((x) => x.number))} försvinner${prompts ? (lost.length === 1 ? ' med sin prompt' : ' med sina prompter') : ''}`
     )
   }
-  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Generera`)
+  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Mediabanken`)
   if (i > 0 && i < storyboard.boards.length - 1) effects.push(`Ruta ${i} och ruta ${i + 2} får en ny, tom övergång`)
   if (shown?.stillId) effects.push('Bilden finns kvar bland storyboardens bilder')
   return planned(
@@ -887,7 +887,7 @@ async function planBoardMove(input: DeleteInput, id: string, toNumber: number, r
       `Övergång ${t.number}${t.prompt.trim() ? ` (${q(excerpt(t.prompt, 40))})` : ''} försvinner${hasPrompt(t) ? ' med sin prompt' : ''}`
   )
   const takes = lost.reduce((sum, t) => sum + t.takeCount, 0)
-  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Generera`)
+  if (takes) effects.push(`${count(takes, 'tagning', 'tagningar')} blir vanliga klipp i Mediabanken`)
   effects.push('Rutorna som hamnar bredvid varandra får nya, tomma övergångar')
   const shown = storyboard.boards[i]
   return planned(
@@ -1033,7 +1033,7 @@ async function planTake(input: DeleteInput, generationId: string, segmentId: str
     return !!now && !!seg && (now.segmentId === seg.id || seg.selected_generation_id === now.id)
   }
   if (!isTake()) refuse(`${q(generationTitle(g, 40))} är ingen tagning av ${where} i ${q(owner.name)}.`)
-  const home = g.source === 'edit' ? 'Redigera' : 'Generera'
+  const home = g.source === 'edit' ? 'Redigera' : 'Mediabanken'
   const effects =
     segment.selected_generation_id === generationId
       ? [
@@ -1172,7 +1172,7 @@ async function planEdit(input: DeleteInput, id: string, r: Reader): Promise<Plan
     )
   }
   if (trashed) effects.push(`${count(trashed, 'version', 'versioner')} flyttas till papperskorgen med mappen`)
-  if (edit.takes.length) effects.push(`${count(edit.takes.length, 'AI-tagning', 'AI-tagningar')} finns kvar i Generera`)
+  if (edit.takes.length) effects.push(`${count(edit.takes.length, 'AI-tagning', 'AI-tagningar')} finns kvar i Mediabanken`)
   for (const job of edit.jobs) {
     if ((job.status === 'failed' || job.status === 'cancelled') && job.canResume && job.costUsd > 0) {
       effects.push(`Jobbet ${q(job.label)} har redan betalat ${usd(job.costUsd)} och kan inte fortsättas när redigeringen är borta`)

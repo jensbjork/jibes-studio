@@ -10,17 +10,21 @@
 //   failing) and leaves only through the user's work:markSeen / work:markAllSeen, or with the item itself (its foreign
 //   key cascades; an error-only row goes with its owner, see dropOrphans).
 // Every item counts under one sidebar view and its owner (a sequence, storyboard, edit or asset) and clip, so the
-// sidebar, the lists and the cards read their counts from the same summary. Agents may read it (get_work_status) but
-// never mark anything seen. Building the summary (buildWorkSummary) is pure, so it is tested on its own.
+// sidebar, the lists and the cards read their counts from the same summary. What Generera made counts there while it
+// is in its list (this session, shared/session.ts) and under the Mediabank after that, as does a picture of no
+// sequence or storyboard. Agents may read it (get_work_status) but never mark anything seen. Building the summary
+// (buildWorkSummary) is pure, so it is tested on its own.
 
 import { randomUUID } from 'node:crypto'
 import { basename, extname } from 'node:path'
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { agentDisplayName } from '@shared/agent-name'
 import { generationTitle } from '@shared/generation-label'
+import { inGenerateSession, type GenerateSession } from '@shared/session'
 import {
   workKey,
   type ApprovalRequest,
+  type EditRecipe,
   type FinishedWork,
   type Generation,
   type ImportTarget,
@@ -43,6 +47,7 @@ import type { ImportService } from './imports'
 import type { JobManager, SendingSubmit } from './jobs'
 import { fromStoredPath } from './paths'
 import type { SequenceActiveWork, SequenceService } from './sequences'
+import { currentSession } from './session'
 import { typicalStillMs, type StillWork } from './stills'
 import type { StoryboardService } from './storyboards'
 
@@ -100,7 +105,7 @@ export interface UnseenJoinedRow {
   label?: string
   context: db.UnseenContext
   generation?: Pick<Generation, 'id' | 'status' | 'source' | 'prompt' | 'createdAt'> &
-    Partial<Pick<Generation, 'title' | 'segmentId' | 'editId' | 'filePath' | 'thumbPath' | 'error'>> & {
+    Partial<Pick<Generation, 'title' | 'segmentId' | 'editId' | 'filePath' | 'thumbPath' | 'error' | 'recipe'>> & {
       /** A version's number and label (its recipe). */
       versionNumber?: number
       versionLabel?: string
@@ -145,6 +150,11 @@ export interface Registries {
   /** Posters of generations that running work names (an edit job's base version). */
   posters: Record<string, string | undefined>
   names: WorkNames
+  /**
+   * This session (main/session.ts): what Generera made before it, and didn't settle in it, has left Generera's list
+   * and counts under the Mediabank.
+   */
+  session: GenerateSession
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
@@ -221,7 +231,10 @@ function sequencePlace(names: WorkNames, sequenceId: string | undefined, extra: 
   }
 }
 
-/** A picture's place and label: "Bild till ruta 3 i ”Resa”", "Bild till klipp 2 i ”Sommar”", "Bild i ”…”", "Bild". */
+/**
+ * A picture's place and label: "Bild till ruta 3 i ”Resa”", "Bild till klipp 2 i ”Sommar”", "Bild i ”…”", or "Bild" in
+ * the Mediabank.
+ */
 function stillPlace(
   names: WorkNames,
   where: { sequenceId?: string; boardId?: string; segmentId?: string; slot?: SegmentImageSlot },
@@ -255,7 +268,8 @@ function stillPlace(
   if (where.sequenceId && sequence) {
     return { ...sequencePlace(names, where.sequenceId, extra), label: `Bild i ”${sequence.name}”` }
   }
-  return { view: 'generate', label: 'Bild', target: { view: 'generate', ...extra } }
+  // A loose picture: the Mediabank's Bilder.
+  return { view: 'media', label: 'Bild', target: { view: 'media', ...extra } }
 }
 
 /** An edit's name in a label ("”Intervju”"), or a stand-in when it is gone. */
@@ -319,7 +333,7 @@ function approvalView(a: ExecutingApproval, request: ApprovalRequest | undefined
     case 'generate-all':
       return sequencePlace(names, a.sequenceId).view
     case 'image':
-      return a.sequenceId ? sequencePlace(names, a.sequenceId).view : 'generate'
+      return a.sequenceId ? sequencePlace(names, a.sequenceId).view : 'media'
     case 'edit':
       return 'editor'
     case 'voice-design':
@@ -360,7 +374,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
   const jobTakes = new Map(reg.editJobs.filter((j) => j.takeId).map((j) => [j.takeId!, j]))
   const pendingById = new Map(pending.map((g) => [g.id, g]))
 
-  // Videos at Venice.
+  // Videos at Venice. One made in Generera stays in its list while it is being made (shared/session.ts).
   for (const g of pending) {
     if (jobTakes.has(g.id)) continue
     const progress = videoProgress(g, reg, now)
@@ -691,7 +705,7 @@ interface FinishedEntry {
   rowId: string
 }
 
-function finishedItem(row: UnseenJoinedRow, names: WorkNames): FinishedWork | undefined {
+function finishedItem(row: UnseenJoinedRow, names: WorkNames, session: GenerateSession): FinishedWork | undefined {
   const finishedAt = row.createdAt
   const g = row.generation
   if (g) {
@@ -733,12 +747,14 @@ function finishedItem(row: UnseenJoinedRow, names: WorkNames): FinishedWork | un
         target: { view: 'editor', editId: g.editId, generationId: g.id }
       }
     }
+    // Generera's while it is in its list (this session); after that, and whatever else is left, the Mediabank's Videor.
+    const view = inGenerateSession(g, session) ? 'generate' : 'media'
     return {
       ...common,
       kind: 'video',
-      view: 'generate',
+      view,
       label: quoted(generationTitle(g, EXCERPT)),
-      target: { view: 'generate', generationId: g.id }
+      target: { view, generationId: g.id }
     }
   }
 
@@ -865,11 +881,14 @@ function finishedItem(row: UnseenJoinedRow, names: WorkNames): FinishedWork | un
 }
 
 /** Every finished item of the rows, with who asked for it, newest first. */
-function finishedEntries(rows: readonly UnseenJoinedRow[], reg: Pick<Registries, 'approvals' | 'names'>): FinishedEntry[] {
+function finishedEntries(
+  rows: readonly UnseenJoinedRow[],
+  reg: Pick<Registries, 'approvals' | 'names' | 'session'>
+): FinishedEntry[] {
   const via = viaByKey(reg)
   const out: FinishedEntry[] = []
   for (const row of rows) {
-    const item = finishedItem(row, reg.names)
+    const item = finishedItem(row, reg.names, reg.session)
     if (!item) continue
     const agent = via.get(item.key)
     out.push({ item: agent ? { ...item, via: agent } : item, rowId: row.id })
@@ -1016,7 +1035,8 @@ function readUnseen(): UnseenJoinedRow[] {
       context: parseJson<db.UnseenContext>(r.context, {})
     }
     if (r.generation_id && r.g_status) {
-      const recipe = parseJson<{ number?: unknown; label?: unknown }>(r.g_recipe, {})
+      // A version's number and label; the session rule reads whether it is the copy of an exported film (export).
+      const recipe = parseJson<EditRecipe | undefined>(r.g_recipe, undefined)
       out.generation = {
         id: r.generation_id,
         status: r.g_status as Generation['status'],
@@ -1029,8 +1049,9 @@ function readUnseen(): UnseenJoinedRow[] {
         ...(r.g_file_path ? { filePath: fromStoredPath(r.g_file_path) } : {}),
         ...(r.g_thumb_path ? { thumbPath: fromStoredPath(r.g_thumb_path) } : {}),
         ...(r.g_error ? { error: r.g_error } : {}),
-        ...(typeof recipe.number === 'number' ? { versionNumber: recipe.number } : {}),
-        ...(typeof recipe.label === 'string' && recipe.label ? { versionLabel: recipe.label } : {})
+        ...(recipe ? { recipe } : {}),
+        ...(typeof recipe?.number === 'number' ? { versionNumber: recipe.number } : {}),
+        ...(typeof recipe?.label === 'string' && recipe.label ? { versionLabel: recipe.label } : {})
       }
     }
     if (r.still_id && r.s_file_path) {
@@ -1261,7 +1282,8 @@ export class WorkStatus {
       typicalStill,
       measuredAt,
       posters,
-      names: readNames()
+      names: readNames(),
+      session: currentSession()
     }
   }
 
@@ -1372,7 +1394,11 @@ export class WorkStatus {
     const ownerId = scope && typeof scope.ownerId === 'string' ? scope.ownerId : undefined
     dropOrphans()
     const approvals = safely('the agent requests', () => this.src.approvals().decided, [])
-    const entries = finishedEntries(readUnseen(), { approvals, names: readNames() }).filter(
+    const entries = finishedEntries(readUnseen(), {
+      approvals,
+      names: readNames(),
+      session: currentSession()
+    }).filter(
       ({ item }) =>
         (!view || item.view === view) && (!ownerId || item.ownerId === ownerId || item.segmentId === ownerId)
     )

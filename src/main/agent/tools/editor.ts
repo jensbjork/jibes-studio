@@ -201,7 +201,7 @@ function mediaInfo(m: EditMedia): Record<string, unknown> {
 }
 
 const ORIGIN_WORDS: Record<EditSummary['origin']['kind'], string> = {
-  generation: 'a clip from the feed (Generera)',
+  generation: 'a clip from the feed (the Mediabank)',
   take: 'a take of a sequence clip',
   export: 'an exported film',
   import: "the user's own film"

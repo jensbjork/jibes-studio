@@ -576,23 +576,31 @@ export function useShownWorkStill(): ShownStill | undefined {
 
 /**
  * Opens the place a piece of work belongs to: the clip drawer in Generera, the clip or take in Sekvenser, the
- * transition or board in Storyboards, the edit (and version) in Redigera, the asset (and voice) in its view; an
- * agent request being carried out opens in the approval dialog. A picture with no board or clip to be seen in (one
- * made for a sequence as a whole, or for nothing) also opens on its own, over its view. Going there doesn't mark
- * anything seen by itself.
+ * transition or board in Storyboards, the edit (and version) in Redigera, the asset (and voice) in its view, the clip,
+ * picture or film in the Mediabank; an agent request being carried out opens in the approval dialog. A picture with
+ * no board or clip to be seen in (one made for a sequence as a whole) also opens on its own, over its view; one that
+ * counts under the Mediabank opens in its Bilder instead. Going there doesn't mark anything seen by itself.
  */
 export function jumpTo(target: WorkTarget, navigate: Navigate): void {
   if (target.approvalId) {
     showApproval(target.approvalId)
     return
   }
-  if (target.stillId && !target.boardId && !target.segmentId && !target.transitionId) {
+  if (target.stillId && !target.boardId && !target.segmentId && !target.transitionId && target.view !== 'media') {
     showWorkStill({ stillId: target.stillId, sequenceId: target.sequenceId ?? target.storyboardId })
   }
   switch (target.view) {
     case 'generate':
       if (target.generationId) navigate('generate', { type: 'open-generation', generationId: target.generationId })
       else navigate('generate')
+      return
+    case 'media':
+      // Generera's clips from an earlier session and pictures with no place of their own.
+      if (target.generationId) {
+        navigate('media', { type: 'open-media', tab: 'videos', generationId: target.generationId })
+      } else if (target.stillId) navigate('media', { type: 'open-media', tab: 'pictures', stillId: target.stillId })
+      else if (target.exportId) navigate('media', { type: 'open-media', tab: 'films', exportId: target.exportId })
+      else navigate('media')
       return
     case 'sequences': {
       const sequenceId = target.sequenceId ?? target.storyboardId

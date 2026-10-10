@@ -89,7 +89,8 @@ Optional, but please use one when a change clearly belongs to an area. Pick the 
 
 | Scope | Area | Mainly |
 | --- | --- | --- |
-| `generate` | The Generate view, the clip feed and the job queue | `GenerateView.tsx`, `ParamsForm.tsx`, `components/feed/`, `jobs.ts`, `venice.ts` |
+| `generate` | The Generate view, its list of this session's clips and the job queue | `GenerateView.tsx`, `ParamsForm.tsx`, `jobs.ts`, `venice.ts`, `shared/session.ts` |
+| `media` | The Mediabank: every video (the clip feed), picture and exported film | `components/media/`, `components/feed/` |
 | `prompt` | The prompt editor and `@ImageN` / `@AudioN` reference checks | `components/prompt/`, `shared/prompt-refs.ts` |
 | `library` | Characters, environments, products, outfits and poses, the prompt library, reviews and learnings | `components/assets/`, `components/prompts/`, `library.ts`, `reviews.ts` |
 | `assets` | Reference images, audio clips and asset folders on disk | `assets.ts`, `references.ts` |

@@ -24,6 +24,7 @@ import { prepareLibrary, registerLibraryRootIpc } from './library-root'
 import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty, toStoredPath } from './paths'
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
 import { attachReviewSummary, registerReviewIpc } from './reviews'
+import { registerSessionIpc } from './session'
 import { reselectTransitionTake } from './sequence-store'
 import { registerSequenceIpc, type SequenceService } from './sequences'
 import { registerStoryboardIpc, type StoryboardService } from './storyboards'
@@ -533,6 +534,7 @@ function registerIpc(): void {
 
   // Export och import: the whole library to a zip and back, only from the window (agents are refused).
   registerArchiveIpc({ busy: libraryBusyReason })
+  registerSessionIpc()
 
   registerAgentIpc(agent)
 }

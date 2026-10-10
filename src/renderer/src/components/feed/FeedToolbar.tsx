@@ -44,6 +44,8 @@ interface Props {
   pendingCount: number
   /** Finished clips not looked at yet: the "Nya" chip. */
   unseenCount: number
+  /** Left end of the first row (the Mediabank's tabs). */
+  leading?: ReactNode
   /** Right end of the first row (e.g. the folder button). */
   trailing?: ReactNode
 }
@@ -70,6 +72,7 @@ export default function FeedToolbar({
   onSearchArrowDown,
   pendingCount,
   unseenCount,
+  leading,
   trailing
 }: Props) {
   const set = (patch: Partial<FeedFilters>) => onFilters({ ...filters, ...patch })
@@ -103,34 +106,8 @@ export default function FeedToolbar({
   return (
     <div className="shrink-0 border-b border-line/60 px-6 pb-2.5">
       <div className="drag flex h-12 items-center gap-3">
-        <div
-          role="radiogroup"
-          aria-label="Visning"
-          className="no-drag flex h-7 shrink-0 items-center rounded-md border border-line bg-panel p-0.5"
-        >
-          <button
-            type="button"
-            role="radio"
-            aria-checked={view === 'cards'}
-            onClick={() => onView('cards')}
-            title="Stora kort med video"
-            className={segment(view === 'cards')}
-          >
-            <GridIcon size={12} />
-            Kort
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={view === 'table'}
-            onClick={() => onView('table')}
-            title="Tabell – många klipp på en gång"
-            className={segment(view === 'table')}
-          >
-            <ListIcon size={12} />
-            Tabell
-          </button>
-        </div>
+        {leading}
+        <ViewSwitch view={view} onView={onView} />
 
         <div className="no-drag relative min-w-36 max-w-72 flex-1">
           <SearchIcon size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
@@ -286,6 +263,91 @@ export default function FeedToolbar({
         </span>
       </div>
     </div>
+  )
+}
+
+/** Kort or Tabell. */
+function ViewSwitch({ view, onView }: { view: FeedView; onView: (view: FeedView) => void }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Visning"
+      className="no-drag flex h-7 shrink-0 items-center rounded-md border border-line bg-panel p-0.5"
+    >
+      <button
+        type="button"
+        role="radio"
+        aria-checked={view === 'cards'}
+        onClick={() => onView('cards')}
+        title="Stora kort med video"
+        className={segment(view === 'cards')}
+      >
+        <GridIcon size={12} />
+        Kort
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={view === 'table'}
+        onClick={() => onView('table')}
+        title="Tabell – många klipp på en gång"
+        className={segment(view === 'table')}
+      >
+        <ListIcon size={12} />
+        Tabell
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Generera's header over this session's clips: the view switch and the import and folder buttons, then what the
+ * session has made so far and the way to everything older in the Mediabank. No search, filters or order: the list is
+ * short and always newest first.
+ */
+export function SessionToolbar({
+  view,
+  onView,
+  summary,
+  onShowAll,
+  trailing
+}: {
+  view: FeedView
+  onView: (view: FeedView) => void
+  /** "Den här sessionen · 3 klipp · $1.20 · 24 s". */
+  summary: string
+  /** "Alla videor i Mediabanken". */
+  onShowAll: () => void
+  trailing?: ReactNode
+}) {
+  return (
+    <div className="shrink-0 border-b border-line/60 px-6 pb-2.5">
+      <div className="drag flex h-12 items-center gap-3">
+        <ViewSwitch view={view} onView={onView} />
+        <span className="flex-1" />
+        {trailing}
+      </div>
+      <div className="flex min-h-7 items-center gap-3">
+        <span className="min-w-0 flex-1 truncate text-[12px] text-muted tabular-nums" title={summary} aria-live="polite">
+          {summary}
+        </span>
+        <MediaLink onClick={onShowAll} />
+      </div>
+    </div>
+  )
+}
+
+/** "Alla videor i Mediabanken →": from Generera's session list to every clip. */
+export function MediaLink({ onClick, className = '' }: { onClick: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Visa alla klipp du har gjort, också från tidigare sessioner"
+      className={`no-drag shrink-0 whitespace-nowrap text-[12px] text-text underline-offset-2 hover:underline ${className}`}
+    >
+      Alla videor i Mediabanken →
+    </button>
   )
 }
 

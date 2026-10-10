@@ -27,15 +27,38 @@ interface Props {
   onDeleted?: (still: Still) => void
   /** Extra buttons for the still on screen, e.g. "Använd som startbild". */
   actions?: (still: Still) => ReactNode
+  /**
+   * An agent opened it (open_in_studio): the still it opened on isn't marked seen by being on screen until the user
+   * steps with ← or → (from then on every still shown is).
+   */
+  openedByAgent?: boolean
 }
 
 const button =
   'rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-30 disabled:hover:bg-transparent'
 
 /** A still at full size with what it was made from: prompt, model, settings, references and price. */
-export default function StillViewer({ still, stills, onClose, deletable = false, onDeleted, actions }: Props) {
+export default function StillViewer({
+  still,
+  stills,
+  onClose,
+  deletable = false,
+  onDeleted,
+  actions,
+  openedByAgent = false
+}: Props) {
   const [currentId, setCurrentId] = useState(still?.id)
-  useEffect(() => setCurrentId(still?.id), [still?.id])
+  // Held back from the seen rule while an agent's still is all that has been shown; the user stepping releases it.
+  const [stepped, setStepped] = useState(false)
+  useEffect(() => {
+    setCurrentId(still?.id)
+    setStepped(false)
+  }, [still?.id])
+  const heldId = openedByAgent && !stepped ? still?.id : undefined
+  const step = (id: string) => {
+    setCurrentId(id)
+    setStepped(true)
+  }
 
   // Deleted here: left out even while the parent still passes them (its list or `still` may update later).
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set())
@@ -58,8 +81,8 @@ export default function StillViewer({ still, stills, onClose, deletable = false,
       const field = e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')
       if (e.key === 'Escape') onClose()
       else if (field) return
-      else if (e.key === 'ArrowLeft' && index > 0) setCurrentId(list[index - 1].id)
-      else if (e.key === 'ArrowRight' && index < list.length - 1) setCurrentId(list[index + 1].id)
+      else if (e.key === 'ArrowLeft' && index > 0) step(list[index - 1].id)
+      else if (e.key === 'ArrowRight' && index < list.length - 1) step(list[index + 1].id)
       else return
       // Captured and stopped here, so a dialog or view underneath doesn't act on the same key (and close too).
       e.preventDefault()
@@ -102,14 +125,14 @@ export default function StillViewer({ still, stills, onClose, deletable = false,
         className="relative flex min-h-0 flex-1 items-center justify-center p-10 pt-12"
         onMouseDown={(e) => e.target === e.currentTarget && onClose()}
       >
-        <StillImage key={current.id} still={current} />
+        <StillImage key={current.id} still={current} markSeen={current.id !== heldId} />
         {list.length > 1 && (
           <>
-            <NavButton side="left" disabled={index <= 0} onClick={() => setCurrentId(list[index - 1].id)} />
+            <NavButton side="left" disabled={index <= 0} onClick={() => step(list[index - 1].id)} />
             <NavButton
               side="right"
               disabled={index >= list.length - 1}
-              onClick={() => setCurrentId(list[index + 1].id)}
+              onClick={() => step(list[index + 1].id)}
             />
           </>
         )}
@@ -143,11 +166,11 @@ export default function StillViewer({ still, stills, onClose, deletable = false,
   )
 }
 
-function StillImage({ still }: { still: Still }) {
+function StillImage({ still, markSeen }: { still: Still; markSeen: boolean }) {
   const [missing, setMissing] = useState(false)
   // A new picture (Pågår och klart) has been looked at once it has been on screen here for a moment.
   const imgRef = useRef<HTMLImageElement>(null)
-  useSeenWhenVisible(imgRef, missing ? undefined : workKey.still(still.id))
+  useSeenWhenVisible(imgRef, missing || !markSeen ? undefined : workKey.still(still.id))
   if (missing) {
     return (
       <p className="max-w-sm text-center text-muted select-text">

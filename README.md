@@ -29,6 +29,7 @@ The interface is in Swedish. You pay Venice per generation; the price is shown b
 
 - **Generera** – a clip from text, a start image, or reference photos and voices you point at in the prompt
   (`@Image1`, `@Audio1`).
+- **Mediabank** – everything you've made in one place: videos, pictures and exported films.
 - **Bibliotek** – characters, environments, products, outfits and poses: photos, a description and a voice.
   Their descriptions are added to the prompt for you.
 - **Sekvenser** – clips that continue from each other's last frame, exported as one film.
