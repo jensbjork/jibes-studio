@@ -1,0 +1,79 @@
+name: Release
+
+# Pushing a version tag (v0.2.0) builds Studio.app on an Apple Silicon runner and publishes it as a GitHub release:
+# Studio-mac-arm64.zip (what install.sh downloads) and Studio-mac-arm64.dmg (for a download by hand).
+# "Run workflow" builds the same files without publishing anything, as an artifact of the run.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Studio.app
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # The tag must match package.json, or the release would carry another version than the app reports.
+      - name: Check the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          want="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match package.json ($want)." >&2
+            exit 1
+          fi
+
+      # Also rebuilds better-sqlite3 for Electron (the postinstall script).
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build native helpers
+        run: npm run build:helpers
+
+      - name: Build
+        run: npx electron-vite build
+
+      # Ad-hoc signed (no Developer ID): a download by curl carries no quarantine flag and opens directly; a download
+      # in a browser needs "Öppna ändå" once (see the README).
+      - name: Package
+        run: npx electron-builder --mac zip dmg --arm64 --publish never
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Studio-mac-arm64
+          path: |
+            dist/Studio-mac-arm64.zip
+            dist/Studio-mac-arm64.dmg
+          retention-days: 14
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/Studio-mac-arm64.zip dist/Studio-mac-arm64.dmg \
+            --title "Studio $GITHUB_REF_NAME" \
+            --generate-notes

@@ -210,7 +210,7 @@ with MCP protocol version 2025-03-26: Studio reads the version from the client's
 instead of content it would reject. Whether an agent can actually listen depends on its client and model; the
 frames, reference images and text work without it.
 
-### Read (34 tools; change nothing)
+### Read (35 tools; change nothing)
 
 | Tool | What it does |
 | --- | --- |

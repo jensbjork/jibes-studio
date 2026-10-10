@@ -10,6 +10,11 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **One-command install**: `install.sh` checks the Mac, installs ffmpeg with Homebrew if needed, downloads the newest
+  `Studio-mac-arm64.zip` from GitHub Releases into Applications and opens it. A release workflow builds the ZIP and a
+  DMG on an Apple Silicon runner when a version tag is pushed.
+- **A short README** with screenshots (taken by `npm run screenshots` from an empty throwaway library); the detailed
+  feature guide moved to `docs/GUIDE.md`.
 - **AI-assisted contributions** in CONTRIBUTING.md: AI tools are welcome, the person submitting is the author and
   responsible, AI help is disclosed with an `Assisted-by:` trailer, and a tool is never listed as a co-author.
 - **Deleting from the lists**: a sequence can be deleted from its ⋯ menu (*Radera sekvensen…*) as well as with the ✕

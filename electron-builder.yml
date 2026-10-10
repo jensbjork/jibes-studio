@@ -23,9 +23,13 @@ extraResources:
   - from: build/bin/studio-voice-isolate
     to: bin/studio-voice-isolate
 mac:
+  # `npm run app` builds the app folder only (dist/mac-arm64/Studio.app); the release workflow asks for zip and dmg.
   target:
     - target: dir
       arch: arm64
+  # Fixed names, so https://github.com/<owner>/studio/releases/latest/download/Studio-mac-arm64.zip always points at
+  # the newest release (install.sh downloads it).
+  artifactName: ${productName}-mac-${arch}.${ext}
   icon: build/icon.icns
   category: public.app-category.video
   darkModeSupport: true
