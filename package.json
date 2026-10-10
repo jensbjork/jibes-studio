@@ -24,6 +24,7 @@
     "dev:real": "node scripts/build-helpers.mjs && electron-vite dev -w",
     "build": "node scripts/build-helpers.mjs && electron-vite build",
     "build:helpers": "node scripts/build-helpers.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "check": "npm run typecheck && npm run build",

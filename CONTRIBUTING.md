@@ -187,7 +187,7 @@ request focused. Before asking for review, check that:
 - [ ] **No secrets or personal data**: no API keys, tokens, real names, personal paths, e-mail addresses or
       private library content in code, comments, commits, screenshots or logs. Never commit media files (videos,
       photos) or a `studio.db`.
-- [ ] **Docs are updated** when behaviour, settings, scripts or agent tools change (README, `docs/`,
+- [ ] **Docs are updated** when behaviour, settings, scripts or agent tools change (README, `docs/` incl. the guide,
       `CHANGELOG.md` under *Unreleased*).
 - [ ] **UI copy is in Swedish** (for now) and addresses the user as "du"; user-facing error messages from the main
       process are Swedish too. Code, comments, logs and docs are in English.

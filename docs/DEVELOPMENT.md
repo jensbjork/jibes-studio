@@ -47,6 +47,7 @@ Electron's Node ABI. A consequence: plain `node` cannot load it — scripts that
 | `npm run check` | `typecheck` + `build` — what CI runs, and what must pass before a pull request. |
 | `npm run app` | Builds the native helper, then builds and packages `dist/mac-arm64/Studio.app` with electron-builder. |
 | `npm run app:install` | `npm run app`, then replaces `/Applications/Studio.app` with the new build. |
+| `npm run screenshots` | Takes the README's screenshots into `docs/images/` from the built `out/` (run `npm run build` first), with a fresh, empty profile and library in a temporary folder. See [Screenshots](#screenshots). |
 
 Because the dev app reloads on every save, keep the code compiling while you work: a broken save restarts a
 broken main process.
@@ -480,7 +481,9 @@ times over as 32-bit float at 48 kHz) fit on the library's disk with 1 GB to spa
 
 `npm run app` runs `electron-vite build` and then electron-builder with `electron-builder.yml`:
 
-- **Target:** a plain `.app` folder for `arm64` (`dist/mac-arm64/Studio.app`), no DMG or ZIP.
+- **Target:** a plain `.app` folder for `arm64` (`dist/mac-arm64/Studio.app`). The release workflow asks for a ZIP
+  and a DMG instead (`--mac zip dmg`), named `Studio-mac-arm64.zip` / `.dmg` (`mac.artifactName`), so
+  `releases/latest/download/Studio-mac-arm64.zip` always points at the newest release.
 - **Signing:** ad hoc (`identity: '-'`), without hardened runtime or notarization. Apple Silicon refuses to run
   unsigned code, and ad-hoc signing is enough for the Mac that built the app. Distributing builds to other Macs
   would need a Developer ID and notarization (not set up). Because every build has a new ad-hoc signature, macOS
@@ -496,6 +499,42 @@ times over as 32-bit float at 48 kHz) fit on the library's disk with 1 GB to spa
   `NODE_OPTIONS=--experimental-require-module` so it works where the feature is still behind that flag. The
   `ExperimentalWarning` printed during packaging is expected.
 - `npm run app:install` deletes `/Applications/Studio.app` and copies the new build there; quit Studio first.
+
+## Releasing
+
+Releases are built on GitHub, not on a laptop (`.github/workflows/release.yml`):
+
+1. Bump `version` in `package.json` (and `package-lock.json`: `npm version 0.2.0 --no-git-tag-version`), move the
+   *Unreleased* entries in `CHANGELOG.md` under the new version, and commit.
+2. Tag the commit and push the tag:
+
+   ```bash
+   git tag v0.2.0 && git push origin v0.2.0
+   ```
+
+3. The workflow checks that the tag matches `package.json`, typechecks, builds the native helper, packages
+   `Studio-mac-arm64.zip` and `.dmg` on an Apple Silicon runner and publishes them as the GitHub release `v0.2.0`
+   with generated notes. *Run workflow* on the Actions tab builds the same files as an artifact without publishing.
+
+The builds are signed ad hoc, not notarized. `install.sh` downloads the ZIP with `curl`, which sets no quarantine
+flag, so the app opens without Gatekeeper's prompt; a DMG downloaded in a browser needs *Open Anyway* once (the
+README says so). A Developer ID and notarization in the workflow would remove that step.
+
+`install.sh` can be tried without touching `/Applications` or downloading anything:
+
+```bash
+STUDIO_ZIP=dist/Studio-mac-arm64.zip STUDIO_APPS_DIR=/tmp/apps STUDIO_NO_OPEN=1 bash install.sh
+```
+
+It only quits a running Studio when that is the copy it replaces.
+
+## Screenshots
+
+`npm run screenshots` (after `npm run build`) starts the built app with `STUDIO_PROFILE_DIR` pointing at a new
+temporary folder, creates an empty library there, adds a little neutral structure (a sequence and a storyboard with
+short notes, no media), opens Generera, the `/` menu, Sekvenser, Storyboards and Redigera at 1440 × 900 (2× pixels)
+over the DevTools protocol and saves `docs/images/*.png`. It never reads your own settings or library, generates
+nothing and uses no API key; the temporary folder is removed afterwards. Run it again when the UI changes.
 
 ## Database migrations
 
