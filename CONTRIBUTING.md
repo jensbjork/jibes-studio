@@ -125,6 +125,9 @@ what breaks and how to migrate. A `!` after the type or scope marks a breaking c
 changes include anything that renames or removes an MCP tool or argument, changes the library layout, or needs
 users to act after updating.
 
+An AI-assisted change carries an `Assisted-by:` trailer, never `Co-authored-by:` (see
+[AI-assisted contributions](#ai-assisted-contributions)).
+
 ### Examples
 
 ```
@@ -150,6 +153,28 @@ To check your commits locally before pushing:
 npm install --global @commitlint/cli@19 @commitlint/config-conventional@19
 commitlint --from origin/main --to HEAD --verbose
 ```
+
+## AI-assisted contributions
+
+Using AI coding tools is welcome; Studio itself is largely written with them. What matters is that a person stands
+behind every change:
+
+- **You are the author and you are responsible.** Read, understand and test everything you submit, as if you had
+  written it by hand. Check that nothing in it is copied from code under an incompatible licence.
+- **Say that you used AI**, with an `Assisted-by:` trailer in the commit message that names the tool and model,
+  for example:
+
+  ```text
+  feat(editor): add a table view of edits
+
+  Assisted-by: Claude Code (Claude Opus 5.5)
+  ```
+
+  Mention it in the pull request description as well. Leave out ordinary tools (editors, compilers, linters).
+- **Never list an AI as an author.** No `Co-authored-by:` or `Signed-off-by:` for a tool: an AI can't take
+  responsibility for a change or agree to the licence, and GitHub would show it as a contributor.
+
+This follows the practice of projects such as the Linux kernel, Fedora and OpenSSL.
 
 ## Pull requests
 
@@ -177,6 +202,8 @@ request focused. Before asking for review, check that:
       `src/main/agent/` (and a row in [docs/AGENTS.md](docs/AGENTS.md)).
 - [ ] **The agent connection stays local**: changes to the MCP server keep it bound to `127.0.0.1` and the
       Tailscale interface, behind the bearer token, off by default.
+- [ ] **AI help is disclosed**: commits made with an AI tool carry an `Assisted-by:` trailer (never
+      `Co-authored-by:` for a tool), and the description says so.
 
 ## Code style
 
