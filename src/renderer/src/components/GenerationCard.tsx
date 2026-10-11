@@ -114,15 +114,30 @@ function GenerationCard({
     hovered.current = true
     if (playable) setLive(true)
   }
-  const leave = () => {
-    hovered.current = false
-    // A clip that is playing keeps playing; a paused one goes back to its poster.
+  /** Back to the poster once the pointer is gone and the clip is paused – never while it is shown full screen. */
+  const settle = () => {
     const video = videoRef.current
+    if (hovered.current || (video && document.fullscreenElement === video)) return
     if (!video || video.paused) {
       setLive(false)
       setAutoPlay(false)
     }
   }
+  const leave = () => {
+    hovered.current = false
+    // Going full screen moves the player out from under the pointer, and its mouseleave comes before (or as) the
+    // player becomes the full-screen element: look again a moment later, so it isn't unmounted on its way there.
+    setTimeout(settle, 250)
+  }
+  // Leaving full screen with the pointer elsewhere: a paused clip goes back to its poster then.
+  useEffect(() => {
+    if (!live) return
+    const onChange = () => {
+      if (!document.fullscreenElement) settle()
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [live])
   const play = () => {
     setAutoPlay(true)
     setLive(true)
@@ -172,13 +187,8 @@ function GenerationCard({
               autoPlay={autoPlay}
               preload="metadata"
               onPlay={(e) => pauseOthers(e.currentTarget)}
-              // Paused after the pointer left (e.g. with the keyboard): back to the poster.
-              onPause={() => {
-                if (!hovered.current) {
-                  setLive(false)
-                  setAutoPlay(false)
-                }
-              }}
+              // Paused after the pointer left (e.g. with the keyboard): back to the poster, unless it is full screen.
+              onPause={settle}
               className="h-full w-full object-contain"
             />
           ) : (
