@@ -677,11 +677,13 @@ export function listAssets(kind?: unknown): Asset[] {
 }
 
 /**
- * The assets with a description (not blank) that one of the params' reference images or audio clips belongs to,
- * as the prompt composer reads them (composePrompt in src/shared/prompt-compose.ts), with all their photo and clip
- * paths (absolute). Read from the database at the moment of the call: a submission appends the descriptions as
- * they are when it is sent, so one edited in the library a moment ago already counts. Files are matched as the
- * library compares paths (pathKey). Which of the references are actually sent is composePrompt's decision.
+ * The assets with a description (not blank) – and the characters and outfits, whose legend line says who wears what
+ * (shared/outfits.ts) with or without one – that one of the params' reference images or audio clips belongs to, as
+ * the prompt composer reads them (composePrompt in src/shared/prompt-compose.ts), with all their photo and clip
+ * paths (absolute) and a character's default outfit. Read from the database at the moment of the call: a submission
+ * appends the descriptions as they are when it is sent, so one edited in the library a moment ago already counts.
+ * Files are matched as the library compares paths (pathKey). Which of the references are actually sent is
+ * composePrompt's decision.
  */
 export function describedAssetsFor(
   params: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'>
@@ -695,27 +697,37 @@ export function describedAssetsFor(
   }
   if (!wanted.size) return []
   const db = getDb()
-  // Descriptions are saved trimmed; the check in SQL only spares reading the files of assets without one.
-  const described = `SELECT id FROM assets WHERE trim(description) != ''`
-  const rows = (db.prepare(`SELECT * FROM assets WHERE id IN (${described})`).all() as AssetRow[]).filter((r) =>
+  // Descriptions are saved trimmed; the check in SQL only spares reading the files of assets the legend can't name.
+  const legendIds = `SELECT id FROM assets WHERE trim(description) != '' OR kind IN ('character', 'outfit')`
+  const rows = (db.prepare(`SELECT * FROM assets WHERE id IN (${legendIds})`).all() as AssetRow[]).filter((r) =>
     isAssetKind(r.kind)
   )
   if (!rows.length) return []
   const images = groupImages(
     db
-      .prepare(`SELECT * FROM asset_images WHERE asset_id IN (${described}) ORDER BY asset_id, position, created_at`)
+      .prepare(`SELECT * FROM asset_images WHERE asset_id IN (${legendIds}) ORDER BY asset_id, position, created_at`)
       .all() as AssetImageRow[]
   )
   const audio = groupAudio(
     db
-      .prepare(`SELECT * FROM asset_audio WHERE asset_id IN (${described}) ORDER BY asset_id, position, created_at`)
+      .prepare(`SELECT * FROM asset_audio WHERE asset_id IN (${legendIds}) ORDER BY asset_id, position, created_at`)
       .all() as AssetAudioRow[]
   )
   return rows.flatMap((r) => {
     const imagePaths = (images.get(r.id) ?? []).map((img) => img.path)
     const audioPaths = (audio.get(r.id) ?? []).map((clip) => clip.path)
     if (![...imagePaths, ...audioPaths].some((p) => wanted.has(pathKey(p)))) return []
-    return [{ id: r.id, kind: r.kind, name: r.name, description: r.description, imagePaths, audioPaths }]
+    return [
+      {
+        id: r.id,
+        kind: r.kind,
+        name: r.name,
+        description: r.description,
+        imagePaths,
+        audioPaths,
+        ...(r.kind === 'character' && r.default_outfit_id ? { defaultOutfitId: r.default_outfit_id } : {})
+      }
+    ]
   })
 }
 

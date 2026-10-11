@@ -8,7 +8,8 @@ import {
   findImageTokens,
   findMalformedTokens,
   type PromptIssue,
-  type ReferenceKind
+  type ReferenceKind,
+  type ValidateOptions
 } from '@shared/prompt-refs'
 import type { Asset, PromptLanguage } from '@shared/types'
 import { audioInsertText, possessive, type FormAudio } from '../pickers/audioRefs'
@@ -84,6 +85,11 @@ interface Options {
   library?: readonly Asset[]
   /** List the pictures and clips the text never mentions (the main prompt; not the negative one). */
   adviseUnused: boolean
+  /**
+   * The @ImageN / @AudioN numbers the References legend explains (ValidateOptions.explained): left out of that list,
+   * since the model is told what they are.
+   */
+  explained?: ValidateOptions['explained']
 }
 
 const MAX_INSERT_FIXES = 3
@@ -253,9 +259,19 @@ export function issueViews(o: Options): IssueView[] {
   views.sort((a, b) => (a.ranges[0]?.start ?? -1) - (b.ranges[0]?.start ?? -1))
 
   // Pictures and clips that are sent but never mentioned still steer the result, without the model knowing what
-  // they are for. Listed per asset, so a whole character (with its voice) reads as one item.
-  if (o.adviseUnused && o.kind === 'reference-to-video' && prompt.trim() && (sentUnused.length || audioUnused.length)) {
-    views.push(unusedView(sentUnused, audioUnused, o))
+  // they are for – unless the References legend says it. Listed per asset, so a whole character (with its voice)
+  // reads as one item.
+  const explainedImages = new Set(o.explained?.images ?? [])
+  const explainedAudios = new Set(o.explained?.audios ?? [])
+  const unexplained = sentUnused.filter((r) => !explainedImages.has(r.index))
+  const audioUnexplained = audioUnused.filter((a) => !explainedAudios.has(a.index))
+  if (
+    o.adviseUnused &&
+    o.kind === 'reference-to-video' &&
+    prompt.trim() &&
+    (unexplained.length || audioUnexplained.length)
+  ) {
+    views.push(unusedView(unexplained, audioUnexplained, o))
   }
 
   // Other advice from the shared rules: "@Anna" that is plain text rather than a reference, pictures or clips

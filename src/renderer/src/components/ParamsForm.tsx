@@ -24,6 +24,7 @@ import {
   supportsEndImage,
   type Kind
 } from '@shared/models'
+import { outfitWearersAmong, withOutfitWearer } from '@shared/outfits'
 import { blockingContinuationError, blockingPromptError, validationContext } from '@shared/prompt-refs'
 import {
   ASSET_KINDS,
@@ -77,7 +78,7 @@ import { moveItem } from './pickers/reorder'
 import SavePromptDialog from './pickers/SavePromptDialog'
 import { formatClipSeconds } from './pickers/text'
 import DescriptionsBox from './prompt/DescriptionsBox'
-import { assetIdsInForm, withAssetDescription, withDescriptionsIncluded } from './prompt/descriptions'
+import { assetIdsInForm, descriptionsView, withAssetDescription, withDescriptionsIncluded } from './prompt/descriptions'
 import NegativePromptIssues, { negativePromptIssues } from './prompt/NegativePromptIssues'
 import PromptField from './prompt/PromptField'
 import PromptEditor, { type PromptEditorHandle } from './prompt/PromptEditor'
@@ -227,6 +228,13 @@ export function modelForKind(models: VideoModel[], currentModel: string, kind: K
   return preferred ?? [...list].sort((a, b) => a.name.localeCompare(b.name))[0]?.id
 }
 
+/** The params with these "bärs av" choices (left out when there are none, as the params store them). */
+function withOutfitWearers(params: GenerationParams, wearers: GenerationParams['outfitWearers']): GenerationParams {
+  if (params.outfitWearers === wearers) return params
+  const { outfitWearers: _, ...rest } = params
+  return wearers ? { ...rest, outfitWearers: wearers } : rest
+}
+
 /** Model, image inputs, prompt and output settings. Shared by the generate view and the segment editor. */
 export default function ParamsForm({
   models,
@@ -337,31 +345,15 @@ export default function ParamsForm({
     return () => clearTimeout(t)
   }, [refNote])
 
-  // Which @ImageN tokens belong to which asset, and who wears which outfit. "bärs av" choices are form
-  // state only: they shape the text a character chip inserts, nothing is stored.
+  // Which @ImageN tokens belong to which asset, and who wears which outfit ("bärs av"). The choices are params
+  // (outfitWearers), so they travel with a sequence clip, "Använd igen" and an agent's form, and the References
+  // legend says who wears what by the same rule (shared/outfits.ts); they also shape the text a character chip inserts.
   const assetRefs = assetRefsOf(refs, byPath, maxRefs)
-  const [wornBy, setWornBy] = useState<Record<string, string | null>>({})
-  const pairings = resolvePairings(assetRefs, wornBy)
+  const pairings = resolvePairings(assetRefs, params.outfitWearers)
 
-  // Forget the choice for an outfit that left the form, so adding it again starts from its default wearer.
-  const outfitsInForm = [
-    ...new Set(
-      refs.flatMap((p) => {
-        const a = byPath.get(p)
-        return a?.kind === 'outfit' ? [a.id] : []
-      })
-    )
-  ]
-    .sort()
-    .join()
-  useEffect(() => {
-    const present = new Set(outfitsInForm.split(','))
-    setWornBy((chosen) => {
-      const ids = Object.keys(chosen)
-      const keep = ids.filter((id) => present.has(id))
-      return keep.length === ids.length ? chosen : Object.fromEntries(keep.map((id) => [id, chosen[id]]))
-    })
-  }, [outfitsInForm])
+  /** Who wears an outfit: a character id, or null for nobody. Built on the latest params, like every setter here. */
+  const wear = (outfitId: string, characterId: string | null) =>
+    setParams((p) => withOutfitWearers(p, withOutfitWearer(p.outfitWearers, outfitId, characterId)))
 
   // ── Reference audio (voices, sounds; @AudioN) ────────────────────────────────
 
@@ -390,6 +382,9 @@ export default function ParamsForm({
     const nextRefs = next.refs ?? refs
     const nextAudios = next.audios ?? audioRefs
     if (sameList(nextRefs, refs) && sameAudios(nextAudios, audioRefs)) return
+    // "bärs av" choices for outfits (or characters) no longer among the pictures are forgotten, so an outfit added
+    // again starts from its default wearer.
+    const present = new Set(nextRefs.flatMap((path) => byPath.get(path)?.id ?? []))
     const images = { before: refs, after: nextRefs }
     const sounds = { before: audioRefs, after: nextAudios }
     const before = params.prompt
@@ -400,7 +395,7 @@ export default function ParamsForm({
     const negativeBefore = params.negativePrompt
     const negative = negativeBefore && remapPromptReferences(negativeBefore, images, sounds)
     setParams((p) => ({
-      ...p,
+      ...withOutfitWearers(p, outfitWearersAmong(p.outfitWearers, present)),
       referenceImages: nextRefs,
       referenceAudios: nextAudios.length ? nextAudios : undefined,
       ...(p.prompt === before ? { prompt } : {}),
@@ -462,8 +457,8 @@ export default function ParamsForm({
     setRefNote(undefined)
   }
 
-  // Which characters each pose applies to ("gäller"): form state only, like "bärs av"; it shapes the text a
-  // pose chip inserts. undefined: every character in the form, also ones added later.
+  // Which characters each pose applies to ("gäller"): form state only; it shapes the text a pose chip inserts.
+  // undefined: every character in the form, also ones added later.
   const [posePeople, setPosePeople] = useState<Record<string, string[] | undefined>>({})
   const posesInForm = [
     ...new Set(
@@ -484,8 +479,8 @@ export default function ParamsForm({
     })
   }, [posesInForm])
 
-  // Which character holds each product ("hålls av"): form state only, like "bärs av" and "gäller"; it shapes the
-  // text a product chip inserts. Missing or null: nobody holds it (the default).
+  // Which character holds each product ("hålls av"): form state only, like "gäller"; it shapes the text a product
+  // chip inserts. Missing or null: nobody holds it (the default).
   const [productHolders, setProductHolders] = useState<Record<string, string | null>>({})
   const productsInForm = [
     ...new Set(
@@ -508,13 +503,21 @@ export default function ParamsForm({
   }, [productsInForm])
   const naming: NamingChoices = { posePeople, productHolders }
 
+  /** "Byt kläder": the new outfit takes the old one's place and is worn by the character (the choice goes with it). */
   const swapOutfitOf = (character: Asset, outfit: Asset | null) => {
     const wearing = outfitsWornBy(character.id, assetRefs, pairings).map((r) => r.asset)
     applyRefs(swapOutfit(refs, wearing, outfit, maxRefs), {
       from: wearing.filter((o) => o.id !== outfit?.id),
       to: outfit
     })
-    if (outfit) setWornBy((chosen) => ({ ...chosen, [outfit.id]: character.id }))
+    if (!outfit) return
+    const photos = new Set(outfit.images.map((img) => img.path))
+    // After the swap's own update; only when some of the outfit's photos fitted.
+    setParams((p) =>
+      (p.referenceImages ?? []).some((path) => photos.has(path))
+        ? withOutfitWearers(p, withOutfitWearer(p.outfitWearers, outfit.id, character.id))
+        : p
+    )
   }
 
   // ── References as the prompt sees them (@ImageN) ────────────────────────────
@@ -539,7 +542,7 @@ export default function ParamsForm({
     const audiosAfter = formAudios(change.referenceAudios ?? [], audioSources, maxAudios, audioSupported).filter(
       (a) => a.sent
     )
-    return entry && referenceGroupOf(entry, after, resolvePairings(after, wornBy), audiosAfter, naming)
+    return entry && referenceGroupOf(entry, after, resolvePairings(after, params.outfitWearers), audiosAfter, naming)
   }
 
   const manageKind = navigate
@@ -561,6 +564,12 @@ export default function ParamsForm({
   // Both flags are params, so they travel with the form, a sequence clip's saved params and "Använd igen", and
   // main composes the legend from them at submit. Built on the latest params, like every other setter here.
 
+  // What the box shows, and which references the legend that is sent explains (for the prompt checks below).
+  const promptLimit = model?.promptCharacterLimit
+  const descriptions = useMemo(
+    () => descriptionsView(params, assets, language, promptLimit),
+    [params, assets, language, promptLimit]
+  )
   const includeDescriptions = (on: boolean) => setParams((p) => withDescriptionsIncluded(p, on))
   const toggleDescription = (assetId: string, on: boolean) =>
     setParams((p) => withAssetDescription(p, assetId, on, assetIdsInForm(p, assets)))
@@ -684,8 +693,9 @@ export default function ParamsForm({
   }, [!!params.negativePrompt])
   const negativeRef = useRef<HTMLTextAreaElement>(null)
   const negativeIssuesId = useId()
-  // What both prompts are checked against: exactly what the main process checks before sending.
-  const checks = validationContext(params, { continuing, continuationFrame: framed })
+  // What both prompts are checked against: exactly what the main process checks before sending – a reference the
+  // References legend explains (its description, or who wears an outfit) isn't reported as unmentioned.
+  const checks = validationContext(params, { continuing, continuationFrame: framed, explained: descriptions.explained })
   // @ImageN and @AudioN mistakes in the negative prompt block generating as well.
   const negativeHasError = negativePromptIssues(params.negativePrompt ?? '', checks).some((i) => i.severity === 'error')
   const switchToReference = kinds.includes('reference-to-video') ? () => switchKind('reference-to-video') : undefined
@@ -867,7 +877,7 @@ export default function ParamsForm({
             }
             onInsert={insertIntoPrompt}
             onRemove={removeAssetRefs}
-            onWear={(outfitId, characterId) => setWornBy((chosen) => ({ ...chosen, [outfitId]: characterId }))}
+            onWear={wear}
             onSwapOutfit={swapOutfitOf}
             onManageOutfits={manageKind && (() => manageKind('outfit'))}
           />
@@ -1051,10 +1061,7 @@ export default function ParamsForm({
           }
         />
         <DescriptionsBox
-          params={params}
-          assets={assets}
-          language={language}
-          limit={model?.promptCharacterLimit}
+          view={descriptions}
           onInclude={includeDescriptions}
           onToggle={toggleDescription}
           onOpenAsset={openAsset}

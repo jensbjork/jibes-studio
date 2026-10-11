@@ -246,3 +246,23 @@ export const excludedDescriptionsInput = z
   .describe(
     "Asset ids whose descriptions are NOT appended (the others still are). Replaces the list; [] appends all of them again."
   )
+
+/** Who wears which outfit ("bärs av"), as set_form, add_segment and update_segment take it. */
+export const outfitWearersInput = z
+  .array(
+    z
+      .object({
+        outfit_asset_id: z.string().describe('An outfit among the references.'),
+        character_asset_id: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("The character among the references who wears it; null: nobody; left out: Studio's default again.")
+      })
+      .strict()
+  )
+  .max(20)
+  .optional()
+  .describe(
+    "Who wears each outfit among the references. The References legend says it after the prompt (\"Red dress (@Image3), worn by Anna (@Image1)\") – you needn't write it. By default an outfit is worn by the character whose default outfit it is, else by the only character among the references. Only the outfits you list change."
+  )

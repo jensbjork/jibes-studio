@@ -14,12 +14,15 @@ import {
   supportsEndImage,
   type Kind
 } from '@shared/models'
+import { outfitWearersAmong, withOutfitWearer } from '@shared/outfits'
 import {
   composePrompt,
   describedAssets,
+  explainedReferences,
   includesDescriptions,
   promptLimitOf,
-  rememberPromptLimits
+  rememberPromptLimits,
+  type ComposedPrompt
 } from '@shared/prompt-compose'
 import {
   blockingContinuationError,
@@ -749,11 +752,14 @@ export function asGenerated(params: GenerationParams, continuing: boolean, endFr
   }
 }
 
-type CheckedParams = Pick<GenerationParams, 'model' | 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios'>
-
-/** Every @ImageN / @AudioN problem of both prompts, the main prompt's first. */
-export function promptIssues(params: CheckedParams): PromptIssue[] {
-  const { prompt, negativePrompt } = validateGenerationParams(params)
+/**
+ * Every @ImageN / @AudioN problem of both prompts, the main prompt's first, as the window shows them: a reference the
+ * References legend explains – `composed`, by default the prompt these params send (composeSubmission) – isn't
+ * reported as unmentioned.
+ */
+export function promptIssues(params: GenerationParams, composed?: ComposedPrompt): PromptIssue[] {
+  const sent = composed ?? (isLibraryReady() ? composeSubmission(params) : undefined)
+  const { prompt, negativePrompt } = validateGenerationParams(params, sent ? { explained: explainedReferences(sent) } : {})
   return [...prompt, ...negativePrompt]
 }
 
@@ -854,6 +860,8 @@ export interface DescriptionEntryInfo {
   sent: boolean
   /** Shortened (ending in "…") to fit the model's prompt_character_limit. */
   shortened?: boolean
+  /** An outfit: the character wearing it, as the legend names it ("worn by Anna (@Image1)"). */
+  worn_by?: { asset_id: string; name: string; tokens: string[] }
 }
 
 /**
@@ -875,6 +883,7 @@ export function descriptionInfo(params: GenerationParams, index: AssetIndex): Re
   const limit = promptLimitOf(params.model)
   const entries: DescriptionEntryInfo[] = all.entries.map((e) => {
     const used = appended.get(e.assetId)
+    const wearer = (used ?? e).wornBy
     return {
       asset_id: e.assetId,
       asset_name: e.name,
@@ -884,7 +893,8 @@ export function descriptionInfo(params: GenerationParams, index: AssetIndex): Re
       included: !!used,
       // composePrompt lists every entry also when it appends none (an empty prompt, a legend that doesn't fit).
       sent: !!used && !!sent.legend,
-      ...(used?.shortened ? { shortened: true } : {})
+      ...(used?.shortened ? { shortened: true } : {}),
+      ...(wearer ? { worn_by: { asset_id: wearer.assetId, name: wearer.name, tokens: wearer.tokens } } : {})
     }
   })
   const note = sent.dropped
@@ -903,6 +913,58 @@ export function descriptionInfo(params: GenerationParams, index: AssetIndex): Re
     ...(limit ? { prompt_character_limit: limit } : {}),
     ...(note ? { descriptions_note: note } : {})
   }
+}
+
+/** An agent's "bärs av" choice (set_form, add_segment, update_segment; kit.ts outfitWearersInput). */
+export interface OutfitWearerInput {
+  outfit_asset_id: string
+  /** null: nobody; left out: the default again. */
+  character_asset_id?: string | null
+}
+
+/**
+ * GenerationParams.outfitWearers with an agent's choices applied (`choices` undefined: none), kept to the outfits and
+ * characters among `references` (the picture paths of the form or clip, also those past the model's limit;
+ * outfitWearersAmong). Each outfit must be an outfit and each character a character, both with a photo among the
+ * references; otherwise refused (Swedish), naming every problem.
+ */
+export function applyOutfitWearers(
+  current: GenerationParams['outfitWearers'],
+  choices: readonly OutfitWearerInput[] | undefined,
+  references: readonly string[],
+  index: AssetIndex
+): GenerationParams['outfitWearers'] {
+  const present = new Set(references.flatMap((path) => index.photo(path)?.asset.id ?? []))
+  let wearers = current
+  const problems: string[] = []
+  const seen = new Set<string>()
+  /** The asset an id names, checked to be of `kind` and among the references; undefined (and a problem) if not. */
+  const among = (id: string, kind: 'outfit' | 'character', what: string): Asset | undefined => {
+    const asset = index.get(id.trim())
+    if (!asset) problems.push(`Det finns ingen tillgång med id ${id} (${what}).`)
+    else if (asset.kind !== kind) {
+      problems.push(`${q(asset.name)} är ingen ${kind === 'outfit' ? 'klädsel' : 'karaktär'} (${what}).`)
+    } else if (!present.has(asset.id)) {
+      problems.push(`${q(asset.name)} finns inte bland referensbilderna – lägg till den först (${what}).`)
+    } else return asset
+    return undefined
+  }
+  for (const choice of choices ?? []) {
+    const outfit = among(choice.outfit_asset_id, 'outfit', 'outfit_asset_id')
+    const character =
+      typeof choice.character_asset_id === 'string'
+        ? among(choice.character_asset_id, 'character', 'character_asset_id')
+        : undefined
+    if (!outfit || (typeof choice.character_asset_id === 'string' && !character)) continue
+    if (seen.has(outfit.id)) {
+      problems.push(`${q(outfit.name)} står mer än en gång i outfit_wearers.`)
+      continue
+    }
+    seen.add(outfit.id)
+    wearers = withOutfitWearer(wearers, outfit.id, character ? character.id : choice.character_asset_id)
+  }
+  if (problems.length) throw new Error(`Vem som bär kläderna kunde inte sättas: ${problems.join(' ')}`)
+  return outfitWearersAmong(wearers, present)
 }
 
 /** "@Image1 Anna (character) photo 1" – one line per reference, for compact listings. */

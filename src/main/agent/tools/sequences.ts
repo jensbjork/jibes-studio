@@ -25,6 +25,7 @@ import {
   supportsEndImage
 } from '@shared/models'
 import { generationTitle } from '@shared/generation-label'
+import { explainedReferences } from '@shared/prompt-compose'
 import {
   audioToken,
   findAudioTokens,
@@ -59,6 +60,7 @@ import { isStoryboardId, sequenceKind, storyboardNotSequence } from '../storyboa
 import {
   AssetIndex,
   StillIndex,
+  applyOutfitWearers,
   audioTarget,
   audioTokenMap,
   blockingProblem,
@@ -87,6 +89,7 @@ import {
   tokenMap,
   usableModels,
   type AudioInfo,
+  type OutfitWearerInput,
   type ReferenceItem
 } from '../studio'
 import {
@@ -95,6 +98,7 @@ import {
   defineTool,
   excludedDescriptionsInput,
   includeDescriptionsInput,
+  outfitWearersInput,
   referenceItem,
   type LabeledImage,
   type ToolContext,
@@ -209,15 +213,19 @@ export function sendProblem(
   return problem?.startsWith('Klippet fortsätter') ? (continuationProblem(generated, plan) ?? problem) : problem
 }
 
-/** The prompt issues of the clip as it would be sent (with the carried references and the frame in reference mode). */
+/**
+ * The prompt issues of the clip as it would be sent (with the carried references and the frame in reference mode). A
+ * reference the References legend of its take's prompt explains (composeTakePrompt) isn't reported as unmentioned.
+ */
 function sendIssues(generated: GenerationParams, plan: ContinuationPlan | undefined): PromptIssue[] {
+  const explained = explainedReferences(composeTakePrompt(generated, plan))
   const { prompt, negativePrompt } =
     plan?.mode === 'references'
       ? validateGenerationParams(
           { ...generated, referenceImages: plan.carried?.images ?? [] },
-          { continuationFrame: true }
+          { continuationFrame: true, explained }
         )
-      : validateGenerationParams(generated)
+      : validateGenerationParams(generated, { explained })
   return [...prompt, ...negativePrompt]
 }
 
@@ -562,6 +570,7 @@ interface ClipInput {
   audio?: boolean
   include_descriptions?: boolean
   excluded_description_asset_ids?: string[]
+  outfit_wearers?: OutfitWearerInput[]
 }
 
 interface ClipParams {
@@ -783,8 +792,23 @@ async function clipParams(
   const clips: ChainClip[] = [...place.sequence.segments]
   clips.splice(place.index, place.insert ? 0 : 1, clip)
   const plan = continuationPlan(clips, place.index)
-  const problem = sendProblem(sendParams(clips, place.index), continuing, ending, plan)
+  const sent = sendParams(clips, place.index)
+  const problem = sendProblem(sent, continuing, ending, plan)
   if (problem) throw new Error(`Klipp ${clipNumber}: ${problem}${plan?.note && plan.applies ? ` (${plan.note})` : ''}`)
+  // Who wears which outfit: the agent's choices, checked against the pictures the clip has or carries, and the
+  // stored ones kept to those (a choice for an outfit that left is forgotten, as in Studio's form).
+  try {
+    const wearers = applyOutfitWearers(
+      params.outfitWearers,
+      input.outfit_wearers,
+      [...(params.referenceImages ?? []), ...(sent.referenceImages ?? [])],
+      assets
+    )
+    if (wearers) params.outfitWearers = wearers
+    else delete params.outfitWearers
+  } catch (err) {
+    throw new Error(`Klipp ${clipNumber}: ${errorText(err)}`)
+  }
   if (plan?.mode === 'references') {
     const dropped = droppedImagesNote(plan)
     if (dropped) notes.push(dropped)
@@ -966,6 +990,7 @@ const clipFields = {
   audio: z.boolean().optional(),
   include_descriptions: includeDescriptionsInput,
   excluded_description_asset_ids: excludedDescriptionsInput,
+  outfit_wearers: outfitWearersInput,
   notes: z
     .string()
     .max(4000)
@@ -1133,7 +1158,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Add clip to sequence',
       description:
-        "Adds a clip (a shot) to a sequence, at the end or after after_segment_id, with its notes (\"Vad händer\") and prompt – or, with from_generation_id, a clip whose selected take is a finished video that already exists (the user's own film, a version from Redigera). Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false (pass it true together with references to give a continuing clip references of its own). A continuing clip starts from the previous clip's last frame. By default (continue_mode \"references\") it is sent reference-to-video with the references it carries – its own, or else those of the clip it continues from (up the chain) – plus that frame as the last reference image, which Studio's instruction in front of the prompt says to start on: use the carried @Image / @Audio tokens (get_sequence: carried_references) and describe what happens next. With continue_mode \"exact\" it is image-to-video from the frame and takes no references or tokens. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The descriptions of its referenced assets are appended to its prompt when it is generated (include_descriptions / excluded_description_asset_ids choose which; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
+        "Adds a clip (a shot) to a sequence, at the end or after after_segment_id, with its notes (\"Vad händer\") and prompt – or, with from_generation_id, a clip whose selected take is a finished video that already exists (the user's own film, a version from Redigera). Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false (pass it true together with references to give a continuing clip references of its own). A continuing clip starts from the previous clip's last frame. By default (continue_mode \"references\") it is sent reference-to-video with the references it carries – its own, or else those of the clip it continues from (up the chain) – plus that frame as the last reference image, which Studio's instruction in front of the prompt says to start on: use the carried @Image / @Audio tokens (get_sequence: carried_references) and describe what happens next. With continue_mode \"exact\" it is image-to-video from the frame and takes no references or tokens. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The descriptions of its referenced assets are appended to its prompt when it is generated, with who wears each outfit (include_descriptions / excluded_description_asset_ids choose which, outfit_wearers who wears what; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
       input: {
         sequence_id: z.string(),
         after_segment_id: z.string().optional().describe('Insert after this clip; at the end when left out.'),
@@ -1215,7 +1240,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update clip',
       description:
-        "Changes a clip: only the fields you pass change. notes is the clip's \"Vad händer\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt; reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
+        "Changes a clip: only the fields you pass change. notes is the clip's \"Vad händer\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt, outfit_wearers who wears each outfit (the legend says it); reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
       input: {
         segment_id: z.string(),
         ...clipFields,

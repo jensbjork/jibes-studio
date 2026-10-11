@@ -115,6 +115,12 @@ export interface ValidateOptions {
    * They are references too, so a prompt with videos but no images is not missing its references. Default 0.
    */
   referenceVideos?: number
+  /**
+   * The @ImageN / @AudioN numbers the References legend explains (prompt-compose.ts explainedReferences: an asset whose
+   * description – or, for an outfit, who wears it – Studio appends when "Ta med beskrivningar" is on for it). Those are
+   * not reported as unmentioned: the legend tells the model what they are.
+   */
+  explained?: { images?: readonly number[]; audios?: readonly number[] }
 }
 
 // ── Scanning ──────────────────────────────────────────────────────────────────
@@ -839,8 +845,9 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
     if (field === 'prompt' && count > 0) {
       const sent = Math.min(count, room)
       const mentioned = new Set([...tokens.map((t) => t.index), ...malformed.flatMap((m) => m.meant)])
+      const explained = new Set(opts.explained?.images ?? [])
       const unused: number[] = []
-      for (let n = 1; n <= sent; n++) if (!mentioned.has(n)) unused.push(n)
+      for (let n = 1; n <= sent; n++) if (!mentioned.has(n) && !explained.has(n)) unused.push(n)
       if (unused.length && text.trim()) {
         advice.push({
           severity: 'warning',
@@ -998,8 +1005,9 @@ function validateAudio(
   }
 
   const mentioned = new Set([...tokens.map((t) => t.index), ...malformed.flatMap((m) => m.meant)])
+  const explained = new Set(opts.explained?.audios ?? [])
   const unused: number[] = []
-  for (let n = 1; n <= sent; n++) if (!mentioned.has(n)) unused.push(n)
+  for (let n = 1; n <= sent; n++) if (!mentioned.has(n) && !explained.has(n)) unused.push(n)
   if (unused.length && text.trim()) {
     out.advice.push({
       severity: 'warning',
@@ -1065,7 +1073,7 @@ type PromptParams = Pick<
  */
 export function validationContext(
   params: PromptParams,
-  extra: { continuing?: boolean; continuationFrame?: boolean } = {}
+  extra: { continuing?: boolean; continuationFrame?: boolean; explained?: ValidateOptions['explained'] } = {}
 ): { referenceCount: number; options: ValidateOptions } {
   const kind = kindOfModelId(params.model)
   const referenceCount = kind === 'reference-to-video' ? (params.referenceImages?.length ?? 0) : 0
@@ -1081,7 +1089,8 @@ export function validationContext(
       ...(extra.continuationFrame && kind === 'reference-to-video' ? { continuationFrame: true } : {}),
       audioLengths: audios.map((a) => (a.length === undefined ? undefined : referenceAudioWindow(a).length)),
       audioInput: supportsAudioInput(params.model),
-      maxAudios: maxReferenceAudios(params.model)
+      maxAudios: maxReferenceAudios(params.model),
+      ...(extra.explained ? { explained: extra.explained } : {})
     }
   }
 }
@@ -1089,11 +1098,12 @@ export function validationContext(
 /**
  * Both prompts of a generation checked as it would be sent (see validationContext). `continuationFrame`: a sequence
  * clip continuing in reference mode, whose params hold the references it carries (the previous clip's last frame is
- * sent after them; see ValidateOptions.continuationFrame).
+ * sent after them; see ValidateOptions.continuationFrame). `explained`: the numbers the References legend explains
+ * (ValidateOptions.explained), not reported as unmentioned.
  */
 export function validateGenerationParams(
   params: PromptParams,
-  extra: { continuationFrame?: boolean } = {}
+  extra: { continuationFrame?: boolean; explained?: ValidateOptions['explained'] } = {}
 ): {
   prompt: PromptIssue[]
   negativePrompt: PromptIssue[]

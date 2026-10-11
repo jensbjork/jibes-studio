@@ -1,5 +1,6 @@
 import { useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { DEFAULT_PARAMS, sanitizeReferenceAudios } from '@shared/models'
+import { sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import type { Asset, AssetAudio, GenerationParams } from '@shared/types'
 import { clipsById, followLibraryAudio } from '../components/pickers/audioRefs'
@@ -22,9 +23,11 @@ function loadRemembered(): GenerationParams {
     const audios = sanitizeReferenceAudios(params.referenceAudios)
     if (audios) params.referenceAudios = audios
     else delete params.referenceAudios
-    // The description switches as the form writes them (defaults left out), never malformed ones from storage.
-    const { includeDescriptions: _include, excludedDescriptionAssetIds: _excluded, ...rest } = params
-    return { ...rest, ...sanitizeDescriptionFlags(params) }
+    // The description switches and "bärs av" choices as the form writes them (defaults left out), never malformed
+    // ones from storage.
+    const { includeDescriptions: _include, excludedDescriptionAssetIds: _excluded, outfitWearers, ...rest } = params
+    const wearers = sanitizeOutfitWearers(outfitWearers)
+    return { ...rest, ...sanitizeDescriptionFlags(params), ...(wearers ? { outfitWearers: wearers } : {}) }
   } catch {
     return { ...DEFAULT_PARAMS }
   }

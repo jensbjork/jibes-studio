@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { agentDisplayName } from '@shared/agent-name'
 import { KINDS, kindOfModelId, paramsForSubmit } from '@shared/models'
-import { composeOptionsFor, composePrompt, describedAssets, type ComposedPrompt } from '@shared/prompt-compose'
-import { canonicalizeParams } from '@shared/prompt-refs'
+import {
+  composeOptionsFor,
+  composePrompt,
+  describedAssets,
+  explainedReferences,
+  type ComposedPrompt
+} from '@shared/prompt-compose'
+import { canonicalizeParams, type ValidateOptions } from '@shared/prompt-refs'
 import type {
   ApprovalImageRequest,
   ApprovalRequest,
@@ -690,6 +696,8 @@ interface Clip {
   title?: string
   /** What will be sent (inputs the mode doesn't use are dropped). */
   params: GenerationParams
+  /** The params as checked (before inputs were dropped), for the warnings once the legend is known. */
+  checked: GenerationParams
   /** The start frame comes from the previous clip's end, so there is no start image yet. */
   continuesFrom?: number
   /** The end frame comes from this (next) clip's first frame ("Slutbild från nästa klipp"). */
@@ -749,9 +757,11 @@ const shownLegend = (legend: string | undefined): string | undefined => legend?.
 function withDescriptions(clips: Clip[], a: ApprovalRequest, composer: Composer | undefined): Clip[] {
   const captured = (a.kind === 'generation' || a.kind === 'segment') && !!a.params
   const legends = a.kind === 'generate-all' ? a.clipLegends : undefined
-  return clips.map((clip) => {
-    const live = composer?.compose(clip.params)
-    const limit = composer?.limitOf(clip.params.model)
+  return clips.map((asked) => {
+    const live = composer?.compose(asked.params)
+    const limit = composer?.limitOf(asked.params.model)
+    // A reference the legend explains (its description, or who wears an outfit) isn't warned about as unmentioned.
+    const clip = live ? { ...asked, warnings: warningsOf(asked.checked, explainedReferences(live)) } : asked
     if (captured) {
       const legend = shownLegend(a.descriptionLegend)
       return {
@@ -776,6 +786,13 @@ function withDescriptions(clips: Clip[], a: ApprovalRequest, composer: Composer 
   })
 }
 
+/** The prompt checks' advice (not blocking) for params, as the dialog lists it. */
+function warningsOf(params: GenerationParams, explained?: ValidateOptions['explained']): string[] {
+  return promptIssuesOf(params, explained)
+    .filter((i) => i.severity === 'warning')
+    .map((i) => i.message)
+}
+
 function clipOf(
   key: string,
   params: GenerationParams,
@@ -787,12 +804,11 @@ function clipOf(
     key,
     title,
     params: paramsForSubmit(params),
+    checked: params,
     continuesFrom,
     endsAt,
     blocking: blockingPromptIssue(params),
-    warnings: promptIssuesOf(params)
-      .filter((i) => i.severity === 'warning')
-      .map((i) => i.message)
+    warnings: warningsOf(params)
   }
 }
 

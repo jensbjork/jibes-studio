@@ -44,8 +44,8 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   fixes, and blocks generation while a reference is wrong. The same check runs again in the main process before
   anything is sent to Venice. **Drag a reference photo or voice to another place** and its number changes, with
   every token in the prompt following it. **The descriptions of the referenced characters, places, products, outfits
-  and poses are appended automatically** when the prompt is sent, as a short *References* list, so you write what
-  happens rather than what everyone looks like.
+  and poses are appended automatically** when the prompt is sent, as a short *References* list that also says who
+  wears each outfit, so you write what happens rather than what everyone looks like.
 - **Library of characters, environments, products, outfits and poses** (*Karaktärer*, *Miljöer*, *Produkter*,
   *Kläder*, *Poser*): a name, a description and ordered reference photos, each in its own folder. A character can
   have a default outfit that comes along automatically, and **a voice** (*Röst*); an environment can have **a
@@ -306,6 +306,12 @@ it doesn't come along (a note says so).
 **Poses.** A pose chip applies to the characters you choose (all of them by default):
 `Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)` (`… och … i posen …` in Swedish).
 
+**Outfits.** An outfit chip says who wears it (*Bärs av*): by default the character whose default outfit it is,
+else the only character in the form; pick another character or *Ingen*. The choice is saved with the form, a
+sequence clip and the generation (*Använd igen* brings it back), and the legend says it when the prompt is sent (see
+below), so the clothes can't be taken for anyone else's. *Byt kläder* on a character chip carries it to the new
+outfit.
+
 **Products.** A product chip can be held by one of the characters in the form (*Hålls av*; nobody by default):
 `Anna (@Image1) holding Kaffeburken (@Image4)` (`… håller …` in Swedish). Video models rarely render small text or
 logos exactly, so medium and close shots that show the product large work best.
@@ -322,20 +328,22 @@ clip editor, so photos can be renumbered without picking or uploading them again
 assets whose photos or voices it sends as a *References* legend, with each asset's tokens:
 
 ```
-Anna (@Image1, @Image2, voice @Audio1) walks along the beach promenade (@Image3) …
+Anna (@Image1, @Image2, voice @Audio1) walks along the beach promenade (@Image4) …
 
 References:
-- Anna (@Image1, @Image2; voice @Audio1): tall woman in her thirties, short red hair, green raincoat
-- Beach promenade (@Image3): a windswept pebble beach at dawn
+- Anna (@Image1, @Image2; voice @Audio1): tall woman in her thirties, short red hair
+- Red dress (@Image3), worn by Anna (@Image1, @Image2): a red silk dress with thin straps
+- Beach promenade (@Image4): a windswept pebble beach at dawn
 ```
 
 The legend is composed when the generation is sent, from the descriptions as they are in the library then — so
 an edited description applies to the next generation — and is never written into the prompt you edit (so *Använd
 igen* doesn't add it twice). The box **Läggs till i prompten** under the prompt shows it live: each described
-asset with its tokens and an excerpt, a switch per asset, *Ta med beskrivningar* to switch them all off,
+asset with its tokens and an excerpt (an outfit with *bärs av* and who wears it — also one without a description,
+whose line then only says that), a switch per asset, *Ta med beskrivningar* to switch them all off,
 *Ändra beskrivning* to open the asset, and the composed length against the model's prompt limit. If the legend
 would make the prompt too long, the descriptions are shortened at word boundaries (marked *förkortad*); if not even
-the names fit, none are appended. The heading and words follow **Promptspråk** (`Referenser:` and `röst` in
+the names fit, none are appended. The heading and words follow **Promptspråk** (`Referenser:`, `röst` and `bärs av` in
 Swedish). A clip's drawer keeps both texts: the prompt you wrote and, as *Skickad prompt*, what Venice got.
 
 In the prompt editor:
@@ -344,7 +352,8 @@ In the prompt editor:
   wrong references turn red;
 - typing `@` opens a menu with the selected photos and *Lägg till från biblioteket* (add from the library);
 - the list under the editor shows every reference with its token, marks photos and clips the prompt never mentions
-  and offers quick fixes such as *Byt till @Image3* (change to @Image3), *Ta bort @Image7* (remove @Image7) or
+  (*nämns inte*) — only those the legend doesn't explain: one whose description (or wearer) is appended is marked
+  *beskrivs* instead, and isn't warned about — and offers quick fixes such as *Byt till @Image3* (change to @Image3), *Ta bort @Image7* (remove @Image7) or
   *Ta bort @Audio2* when the voices add up to more than 15 s;
 - **Generera** is disabled while a reference is wrong, and says why.
 

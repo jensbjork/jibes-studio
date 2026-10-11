@@ -5,7 +5,8 @@
 //
 //   References:
 //   - Anna (@Image1, @Image2; voice @Audio1): tall woman in her thirties, short red hair
-//   - Stranden (@Image3): a windswept pebble beach at dawn
+//   - Röd klänning (@Image3), worn by Anna (@Image1, @Image2): a red silk dress with thin straps
+//   - Stranden (@Image4): a windswept pebble beach at dawn
 //
 // Composed at send time, never written into the editor's text: a description edited in the library applies to the
 // next generation, the prompt stays readable, and "Använd igen" can't append it twice. Pure and shared, so the
@@ -14,6 +15,7 @@
 
 import { pathKey } from './generation-filter'
 import { paramsForSubmit } from './models'
+import { resolveOutfitWearers } from './outfits'
 import type {
   Asset,
   ComposedPrompt,
@@ -35,6 +37,9 @@ const AUDIO_WORD: Record<PromptLanguage, { voice: string; sound: string }> = {
   en: { voice: 'voice', sound: 'sound' },
   sv: { voice: 'röst', sound: 'ljud' }
 }
+
+/** Between an outfit's name and the character wearing it ("Röd klänning (@Image3), worn by Anna (@Image1)"). */
+const WORN_BY: Record<PromptLanguage, string> = { en: 'worn by', sv: 'bärs av' }
 
 /** What is put after a shortened description. */
 const ELLIPSIS = '…'
@@ -105,7 +110,8 @@ export function describedAsset(asset: Asset): DescribedAsset {
     description: asset.description ?? '',
     imagePaths: (asset.images ?? []).map((img) => img.path),
     // Kinds without sound (and assets from a main process older than audio) may have no list at all.
-    audioPaths: (Array.isArray(asset.audio) ? asset.audio : []).map((clip) => clip.path)
+    audioPaths: (Array.isArray(asset.audio) ? asset.audio : []).map((clip) => clip.path),
+    ...(asset.kind === 'character' && asset.defaultOutfitId ? { defaultOutfitId: asset.defaultOutfitId } : {})
   }
 }
 
@@ -148,9 +154,20 @@ interface Draft {
   description: string
   images: number[]
   audios: number[]
+  /** An outfit: the character wearing it (shared/outfits.ts). */
+  wornBy?: Draft
 }
 
-/** "Anna (@Image1, @Image2; voice @Audio1)": an entry's name and tokens, what stays when its description can't. */
+/** "Anna (@Image1, @Image2)": a name with its picture tokens, as the wearer of an outfit is named. */
+function withImages(d: Draft): string {
+  const images = d.images.map((n) => `@Image${n}`).join(', ')
+  return d.name ? `${d.name} (${images})` : images
+}
+
+/**
+ * "Anna (@Image1, @Image2; voice @Audio1)", "Röd klänning (@Image3), worn by Anna (@Image1)": an entry's name, tokens
+ * and wearer, what stays when its description can't.
+ */
 function label(d: Draft, language: PromptLanguage): string {
   const images = d.images.map((n) => `@Image${n}`).join(', ')
   const words = AUDIO_WORD[language]
@@ -158,7 +175,8 @@ function label(d: Draft, language: PromptLanguage): string {
     ? `${d.asset.kind === 'character' ? words.voice : words.sound} ${d.audios.map((n) => `@Audio${n}`).join(', ')}`
     : ''
   const tokens = [images, audios].filter(Boolean).join('; ')
-  return d.name ? `${d.name} (${tokens})` : tokens
+  const own = d.name ? `${d.name} (${tokens})` : tokens
+  return d.wornBy ? `${own}, ${WORN_BY[language]} ${withImages(d.wornBy)}` : own
 }
 
 /** "\n- Anna (@Image1): tall woman …"; without ": …" when the description is empty. */
@@ -184,7 +202,8 @@ function shorten(text: string, max: number): string {
  * The prompt as it is sent: the user's prompt with a References legend appended that tells the model what each
  * referenced asset is, from the assets' descriptions.
  *
- * - One entry per asset that has a description (not blank), has at least one photo or audio clip among the
+ * - One entry per asset that has a description (not blank) – or is an outfit somebody wears (shared/outfits.ts: the
+ *   entry then says "worn by Anna (@Image1)", "bärs av" in Swedish) – has at least one photo or audio clip among the
  *   references that are actually sent (paramsForSubmit: reference mode only, images within the model's cap, audio
  *   only with a model that takes it and within its limit) and is not excluded (`opts.excludedAssetIds`). Its tokens
  *   are its @ImageN in reference order, then its @AudioN; entries are ordered by their first token (pictures
@@ -221,16 +240,21 @@ export function composePrompt(
   const excluded = new Set(opts.excludedAssetIds ?? [])
   const byImage = new Map<string, DescribedAsset>()
   const byAudio = new Map<string, DescribedAsset>()
-  for (const asset of assets) {
-    if (!asset || excluded.has(asset.id) || !legendText(asset.description)) continue
-    // The first asset to claim a file keeps it.
-    const claim = (index: Map<string, DescribedAsset>, paths: readonly string[] | undefined): void => {
-      for (const p of paths ?? []) {
-        if (typeof p === 'string' && p && !index.has(pathKey(p))) index.set(pathKey(p), asset)
+  // The first asset to claim a file keeps it, those the legend describes first; the others still count as present
+  // (the character wearing an outfit is named in the outfit's entry whether it has a description or not).
+  const describes = (asset: DescribedAsset): boolean => !excluded.has(asset.id) && !!legendText(asset.description)
+  for (const first of [true, false]) {
+    for (const asset of assets) {
+      if (!asset || describes(asset) !== first) continue
+      for (const [index, paths] of [
+        [byImage, asset.imagePaths],
+        [byAudio, asset.audioPaths]
+      ] as const) {
+        for (const p of paths ?? []) {
+          if (typeof p === 'string' && p && !index.has(pathKey(p))) index.set(pathKey(p), asset)
+        }
       }
     }
-    claim(byImage, asset.imagePaths)
-    claim(byAudio, asset.audioPaths)
   }
   if (!byImage.size && !byAudio.size) return none
 
@@ -253,7 +277,15 @@ export function composePrompt(
     const asset = byAudio.get(pathKey(clip.path))
     if (asset) draftOf(asset).audios.push(i + 1)
   })
-  const list = [...drafts.values()]
+  // Who wears each outfit among the pictures sent: the outfit's entry names the character.
+  const pictured = [...drafts.values()].filter((d) => d.images.length).map((d) => d.asset)
+  for (const [outfitId, characterId] of resolveOutfitWearers(pictured, params.outfitWearers)) {
+    const outfit = drafts.get(outfitId)
+    if (outfit) outfit.wornBy = drafts.get(characterId)
+  }
+  // An entry per asset switched on that has a description, or is an outfit somebody wears (that alone is worth
+  // saying, so the model can't take the clothes for anyone else's).
+  const list = [...drafts.values()].filter((d) => !excluded.has(d.asset.id) && (d.description || d.wornBy))
   if (!list.length) return none
 
   const entry = (d: Draft, description: string): DescriptionEntry => ({
@@ -262,7 +294,10 @@ export function composePrompt(
     name: d.name,
     tokens: [...d.images.map((n) => `@Image${n}`), ...d.audios.map((n) => `@Audio${n}`)],
     description,
-    ...(description !== d.description ? { shortened: true } : {})
+    ...(description !== d.description ? { shortened: true } : {}),
+    ...(d.wornBy
+      ? { wornBy: { assetId: d.wornBy.asset.id, name: d.wornBy.name, tokens: d.wornBy.images.map((n) => `@Image${n}`) } }
+      : {})
   })
   const own = userPrompt.trimEnd()
   if (!own) return { ...none, entries: list.map((d) => entry(d, d.description)) }
@@ -366,4 +401,24 @@ export function promptLimitOf(modelId: string): number | undefined {
 /** Whether the remembered list knows the model at all (with or without a limit). */
 export function knowsPromptLimit(modelId: string): boolean {
   return knownLimits.has(modelId)
+}
+
+/**
+ * The @ImageN / @AudioN numbers the legend explains when it is sent (not when it was left out: a blank prompt, or not
+ * even the names fitted): the prompt checks don't report those as unmentioned (ValidateOptions.explained).
+ */
+export function explainedReferences(composed: Pick<ComposedPrompt, 'legend' | 'entries'>): {
+  images: number[]
+  audios: number[]
+} {
+  const images: number[] = []
+  const audios: number[] = []
+  if (!composed.legend) return { images, audios }
+  for (const e of composed.entries) {
+    for (const token of e.tokens) {
+      const m = /^@(Image|Audio)(\d+)$/.exec(token)
+      if (m) (m[1] === 'Image' ? images : audios).push(Number(m[2]))
+    }
+  }
+  return { images, audios }
 }

@@ -6,6 +6,7 @@ import { readdir, rm, rmdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { continueModeOf, isContinueMode, type ChainClip } from '@shared/continuation'
 import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios } from '@shared/models'
+import { sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import { generationSource, isVeniceGeneration } from '@shared/generation-label'
 import { continuationFrameOf, isExtractedFirstFrame } from '@shared/seams'
@@ -235,14 +236,16 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v 
 /**
  * Normalises params coming from the renderer, an agent or JSON, dropping anything malformed. Reference audio
  * clips keep their windows; whether the model can use them is decided when a take is sent (paramsForSubmit).
- * The description switches (includeDescriptions, excludedDescriptionAssetIds) are kept: they decide what a take
- * appends to its prompt, and "Använd igen" on a take brings them back.
+ * The description switches (includeDescriptions, excludedDescriptionAssetIds) and who wears each outfit
+ * (outfitWearers) are kept: they decide what a take appends to its prompt, and "Använd igen" on a take brings them
+ * back.
  */
 export function sanitizeParams(input: Partial<GenerationParams> | undefined): GenerationParams {
   const p = input ?? {}
   const refs = Array.isArray(p.referenceImages)
     ? p.referenceImages.filter((r): r is string => typeof r === 'string' && !!r)
     : undefined
+  const wearers = sanitizeOutfitWearers(p.outfitWearers)
   return {
     model: str(p.model) ?? DEFAULT_PARAMS.model,
     prompt: typeof p.prompt === 'string' ? p.prompt : '',
@@ -255,7 +258,8 @@ export function sanitizeParams(input: Partial<GenerationParams> | undefined): Ge
     endImage: str(p.endImage),
     referenceImages: refs?.length ? refs : undefined,
     referenceAudios: sanitizeReferenceAudios(p.referenceAudios),
-    ...sanitizeDescriptionFlags(p)
+    ...sanitizeDescriptionFlags(p),
+    ...(wearers ? { outfitWearers: wearers } : {})
   }
 }
 

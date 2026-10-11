@@ -43,6 +43,7 @@ export function promptWritingGuide(lang: PromptLanguage): string {
   const posedAs = sv ? 'i posen' : 'posed as in'
   const and = sv ? 'och' : 'and'
   const references = sv ? 'Referenser:' : 'References:'
+  const wornBy = sv ? 'bärs av' : 'worn by'
   return `## Writing video prompts (Seedance-class models)
 
 **Language:** write every video prompt in ${LANGUAGE_NAMES[lang]} (the user's setting "Promptspråk"), even though you talk to the user in Swedish.
@@ -65,12 +66,13 @@ export function promptWritingGuide(lang: PromptLanguage): string {
 - Tokens only exist in reference-to-video mode. Text-to-video and image-to-video prompts must not contain any @ tokens.
 - The photos carry identity (face, exact garment, the place, the body positions of a pose) and the audio carries the voice. Use the text for what they can't say: action, expression, camera, light. Keep any appearance you do mention consistent with the asset's description and photos – never contradict them (no "blonde" for a dark-haired character).
 
-**Descriptions of referenced assets are appended automatically as a References legend – don't repeat them in the prompt; write the action, camera and mood.** When Studio sends a prompt it adds one line per referenced asset that has a description, built from the user's library at that moment:
+**Descriptions of referenced assets are appended automatically as a References legend – don't repeat them in the prompt; write the action, camera and mood.** When Studio sends a prompt it adds one line per referenced asset that has a description (and per outfit somebody wears), built from the user's library at that moment:
 \`\`\`
 <your prompt>
 
 ${references}
 - Anna (@Image1, @Image2; ${voice} @Audio1): <Anna's description>
+- <the outfit> (@Image3), ${wornBy} Anna (@Image1, @Image2): <its description>
 - <the place> (@Image4): <its description>
 \`\`\`
 - The legend is never part of the prompt text you write or read back (\`prompt\`); \`composed_prompt\` (get_workspace, validate_prompt, get_sequence) shows the whole text that is sent and \`description_entries\` which descriptions go along (\`sent\`; \`included\` only says it is switched on – an empty prompt, or a legend that doesn't fit the model's limit, sends none: see \`descriptions_note\`). It follows the tokens, so it stays right when references are reordered.
@@ -158,12 +160,13 @@ Each model has its own durations, resolutions, aspect ratios and audio options (
 - set_references adds whole assets (all their photos, or the image_ids you pick) in order, and for a model with audio_input each character's first voice clip (include_voice: false leaves it out; audio_ids picks other clips; include_voice: true also adds an environment's sound). It answers with the token maps: \`{token: "@Image1", asset_name: "Anna", kind: "character", photo_number: 1}\` and \`{token: "@Audio1", asset_name: "Anna", role: "voice", start: 0, length: 8}\`. Build the prompt from those maps.
 - The image budget is small: usually 1–3 photos per character (clear face, different angles), 1–2 per outfit (the whole garment), 1–2 per environment, 1–2 per product (the front with the label first), 1 per pose. Choose the clearest photos with get_asset and pass their image_ids.
 - **Default outfits are not added automatically by set_references** (Studio's own picker does add them). If a character should wear its default outfit, add that outfit too; if the scene needs other clothes, add the other outfit instead – never both.
-- Studio refuses to generate when a token points at nothing, past the model's limit, is malformed ("@Image 3", "@img3", "@Voice1", "@Ljud1") or appears in a mode without references. validate_prompt shows those problems (Swedish messages) before anything is paid for; warnings mean a reference is never mentioned.
+- Studio refuses to generate when a token points at nothing, past the model's limit, is malformed ("@Image 3", "@img3", "@Voice1", "@Ljud1") or appears in a mode without references. validate_prompt shows those problems (Swedish messages) before anything is paid for; warnings mean, among other things, a reference that is neither mentioned nor explained by the References legend.
 - **Reordering:** reorder_references changes the order of the form's (or a clip's: target {segment_id}) reference images or audio clips, the way the user drags a thumbnail in Studio, and renumbers every token in the prompt and negative prompt so each still points at the same picture or clip – with references [A, B, C] and "@Image1 hugs @Image3", moving C first gives [C, A, B] and "@Image2 hugs @Image1". Name references by token, image_id / audio_id or asset_id; the ones you name come first, the rest keep their order. Use it whenever only the order should change (e.g. to bring a picture within the model's limit of max_reference_images, or to make a character @Image1): set_references with mode "replace" sets the list anew and does not renumber the tokens already in the prompt.
 
 ## Descriptions in the prompt (the References legend)
 - Studio appends the descriptions of the assets whose photos or voices are sent to the prompt, as a References legend after it (see "Writing video prompts"). It is composed when the generation is sent, from the descriptions as they are then: a description the user (or you, with update_asset) improves applies to the next generation.
 - The user can switch it off for a form or clip ("Ta med beskrivningar": include_descriptions) or per asset (excluded_description_asset_ids). Respect what they switched off; change it only when asked or clearly needed, and tell them.
+- The legend also says who wears each outfit ("<the outfit> (@Image3), worn by Anna (@Image1)"; \`worn_by\` in description_entries), also for an outfit without a description: by default the character whose default outfit it is, else the only character among the references. outfit_wearers (set_form, add_segment, update_segment) changes it; you needn't write it in the prompt. Warnings about unmentioned references only concern references the legend doesn't explain (no description, switched off, loose pictures).
 - Don't paste descriptions into the prompt yourself – they would be sent twice. Check composed_prompt (get_workspace, validate_prompt, get_sequence) to see exactly what is sent.
 - The approval dialog shows the user the whole composed prompt with the legend; if a description changes before they approve, the request lapses and you need to ask again.
 

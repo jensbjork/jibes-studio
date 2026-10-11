@@ -273,6 +273,10 @@ export default function PromptEditor(props: Props) {
   const segments = useMemo(() => segmentsOf(text.length, marks), [text, marks])
   const mentioned = useMemo(() => mentionedIndices(text), [text])
   const mentionedAudio = useMemo(() => mentionedAudioIndices(text), [text])
+  // What the References legend explains, which the strip doesn't mark as unmentioned.
+  const explainedKey = JSON.stringify(checks.options.explained ?? null)
+  const explained = useMemo(() => new Set(checks.options.explained?.images ?? []), [explainedKey])
+  const explainedAudio = useMemo(() => new Set(checks.options.explained?.audios ?? []), [explainedKey])
   const views = useMemo(
     () =>
       issueViews({
@@ -288,7 +292,8 @@ export default function PromptEditor(props: Props) {
         canRemoveAudio: !!onRemoveAudio,
         audioModelName: onUseAudioModel ? audioModelName : undefined,
         library: onAddFromLibrary ? library : undefined,
-        adviseUnused: true
+        adviseUnused: true,
+        explained: checks.options.explained
       }),
     [
       text,
@@ -303,7 +308,8 @@ export default function PromptEditor(props: Props) {
       !!onRemoveAudio,
       onUseAudioModel ? audioModelName : undefined,
       library,
-      !!onAddFromLibrary
+      !!onAddFromLibrary,
+      checksKey
     ]
   )
   const hasError = views.some((v) => v.severity === 'error')
@@ -798,6 +804,8 @@ export default function PromptEditor(props: Props) {
           audios={audios}
           mentioned={mentioned}
           mentionedAudio={mentionedAudio}
+          explained={explained}
+          explainedAudio={explainedAudio}
           showUnused={!!text.trim()}
           maxImages={maxImages}
           highlighted={lit}

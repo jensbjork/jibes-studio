@@ -455,13 +455,16 @@ interface WearerSelectProps {
   onChange: (characterId: string | null) => void
 }
 
-/** "bärs av Anna ▾" on an outfit chip. Only shapes the text inserted for the character. */
+/**
+ * "bärs av Anna ▾" on an outfit chip: who wears the outfit (GenerationParams.outfitWearers). The References legend
+ * says it when the prompt is sent ("worn by Anna (@Image1)"), and it shapes the text inserted for the character.
+ */
 function WearerSelect({ outfit, wearer, characters, onChange }: WearerSelectProps) {
   const name = characters.find((c) => c.id === wearer)?.name
   return (
     <label
       className="relative flex shrink-0 items-center gap-1 pr-1 text-muted"
-      title={`Vem har på sig ${outfit.name}? Styr texten som infogas för karaktären.`}
+      title={`Vem har på sig ${outfit.name}? Skrivs in i prompten när den skickas (Läggs till i prompten) och styr texten som infogas för karaktären.`}
     >
       <span>bärs av</span>
       <span className={`max-w-20 truncate ${name ? 'text-text' : ''}`}>{name ?? 'ingen'}</span>

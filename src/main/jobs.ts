@@ -12,6 +12,7 @@ import {
   rememberPromptLimits
 } from '@shared/prompt-compose'
 import { generationTitle } from '@shared/generation-label'
+import { sanitizeOutfitWearers } from '@shared/outfits'
 import { blockingPromptError, canonicalizeParams } from '@shared/prompt-refs'
 import { isGenerateOrigin } from '@shared/session'
 import {
@@ -143,6 +144,13 @@ function checkComposed(params: GenerationParams, composed: Pick<ComposedPrompt, 
   if (problem) throw new Error(problem)
 }
 
+/** The params with their "bärs av" choices as stored (sanitizeOutfitWearers): kept with the generation for "Använd igen". */
+function withCleanWearers(params: GenerationParams): GenerationParams {
+  const { outfitWearers, ...rest } = params
+  const wearers = sanitizeOutfitWearers(outfitWearers)
+  return wearers ? { ...rest, outfitWearers: wearers } : rest
+}
+
 /**
  * The params exactly as a paid submission sends them, or a Swedish refusal: the prompt's @ImageN and @AudioN
  * references are checked against what the caller has (so a token past the model's limit is reported as such),
@@ -156,7 +164,7 @@ function checkComposed(params: GenerationParams, composed: Pick<ComposedPrompt, 
 export async function prepareSubmission(params: GenerationParams): Promise<GenerationParams> {
   const problem = blockingPromptError(params)
   if (problem) throw new Error(problem)
-  const checked = paramsForSubmit(canonicalizeParams(params))
+  const checked = withCleanWearers(paramsForSubmit(canonicalizeParams(params)))
   checkComposed(checked, composeSubmission(checked))
   if (!checked.referenceAudios?.length) return checked
   // "The clip no longer exists" says more than ffprobe failing to open it.
