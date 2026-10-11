@@ -3,6 +3,7 @@
 // pictures and clips. Pure functions, shared by the params form and the generate view.
 
 import { maxReferenceAudios, maxReferenceImages, supportsAudioInput } from '@shared/models'
+import { resolveOutfitWearers } from '@shared/outfits'
 import type { Asset, GenerationParams, ReferenceAudio } from '@shared/types'
 import { addAudios, audioSourcesByPath, referenceAudioOf, voiceOf } from './audioRefs'
 import { imageCount } from './text'
@@ -44,30 +45,23 @@ export function defaultOutfitOf(character: Asset, byId: ReadonlyMap<string, Asse
 }
 
 /**
- * Who wears each outfit in the form: outfit id → character id. `chosen` holds the "bärs av" choices made in
- * the form (null = nobody); a choice naming a character that is no longer there falls back to the default:
- * the character whose default outfit it is, else the only character present.
+ * Who wears each outfit in the form: outfit id → character id, decided by the shared rule the References legend and
+ * the agents' tools use (shared/outfits.ts). `chosen` is GenerationParams.outfitWearers, the "bärs av" choices (null =
+ * nobody); a choice naming a character that is no longer there falls back to the default: the character whose
+ * default outfit it is, else the only character present.
  */
 export function resolvePairings(
   assetRefs: readonly AssetRef[],
-  chosen: Readonly<Record<string, string | null>>
+  chosen: GenerationParams['outfitWearers']
 ): Map<string, string> {
-  const characters = assetRefs.filter((r) => r.asset.kind === 'character').map((r) => r.asset)
-  const present = new Set(characters.map((c) => c.id))
-  const pairings = new Map<string, string>()
-  for (const { asset } of assetRefs) {
-    if (asset.kind !== 'outfit') continue
-    const choice = chosen[asset.id]
-    if (choice === null) continue
-    if (choice !== undefined && present.has(choice)) {
-      pairings.set(asset.id, choice)
-      continue
-    }
-    const owner =
-      characters.find((c) => c.defaultOutfitId === asset.id) ?? (characters.length === 1 ? characters[0] : undefined)
-    if (owner) pairings.set(asset.id, owner.id)
-  }
-  return pairings
+  return resolveOutfitWearers(
+    assetRefs.map(({ asset }) => ({
+      id: asset.id,
+      kind: asset.kind,
+      ...(asset.defaultOutfitId ? { defaultOutfitId: asset.defaultOutfitId } : {})
+    })),
+    chosen
+  )
 }
 
 /** The outfits a character wears in the form, in reference order. */

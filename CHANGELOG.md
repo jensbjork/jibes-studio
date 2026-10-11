@@ -10,6 +10,12 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **The prompt says who wears the clothes**: with *Ta med beskrivningar* on, the References legend names the
+  character wearing each outfit – `Röd klänning (@Image3), worn by Anna (@Image1, @Image2): …` (`bärs av` in
+  Swedish) – also for an outfit without a description, so the model can't take the clothes for anyone else's. The
+  outfit chip's *bärs av* decides it (by default the character whose default outfit it is, else the only character);
+  *Läggs till i prompten* shows the wearer on the outfit's row. Agents: `set_form`, `add_segment` and
+  `update_segment` take `outfit_wearers`, and `description_entries` report `worn_by`.
 - **Mediabank**, first under *Bibliotek* in the sidebar: everything you've made in one place, in three tabs.
   *Videor* is the full clip feed – every generation, take, own film and version, with the filters, *Kort* / *Tabell*,
   *Importera egna klipp…* and the detail drawer; *Använd igen* there fills Generera's form. *Bilder* holds every
@@ -323,6 +329,11 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- **"Nämns inte" only for references without an automatic description**: a reference whose description (or, for an
+  outfit, wearer) the legend appends is no longer warned about when the prompt doesn't name it; the reference list
+  marks it *beskrivs*. The same goes for the agents' `issues` and the approval dialog.
+- **The outfit chip's *bärs av* is saved** with the form, a sequence clip and the generation (`outfitWearers` in the
+  params), so *Använd igen* and the clip editor bring it back; *Byt kläder* carries it to the new outfit.
 - **Generera lists this session**: the right side of Generera shows what was made there since Studio started (and
   clips that were still being made when it started); closing the window keeps the session, quitting ends it. Everything older is in the
   Mediabank. *Pågår och klart* counts Generera's clips from an earlier session, and pictures that belong to no

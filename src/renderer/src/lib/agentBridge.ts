@@ -14,6 +14,7 @@ import {
   type Kind
 } from '@shared/models'
 import { canonicalizeTokens, findAudioTokens, findImageTokens, findMalformedTokens } from '@shared/prompt-refs'
+import { outfitWearersAmong, sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import { referenceMoves, reorderReferences } from '@shared/prompt-remap'
 import { isMediaTab, type MediaTab } from '@shared/session'
@@ -206,6 +207,7 @@ export function applySetForm(
   const endValue = field(args, 'end_image')
   const includeValue = field(args, 'include_descriptions')
   const excludedValue = field(args, 'excluded_description_asset_ids')
+  const wearersValue = field(args, 'outfit_wearers')
   const explicit = new Set(
     ['duration', 'resolution', 'aspect_ratio', 'audio'].filter((key) => given(field(args, key)))
   )
@@ -369,6 +371,19 @@ export function applySetForm(
     }
   }
 
+  // Who wears each outfit ("bärs av"), as the chips store it: main checked the outfits and characters and sends the
+  // whole set of choices (null: none left, every outfit worn by its default).
+  if (wearersValue !== undefined) {
+    if (wearersValue === null) delete next.outfitWearers
+    else if (typeof wearersValue !== 'object' || Array.isArray(wearersValue)) {
+      errors.push('outfit_wearers kunde inte läsas.')
+    } else {
+      const wearers = sanitizeOutfitWearers(wearersValue)
+      if (wearers) next.outfitWearers = wearers
+      else delete next.outfitWearers
+    }
+  }
+
   const limit = model?.promptCharacterLimit
   if (limit && next.prompt.length > limit && (promptValue !== undefined || modelChanged)) {
     errors.push(`Prompten är ${next.prompt.length} tecken – ${modelLabel} tar högst ${limit}. Korta den.`)
@@ -459,6 +474,12 @@ export function applySetReferences(
     }
   }
   next.referenceAudios = audios.length ? audios : undefined
+  // "bärs av" choices for outfits (or characters) no longer among the pictures are forgotten, as the form does it.
+  const owners = new Map(assets.flatMap((a) => a.images.map((img) => [pathKey(img.path), a.id] as const)))
+  const present = new Set(refs.flatMap((path) => owners.get(pathKey(path)) ?? []))
+  const wearers = outfitWearersAmong(next.outfitWearers, present)
+  if (wearers) next.outfitWearers = wearers
+  else delete next.outfitWearers
 
   if (mode === 'replace' && findImageTokens(next.prompt).length && !sameList(before, refs)) {
     notes.push('Prompten ändrades inte – se till att varje @ImageN i den pekar på rätt bild i den nya listan.')

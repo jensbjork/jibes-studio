@@ -12,6 +12,12 @@ interface Props {
   mentioned: ReadonlySet<number>
   /** @AudioN numbers the prompt mentions. */
   mentionedAudio: ReadonlySet<number>
+  /**
+   * @ImageN / @AudioN numbers the References legend explains (its description, or who wears an outfit): not marked
+   * as unmentioned, since the model is told what they are.
+   */
+  explained: ReadonlySet<number>
+  explainedAudio: ReadonlySet<number>
   /** Show which pictures and clips the prompt doesn't mention (off while the prompt is empty). */
   showUnused: boolean
   maxImages: number
@@ -26,14 +32,17 @@ const row = 'flex w-full items-center gap-2 px-2 py-1 text-left text-[11px] tran
 
 /**
  * The key to the prompt's @ImageN and @AudioN tokens: one row per reference image and per audio clip (with a
- * play button for the part that is sent), with a warning dot on the ones the prompt never mentions. Clicking a
- * row inserts its token at the caret.
+ * play button for the part that is sent), with a warning dot on the ones the prompt never mentions and the
+ * References legend doesn't explain either ("beskrivs" on those it does). Clicking a row inserts its token at the
+ * caret.
  */
 export default function ReferenceStrip({
   references,
   audios,
   mentioned,
   mentionedAudio,
+  explained,
+  explainedAudio,
   showUnused,
   maxImages,
   highlighted,
@@ -48,7 +57,9 @@ export default function ReferenceStrip({
       onMouseLeave={() => onHighlight(undefined)}
     >
       {references.map((r) => {
-        const unused = showUnused && r.sent && !mentioned.has(r.index)
+        const unmentioned = showUnused && r.sent && !mentioned.has(r.index)
+        const described = unmentioned && explained.has(r.index)
+        const unused = unmentioned && !described
         const tone = r.asset ? KIND_TONE[r.asset.kind] : undefined
         const token = `@Image${r.index}`
         const key = markKey('image', r.index)
@@ -66,7 +77,9 @@ export default function ReferenceStrip({
                   ? `Skickas inte – modellen tar max ${maxImages} bilder`
                   : unused
                     ? `Nämns inte i prompten – klicka för att infoga ${token} vid markören`
-                    : `Infoga ${token} vid markören`
+                    : described
+                      ? `Beskrivs i referenslistan som läggs till i prompten – klicka för att infoga ${token} vid markören`
+                      : `Infoga ${token} vid markören`
               }
               className={`${row} ${highlighted === key ? 'bg-raised' : ''} ${r.sent ? '' : 'opacity-45'}`}
             >
@@ -82,13 +95,15 @@ export default function ReferenceStrip({
                   <span className="text-muted">Egen bild · {fileName(r.path)}</span>
                 )}
               </span>
-              <Status sent={r.sent} unused={unused} />
+              <Status sent={r.sent} unused={unused} described={described} />
             </button>
           </li>
         )
       })}
       {audios.map((a) => {
-        const unused = showUnused && a.sent && !mentionedAudio.has(a.index)
+        const unmentioned = showUnused && a.sent && !mentionedAudio.has(a.index)
+        const described = unmentioned && explainedAudio.has(a.index)
+        const unused = unmentioned && !described
         const kind = a.source?.asset.kind
         const token = `@Audio${a.index}`
         const key = markKey('audio', a.index)
@@ -107,7 +122,9 @@ export default function ReferenceStrip({
                   ? 'Skickas inte med den här modellen'
                   : unused
                     ? `Nämns inte i prompten – klicka för att infoga ${token} vid markören`
-                    : `Infoga ${token} vid markören`
+                    : described
+                      ? `Beskrivs i referenslistan som läggs till i prompten – klicka för att infoga ${token} vid markören`
+                      : `Infoga ${token} vid markören`
               }
               className={`${row} min-w-0 flex-1 ${highlighted === key ? 'bg-raised' : ''} ${a.sent ? '' : 'opacity-45'}`}
             >
@@ -119,7 +136,7 @@ export default function ReferenceStrip({
                   · {parts.detail} · {windowLabel(a)}
                 </span>
               </span>
-              <Status sent={a.sent} unused={unused} />
+              <Status sent={a.sent} unused={unused} described={described} />
             </button>
             <span className="shrink-0 pr-2">
               <AudioPlayButton path={a.path} start={a.start} length={a.length} label={label} className="h-5 w-5" />
@@ -131,8 +148,10 @@ export default function ReferenceStrip({
   )
 }
 
-function Status({ sent, unused }: { sent: boolean; unused: boolean }) {
+function Status({ sent, unused, described }: { sent: boolean; unused: boolean; described: boolean }) {
   if (!sent) return <span className="shrink-0 text-accent">skickas inte</span>
+  // Not in the prompt's text, but the References legend tells the model what it is.
+  if (described) return <span className="shrink-0 text-muted">beskrivs</span>
   if (!unused) return null
   return (
     <span className="flex shrink-0 items-center gap-1 text-amber-300">

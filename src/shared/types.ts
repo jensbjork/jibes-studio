@@ -59,6 +59,13 @@ export interface GenerationParams {
   /** Assets (ids) whose description is left out of the legend, each switched off in the editor on its own. */
   excludedDescriptionAssetIds?: string[]
   /**
+   * Who wears each outfit among the references ("bärs av"): outfit asset id → character asset id, null = nobody. An
+   * outfit left out wears its default: the character among the references whose default outfit it is, else the only
+   * character there (shared/outfits.ts). The References legend says it ("Röd klänning (@Image3), worn by Anna
+   * (@Image1)"). Only choices that differ from that default need be stored.
+   */
+  outfitWearers?: Record<string, string | null>
+  /**
    * Video-to-video edit and upscale models: the source clip (an H.264 proxy ≤22 MB in the edit's Underlag/),
    * sent as `video_url`. Absolute over IPC, stored relative like the images.
    */
@@ -480,6 +487,8 @@ export interface DescribedAsset {
   imagePaths: string[]
   /** Absolute paths of its audio clips (AssetAudio.path). */
   audioPaths: string[]
+  /** Characters: the outfit it wears unless told otherwise (Asset.defaultOutfitId). */
+  defaultOutfitId?: string
 }
 
 export interface ComposeOptions {
@@ -513,6 +522,8 @@ export interface DescriptionEntry {
   description: string
   /** Its description was shortened (or left out) to fit the model's limit. */
   shortened?: boolean
+  /** An outfit: the character wearing it in this generation, as the legend names it ("worn by Anna (@Image1)"). */
+  wornBy?: { assetId: string; name: string; tokens: string[] }
 }
 
 export interface ComposedPrompt {
@@ -1932,6 +1943,11 @@ export interface AgentSetFormArgs {
   include_descriptions?: boolean
   /** GenerationParams.excludedDescriptionAssetIds; [] switches every description back on. */
   excluded_description_asset_ids?: string[]
+  /**
+   * GenerationParams.outfitWearers as a whole (main merged the agent's choices into the form's and checked them);
+   * null: no choices, every outfit worn by its default.
+   */
+  outfit_wearers?: Record<string, string | null> | null
 }
 
 /** set_references: photo paths (main resolved the agent's asset ids), in order. */

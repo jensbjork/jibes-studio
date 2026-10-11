@@ -10,18 +10,22 @@ import {
   composeOptionsFor,
   composePrompt,
   describedAssets,
+  explainedReferences,
   includesDescriptions,
   type ComposedPrompt
 } from '@shared/prompt-compose'
+import type { ValidateOptions } from '@shared/prompt-refs'
 import type { Asset, GenerationParams, PromptLanguage } from '@shared/types'
 
-/** One described asset among the sent references, as the box lists it. */
+/** One described asset among the sent references (or an outfit somebody wears), as the box lists it. */
 export interface DescriptionRow {
   asset: Asset
   /** Its @ImageN tokens in reference order, then its @AudioN tokens. */
   tokens: string[]
-  /** The description as the legend writes it in full (whitespace collapsed). */
+  /** The description as the legend writes it in full (whitespace collapsed); '' for a worn outfit without one. */
   description: string
+  /** An outfit: the character wearing it, as the legend names it ("worn by Anna (@Image1)"; shared/outfits.ts). */
+  wornBy?: { asset: Asset; tokens: string[] }
   /** Its own toggle: not in excludedDescriptionAssetIds. */
   on: boolean
   /** In the legend that is sent: its toggle and the master switch are on, and the legend fits the model's limit. */
@@ -34,7 +38,7 @@ export interface DescriptionRow {
 }
 
 export interface DescriptionsView {
-  /** Every described asset among the sent references, in the legend's order (by first token). */
+  /** Every described asset (and worn outfit) among the sent references, in the legend's order (by first token). */
   rows: DescriptionRow[]
   /** Assets among the sent references that have no description, so nothing of theirs is added. */
   undescribed: Asset[]
@@ -50,11 +54,17 @@ export interface DescriptionsView {
   truncated: boolean
   /** Not even names and tokens fit the limit, so no legend is sent at all. */
   dropped: boolean
+  /**
+   * The @ImageN / @AudioN numbers the legend that is sent explains (ValidateOptions.explained): the prompt checks
+   * don't report those as unmentioned.
+   */
+  explained: NonNullable<ValidateOptions['explained']>
 }
 
 /**
  * What the box shows for a set of params: the rows (also the ones switched off, so they can be switched on
- * again), the referenced assets without a description, and the composed prompt with its length.
+ * again), the referenced assets without a description, and the composed prompt with its length – and which
+ * references the sent legend explains, for the prompt checks.
  */
 export function descriptionsView(
   params: GenerationParams,
@@ -87,10 +97,12 @@ export function descriptionsView(
     const asset = byId.get(entry.assetId)
     if (!asset) continue
     const sent = sentEntries.get(asset.id)
+    const wearer = entry.wornBy && byId.get(entry.wornBy.assetId)
     rows.push({
       asset,
       tokens: entry.tokens,
       description: entry.description,
+      ...(wearer ? { wornBy: { asset: wearer, tokens: entry.wornBy!.tokens } } : {}),
       on: !excluded.has(asset.id),
       sent: !!sent,
       ...(sent?.shortened ? { shortened: sent.description } : {})
@@ -109,7 +121,8 @@ export function descriptionsView(
     blank,
     ...(promptCharacterLimit ? { limit: promptCharacterLimit } : {}),
     truncated: composed.truncated && !composed.dropped,
-    dropped: composed.dropped
+    dropped: composed.dropped,
+    explained: explainedReferences(composed)
   }
 }
 

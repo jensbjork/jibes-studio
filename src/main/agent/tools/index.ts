@@ -55,10 +55,13 @@ function descriptionContext(params: GenerationParams, assets: AssetIndex): strin
     return '\nThe descriptions of the references are switched off here ("Ta med beskrivningar" is off), so nothing is appended: say in the prompt what matters about their looks.'
   }
   const off = new Set(params.excludedDescriptionAssetIds ?? [])
-  const lines = all.map(
-    (e) => `- ${e.name} (${e.tokens.join(', ')}): ${off.has(e.assetId) ? '(switched off – not appended)' : e.description}`
-  )
-  return `\nStudio appends these descriptions after your prompt as a References legend – don't repeat them; write the action, camera and mood:\n${lines.join('\n')}`
+  const lines = all.map((e) => {
+    // An outfit's line says who wears it, so the prompt needn't.
+    const worn = e.wornBy ? `, worn by ${e.wornBy.name} (${e.wornBy.tokens.join(', ')})` : ''
+    const text = off.has(e.assetId) ? '(switched off – not appended)' : e.description || '(no description)'
+    return `- ${e.name} (${e.tokens.join(', ')})${worn}: ${text}`
+  })
+  return `\nStudio appends these descriptions after your prompt as a References legend (with who wears each outfit) – don't repeat them; write the action, camera and mood:\n${lines.join('\n')}`
 }
 
 /** The references of reference-mode params, for the write_video_prompt context. */

@@ -57,6 +57,7 @@ import {
   AssetIndex,
   MODES,
   StillIndex,
+  applyOutfitWearers,
   assetPhotoPath,
   audioTarget,
   audioTokenMap,
@@ -90,6 +91,7 @@ import {
   defineTool,
   excludedDescriptionsInput,
   includeDescriptionsInput,
+  outfitWearersInput,
   priceValue,
   quote,
   readForm,
@@ -159,6 +161,9 @@ export function excludedIds(ids: readonly string[], index: AssetIndex): string[]
 const sameIds = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean =>
   JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort())
 
+const sameWearers = (a: GenerationParams['outfitWearers'], b: GenerationParams['outfitWearers']): boolean =>
+  JSON.stringify(Object.entries(a ?? {}).sort()) === JSON.stringify(Object.entries(b ?? {}).sort())
+
 /** The model references are chosen for: the form's, or the reference-to-video model Studio would switch it to. */
 function referenceModel(currentModel: string, models: readonly VideoModel[] | undefined): string {
   if (kindOfModelId(currentModel) === 'reference-to-video') return currentModel
@@ -188,7 +193,8 @@ function formChanges(args: Record<string, unknown>): string {
     ['start_image', 'startbild'],
     ['end_image', 'slutbild'],
     ['include_descriptions', 'beskrivningarna'],
-    ['excluded_description_asset_ids', 'beskrivningarna']
+    ['excluded_description_asset_ids', 'beskrivningarna'],
+    ['outfit_wearers', 'vem som bär kläderna']
   ]
   const others = [...new Set(labels.filter(([key]) => args[key] !== undefined).map(([, label]) => label))]
   const prompt = args.prompt !== undefined
@@ -266,7 +272,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get workspace',
       description:
-        "What the user is looking at in Studio right now (the view – generate, media (the Mediabank: everything made, with media_tab – videos, pictures or films – the tab on screen), sequences, storyboards, editor, prompts, settings or a library view: characters, environments, products, outfits, poses – and the sequence and clip open in the sequence editor, the storyboard open in Storyboards, or the edit open in Redigera – view \"editor\", edit_id) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included) and whether it is in composed_prompt now (sent); include_descriptions and excluded_description_asset_ids are the form's switches, changed with set_form). Start here to see what the user is working on.",
+        "What the user is looking at in Studio right now (the view – generate, media (the Mediabank: everything made, with media_tab – videos, pictures or films – the tab on screen), sequences, storyboards, editor, prompts, settings or a library view: characters, environments, products, outfits, poses – and the sequence and clip open in the sequence editor, the storyboard open in Storyboards, or the edit open in Redigera – view \"editor\", edit_id) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included), whether it is in composed_prompt now (sent) and for an outfit who wears it (worn_by); include_descriptions, excluded_description_asset_ids and who wears what are the form's choices, changed with set_form). Issues warn about references the prompt never mentions only when the legend doesn't explain them either. Start here to see what the user is working on.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'tittade på arbetsytan'
@@ -375,7 +381,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Set Generate form',
       description:
-        "Fills in Studio's Generate form and shows the Generate view. Only the fields you pass change. Values are checked against the model (see list_models): duration like \"8s\", resolution like \"480p\", aspect_ratio like \"16:9\". Passing mode alone switches to that mode's model in the same family (as Studio's mode switch does). start_image is the picture that becomes the first frame – {asset_id, image_id?} (a library photo, its cover unless you give image_id), {still_id} or {upload_id} (made a still in Referensbilder first); it switches the form to image-to-video. end_image is the picture the clip ends on (the same kinds), for an image-to-video model that takes an end image (supports_end_image in list_models; without a model given Studio picks the family's one that does). null clears either. @ImageN tokens are normalised (\"@image3\" → \"@Image3\"). include_descriptions and excluded_description_asset_ids decide which descriptions of the referenced assets Studio appends to the prompt as a References legend (all of them by default – don't repeat them in the prompt). All or nothing: if any value is invalid, nothing changes and the error lists every problem. Returns the form with the token map, the composed prompt, validation issues, the price and notes about anything Studio adjusted on its own (e.g. a duration the new model doesn't offer). To use reference images, call set_references; to reorder them, reorder_references.",
+        "Fills in Studio's Generate form and shows the Generate view. Only the fields you pass change. Values are checked against the model (see list_models): duration like \"8s\", resolution like \"480p\", aspect_ratio like \"16:9\". Passing mode alone switches to that mode's model in the same family (as Studio's mode switch does). start_image is the picture that becomes the first frame – {asset_id, image_id?} (a library photo, its cover unless you give image_id), {still_id} or {upload_id} (made a still in Referensbilder first); it switches the form to image-to-video. end_image is the picture the clip ends on (the same kinds), for an image-to-video model that takes an end image (supports_end_image in list_models; without a model given Studio picks the family's one that does). null clears either. @ImageN tokens are normalised (\"@image3\" → \"@Image3\"). include_descriptions and excluded_description_asset_ids decide which descriptions of the referenced assets Studio appends to the prompt as a References legend (all of them by default – don't repeat them in the prompt); outfit_wearers decides who wears each outfit among the references, which the legend says too. All or nothing: if any value is invalid, nothing changes and the error lists every problem. Returns the form with the token map, the composed prompt, validation issues, the price and notes about anything Studio adjusted on its own (e.g. a duration the new model doesn't offer). To use reference images, call set_references; to reorder them, reorder_references.",
       input: {
         mode: z.enum(MODES).optional().describe('"reference-to-video" (default mode), "image-to-video" or "text-to-video".'),
         model: z.string().optional().describe('A model id from list_models.'),
@@ -392,7 +398,8 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           'The picture the clip ends on (a model with supports_end_image): {asset_id, image_id?}, {still_id} or {upload_id}; null clears it.'
         ),
         include_descriptions: includeDescriptionsInput,
-        excluded_description_asset_ids: excludedDescriptionsInput
+        excluded_description_asset_ids: excludedDescriptionsInput,
+        outfit_wearers: outfitWearersInput
       },
       annotations: WRITE,
       summary: (args) => formChanges(args)
@@ -461,6 +468,14 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       if (input.audio !== undefined) args.audio = input.audio
       if (input.prompt !== undefined) args.prompt = canonical(input.prompt)
       if (input.negative_prompt !== undefined) args.negative_prompt = canonical(input.negative_prompt)
+      // Who wears what, checked against the form's references and merged into its choices (the window takes the
+      // whole set, as it takes the excluded descriptions).
+      let wearers: GenerationParams['outfitWearers']
+      if (input.outfit_wearers !== undefined) {
+        const form = await readForm(ctx)
+        wearers = applyOutfitWearers(form.params.outfitWearers, input.outfit_wearers, formImages(form), index)
+        args.outfit_wearers = wearers ?? null
+      }
       // Last: an upload becomes a still only once everything else is known to be right.
       if (input.start_image !== undefined) args.start_image = await formPicture(ctx, input.start_image, index)
       if (input.end_image !== undefined) args.end_image = await formPicture(ctx, input.end_image, index)
@@ -476,6 +491,9 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       }
       if (excluded !== undefined && !sameIds(state.params.excludedDescriptionAssetIds, excluded)) {
         notes.push('Studio-fönstret ändrade inte vilka beskrivningar som är avslagna – kontrollera description_entries i svaret.')
+      }
+      if (input.outfit_wearers !== undefined && !sameWearers(state.params.outfitWearers, wearers)) {
+        notes.push('Studio-fönstret ändrade inte vem som bär kläderna – kontrollera worn_by i description_entries i svaret.')
       }
       return {
         data: {
@@ -494,7 +512,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Validate prompt',
       description:
-        "Checks a prompt's @ImageN and @AudioN tokens against a set of references without changing anything – the same check Studio applies before every paid generation (tokens that point at nothing or past the model's limits, malformed ones like \"@Image 3\" or \"@Voice1\", audio with a model that takes none, audio without any reference image, more than 15 s of audio in total, references never mentioned). By default (use_form: true) it uses the Generate form's references, model and description switches; pass reference_asset_ids (all photos of each asset, in order, plus characters' voices) or references (items like set_references) to check against another set, e.g. a planned sequence clip, and model or mode to check for another mode. Returns ok (no errors), the issues (Swedish messages, errors block generation, warnings are advice), the token maps with which references the prompt mentions, the prompt with tokens normalised, and composed_prompt: the prompt as it would be sent, with the descriptions of the referenced assets appended as a References legend (description_entries; include_descriptions / excluded_description_asset_ids change it like set_form's), measured against the model's prompt_character_limit.",
+        "Checks a prompt's @ImageN and @AudioN tokens against a set of references without changing anything – the same check Studio applies before every paid generation (tokens that point at nothing or past the model's limits, malformed ones like \"@Image 3\" or \"@Voice1\", audio with a model that takes none, audio without any reference image, more than 15 s of audio in total, references neither mentioned nor explained by the References legend). By default (use_form: true) it uses the Generate form's references, model, description switches and who wears what; pass reference_asset_ids (all photos of each asset, in order, plus characters' voices) or references (items like set_references) to check against another set, e.g. a planned sequence clip, and model or mode to check for another mode. Returns ok (no errors), the issues (Swedish messages, errors block generation, warnings are advice), the token maps with which references the prompt mentions, the prompt with tokens normalised, and composed_prompt: the prompt as it would be sent, with the descriptions of the referenced assets appended as a References legend (description_entries, with worn_by for an outfit somebody wears; include_descriptions / excluded_description_asset_ids change it like set_form's), measured against the model's prompt_character_limit.",
       input: {
         prompt: z.string(),
         negative_prompt: z.string().optional(),
@@ -556,7 +574,9 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         referenceImages: paths,
         referenceAudios: audios.length ? audios : undefined,
         includeDescriptions: input.include_descriptions ?? switches?.includeDescriptions,
-        ...(excluded?.length ? { excludedDescriptionAssetIds: excluded } : {})
+        ...(excluded?.length ? { excludedDescriptionAssetIds: excluded } : {}),
+        // Who wears what goes with the form's references too; other references get Studio's default.
+        ...(switches?.outfitWearers ? { outfitWearers: switches.outfitWearers } : {})
       }
       const issues = promptIssues(params)
       const mentioned = new Set(findImageTokens(input.prompt).map((t) => t.index))

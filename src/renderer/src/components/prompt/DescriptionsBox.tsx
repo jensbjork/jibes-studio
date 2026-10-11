@@ -1,17 +1,16 @@
-import { useId, useMemo, useState } from 'react'
-import type { Asset, GenerationParams, PromptLanguage } from '@shared/types'
+import { useId, useState } from 'react'
+import type { Asset } from '@shared/types'
 import AssetAvatar from '../assets/AssetAvatar'
 import { KIND_TONE } from '../pickers/assetKinds'
-import { descriptionsView, type DescriptionRow } from './descriptions'
+import type { DescriptionRow, DescriptionsView } from './descriptions'
 
 interface Props {
-  params: GenerationParams
-  /** The whole library, live: a description edited there shows up here at once (and is what main sends). */
-  assets: readonly Asset[]
-  /** Prompt language: the legend's words ("References"/"Referenser", "voice"/"röst"). */
-  language: PromptLanguage
-  /** The model's prompt limit (VideoModel.promptCharacterLimit), when it has one. */
-  limit?: number
+  /**
+   * descriptionsView of the form's params, the live library (a description edited there shows up here at once, and
+   * is what main sends), the prompt language and the model's prompt limit. The form computes it once: its prompt
+   * checks need to know which references the legend explains.
+   */
+  view: DescriptionsView
   /** The master switch, "Ta med beskrivningar" (includeDescriptions). */
   onInclude: (on: boolean) => void
   /** One asset's toggle (excludedDescriptionAssetIds). */
@@ -23,17 +22,17 @@ interface Props {
 /**
  * "Läggs till i prompten": the descriptions of the characters, places, outfits and poses among the references,
  * which are appended to the prompt as a References legend when it is sent (composed by main from the library as
- * it is then, so an edited description applies to the next generation). One row per described asset with its
- * tokens and an excerpt, a toggle for each and a master switch, a link to edit the description, and the length
- * of the prompt as sent against the model's limit, with a note when descriptions had to be shortened or left
- * out to fit. Hidden while no reference that is sent has a description.
+ * it is then, so an edited description applies to the next generation), with who wears each outfit. One row per
+ * described asset (and per outfit somebody wears) with its tokens and an excerpt, a toggle for each and a master
+ * switch, a link to edit the description, and the length of the prompt as sent against the model's limit, with a
+ * note when descriptions had to be shortened or left out to fit. Hidden while no reference that is sent has a
+ * description and no outfit is worn.
  */
-export default function DescriptionsBox({ params, assets, language, limit, onInclude, onToggle, onOpenAsset }: Props) {
-  const view = useMemo(() => descriptionsView(params, assets, language, limit), [params, assets, language, limit])
+export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset }: Props) {
   const [showText, setShowText] = useState(false)
   const titleId = useId()
   const textId = useId()
-  const { rows, undescribed, include, composed, blank, truncated, dropped } = view
+  const { rows, undescribed, include, composed, blank, truncated, dropped, limit } = view
   if (!rows.length) return null
 
   const length = composed.prompt.length
@@ -174,7 +173,7 @@ function Row({
   onToggle: (on: boolean) => void
   onOpen?: () => void
 }) {
-  const { asset, tokens, description, on, sent, shortened } = row
+  const { asset, tokens, description, wornBy, on, sent, shortened } = row
   const tone = KIND_TONE[asset.kind]
   return (
     <li className="flex items-start gap-2 px-2.5 py-2">
@@ -192,12 +191,23 @@ function Row({
               {token}
             </span>
           ))}
+          {/* Who wears the outfit, as the legend says it ("worn by Anna (@Image1)"); chosen on its chip (bärs av). */}
+          {wornBy && (
+            <span className="text-[11px] text-muted" title={`${asset.name} bärs av ${wornBy.asset.name} – det skrivs in i prompten`}>
+              bärs av <span className={KIND_TONE[wornBy.asset.kind].text}>{wornBy.asset.name}</span>
+              {wornBy.tokens.length > 0 && ` (${wornBy.tokens.join(', ')})`}
+            </span>
+          )}
         </div>
         {/* What is sent: the shortened text when the model's limit asked for it, the full one otherwise (and,
-            dimmed with the row, while it isn't sent at all). */}
-        <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted select-text" title={description}>
-          {shortened || description}
-        </p>
+            dimmed with the row, while it isn't sent at all). A worn outfit without a description sends who wears it. */}
+        {description ? (
+          <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted select-text" title={description}>
+            {shortened || description}
+          </p>
+        ) : (
+          <p className="mt-0.5 text-[11px] leading-snug text-muted">Ingen beskrivning – bara vem som bär den.</p>
+        )}
         {(shortened !== undefined || onOpen) && (
           <div className="mt-0.5 flex items-center gap-2 text-[11px]">
             {shortened !== undefined && (
@@ -219,7 +229,7 @@ function Row({
                 title={`Öppna ${asset.name} i biblioteket`}
                 className="text-muted transition hover:text-text hover:underline"
               >
-                Ändra beskrivning
+                {description ? 'Ändra beskrivning' : 'Skriv en beskrivning'}
               </button>
             )}
           </div>
@@ -229,15 +239,15 @@ function Row({
         type="button"
         role="switch"
         aria-checked={on}
-        aria-label={`Ta med beskrivningen av ${asset.name}`}
+        aria-label={description ? `Ta med beskrivningen av ${asset.name}` : `Ta med vem som bär ${asset.name}`}
         disabled={!include}
         onClick={() => onToggle(!on)}
         title={
           !include
             ? 'Beskrivningarna är avslagna'
             : on
-              ? `Beskrivningen av ${asset.name} läggs till – klicka för att låta bli`
-              : `Lägg till beskrivningen av ${asset.name}`
+              ? `${description ? `Beskrivningen av ${asset.name}` : `Vem som bär ${asset.name}`} läggs till – klicka för att låta bli`
+              : `Lägg till ${description ? `beskrivningen av ${asset.name}` : `vem som bär ${asset.name}`}`
         }
         className="mt-1 shrink-0 rounded-full disabled:opacity-40"
       >
@@ -249,7 +259,13 @@ function Row({
 
 /** The legend as it is sent, its tokens coloured like the assets they belong to (as in the prompt above). */
 function LegendText({ text, rows }: { text: string; rows: readonly DescriptionRow[] }) {
-  const tones = new Map(rows.flatMap((r) => r.tokens.map((t) => [t, KIND_TONE[r.asset.kind].token] as const)))
+  const tones = new Map(
+    rows.flatMap((r) => [
+      // A wearer without a row of its own (no description) is named in its outfit's line.
+      ...(r.wornBy?.tokens.map((t) => [t, KIND_TONE[r.wornBy!.asset.kind].token] as const) ?? []),
+      ...r.tokens.map((t) => [t, KIND_TONE[r.asset.kind].token] as const)
+    ])
+  )
   // split() with a capturing group puts the tokens at the odd indices.
   return (
     <>
