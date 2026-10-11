@@ -450,6 +450,8 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Fixed
 
+- Full screen from a clip card's player (Generera, the Mediabank) no longer closes at once: the card kept its player
+  only while the pointer was over it, and going full screen counts as leaving.
 - The agent's presence pill no longer re-renders in a loop while an agent works.
 - A picture that failed after its *Skapa bild…* dialog was closed is no longer lost: it shows in *Pågår och klart*
   and on its board.
