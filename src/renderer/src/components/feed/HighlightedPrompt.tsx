@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { findAudioTokens, findImageTokens, findMalformedTokens } from '@shared/prompt-refs'
-import type { AssetKind } from '@shared/types'
 import { KIND_TONE, OWN_IMAGE_TOKEN as OWN_TOKEN } from '../pickers/assetKinds'
+import { audioRole } from '../pickers/audioRefs'
+import { useTokenCard, type TokenCardContent, type TokenTarget } from '../pickers/ReferenceCard'
 import type { AudioReference, ImageReference } from './references'
 
 interface Props {
@@ -22,29 +23,62 @@ interface Mark {
   node: ReactNode
 }
 
-const base = 'rounded px-0.5 font-medium transition-colors'
+const base = 'rounded px-0.5 font-medium transition-colors outline-none focus-visible:ring-1 focus-visible:ring-white/70'
 const broken = `${base} text-accent underline decoration-accent decoration-wavy underline-offset-2`
+
+/** A picture that was sent, for the token's hover card. */
+function imageTarget(ref: ImageReference): TokenTarget {
+  return {
+    kind: ref.asset?.kind,
+    label: ref.asset ? `${ref.asset.name} (foto ${ref.photo ?? 1})` : 'egen bild',
+    path: ref.path,
+    name: ref.asset?.name,
+    number: ref.photo,
+    count: ref.asset?.images.length,
+    ...(ref.unsent ? { unsent: 'Skickades inte – modellen tog inte fler bilder' } : {})
+  }
+}
+
+/** A sound clip that was sent, for the token's hover card. */
+function audioTarget(ref: AudioReference): TokenTarget {
+  return {
+    kind: ref.asset?.kind,
+    label: ref.asset ? `${ref.asset.name} · ${audioRole(ref.asset.kind)}` : 'eget ljud',
+    path: ref.path,
+    name: ref.asset?.name,
+    number: ref.number,
+    count: ref.asset?.audio?.length,
+    window: { start: ref.start, length: ref.length }
+  }
+}
 
 /**
  * A finished generation's prompt, read-only, with its @ImageN and @AudioN tokens coloured like the asset they
  * point at, so it is easy to see which picture or voice each part of the text was about. Tokens that pointed at
- * nothing, and misspelled ones, are red.
+ * nothing, and misspelled ones, are red. Hovering or focusing a token shows its card: the picture, or the clip
+ * with a play button for the part that was sent.
  */
 export default function HighlightedPrompt({ text, images, audios, highlighted, onHover, className = '' }: Props) {
   const references = images.filter((r) => r.role === 'reference')
+  const card = useTokenCard()
   const marks: Mark[] = []
 
-  const tokenNode = (key: number, raw: string, canonical: string, kind: AssetKind | undefined, label: string) => (
-    <span
-      key={key}
-      title={`${canonical} · ${label}`}
-      onMouseEnter={() => onHover?.(canonical)}
-      onMouseLeave={() => onHover?.(undefined)}
-      className={`${base} ${kind ? KIND_TONE[kind].token : OWN_TOKEN} ${highlighted === canonical ? 'ring-1 ring-white/50' : ''}`}
-    >
-      {raw}
-    </span>
-  )
+  const tokenNode = (key: number, raw: string, canonical: string, content: TokenCardContent, valid: boolean) => {
+    const kind = content.target?.kind
+    return (
+      <span
+        key={key}
+        {...card.bind(key, content, { highlight: canonical, onHighlight: onHover })}
+        className={
+          valid
+            ? `${base} ${kind ? KIND_TONE[kind].token : OWN_TOKEN} ${highlighted === canonical ? 'ring-1 ring-white/50' : ''}`
+            : broken
+        }
+      >
+        {raw}
+      </span>
+    )
+  }
 
   for (const t of findImageTokens(text)) {
     const ref = references[t.index - 1]
@@ -52,14 +86,15 @@ export default function HighlightedPrompt({ text, images, audios, highlighted, o
     marks.push({
       start: t.start,
       end: t.end,
-      node:
-        ref && !ref.unsent ? (
-          tokenNode(t.start, t.raw, canonical, ref.asset?.kind, ref.asset ? `${ref.asset.name} (foto ${ref.photo ?? 1})` : 'egen bild')
-        ) : (
-          <span key={t.start} title={`${t.raw} pekade inte på någon bild som skickades`} className={broken}>
-            {t.raw}
-          </span>
-        )
+      node: tokenNode(
+        t.start,
+        t.raw,
+        canonical,
+        ref
+          ? { token: canonical, ref: 'image', target: imageTarget(ref) }
+          : { token: canonical, ref: 'image', problem: `${t.raw} pekade inte på någon bild som skickades` },
+        !!ref && !ref.unsent
+      )
     })
   }
   for (const t of findAudioTokens(text)) {
@@ -69,12 +104,14 @@ export default function HighlightedPrompt({ text, images, audios, highlighted, o
     marks.push({
       start: t.start,
       end: t.end,
-      node: ref ? (
-        tokenNode(t.start, t.raw, canonical, ref.asset?.kind, ref.asset ? `${ref.asset.name} (ljud)` : 'eget ljud')
-      ) : (
-        <span key={t.start} title={`${t.raw} pekade inte på något ljud som skickades`} className={broken}>
-          {t.raw}
-        </span>
+      node: tokenNode(
+        t.start,
+        t.raw,
+        canonical,
+        ref
+          ? { token: canonical, ref: 'audio', target: audioTarget(ref) }
+          : { token: canonical, ref: 'audio', problem: `${t.raw} pekade inte på något ljud som skickades` },
+        !!ref
       )
     })
   }
@@ -86,7 +123,11 @@ export default function HighlightedPrompt({ text, images, audios, highlighted, o
       node: (
         <span
           key={m.start}
-          title={m.suggestion ? `Felskriven referens – menade ${m.suggestion}` : 'Felskriven referens'}
+          {...card.bind(m.start, {
+            token: m.raw,
+            ref: 'image',
+            problem: m.suggestion ? `Felskriven referens – menade ${m.suggestion}` : 'Felskriven referens'
+          })}
           className={broken}
         >
           {m.raw}
@@ -106,5 +147,10 @@ export default function HighlightedPrompt({ text, images, audios, highlighted, o
   }
   if (at < text.length) parts.push(text.slice(at))
 
-  return <p className={`whitespace-pre-wrap break-words leading-relaxed select-text ${className}`}>{parts}</p>
+  return (
+    <>
+      <p className={`whitespace-pre-wrap break-words leading-relaxed select-text ${className}`}>{parts}</p>
+      {card.card}
+    </>
+  )
 }

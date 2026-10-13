@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { ApprovalImageRequest, ApprovalRequest, GenerationParams, Storyboard, VideoModel } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
+import type { ViewedPicture } from '../pickers/ReferenceViewer'
+import { useViewPictures } from './ApprovalPictures'
 
 // What the approval dialog shows for a request about a storyboard (ApprovalRequest.sequenceKind 'storyboard'): a
 // transition is the clip from one board's picture to the next one's, so the user sees the two pictures side by
@@ -171,23 +173,31 @@ function boxRatio(aspectRatio: string | undefined): string {
   return m ? `${m[1]} / ${m[2]}` : '16 / 9'
 }
 
-/** One board's picture with its number and note under it. */
+/** One board's picture with its number and note under it; a click shows it large. */
 function BoardPicture({
   path,
   board,
   role,
-  aspectRatio
+  aspectRatio,
+  onOpen
 }: {
   path: string | undefined
   board: BoardView
   role: 'Start' | 'Slut'
   aspectRatio?: string
+  onOpen?: () => void
 }) {
   const [missing, setMissing] = useState(false)
+  const Box = onOpen ? 'button' : 'div'
   return (
     <figure className="min-w-0 flex-1">
-      <div
-        className={`relative overflow-hidden rounded-md bg-raised ${missing || !path ? 'ring-1 ring-accent' : ''}`}
+      <Box
+        type={onOpen ? 'button' : undefined}
+        onClick={onOpen}
+        title={onOpen ? 'Klicka för att förstora' : undefined}
+        className={`relative block w-full overflow-hidden rounded-md bg-raised ${missing || !path ? 'ring-1 ring-accent' : ''} ${
+          onOpen ? 'cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-white/70' : ''
+        }`}
         style={{ aspectRatio: boxRatio(aspectRatio) }}
       >
         {path && !missing ? (
@@ -203,7 +213,7 @@ function BoardPicture({
           </span>
         )}
         <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 text-[10px]">{role}</span>
-      </div>
+      </Box>
       <figcaption className="mt-1.5 text-[12px] leading-snug">
         <span className="font-medium">{board.number ? `Ruta ${board.number}` : 'Ruta'}</span>
         {board.note?.trim() && <span className="line-clamp-2 text-muted select-text">{board.note.trim()}</span>}
@@ -229,6 +239,15 @@ export function TransitionSummary({
 }) {
   const p = view.params
   const model = models.find((m) => m.id === p.model)
+  const open = useViewPictures()
+  const boardName = (board: BoardView): string => (board.number ? `Ruta ${board.number}` : 'Ruta')
+  const pictures: ViewedPicture[] = [
+    ...(p.startImage ? [{ path: p.startImage, place: 'Startbild', name: boardName(view.from) }] : []),
+    ...(p.endImage ? [{ path: p.endImage, place: 'Slutbild', name: boardName(view.to) }] : [])
+  ]
+  // By place, not by file: two boards can have the same picture.
+  const openAt = (at: number, path: string | undefined) =>
+    open && path ? () => open(`Övergång ${view.number}`, pictures, at) : undefined
   // Always image-to-video from the two pictures, so the mode goes unsaid.
   const settings = [
     model?.name ?? p.model,
@@ -250,11 +269,23 @@ export function TransitionSummary({
       <p className="mb-3 text-[12px] text-muted">{settings.join(' · ')}</p>
 
       <div className={`flex items-start gap-3 ${compact ? 'max-w-[420px]' : ''}`}>
-        <BoardPicture path={p.startImage} board={view.from} role="Start" aspectRatio={aspectRatio} />
+        <BoardPicture
+          path={p.startImage}
+          board={view.from}
+          role="Start"
+          aspectRatio={aspectRatio}
+          onOpen={openAt(0, p.startImage)}
+        />
         <span aria-hidden className="mt-[18%] shrink-0 text-lg text-muted">
           →
         </span>
-        <BoardPicture path={p.endImage} board={view.to} role="Slut" aspectRatio={aspectRatio} />
+        <BoardPicture
+          path={p.endImage}
+          board={view.to}
+          role="Slut"
+          aspectRatio={aspectRatio}
+          onOpen={openAt(p.startImage ? 1 : 0, p.endImage)}
+        />
       </div>
 
       <p className="mb-1.5 mt-3 text-[11px] text-muted">Vad händer?</p>
@@ -281,13 +312,23 @@ export function TransitionSummary({
 /** Where an image request's picture goes in a storyboard: the board, its note, and the picture it replaces. */
 export function BoardTargetSummary({ target, storyboardName }: { target: BoardTarget; storyboardName?: string }) {
   const where = storyboardName ? ` i ”${storyboardName}”` : ''
+  const open = useViewPictures()
+  const current = target.currentImage
   return (
     <div className="mt-3 flex items-start gap-3">
-      {target.currentImage && (
-        <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-raised" title="Bilden rutan har nu">
-          <img src={mediaUrl(target.currentImage)} draggable={false} className="h-full w-full object-cover opacity-70" />
+      {current && (
+        <button
+          type="button"
+          onClick={() =>
+            open?.('Rutans bild', [{ path: current, place: 'Ersätts', name: `Bilden i ruta ${target.number ?? ''}`.trim() }], 0)
+          }
+          disabled={!open}
+          className="relative h-16 w-24 shrink-0 cursor-zoom-in overflow-hidden rounded bg-raised outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:cursor-default"
+          title="Bilden rutan har nu – klicka för att förstora"
+        >
+          <img src={mediaUrl(current)} alt="" draggable={false} className="h-full w-full object-cover opacity-70" />
           <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">Ersätts</span>
-        </div>
+        </button>
       )}
       <p className="text-[12px] leading-relaxed text-muted">
         {target.number

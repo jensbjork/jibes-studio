@@ -114,6 +114,12 @@ export function stopClip(): void {
   emit()
 }
 
+/** Plays the window, or stops it when it is the one playing (a key press on an @AudioN token). */
+export function toggleClip(path: string, start: number, length: number): void {
+  if (playing?.key === keyOf(path, start, length)) stopClip()
+  else playClip(path, start, length)
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
@@ -140,20 +146,32 @@ interface Props {
   label: string
   /** Size and colour; defaults to a small round button. */
   className?: string
+  /**
+   * Plays on to the window's end when the button goes away – a hover card closing as the pointer leaves it. The
+   * window is short, and any other clip started stops it.
+   */
+  keepPlaying?: boolean
 }
 
 /**
  * ▶ / ■ for a clip's reference window, with a ring that fills while it plays. Stops when the button goes away,
- * so a removed chip doesn't keep talking.
+ * so a removed chip doesn't keep talking (unless `keepPlaying`).
  */
-export default function AudioPlayButton({ path, start, length, label, className = 'h-5 w-5' }: Props) {
+export default function AudioPlayButton({
+  path,
+  start,
+  length,
+  label,
+  className = 'h-5 w-5',
+  keepPlaying = false
+}: Props) {
   const state = useClipState(path, start, length)
   const playingNow = state.playing
   useEffect(
     () => () => {
-      if (playing?.key === keyOf(path, start, length)) stopClip()
+      if (!keepPlaying && playing?.key === keyOf(path, start, length)) stopClip()
     },
-    [path, start, length]
+    [path, start, length, keepPlaying]
   )
   const title = state.failed
     ? `Filen går inte att spela upp: ${path.split('/').pop() ?? path}`

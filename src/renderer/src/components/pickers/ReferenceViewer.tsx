@@ -58,7 +58,9 @@ type Panel = 'image' | 'asset'
 /**
  * A reference picture large, over the window: what it is, ← / → through the list's pictures, and its actions –
  * swap it (in place, so its @ImageN and the prompt stay), swap every place of its asset, show it in Finder, remove it.
- * Esc or a click outside closes (the swap panel first, when it is open).
+ * Without onSwapImage, onSwapAsset and onRemove it only shows (the approval dialog: a request can't be changed
+ * there). Esc or a click outside closes (the swap panel first, when it is open) – and only the viewer: the key is
+ * captured, so a dialog underneath stays open.
  */
 export default function ReferenceViewer({
   label,

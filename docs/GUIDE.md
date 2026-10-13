@@ -35,7 +35,8 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   (status, model, the asset whose photos or voice were used, rating (★★★, ★★ or more, ★ or more, *Tumme ner*),
   unrated or reviewed, time, standalone or a take, *Nya* — not watched yet), sorting (newest, oldest, rating, cost,
   length) and a summary of the filtered clips. A detail drawer shows the player, the prompt with its
-  tokens (and *Skickad prompt*, the prompt exactly as it was sent, when descriptions were appended), the references
+  tokens (and *Skickad prompt*, the prompt exactly as it was sent, when descriptions were appended) — hover a token
+  to see its picture, or to play the part of the voice that was sent — the references
   and voices that were sent, the settings, and your own rating (👎 *tumme ner* or one to three stars), note and tags
   next to the agents' reviews.
 - **A reference-aware prompt editor.** In reference mode the prompt points at the photos as `@Image1`, `@Image2` …
@@ -479,6 +480,14 @@ their own** — the paid tools (videos, pictures, paid edits and designed voices
 request that Studio shows you (with the prompt, references, voices and price, or with what would be removed and what
 depends on it), and nothing is sent to Venice or removed until you approve it. Settings, the library folder,
 consents and your own ratings and learnings stay yours.
+
+To check a request before you approve it, hover an `@ImageN` or `@AudioN` token in its prompt or in the appended
+References legend (or Tab to it): a card shows the picture large enough to recognise — the asset, *foto 2 av 3*, and
+*skickas inte* for one past the model's limit — or names the voice with its window and a play button for exactly the
+part that is sent (Enter on a focused voice token plays it too). Tokens and the reference tiles or voice rows they name
+light up together, whichever you hover. Click a tile, an image token, a start or end image, a neighbour's frame or a
+storyboard board to see it large, with ← / → and a filmstrip through the request's pictures; nothing can be changed
+there, and Esc closes the viewer (then the card) before it closes the dialog.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
 Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 90
