@@ -31,19 +31,30 @@ export const PREFERRED_IMAGE = {
 
 // ── Model list ────────────────────────────────────────────────────────────────
 
-// The list rarely changes; one request is shared by every dialog. A failed fetch is forgotten so the next
-// dialog tries again (e.g. after the API key was added).
+// The list rarely changes; one request is shared by every dialog, and dropped after as long as main keeps its own
+// copy so a window left open still follows Venice. A failed fetch is forgotten so the next dialog tries again
+// (e.g. after the API key was added), and answers with the last list that arrived when there is one.
+const IMAGE_MODELS_MAX_AGE_MS = 10 * 60_000
 let imageModelsPromise: Promise<ImageModel[]> | undefined
+let imageModelsFetchedAt = 0
+let lastImageModels: ImageModel[] | undefined
 
 export function loadImageModels(): Promise<ImageModel[]> {
-  if (!imageModelsPromise) {
-    const request = window.studio.listImageModels()
-    imageModelsPromise = request
-    request.catch(() => {
+  if (imageModelsPromise && Date.now() - imageModelsFetchedAt < IMAGE_MODELS_MAX_AGE_MS) return imageModelsPromise
+  const request: Promise<ImageModel[]> = window.studio.listImageModels().then(
+    (list) => {
+      lastImageModels = list
+      return list
+    },
+    (err: unknown) => {
       if (imageModelsPromise === request) imageModelsPromise = undefined
-    })
-  }
-  return imageModelsPromise
+      if (lastImageModels) return lastImageModels
+      throw err
+    }
+  )
+  imageModelsPromise = request
+  imageModelsFetchedAt = Date.now()
+  return request
 }
 
 export function useImageModels(): { models: ImageModel[]; loaded: boolean; error?: string } {

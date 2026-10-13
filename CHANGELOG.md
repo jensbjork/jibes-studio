@@ -10,6 +10,13 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Swap a reference without losing the prompt**: click a reference picture in Generera, a sequence clip or *Skapa
+  bild…* to see it large (← → step through them), then *Byt bilden…* swaps it for another picture in the same place,
+  and *Byt hela Anna…* gives every place of that asset – and its voice, when both have one – to another asset. No
+  `@ImageN` or `@AudioN` number changes, and the name written right before a fully swapped group follows
+  (`Anna (@Image1)` → `Bo (@Image1)`), as do the description switch and who wears which outfit; clips that carry the
+  references keep their tokens. Agents: `swap_reference` (`image`, `with`, `whole_asset`, for the form or a clip),
+  90 tools in all (35 read, 46 write, 9 ask for approval).
 - **The prompt says who wears the clothes**: with *Ta med beskrivningar* on, the References legend names the
   character wearing each outfit – `Röd klänning (@Image3), worn by Anna (@Image1, @Image2): …` (`bärs av` in
   Swedish) – also for an outfit without a description, so the model can't take the clothes for anyone else's. The
@@ -450,6 +457,10 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Fixed
 
+- The model lists follow Venice while Studio stays open: a window kept its first list of video and image models
+  until it was closed, so models Venice added or retired never showed up. Both lists are now fetched again once
+  they are ten minutes old (when a view opens, or the window comes back to the front); if Venice can't be reached
+  meanwhile, the last list stays.
 - Full screen from a clip card's player (Generera, the Mediabank) no longer closes at once: the card kept its player
   only while the pointer was over it, and going full screen counts as leaving.
 - The agent's presence pill no longer re-renders in a loop while an agent works.

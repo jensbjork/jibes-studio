@@ -15,7 +15,8 @@ interface Props {
 export default function Modal({ title, subtitle, onClose, footer, maxWidth = 460, children }: Props) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      // Not when a popover inside it took the key (it marks it handled).
+      if (e.key === 'Escape' && !e.defaultPrevented) onClose()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)

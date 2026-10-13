@@ -179,7 +179,7 @@ connect (see [Troubleshooting](#troubleshooting)).
 
 ## Tools
 
-Studio offers **89 tools** — 35 that read, 45 that write (free) and 9 that only ask for your approval (8 paid ones
+Studio offers **90 tools** — 35 that read, 46 that write (free) and 9 that only ask for your approval (8 paid ones
 and `request_delete`) — plus one prompt and one resource. Tool errors come back as readable tool errors; their
 messages are in Swedish, like the app's UI. Tools that touch the library fail with an explanation until a library is
 open, and the tools that read or fill the Generate form need the Studio window to be open. No tool takes a file path:
@@ -188,7 +188,7 @@ files come as uploads (see [Sending files to Studio](#sending-files-to-studio)) 
 | Area | Read | Write | Asks for approval |
 | --- | --- | --- | --- |
 | Guide and library (`tools/library.ts`) | `get_studio_guide`, `get_prompt_blocks`, `list_assets`, `get_asset`, `list_models`, `list_prompts`, `list_generations`, `get_generation` | `create_asset`, `update_asset`, `update_asset_audio`, `add_asset_images`, `reorder_asset_images`, `add_asset_audio`, `reorder_asset_audio`, `save_prompt`, `update_prompt` | |
-| Generate form (`tools/form.ts`) | `get_workspace`, `validate_prompt` | `set_form`, `set_references`, `reorder_references`, `open_in_studio` | |
+| Generate form (`tools/form.ts`) | `get_workspace`, `validate_prompt` | `set_form`, `set_references`, `reorder_references`, `swap_reference`, `open_in_studio` | |
 | Sequences (`tools/sequences.ts`) | `list_sequences`, `get_sequence` | `create_sequence`, `update_sequence`, `add_segment`, `update_segment`, `move_segment`, `export_film`, `stop_generation_run` | |
 | Stills and keyframes (`tools/stills.ts`) | `list_image_models`, `list_stills`, `get_still`, `preview_segment_frames` | `save_frame_as_still`, `bridge_segment`, `import_still` | |
 | Storyboards (`tools/storyboards.ts`) | `list_storyboards`, `get_storyboard`, `preview_transition` | `create_storyboard`, `update_storyboard`, `add_board`, `update_board`, `move_board`, `update_transition`, `convert_storyboard_to_sequence` | |
@@ -199,7 +199,7 @@ files come as uploads (see [Sending files to Studio](#sending-files-to-studio)) 
 | Own clips (`tools/imports.ts`) | `get_import` | `import_own_clips`, `cancel_import` | |
 | Removing things (`tools/delete.ts`) | | | `request_delete` |
 | Status (`tools/work.ts`) | `get_work_status` | | |
-| **Total (89)** | **35** | **45** | **9** |
+| **Total (90)** | **35** | **46** | **9** |
 
 **Images and sound.** Tools that return media send pictures as MCP image content (JPEG) and sound as MCP **audio
 content** (MP3, mono), each preceded by a text label that says what it is (`Reference @Audio1 = Anna's voice
@@ -251,13 +251,14 @@ frames, reference images and text work without it.
 | `get_import` | How an `import_own_clips` import is going: `running`, `done` or `failed`, each file's progress and error, and once done the `generation_ids`, `segment_ids` and errors. Kept for two hours. |
 | `get_work_status` | What Studio is doing right now and what has finished that the user hasn't looked at yet — the window's *Pågår och klart*: `running` (videos at Venice with progress and `eta_seconds` or `usually_takes_seconds`, takes being sent, *Generera saknade* runs, pictures being made, Redigera jobs and renders, exports, imports, approved requests being carried out and uploads; each with its label, phase, start, `via` — the agent it was done for — and ids), `unseen` (finished and failed videos, versions, pictures, exports and voices nobody has looked at, newest first) and `counts` (in all and per view). `view` narrows it to one view (`generate`, `media`, `sequences`, `storyboards`, `editor` or a library view), `include_finished: false` leaves the finished ones out. Ids only, never file paths (an error that quoted one — ffmpeg names files by their paths — keeps only the file name). |
 
-### Write (45 tools; free, change the library or the form)
+### Write (46 tools; free, change the library or the form)
 
 | Tool | What it does |
 | --- | --- |
 | `set_form` | Fills in the Generate form (mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, start and end image — `{asset_id, image_id?}`, `{still_id}` or `{upload_id}`, `null` clears; an end image only with a model that takes one —, which descriptions are appended: `include_descriptions`, `excluded_description_asset_ids`, and who wears each outfit: `outfit_wearers`) and shows the Generate view. An upload is first imported as a still in `Referensbilder`, so the form never points at a scratch file. All or nothing: invalid values change nothing. |
 | `set_references` | Sets the form's reference images and audio from assets, in order (`replace` or `append`): all photos or chosen `image_ids` (`[]` for none, e.g. only a voice); with a model that takes reference audio, a character's first voice clip unless `include_voice` is false, an environment's first sound clip with `include_voice: true`, or chosen `audio_ids`. An item can also be a loose picture, `{still_id}` or `{upload_id}` (made a still in `Referensbilder` first), with no description to append. Switches the form to reference-to-video if needed and returns the token maps (`references`, `audio_references`) to write the prompt with. Photos and clips over the model's limits (9 images for Seedance; 3 clips, 15 s of audio in all) are listed in `not_added` / `not_added_audio`, and so is a default voice under 2 s (no model takes it). Replacing the references doesn't renumber the prompt's tokens; `reorder_references` does. |
 | `reorder_references` | Changes the order of the form's (`target: "form"`, default) or a clip's (`target: {segment_id}`) reference images (`images`) and/or audio clips (`audios`), like dragging a thumbnail in Studio, and renumbers every `@ImageN` / `@AudioN` in the prompt and negative prompt so each keeps pointing at the same picture or clip: references [A, B, C] with "@Image1 hugs @Image3", `images: ["@Image3"]` → [C, A, B] and "@Image2 hugs @Image1". References are named by token, `image_id` / `audio_id` or `asset_id` (all of that asset's photos or clips); the named ones come first, the rest keep their order. Answers with the new token maps, `moved` (old → new token), the prompt, `composed_prompt` and the pictures past the model's limit (`not_sent`; moving one forward sends it). For a continuing clip only its own references (one that carries another clip's says where to reorder them); not for a clip that sends no references. |
+| `swap_reference` | Swaps the picture in one place of the form's (`target: "form"`, default) or a clip's (`target: {segment_id}`) references for another, like *Byt bilden…* in Studio, without changing any number: `image` names the place (its token in the current numbering, or the `image_id` there), `with` the new picture (`{asset_id, image_id?}` — the cover unless `image_id` —, `{still_id}` or `{upload_id}`, made a still in `Referensbilder` first). `whole_asset: true` is *Byt hela …*: every place of the asset whose photo is in `image` goes to the asset in `with.asset_id` (its photos in order, reused from the first when it has fewer), and its voice or sound takes the old one's `@Audio` places (the old clips stay, with a note, when it has none). The name written right before a group of tokens that all changed follows (`Anna (@Image1, voice @Audio1)` → `Bo (…)`), as do the description switches and who wears which outfit; a name before a group that still holds some of the old asset's pictures stays. Answers with the token maps, `swapped` (each token that shows something else now: `was` / `now`), the prompt, `composed_prompt`, issues and `notes`. Refused for a loose picture or a non-asset with `whole_asset`, and for a clip that sends no references of its own (one that carries another clip's names the clip to swap in — the clips carrying its references keep their tokens). |
 | `open_in_studio` | Brings a place to the front: the Generate view (with `generation_id`, that clip in its drawer; a clip that isn't in Generera's list — made in an earlier session, a take, a version — opens in the Mediabank instead: `shown: "media"` and a `note`), the Mediabank (`view: "media"`, `tab` `videos`, `pictures` or `films`; `generation_id` opens a clip in *Videor*'s drawer, `still_id` a picture in *Bilder*, `export_id` a film in *Filmer*, each on its own tab; answers `{shown: "media", tab}`), a sequence (optionally one clip), a storyboard (with `transition_id`, that transition in the transition editor), an edit in Redigera (`view: "editor"`, `edit_id`, with `version_id` that version in the player; without either the list), an asset in its library view (`view: "asset"`, `asset_id`) or the prompt library (`view: "prompts"`). Opening something never counts as the user having seen it. |
 | `create_asset` | Creates a character, environment, product, outfit or pose with a name and description. Add photos with `add_asset_images` and, for characters and environments, sound with `add_asset_audio`. |
 | `update_asset` | Changes an asset's name, description or (characters) default outfit. Renaming also renames its folder. The description is appended to every later prompt that sends the asset's photos or voice. |
@@ -271,7 +272,7 @@ frames, reference images and text work without it.
 | `create_sequence` | Creates an empty sequence with the default settings. |
 | `update_sequence` | Changes a sequence's name (its folder follows), its `defaults` (model, duration, resolution, aspect ratio, audio — checked against the model like the window does) and its *Exportformat* (`export_height` 480, 720 or 1080, `null` for the first clip's own size). |
 | `add_segment` | Adds a clip — or, with `from_generation_id`, a clip whose selected take is a finished video that already exists (your own clip, a version from Redigera; only `notes` go along, it doesn't continue from the clip before) — (`notes`, prompt, references with the same items as `set_references`, model and options, `include_descriptions` / `excluded_description_asset_ids` and `outfit_wearers` (by default those of the clip before), `continue_from_previous`, `continue_mode`, `end_from_next`, `start_image` / `end_image`), validated like a generation. A clip that continues in reference mode (`continue_mode: "references"`, the default) is sent reference-to-video with the references it carries — its own, or else those of the clip it continues from — and the previous clip's last frame as the last reference image; one that continues exactly (`"exact"`), ends on the next clip or has a start or end image is image-to-video and takes no references, so no voices either. |
-| `update_segment` | Changes a clip; only the fields passed change (`references` replaces its photos and audio — items may also be `{still_id}` or `{upload_id}`, loose pictures; `include_descriptions` / `excluded_description_asset_ids` choose the descriptions appended to its prompt, `outfit_wearers` who wears each outfit). `start_image` / `end_image` take `{still_id}`, `{asset_image_id}`, `{generation_id, time}` (a frame, saved as a still), `{upload_id}` or `{url}` (copied in as a still of the sequence), `"previous"` / `"next"` or `null`; `continue_mode` switches a continuing clip between `references` and `exact` (exact drops its references and their tokens); new `references` (or `reorder_references`) on a clip also renumber the tokens of the later clips that inherit them, so they keep naming the same pictures, voices and frame; a picture makes the clip image-to-video (with a model that takes an end image when it has one), drops its references and takes the `@` tokens out of a prompt the agent didn't rewrite. `selected_take_id` chooses which of its finished takes is in the cut — a take chosen again gets back the trims it last had —, and `trim_start` / `trim_end` trim it (in seconds; Studio keeps at least 0.2 s and says when it adjusted them). Existing takes are kept. |
+| `update_segment` | Changes a clip; only the fields passed change (`references` replaces its photos and audio — items may also be `{still_id}` or `{upload_id}`, loose pictures; `include_descriptions` / `excluded_description_asset_ids` choose the descriptions appended to its prompt, `outfit_wearers` who wears each outfit). `start_image` / `end_image` take `{still_id}`, `{asset_image_id}`, `{generation_id, time}` (a frame, saved as a still), `{upload_id}` or `{url}` (copied in as a still of the sequence), `"previous"` / `"next"` or `null`; `continue_mode` switches a continuing clip between `references` and `exact` (exact drops its references and their tokens); new `references` (or `reorder_references`) on a clip also renumber the tokens of the later clips that inherit them, so they keep naming the same pictures, voices and frame (a `swap_reference` there changes no number, and only the name in front of a fully swapped group follows); a picture makes the clip image-to-video (with a model that takes an end image when it has one), drops its references and takes the `@` tokens out of a prompt the agent didn't rewrite. `selected_take_id` chooses which of its finished takes is in the cut — a take chosen again gets back the trims it last had —, and `trim_start` / `trim_end` trim it (in seconds; Studio keeps at least 0.2 s and says when it adjusted them). Existing takes are kept. |
 | `move_segment` | Moves a clip to another position (`to_clip_number`, 1-based). |
 | `export_film` | Exports a sequence (`sequence_id`) or a storyboard (`storyboard_id`) as one film — the selected takes, trimmed, at its *Exportformat* — into its folder, exactly as *Exportera* does. Free and local. Waits up to `wait_seconds` (default 30) and answers `{status: "done", export_id, duration, cuts}`, else `{status: "running", progress}` (follow it with `get_work_status` or `list_exports`); an export already running for it answers `running`. |
 | `stop_generation_run` | Stops *Generera saknade* for a sequence or a storyboard: no further clips are sent; takes already at Venice still land. |
@@ -439,7 +440,7 @@ away sooner — do that with a large video once `import_own_clips` is done.
 | `add_asset_audio` | `{upload_id}`, `{url}`, `{generation_id, start?, end?}`, `{edit_media_id}` |
 | `import_still` | `{upload_id}`, `{url}` |
 | `add_segment`, `update_segment` (start and end image), `add_board`, `update_board` (picture) | also `{upload_id}`, `{url}` (copied in as a still) |
-| `set_form` (start and end image), `set_references`, clip `references` | also `{upload_id}` (imported as a still in `Referensbilder` first) |
+| `set_form` (start and end image), `set_references`, clip `references`, `swap_reference` (`with`) | also `{upload_id}` (imported as a still in `Referensbilder` first) |
 | `import_own_clips` | video `upload_id`s |
 | `add_edit_audio` | `{upload_id}`, `{url}`, `{asset_audio_id}` |
 
@@ -589,7 +590,7 @@ References:
   the library at the moment of sending, on one line and without `@`, so an `update_asset` applies to the next
   generation (and makes a pending approval that uses the asset lapse).
 - The prompt agents write (and `prompt` in every answer) never contains the legend. `composed_prompt` in
-  `get_workspace`, `validate_prompt`, `get_sequence` and `reorder_references` is the text that would be sent, with
+  `get_workspace`, `validate_prompt`, `get_sequence`, `reorder_references` and `swap_reference` is the text that would be sent, with
   `description_entries` (asset, tokens, description, `included` = switched on, `sent` = in `composed_prompt` right
   now, `shortened`, `worn_by` = `{asset_id, name, tokens}` of the character wearing an outfit),
   `composed_characters` against `prompt_character_limit`, and a `descriptions_note` when descriptions were shortened to fit the model's limit,
@@ -608,12 +609,15 @@ References:
   changes it; both must be among the references (an outfit and a character), or nothing changes. The choice is kept
   with the params (`outfitWearers`), so a clip, its takes and *Använd igen* keep it.
 - The prompt checks (`issues` in `get_workspace`, `validate_prompt`, `get_sequence`, `set_form`, `set_references`,
-  `reorder_references`, clip answers) warn about a reference the prompt never mentions only when the legend doesn't
+  `reorder_references`, `swap_reference`, clip answers) warn about a reference the prompt never mentions only when the legend doesn't
   explain it either: an asset whose description (or, for an outfit, wearer) is appended needn't be named in the
   prompt. The window marks those *beskrivs* instead of *nämns inte*.
 - `reorder_references` changes the order of a form's or clip's references and renumbers every `@ImageN` /
   `@AudioN` in the prompt and the negative prompt with it, the same way dragging a thumbnail in Studio does; the
   legend follows the new numbers. `set_references` with `mode: "replace"` does not renumber anything.
+- To change who or what a reference shows without touching the prompt's numbers, use `swap_reference`: the new
+  picture (or, with `whole_asset`, the new asset and its voice) takes the same places, and the name right before a
+  group of tokens that all changed follows; the legend describes the new asset.
 
 ## Prompt-writing guidance
 

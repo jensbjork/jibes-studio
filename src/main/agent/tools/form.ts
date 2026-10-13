@@ -50,9 +50,23 @@ import {
   namedPositions,
   newOrder,
   notSentInfo,
+  referencesAnswer,
   reorderAnswer,
   unchanged
 } from '../reorder'
+import {
+  applySwap,
+  planSwap,
+  swapArgs,
+  swapNotes,
+  swapSummary,
+  swappedInfo,
+  swappedTokens,
+  swapsNothing,
+  unchangedNote,
+  type ReadySwap,
+  type SwapInput
+} from '../swap'
 import {
   AssetIndex,
   MODES,
@@ -99,7 +113,7 @@ import {
   type ToolContext,
   type ToolOutput
 } from './kit'
-import { reorderClipReferences } from './sequences'
+import { reorderClipReferences, swapClipReference } from './sequences'
 import { importAsStill, resolvePictureReferences, uploadSource } from './sources'
 
 // The Generate form in Studio's window and what the user is looking at. These tools go through the window (the
@@ -708,6 +722,103 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           ...(notes.length ? { notes } : {})
         },
         summary: `ändrade ordningen på referenserna${movedSummary(moved)}`
+      }
+    }
+  )
+
+  defineTool(
+    server,
+    ctx,
+    'swap_reference',
+    {
+      title: 'Swap reference',
+      description:
+        "Swaps the picture in one place of the Generate form's (target \"form\", the default) or a sequence clip's (target {segment_id}) reference images for another – like Studio's \"Byt bilden…\" – without changing any number: every @ImageN / @AudioN token in the prompt and negative prompt keeps its number and now shows the new picture. image names the place: its token in the current numbering (\"@Image2\") or the image_id of the library photo there. with is the new picture: {asset_id, image_id?} (a library photo, the asset's cover unless image_id), {still_id} or {upload_id} (made a still in Referensbilder first). whole_asset: true swaps the whole asset instead – like \"Byt hela …\": every place of the asset whose photo is in image is taken by the asset in with.asset_id (its photos in order, the first ones reused when it has fewer), and its voice or sound clips take the old asset's @Audio places (when it has none, the old clips stay and a note says so). The name written right before a group of tokens that all changed follows (\"Anna (@Image1, voice @Audio1)\" → \"Bo (@Image1, voice @Audio1)\"), and so do the description switches and who wears which outfit; a name before a group that still holds some of the old asset's pictures stays, so read the notes. Use this to change who or what a reference shows without touching the prompt's numbers; to change the order use reorder_references, to choose the list anew set_references. Returns the token maps, swapped (each token that shows another picture or clip now: was / now), the prompt, composed_prompt, issues and notes. A clip that continues in reference mode swaps its own references (the clips that carry them keep their tokens too); a clip that carries another clip's references is refused (swap them in that clip, which the answer names), and so is a clip that sends no references.",
+      input: {
+        target: z
+          .union([z.literal('form'), z.object({ segment_id: z.string() }).strict()])
+          .default('form')
+          .describe('"form" (the Generate form, default) or {segment_id} for a sequence clip.'),
+        image: z
+          .string()
+          .describe('The place to swap: its token in the current numbering ("@Image2") or the image_id of the library photo there.'),
+        with: z
+          .union([
+            z.object({ asset_id: z.string(), image_id: z.string().optional() }).strict(),
+            z.object({ still_id: z.string() }).strict(),
+            uploadSource
+          ])
+          .describe(
+            'The new picture: {asset_id, image_id?} (a library photo, the cover unless image_id), {still_id} or {upload_id}. With whole_asset: {asset_id} alone.'
+          ),
+        whole_asset: z
+          .boolean()
+          .default(false)
+          .describe(
+            "true: every place of the asset whose photo is in image (and its voice) is taken by with.asset_id. Default false: only this place."
+          )
+      },
+      annotations: { ...WRITE, idempotentHint: false },
+      summary: ({ target, whole_asset }) =>
+        `bytte ${whole_asset ? 'en tillgång bland referenserna' : 'en referensbild'}${target === 'form' ? '' : ' i ett klipp'}`
+    },
+    async ({ target, image, with: replacement, whole_asset }) => {
+      const input: SwapInput = { image, with: replacement, whole_asset }
+      if (target !== 'form') return swapClipReference(ctx, target.segment_id, input)
+      const index = await AssetIndex.load()
+      const before = await readForm(ctx)
+      const params = before.params
+      const kind = kindOfModelId(params.model)
+      if (kind !== 'reference-to-video') {
+        throw new Error(
+          `Formuläret är i läget ${kind} och skickar inga referenser, så det finns inget att byta. Byt till reference-to-video med set_form först.`
+        )
+      }
+      const paths = formImages(before)
+      const clips = params.referenceAudios ?? []
+      const all: GenerationParams = { ...params, referenceImages: paths }
+      const asked = await planSwap(input, paths, index, 'formuläret')
+      if (!('uploadId' in asked) && swapsNothing(asked, paths)) {
+        return {
+          data: {
+            target: 'form',
+            ...referencesAnswer(all, index, swappedInfo({ images: [], audios: [] })),
+            notes: [unchangedNote(asked)]
+          },
+          summary: 'tittade på referenserna (oförändrade)'
+        }
+      }
+      // Last: an upload becomes a still only once everything else is known to be right.
+      const plan: ReadySwap =
+        'uploadId' in asked
+          ? { whole: false, place: asked.place, path: (await importAsStill(ctx, { upload_id: asked.uploadId })).path }
+          : asked
+      // What the swap should give, by the same shared rules the window applies to the form as it is when it arrives.
+      const expected = applySwap(all, plan, index.assets).params
+      const state = await ctx.bridge.send<AgentFormState>('swap_reference', swapArgs(plan, paths))
+      const after = state.params
+      const gotImages = formImages(state)
+      const gotAudios = after.referenceAudios ?? []
+      const notes = [...(state.notes ?? [])]
+      // The user may have changed the form at the same moment; the agent hears what it is now, not what it asked.
+      if (
+        !samePaths(gotImages, expected.referenceImages ?? []) ||
+        !samePaths(gotAudios.map((a) => a.path), (expected.referenceAudios ?? []).map((a) => a.path)) ||
+        after.prompt !== expected.prompt
+      ) {
+        notes.push(
+          'Referenserna i formuläret blev inte exakt som du bad om (formuläret ändrades kanske samtidigt) – se references och prompt i svaret.'
+        )
+      }
+      const swapped = swappedTokens({ images: paths, audios: clips }, { images: gotImages, audios: gotAudios }, index)
+      notes.push(...swapNotes(all, { ...after, referenceImages: gotImages }, plan, swapped, index))
+      return {
+        data: {
+          target: 'form',
+          ...referencesAnswer({ ...after, referenceImages: gotImages }, index, swappedInfo(swapped)),
+          ...(notes.length ? { notes } : {})
+        },
+        summary: swapSummary(plan, swapped)
       }
     }
   )

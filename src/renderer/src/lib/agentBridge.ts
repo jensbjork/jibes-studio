@@ -17,6 +17,7 @@ import { canonicalizeTokens, findAudioTokens, findImageTokens, findMalformedToke
 import { outfitWearersAmong, sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import { referenceMoves, reorderReferences } from '@shared/prompt-remap'
+import { swapReferenceAsset, swapReferenceImage } from '@shared/reference-swap'
 import { isMediaTab, type MediaTab } from '@shared/session'
 import type {
   AgentCommand,
@@ -44,11 +45,12 @@ import { promptIssuesOf } from './promptIssues'
 import { openEditInEditor, openInSequenceEditor, openStoryboard } from './workspace'
 
 // The renderer half of the agent connection. Tools that read or fill the Generate form (get_workspace,
-// set_form, set_references, reorder_references) and open_in_studio (Generate or a clip in its drawer, the Mediabank
+// set_form, set_references, reorder_references, swap_reference) and open_in_studio (Generate or a clip in its drawer, the Mediabank
 // on a tab or with a clip, picture or film open, a sequence, a storyboard or one of its transitions, an edit or one
 // of its versions in Redigera, an asset, the prompt library) reach main's MCP server as an 'agent:command';
 // this applies them to the form store with the same rules the form itself uses (mode switching, model options,
-// the reference caps for images and audio, tokens following a reorder) and answers with 'agent:reply'.
+// the reference caps for images and audio, tokens following a reorder, names following a swap) and answers with
+// 'agent:reply'.
 // Everything else the agent does goes straight to main's services. Error messages are Swedish: they are shown
 // to the agent, which talks to the user in Swedish.
 
@@ -56,9 +58,8 @@ import { openEditInEditor, openInSequenceEditor, openStoryboard } from './worksp
 export type FormImage = Omit<AgentFormReference, 'token'>
 
 /**
- * The answer to get_form, set_form, set_references and reorder_references. `params` is what a generation would
- * send now (inputs
- * the mode doesn't use are left out); `references` are in order, @Image1 first, only in reference mode and
+ * The answer to get_form, set_form, set_references, reorder_references and swap_reference. `params` is what a
+ * generation would send now (inputs the mode doesn't use are left out); `references` are in order, @Image1 first, only in reference mode and
  * only the images the model takes; `audioReferences` likewise, @Audio1 first, only when the model takes audio.
  */
 export interface FormSnapshot extends AgentFormState {
@@ -644,6 +645,54 @@ export function applyReorderReferences(
   return { params: next, notes, moved }
 }
 
+/**
+ * Applies swap_reference to the form: the picture in one place (`image`, by path – the place it is in now, `index`
+ * telling which when it is there twice – and `path`, the new picture), or every place of one asset
+ * (`from_asset_id`) taken by another (`to_asset_id`, with its voice), by the shared swapReferenceImage /
+ * swapReferenceAsset that "Byt bilden…" and "Byt hela …" use: no number changes, and the name in front of fully
+ * swapped token groups follows, in one change. All or nothing. The notes are the shared ones.
+ */
+export function applySwapReference(current: GenerationParams, rawArgs: unknown, assets: readonly Asset[] = []): FormChange {
+  const args = asArgs(rawArgs)
+  if (kindOfModelId(current.model) !== 'reference-to-video') {
+    throw new BridgeError(
+      `Formuläret är i läget ${modeName(kindOfModelId(current.model))} – referenser används bara i läget ` +
+        `${modeName('reference-to-video')}. Byt läge med set_form först.`
+    )
+  }
+  const fromId = field(args, 'from_asset_id')
+  const toId = field(args, 'to_asset_id')
+  try {
+    if (given(fromId) || given(toId)) {
+      const from = assets.find((a) => a.id === fromId)
+      const to = assets.find((a) => a.id === toId)
+      if (!from || !to) throw new BridgeError('Inget ändrades: tillgången finns inte (längre).')
+      return swapReferenceAsset(current, from, to)
+    }
+    const image = field(args, 'image')
+    const path = field(args, 'path')
+    const hint = field(args, 'index')
+    if (typeof image !== 'string' || typeof path !== 'string' || !image.startsWith('/') || !path.startsWith('/')) {
+      throw new BridgeError('Bytet kunde inte läsas (image och path ska vara bildsökvägar).')
+    }
+    const images = current.referenceImages ?? []
+    const key = pathKey(image)
+    const at =
+      typeof hint === 'number' && images[hint] !== undefined && pathKey(images[hint]) === key
+        ? [hint]
+        : images.flatMap((p, i) => (pathKey(p) === key ? [i] : []))
+    if (at.length !== 1) {
+      throw new BridgeError(
+        'Inget ändrades: bilden du ville byta finns inte längre på sin plats bland referensbilderna (formuläret ändrades kanske samtidigt). Läs formuläret igen med get_workspace.'
+      )
+    }
+    return swapReferenceImage(current, at[0], path, assets)
+  } catch (e) {
+    if (e instanceof BridgeError) throw e
+    throw new BridgeError(`Inget ändrades. ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
 /** Notes for the pictures a reorder moved past the model's limit (no longer sent) or back inside it. */
 function capNotes(before: readonly string[], after: readonly string[], max: number, assets: readonly Asset[]): string[] {
   if (after.length <= max) return []
@@ -1023,7 +1072,7 @@ async function run(cmd: AgentCommand, ctx: BridgeContext): Promise<unknown> {
   // Compared as text: a command this window doesn't know yet (main newer than the window) is refused below.
   const command: string = cmd.command
   if (command === 'open') return applyOpen(cmd.args, ctx)
-  if (!['get_form', 'set_form', 'set_references', 'reorder_references'].includes(command)) {
+  if (!['get_form', 'set_form', 'set_references', 'reorder_references', 'swap_reference'].includes(command)) {
     throw new BridgeError(`Studio känner inte igen kommandot ”${command}”.`)
   }
 
@@ -1039,7 +1088,9 @@ async function run(cmd: AgentCommand, ctx: BridgeContext): Promise<unknown> {
       ? applySetForm(getGenerateParams(), cmd.args, models, error)
       : command === 'set_references'
         ? applySetReferences(getGenerateParams(), cmd.args, models, assets)
-        : applyReorderReferences(getGenerateParams(), cmd.args, assets)
+        : command === 'swap_reference'
+          ? applySwapReference(getGenerateParams(), cmd.args, assets)
+          : applyReorderReferences(getGenerateParams(), cmd.args, assets)
   // The awaits may have outlasted main's patience, or a library switch may have gone through meanwhile.
   if (expired(cmd)) throw new BridgeError(TOO_LATE)
   if (generateParamsFrozen()) throw new BridgeError(SWITCHING_LIBRARY)

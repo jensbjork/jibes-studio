@@ -26,6 +26,7 @@ import {
 } from '@shared/models'
 import { outfitWearersAmong, withOutfitWearer } from '@shared/outfits'
 import { blockingContinuationError, blockingPromptError, validationContext } from '@shared/prompt-refs'
+import { swapReferenceAsset, swapReferenceImage, type SwapResult } from '@shared/reference-swap'
 import {
   ASSET_KINDS,
   type Asset,
@@ -38,7 +39,7 @@ import {
 import { ASSET_COPY, ASSET_VIEW, swedishList } from '../lib/assets'
 import { useAssets, usePrompts } from '../lib/hooks'
 import type { Navigate } from '../lib/navigation'
-import ImageInput, { type ImageCaption } from './ImageInput'
+import ImageInput, { type ImageCaption, type SwapChoice } from './ImageInput'
 import AssetChips, { posePeopleOf, productHolderOf } from './pickers/AssetChips'
 import AssetPicker from './pickers/AssetPicker'
 import AudioChips from './pickers/AudioChips'
@@ -117,6 +118,8 @@ interface Props {
   onSubmit?: () => void
   /** Lets the pickers link to the library views (characters, environments, products, outfits, poses, prompts). */
   navigate?: Navigate
+  /** A sequence clip's sequence: "Byt bilden…" offers its saved pictures (else every saved picture). */
+  sequenceId?: string
 }
 
 /**
@@ -248,7 +251,8 @@ export default function ParamsForm({
   continuationFrame,
   endImageRequired = false,
   onSubmit,
-  navigate
+  navigate,
+  sequenceId
 }: Props) {
   const model = models.find((m) => m.id === params.model)
   const kind = kindOfModelId(params.model)
@@ -385,6 +389,8 @@ export default function ParamsForm({
     // "bärs av" choices for outfits (or characters) no longer among the pictures are forgotten, so an outfit added
     // again starts from its default wearer.
     const present = new Set(nextRefs.flatMap((path) => byPath.get(path)?.id ?? []))
+    // A picture in several places (a swapped-in asset with fewer photos reuses them) is followed place by place by
+    // the remap itself (placeKeys).
     const images = { before: refs, after: nextRefs }
     const sounds = { before: audioRefs, after: nextAudios }
     const before = params.prompt
@@ -518,6 +524,69 @@ export default function ParamsForm({
         ? withOutfitWearers(p, withOutfitWearer(p.outfitWearers, outfit.id, character.id))
         : p
     )
+  }
+
+  /**
+   * "Byt bilden…" / "Byt hela Anna…" in the enlarged view: another picture (or asset) takes the same places, so no
+   * @ImageN or @AudioN number changes and the prompt keeps every token. Not a removal and an addition through
+   * setReferences, which would renumber or drop them: the shared rules (shared/reference-swap) change the pictures,
+   * clips, the name in front of the swapped tokens, the description switch and the wearers in one update, and the
+   * form's own "gäller" and "hålls av" choices follow here. Returns the note to show in the viewer too.
+   */
+  const swapReference = (index: number, choice: SwapChoice): string | undefined => {
+    const old = refs[index]
+    if (old === undefined) return undefined
+    const from = byPath.get(old)
+    const target = choice.kind === 'asset' ? assets.find((a) => a.id === choice.assetId) : byPath.get(choice.path)
+    const apply = (p: GenerationParams): SwapResult => {
+      if (choice.kind === 'image') return swapReferenceImage(p, index, choice.path, assets)
+      if (!from || !target) throw new Error('Biblioteket har ändrats – stäng bilden och försök igen.')
+      return swapReferenceAsset(p, from, target)
+    }
+    let result: SwapResult
+    try {
+      result = apply(params)
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e)
+    }
+    if (result.params === params) return undefined
+    if (result.params.prompt !== params.prompt) ownPrompt.current = result.params.prompt
+    // On the latest params, like every setter here; nothing happens if the picture left that place meanwhile.
+    setParams((p) => {
+      if ((p.referenceImages ?? [])[index] !== old) return p
+      try {
+        const next = apply(p).params
+        // As setReferences does: "bärs av" choices for assets no longer among the pictures are forgotten.
+        const present = new Set((next.referenceImages ?? []).flatMap((path) => byPath.get(path)?.id ?? []))
+        return withOutfitWearers(next, outfitWearersAmong(next.outfitWearers, present))
+      } catch {
+        return p
+      }
+    })
+    // The asset left every place it had and another of its kind took them: its "gäller" / "hålls av" go along.
+    const after = result.params.referenceImages ?? []
+    if (
+      from &&
+      target &&
+      from.id !== target.id &&
+      from.kind === target.kind &&
+      !after.some((path) => byPath.get(path)?.id === from.id)
+    ) {
+      const follow = (id: string) => (id === from.id ? target.id : id)
+      setPosePeople((chosen) =>
+        Object.fromEntries(
+          Object.entries(chosen).map(([pose, ids]) => [follow(pose), ids && [...new Set(ids.map(follow))]])
+        )
+      )
+      setProductHolders((chosen) =>
+        Object.fromEntries(
+          Object.entries(chosen).map(([product, holder]) => [follow(product), holder && follow(holder)])
+        )
+      )
+    }
+    const note = result.notes.join(' ') || undefined
+    setRefNote(note)
+    return note
   }
 
   // ── References as the prompt sees them (@ImageN) ────────────────────────────
@@ -757,6 +826,8 @@ export default function ParamsForm({
                 value={params.startImage ? [params.startImage] : []}
                 onChange={(v) => set('startImage', v[0])}
                 caption={caption}
+                library={assets}
+                sequenceId={sequenceId}
                 action={libraryImageButton(startButton, 'start', `Välj startbild bland ${SINGLE_IMAGE_KINDS_TEXT}`)}
               />
               {singleImagePicker('start', params.startImage)}
@@ -778,6 +849,8 @@ export default function ParamsForm({
                   value={params.endImage ? [params.endImage] : []}
                   onChange={(v) => set('endImage', v[0])}
                   caption={caption}
+                  library={assets}
+                  sequenceId={sequenceId}
                   action={libraryImageButton(endButton, 'end', `Välj slutbild bland ${SINGLE_IMAGE_KINDS_TEXT}`)}
                 />
                 {!endImagePossible && (
@@ -803,7 +876,10 @@ export default function ParamsForm({
             showCount={false}
             value={refs}
             onChange={(v) => setRefs(v)}
+            onSwap={swapReference}
             caption={caption}
+            library={assets}
+            sequenceId={sequenceId}
             action={
               // Five kinds don't fit beside the label in the form's width: the buttons wrap onto a second row,
               // right-aligned, rather than squeezing the label.
