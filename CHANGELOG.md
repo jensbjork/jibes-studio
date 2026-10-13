@@ -10,6 +10,13 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Check an agent's request against its references**: in the approval dialog, hovering (or tabbing to) an `@ImageN`
+  or `@AudioN` token in the prompt or the References legend shows a card with the picture large enough to recognise –
+  the asset, *foto 2 av 3*, *skickas inte* past the model's limit – or the voice with its window and a play button for
+  exactly the part that is sent; misspelled tokens say what is wrong. Tokens and the reference tiles or voice rows
+  they name light up together, and clicking a tile, an image token, a start or end image, a neighbour's frame or a
+  storyboard board opens it large – ← / → and a filmstrip through the request's pictures, read only; Esc closes the
+  viewer first, not the dialog. A finished clip's drawer shows the same cards on its prompt's tokens.
 - **Swap a reference without losing the prompt**: click a reference picture in Generera, a sequence clip or *Skapa
   bild…* to see it large (← → step through them), then *Byt bilden…* swaps it for another picture in the same place,
   and *Byt hela Anna…* gives every place of that asset – and its voice, when both have one – to another asset. No

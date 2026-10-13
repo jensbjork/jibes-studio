@@ -511,7 +511,8 @@ doesn't count.
 3. Studio shows the approval dialog with the prompt (tokens coloured) and, set apart below it, the References legend
    that is appended to it (the descriptions of the referenced assets, as they were when the agent asked, with the
    length that is sent), the reference images, the voices and sounds with their windows and play buttons, the
-   price and the agent's note. A clip that starts or ends on its neighbours' frames shows both frames, live, and
+   price and the agent's note. Hovering a token shows its picture, or its voice with a play button; tokens and tiles
+   light up together, and a click shows a picture large (read only). A clip that starts or ends on its neighbours' frames shows both frames, live, and
    can't be approved while they are being fetched: if a neighbour's take or trim changes after the request was
    made, the request lapses (approving it says why) and the agent has to ask again, so a frame the user never saw
    is never paid for. A storyboard transition shows the two board pictures side by side with an arrow between them,
