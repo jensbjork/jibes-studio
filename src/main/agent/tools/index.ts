@@ -165,8 +165,8 @@ async function promptContext(ctx: ToolContext, segmentId: string | undefined, tr
 }
 
 /**
- * Everything a session offers: the tools, the write_video_prompt prompt and the studio://guide resource. 88 tools:
- * 34 that only read, 45 that change the library or the form (free), and 9 that only ask the user – the 8 paid
+ * Everything a session offers: the tools, the write_video_prompt prompt and the studio://guide resource. 90 tools:
+ * 35 that only read, 46 that change the library or the form (free), and 9 that only ask the user – the 8 paid
  * requests and request_delete. No tool removes anything or spends money on its own.
  */
 export function registerAgentTools(server: McpServer, ctx: ToolContext): void {

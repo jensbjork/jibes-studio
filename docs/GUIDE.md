@@ -324,6 +324,13 @@ the front gives [C, A, B] and `@Image2 hugs @Image1`. Pictures past the model's 
 (not sent); dragging one forward sends it instead of the last one. This works in Generera and in the sequence
 clip editor, so photos can be renumbered without picking or uploading them again in another order.
 
+**Swapping.** Click a reference picture to see it large (← → step through the others). *Byt bilden…* swaps it for
+another picture in the same place; *Byt hela Anna…* gives every place of that asset to another asset, and its voice
+too when both have one. No number changes, so the prompt keeps every token, and the name written right before a
+group of tokens that all changed follows (`Anna (@Image1, voice @Audio1)` → `Bo (@Image1, voice @Audio1)`), as do the
+description switch and who wears which outfit. A name before a group that still holds some of the old asset's pictures
+stays. This works in Generera, in the sequence clip editor and in *Skapa bild…*.
+
 **Descriptions are appended to the prompt.** When a generation is sent, Studio appends the descriptions of the
 assets whose photos or voices it sends as a *References* legend, with each asset's tokens:
 
@@ -378,7 +385,8 @@ the prompt as sent starts with an instruction to begin on it; *Skickar med: Anna
 says what goes along. The characters stay themselves, also when they leave the picture and come back; the first
 frame comes very close to the previous clip's last one but isn't guaranteed identical. Reorder, remove or add
 references in the clip they come from, and the clips that carry them keep each `@Image` and `@Audio` on the same
-picture or voice (and the frame's token on the frame); a token whose picture no longer goes along is taken out. **Exakt startbild** sends
+picture or voice (and the frame's token on the frame); a token whose picture no longer goes along is taken out. Swap
+one there (*Byt bilden…*) and their tokens stay as they are, with the name in front following as in the clip itself. **Exakt startbild** sends
 image-to-video from the frame itself — an exact cut, but no references (the clip's own references and their `@`
 tokens are taken out). A clip that also ends on the next clip (*Slutbild från nästa klipp*, *Gör om mellan
 grannarna*) or has an end image of its own is always sent exactly. If the model takes 9 reference images and the
@@ -473,7 +481,7 @@ depends on it), and nothing is sent to Venice or removed until you approve it. S
 consents and your own ratings and learnings stay yours.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 89
+Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 90
 tools, sending files, the review loop and troubleshooting.
 
 ## Security

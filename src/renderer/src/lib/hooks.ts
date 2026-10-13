@@ -10,30 +10,59 @@ import type {
   VideoModel
 } from '@shared/types'
 
-// The model list rarely changes; share one request across all views (and the agent bridge).
+// The model list rarely changes; share one request across all views (and the agent bridge). Venice does add and
+// retire models, and a window can stay open for days, so the copy is dropped after as long as main keeps its own.
+const MODELS_MAX_AGE_MS = 10 * 60_000
 let modelsPromise: Promise<VideoModel[]> | undefined
+let modelsFetchedAt = 0
+let lastModels: VideoModel[] | undefined
 
-/** The model list, fetched once; a failed fetch is forgotten so the next caller tries again. */
+/**
+ * The model list, fetched again when the copy is ten minutes old. A failed fetch is forgotten so the next caller
+ * tries again, and answers with the last list that arrived when there is one.
+ */
 export function loadModels(): Promise<VideoModel[]> {
-  if (!modelsPromise) {
-    // Kinds are registered before anyone uses the list, so kindOfModelId agrees with main.
-    const request = window.studio.listModels().then((list) => {
+  if (modelsPromise && Date.now() - modelsFetchedAt < MODELS_MAX_AGE_MS) return modelsPromise
+  const request: Promise<VideoModel[]> = window.studio.listModels().then(
+    (list) => {
+      // Kinds are registered before anyone uses the list, so kindOfModelId agrees with main.
       rememberModelKinds(list)
+      lastModels = list
       return list
-    })
-    modelsPromise = request
-    request.catch(() => {
+    },
+    (err: unknown) => {
       if (modelsPromise === request) modelsPromise = undefined
-    })
-  }
-  return modelsPromise
+      if (lastModels) return lastModels
+      throw err
+    }
+  )
+  modelsPromise = request
+  modelsFetchedAt = Date.now()
+  return request
 }
 
 export function useModels(): { models: VideoModel[]; error?: string } {
   const [models, setModels] = useState<VideoModel[]>([])
   const [error, setError] = useState<string>()
   useEffect(() => {
-    loadModels().then(setModels, (e: unknown) => setError(ipcErrorMessage(e)))
+    let active = true
+    const load = () =>
+      loadModels().then(
+        (list) => {
+          if (!active) return
+          setModels(list)
+          setError(undefined)
+        },
+        (e: unknown) => active && setError(ipcErrorMessage(e))
+      )
+    load()
+    // Back in front after a long while: ask again (nothing is fetched until the copy is old; the same list keeps
+    // the same array, so nothing re-renders).
+    window.addEventListener('focus', load)
+    return () => {
+      active = false
+      window.removeEventListener('focus', load)
+    }
   }, [])
   return { models, error }
 }

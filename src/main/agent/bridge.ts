@@ -5,6 +5,9 @@ import type { AgentCommandReply, AgentFormCommand } from '@shared/types'
 // The Generate form lives in the window (it is what the user sees and edits), so the tools that read or fill it
 // ask the window: main sends 'agent:command' and the window's agent bridge answers with 'agent:reply'.
 
+/** What main asks the window (swap_reference: see agent/swap.ts). */
+export type WindowCommand = AgentFormCommand
+
 /** How long the window gets to answer. */
 export const COMMAND_TIMEOUT_MS = 10_000
 
@@ -33,7 +36,7 @@ export class FormBridge {
   }
 
   /** Sends a command to the window and resolves with its answer; rejects (in Swedish) after the timeout. */
-  send<T>(command: AgentFormCommand, args?: unknown): Promise<T> {
+  send<T>(command: WindowCommand, args?: unknown): Promise<T> {
     const win = targetWindow()
     if (!win) return Promise.reject(new Error(WINDOW_NOT_ANSWERING))
     const id = randomUUID()

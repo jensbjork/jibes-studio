@@ -380,6 +380,7 @@ export default function SegmentEditor({
               endImageNote={endFromNext ? `Första bildrutan från klipp ${index + 2} används som slutbild.` : undefined}
               onSubmit={() => void generate()}
               navigate={navigate}
+              sequenceId={sequence.id}
             />
           </>
         )}

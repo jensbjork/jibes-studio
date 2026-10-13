@@ -136,6 +136,49 @@ function referenceUnits(prompt: string): Unit[] {
   return units.sort((a, b) => a.start - b.start)
 }
 
+/**
+ * A reference list before and after a change, as keys that are followed place by place when a
+ * picture is in several places – a swapped-in asset with fewer photos reuses them, and every token would otherwise go
+ * to the first place. Each place before is matched with one after – the k-th place of a picture with its k-th when
+ * only the order changed, else along the longest common run (a removal or an addition anywhere) – and the two share
+ * a key; a place left unmatched keeps a key of its own, so its tokens go. Without repeats the lists come back as they
+ * are.
+ */
+export function placeKeys(before: readonly string[], after: readonly string[]): { before: string[]; after: string[] } {
+  const repeats = (list: readonly string[]): boolean => new Set(list).size !== list.length
+  if (!repeats(before) && !repeats(after)) return { before: [...before], after: [...after] }
+  const pairs: Array<[number, number]> = []
+  const sorted = (list: readonly string[]): string => [...list].sort().join('\n')
+  if (before.length === after.length && sorted(before) === sorted(after)) {
+    const places = new Map<string, number[]>()
+    after.forEach((p, j) => places.set(p, [...(places.get(p) ?? []), j]))
+    const taken = new Map<string, number>()
+    before.forEach((p, i) => {
+      const k = taken.get(p) ?? 0
+      taken.set(p, k + 1)
+      pairs.push([i, places.get(p)![k]])
+    })
+  } else {
+    const n = before.length
+    const m = after.length
+    const run = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        run[i][j] = before[i] === after[j] ? run[i + 1][j + 1] + 1 : Math.max(run[i + 1][j], run[i][j + 1])
+      }
+    }
+    for (let i = 0, j = 0; i < n && j < m; ) {
+      if (before[i] === after[j]) pairs.push([i++, j++])
+      else if (run[i + 1][j] >= run[i][j + 1]) i++
+      else j++
+    }
+  }
+  const keysBefore = before.map((p, i) => `${p}\u0000-${i}`)
+  const keysAfter = after.map((p, j) => `${p}\u0000+${j}`)
+  for (const [i, j] of pairs) keysBefore[i] = keysAfter[j] = `${before[i]}\u0000${i}`
+  return { before: keysBefore, after: keysAfter }
+}
+
 /** A reference list before and after a change, for remapping its tokens. */
 export interface ListChange<T> {
   before: readonly T[]
@@ -169,16 +212,16 @@ export function remapPromptReferences(
   const newPhotos = new Set(swap?.to?.images.map((img) => img.path) ?? [])
   const newIndices = after.flatMap((p, i) => (newPhotos.has(p) ? [i + 1] : []))
   /** The token's new number; null when its picture or clip is gone, undefined when it named none. */
+  // Followed place by place: a picture or clip in several places (a swapped-in asset with fewer photos reuses them)
+  // keeps each token on its own place rather than all of them going to the first.
+  const imageKeys = placeKeys(before, after)
+  const audioKeys = audios ? placeKeys(audios.before.map((a) => a.path), audios.after.map((a) => a.path)) : undefined
   const renumber = (ref: ReferenceKind, n: number): number | null | undefined => {
-    if (ref === 'audio') {
-      const path = audios?.before[n - 1]?.path
-      if (path === undefined) return undefined
-      const i = audios!.after.findIndex((a) => a.path === path)
-      return i === -1 ? null : i + 1
-    }
-    const path = before[n - 1]
-    if (path === undefined) return undefined
-    const i = after.indexOf(path)
+    const keys = ref === 'audio' ? audioKeys : imageKeys
+    if (!keys) return undefined
+    const key = keys.before[n - 1]
+    if (key === undefined) return undefined
+    const i = keys.after.indexOf(key)
     return i === -1 ? null : i + 1
   }
   /** A lone token or near miss's new number, following an old outfit's photo to the new outfit's. */
@@ -279,6 +322,37 @@ export function remapPromptReferences(
     else if (kept.length !== members.length || kept.some((m, i) => m.n !== members[i].n)) {
       put(start, end, `(${kept.map(tokenText).join(', ')})`)
     }
+  }
+  return out + prompt.slice(last)
+}
+
+/**
+ * The prompt with `oldName` changed to `newName` where it names a reference: right in front of a "(…)" group whose
+ * tokens all belong to the swapped places (`owns`) – "Anna (@Image1, voice @Audio1)" → "Bo (@Image1, voice @Audio1)".
+ * Letter case and Unicode form of the name are ignored; every number, and the rest of the text, stays as written.
+ */
+export function renameReferenceNames(
+  prompt: string,
+  oldName: string,
+  newName: string,
+  owns: (ref: ReferenceKind, n: number) => boolean
+): string {
+  const from = oldName.trim()
+  const to = newName.trim()
+  if (!prompt || !from || !to || from === to) return prompt
+  const key = (text: string): string => text.normalize('NFC').toLocaleLowerCase('sv')
+  let out = ''
+  let last = 0
+  for (const unit of referenceUnits(prompt)) {
+    if (unit.type !== 'group' || !unit.members.every((m) => owns(m.ref, m.n))) continue
+    const head = prompt.slice(last, unit.start)
+    const name = /\s*$/.exec(head)!
+    const before = head.slice(0, name.index)
+    if (before.length < from.length || key(before.slice(-from.length)) !== key(from)) continue
+    // A whole word: "Johanna (@Image1)" is not "Anna".
+    if (/[\p{L}\p{N}_]$/u.test(before.slice(0, -from.length))) continue
+    out += before.slice(0, -from.length) + to + head.slice(name.index)
+    last = unit.start
   }
   return out + prompt.slice(last)
 }

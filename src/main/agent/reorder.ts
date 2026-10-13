@@ -234,13 +234,14 @@ export function movedSummary(moved: { images: MovedToken[]; audios: MovedToken[]
 }
 
 /**
- * What reorder_references answers with: the new token maps, which tokens moved, the prompts as they read now, the
- * composed prompt with its descriptions, the images left over past the model's limit, and the token issues.
+ * What a change of a reference list answers with (reorder_references, swap_reference): the new token maps, what
+ * changed (`change`: moved or swapped), the prompts as they read now, the composed prompt with its descriptions, the
+ * images left over past the model's limit, and the token issues.
  */
-export function reorderAnswer(
+export function referencesAnswer(
   params: GenerationParams,
   index: AssetIndex,
-  moved: { images: MovedToken[]; audios: MovedToken[] }
+  change: Record<string, unknown>
 ): Record<string, unknown> {
   const all = params.referenceImages ?? []
   const audios = params.referenceAudios ?? []
@@ -248,13 +249,24 @@ export function reorderAnswer(
     references: tokenMap(all.slice(0, maxReferenceImages(params.model)), index),
     ...notSentInfo(all, params.model, index),
     ...(audios.length ? { audio_references: audioTokenMap(audios, index) } : {}),
-    moved: {
-      ...(moved.images.length ? { images: moved.images } : {}),
-      ...(moved.audios.length ? { audios: moved.audios } : {})
-    },
+    ...change,
     prompt: params.prompt,
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...descriptionInfo(params, index),
     issues: issueList(promptIssues(params))
   }
+}
+
+/** What reorder_references answers with: referencesAnswer with which tokens moved. */
+export function reorderAnswer(
+  params: GenerationParams,
+  index: AssetIndex,
+  moved: { images: MovedToken[]; audios: MovedToken[] }
+): Record<string, unknown> {
+  return referencesAnswer(params, index, {
+    moved: {
+      ...(moved.images.length ? { images: moved.images } : {}),
+      ...(moved.audios.length ? { audios: moved.audios } : {})
+    }
+  })
 }

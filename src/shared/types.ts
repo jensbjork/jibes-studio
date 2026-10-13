@@ -1838,7 +1838,13 @@ export interface ApprovalRequest {
 }
 
 /** Commands main sends to the window's agent bridge (see StudioApi.onAgentCommand). */
-export type AgentFormCommand = 'get_form' | 'set_form' | 'set_references' | 'reorder_references' | 'open'
+export type AgentFormCommand =
+  | 'get_form'
+  | 'set_form'
+  | 'set_references'
+  | 'reorder_references'
+  | 'swap_reference'
+  | 'open'
 
 export interface AgentCommand {
   id: string
@@ -1850,7 +1856,7 @@ export interface AgentCommand {
   command: AgentFormCommand
   /**
    * get_form: none. set_form: AgentSetFormArgs. set_references: AgentSetReferencesArgs. reorder_references:
-   * AgentReorderReferencesArgs. open: AgentOpenArgs.
+   * AgentReorderReferencesArgs. swap_reference: the tool's input (agent/swap.ts). open: AgentOpenArgs.
    */
   args: unknown
 }

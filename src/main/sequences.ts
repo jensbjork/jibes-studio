@@ -40,6 +40,7 @@ import { knowsPromptLimit, rememberPromptLimits } from '@shared/prompt-compose'
 import { blockingContinuationError, blockingPromptError, findAudioTokens, findImageTokens } from '@shared/prompt-refs'
 import { NEEDS_CONSENT } from '@shared/types'
 import type {
+  Asset,
   ComposedPrompt,
   ContinueMode,
   ExportProgress,
@@ -57,6 +58,7 @@ import type {
   VideoModel
 } from '@shared/types'
 import { isAgentCall } from './agent/local-ipc'
+import { listAssets } from './assets'
 import * as db from './db'
 import { concatClips, extractFrame, extractFrameAtOrAfter, frameStartAtOrAfter, probe } from './ffmpeg'
 import { composeSubmission, prepareSubmission, toPublic, videoLocation, type JobManager } from './jobs'
@@ -80,6 +82,7 @@ import {
   toStoredPath,
   withoutLocalPaths
 } from './paths'
+import { followSwap, swappedInPlace } from './inherited-swap'
 import { placeFile } from './references'
 import {
   buildConcatClips,
@@ -1487,7 +1490,8 @@ export class SequenceService {
    * Keeps the @ImageN / @AudioN tokens of the clips that inherit their references (continuing in reference mode with
    * none of their own) on the same pictures, voices and frame after `changedId` – the clip they carry them from – got
    * other references: reordered, removed or added there, as that clip's own prompt follows them in the window (see
-   * continuation.ts remapInheritedTokens). For the window and agents alike. A clip whose references now come from
+   * continuation.ts remapInheritedTokens) – or swapped in place, which changes no number (inherited-swap.ts). For the
+   * window and agents alike. A clip whose references now come from
    * another clip (the chain itself changed) is left as it is; its tokens are checked before anything is sent.
    */
   private keepInheritedTokens(sequenceId: string, beforeRows: readonly store.SegmentRow[], changedId: string): void {
@@ -1495,6 +1499,7 @@ export class SequenceService {
     const before = chainOf(beforeRows)
     const after = chainOf(afterRows)
     const update = this.sql().prepare('UPDATE segments SET params = ? WHERE id = ?')
+    let assets: Asset[] | undefined
     afterRows.forEach((row, j) => {
       if (row.id === changedId) return
       const i = beforeRows.findIndex((r) => r.id === row.id)
@@ -1503,9 +1508,13 @@ export class SequenceService {
       if (!was || !now || beforeRows[was.fromIndex]?.id !== afterRows[now.fromIndex]?.id) return
       if (!inheritedTokensChanged(was, now)) return
       const params = store.parseParams(row.params)
-      const prompt = remapInheritedTokens(params.prompt, was, now)
-      const negativePrompt =
-        params.negativePrompt === undefined ? undefined : remapInheritedTokens(params.negativePrompt, was, now)
+      // A picture or voice swapped in place ("Byt bilden…", swap_reference) keeps its number, so the tokens stay and
+      // only the name in front of them may follow (inherited-swap.ts); any other change renumbers them.
+      const swapped = swappedInPlace(was, now)
+      const follow = (text: string): string =>
+        swapped ? followSwap(text, was, now, swapped, (assets ??= listAssets())) : remapInheritedTokens(text, was, now)
+      const prompt = follow(params.prompt)
+      const negativePrompt = params.negativePrompt === undefined ? undefined : follow(params.negativePrompt)
       if (prompt === params.prompt && negativePrompt === params.negativePrompt) return
       update.run(store.serializeParams({ ...params, prompt, negativePrompt }), row.id)
     })

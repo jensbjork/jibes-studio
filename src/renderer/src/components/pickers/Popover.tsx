@@ -84,6 +84,8 @@ export default function Popover({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       e.stopPropagation()
+      // Marked as handled: a dialog underneath listening on the same node (Modal) leaves it alone.
+      e.preventDefault()
       onClose()
       anchorRef.current?.focus()
     }

@@ -70,3 +70,4 @@ export function nearestGap(
   const after = x > (best.box.left + best.box.right) / 2
   return { gap: after ? best.i + 1 : best.i, at: best.i, side: after ? 'after' : 'before' }
 }
+

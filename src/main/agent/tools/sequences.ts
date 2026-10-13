@@ -55,7 +55,28 @@ import * as store from '../../sequence-store'
 import { composeTakePrompt, withoutReferenceTokens } from '../../sequences'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
-import { movedSummary, movedTokens, newOrder, reorderAnswer, unchanged, type MovedToken } from '../reorder'
+import {
+  movedSummary,
+  movedTokens,
+  newOrder,
+  referencesAnswer,
+  reorderAnswer,
+  unchanged,
+  type MovedToken
+} from '../reorder'
+import {
+  applySwap,
+  planSwap,
+  swapNotes,
+  swapSummary,
+  swappedInfo,
+  swappedTokens,
+  swapsNothing,
+  unchangedNote,
+  type ReadySwap,
+  type SwapInput,
+  type Swapped
+} from '../swap'
 import { isStoryboardId, sequenceKind, storyboardNotSequence } from '../storyboard-rows'
 import {
   AssetIndex,
@@ -106,6 +127,7 @@ import {
 } from './kit'
 import {
   URL_WAIT_MS,
+  importAsStill,
   resolvePictureReferences,
   stageFiles,
   uploadSource,
@@ -872,7 +894,57 @@ function clipNotes(result: ClipParams): Record<string, unknown> {
   }
 }
 
-// ── Reordering a clip's references ───────────────────────────────────────────
+// ── Reordering and swapping a clip's references ──────────────────────────────
+
+/**
+ * Refuses (in Swedish) to change the references of a clip that sends none of its own: one that continues exactly,
+ * one that carries another clip's references (the message says which clip to change instead: `there`), and one with
+ * a start or end image or none at all. `verb` is what can't be done ("ordna om", "byta").
+ */
+function assertOwnClipReferences(
+  sequence: Sequence,
+  index: number,
+  segment: Segment,
+  verb: string,
+  there: (fromClip: number) => string
+): void {
+  const clipNumber = index + 1
+  if (continues(sequence, index)) {
+    const plan = continuationOf(sequence, index)
+    if (plan?.form !== 'reference-to-video') {
+      throw new Error(
+        `Klipp ${clipNumber} fortsätter med exakt startbild från föregående klipp och skickar inga referenser, så det finns inget att ${verb}.`
+      )
+    }
+    if (!ownReferences(segment.params)) {
+      const from = plan.carried?.fromClip
+      throw new Error(
+        from
+          ? `Klipp ${clipNumber} har inga egna referenser – det skickar med referenserna från klipp ${from}. ${there(from)}, eller ge klippet egna med update_segment({references}).`
+          : `Klipp ${clipNumber} har inga referenser att ${verb}.`
+      )
+    }
+  }
+  if (endsOnNext(sequence, index) || kindOfModelId(segment.params.model) === 'image-to-video') {
+    throw new Error(
+      `Klipp ${clipNumber} har en start- eller slutbild (bild-till-video) och skickar inga referenser, så det finns inget att ${verb}.`
+    )
+  }
+  if (kindOfModelId(segment.params.model) !== 'reference-to-video') {
+    throw new Error(`Klipp ${clipNumber} är text-till-video och har inga referenser att ${verb}.`)
+  }
+}
+
+/** Refuses to save a clip the user changed in Studio after it was read (`params`): their change is not written over. */
+function assertClipUnchanged(segmentId: string, params: GenerationParams): void {
+  const row = store.getSegmentRow(segmentId)
+  if (!row) throw new Error('Klippet finns inte längre.')
+  if (store.serializeParams(store.parseParams(row.params)) !== store.serializeParams(params)) {
+    throw new Error(
+      'Klippet ändrades i Studio medan ändringen förbereddes, så inget sparades. Läs klippet igen (get_sequence) och gör ändringen på nytt.'
+    )
+  }
+}
 
 /**
  * reorder_references for a sequence clip: its reference images and/or audio in the new order (see newOrder), with
@@ -889,30 +961,7 @@ export async function reorderClipReferences(
   assertNotRunning(sequence)
   const clipNumber = index + 1
   const where = `klipp ${clipNumber}`
-  if (continues(sequence, index)) {
-    const plan = continuationOf(sequence, index)
-    if (plan?.form !== 'reference-to-video') {
-      throw new Error(
-        `Klipp ${clipNumber} fortsätter med exakt startbild från föregående klipp och skickar inga referenser, så det finns inget att ordna om.`
-      )
-    }
-    if (!ownReferences(segment.params)) {
-      const from = plan.carried?.fromClip
-      throw new Error(
-        from
-          ? `Klipp ${clipNumber} har inga egna referenser – det skickar med referenserna från klipp ${from}. Ordna om dem där, eller ge klippet egna med update_segment({references}).`
-          : `Klipp ${clipNumber} har inga referenser att ordna om.`
-      )
-    }
-  }
-  if (endsOnNext(sequence, index) || kindOfModelId(segment.params.model) === 'image-to-video') {
-    throw new Error(
-      `Klipp ${clipNumber} har en start- eller slutbild (bild-till-video) och skickar inga referenser, så det finns inget att ordna om.`
-    )
-  }
-  if (kindOfModelId(segment.params.model) !== 'reference-to-video') {
-    throw new Error(`Klipp ${clipNumber} är text-till-video och har inga referenser att ordna om.`)
-  }
+  assertOwnClipReferences(sequence, index, segment, 'ordna om', () => 'Ordna om dem där')
   // The model list also makes main remember the models' prompt limits, which the descriptions are fitted into.
   const [assets] = await Promise.all([AssetIndex.load(), modelsIfAvailable()])
   const params = segment.params
@@ -943,13 +992,7 @@ export async function reorderClipReferences(
   if (imageOrder) next = reorderReferences(next, 'image', imageOrder.map((i) => imageToken(i + 1)))
   if (audioOrder) next = reorderReferences(next, 'audio', audioOrder.map((i) => audioToken(i + 1)))
   // Built on the clip as it was read: a change the user saved meanwhile must not be written over.
-  const row = store.getSegmentRow(segment.id)
-  if (!row) throw new Error('Klippet finns inte längre.')
-  if (store.serializeParams(store.parseParams(row.params)) !== store.serializeParams(params)) {
-    throw new Error(
-      'Klippet ändrades i Studio medan ändringen förbereddes, så inget sparades. Läs klippet igen (get_sequence) och gör ändringen på nytt.'
-    )
-  }
+  assertClipUnchanged(segment.id, params)
   const updated = await callService<Sequence>('segments:update', segment.id, { params: next } satisfies SegmentPatch)
   const saved = updated.segments.find((s) => s.id === segment.id)?.params ?? next
   const moved = {
@@ -959,6 +1002,73 @@ export async function reorderClipReferences(
   return {
     data: answer(saved, moved),
     summary: `ändrade ordningen på referenserna i klipp ${clipNumber} i ${q(sequence.name)}${movedSummary(moved)}`
+  }
+}
+
+/**
+ * swap_reference for a sequence clip: the picture in one place – or every place of one asset, with its voice – taken
+ * by another (the shared swapReferenceImage / swapReferenceAsset, as the clip editor's "Byt bilden…" and "Byt hela …"
+ * do), no number changed, saved through the sequence service in one change; the clips that carry its references keep
+ * their tokens (the service sees a swap in place). Refused like reorderClipReferences, and for a clip that carries
+ * another clip's references the answer names that clip.
+ */
+export async function swapClipReference(ctx: ToolContext, segmentId: string, input: SwapInput): Promise<ToolOutput> {
+  const { sequence, index, segment } = await loadClip(segmentId)
+  assertNotRunning(sequence)
+  const clipNumber = index + 1
+  const where = `klipp ${clipNumber}`
+  assertOwnClipReferences(sequence, index, segment, 'byta', (from) => {
+    const source = sequence.segments[from - 1]
+    return `Byt bilden där (swap_reference med target {segment_id: "${source?.id ?? ''}"}) – klippen som bär dess referenser följer med`
+  })
+  // The model list also makes main remember the models' prompt limits, which the descriptions are fitted into.
+  const [assets] = await Promise.all([AssetIndex.load(), modelsIfAvailable()])
+  const params = segment.params
+  const paths = params.referenceImages ?? []
+  const clips = params.referenceAudios ?? []
+  // The previous clip's last frame goes after a continuing clip's references when it is sent; it is no reference here.
+  const continuation = continues(sequence, index) ? continuationOf(sequence, index) : undefined
+  const frame = continuation?.mode === 'references' ? continuation.frameToken : undefined
+  const named = findImageTokens(input.image.trim())
+  if (frame !== undefined && named.length === 1 && named[0].index === frame) {
+    throw new Error(
+      `@Image${frame} i klipp ${clipNumber} är föregående klipps sista bildruta, som Studio lägger till sist när klippet skickas – den kan inte bytas.`
+    )
+  }
+  const asked = await planSwap(input, paths, assets, where)
+  const answer = (p: GenerationParams, swapped: Swapped): Record<string, unknown> => ({
+    target: { segment_id: segment.id },
+    sequence_id: sequence.id,
+    clip_number: clipNumber,
+    ...referencesAnswer(p, assets, swappedInfo(swapped))
+  })
+  if (!('uploadId' in asked) && swapsNothing(asked, paths)) {
+    return {
+      data: { ...answer(params, { images: [], audios: [] }), notes: [unchangedNote(asked)] },
+      summary: `tittade på referenserna i klipp ${clipNumber} (oförändrade)`
+    }
+  }
+  // Last: an upload becomes a still only once everything else is known to be right.
+  const plan: ReadySwap =
+    'uploadId' in asked
+      ? { whole: false, place: asked.place, path: (await importAsStill(ctx, { upload_id: asked.uploadId })).path }
+      : asked
+  const result = applySwap(params, plan, assets.assets)
+  // Built on the clip as it was read: a change the user saved meanwhile must not be written over.
+  assertClipUnchanged(segment.id, params)
+  const updated = await callService<Sequence>('segments:update', segment.id, {
+    params: result.params
+  } satisfies SegmentPatch)
+  const saved = updated.segments.find((s) => s.id === segment.id)?.params ?? result.params
+  const swapped = swappedTokens(
+    { images: paths, audios: clips },
+    { images: saved.referenceImages ?? [], audios: saved.referenceAudios ?? [] },
+    assets
+  )
+  const notes = [...result.notes, ...swapNotes(params, saved, plan, swapped, assets)]
+  return {
+    data: { ...answer(saved, swapped), ...(notes.length ? { notes } : {}) },
+    summary: swapSummary(plan, swapped, ` i klipp ${clipNumber} i ${q(sequence.name)}`)
   }
 }
 
@@ -1240,7 +1350,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update clip',
       description:
-        "Changes a clip: only the fields you pass change. notes is the clip's \"Vad händer\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt, outfit_wearers who wears each outfit (the legend says it); reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
+        "Changes a clip: only the fields you pass change. notes is the clip's \"Vad händer\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt, outfit_wearers who wears each outfit (the legend says it); reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens; swap_reference({target: {segment_id}}) swaps one of them (or a whole asset) for another, keeping every number. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
       input: {
         segment_id: z.string(),
         ...clipFields,
