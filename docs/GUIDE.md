@@ -325,12 +325,23 @@ the front gives [C, A, B] and `@Image2 hugs @Image1`. Pictures past the model's 
 (not sent); dragging one forward sends it instead of the last one. This works in Generera and in the sequence
 clip editor, so photos can be renumbered without picking or uploading them again in another order.
 
-**Swapping.** Click a reference picture to see it large (← → step through the others). *Byt bilden…* swaps it for
-another picture in the same place; *Byt hela Anna…* gives every place of that asset to another asset, and its voice
-too when both have one. No number changes, so the prompt keeps every token, and the name written right before a
-group of tokens that all changed follows (`Anna (@Image1, voice @Audio1)` → `Bo (@Image1, voice @Audio1)`), as do the
-description switch and who wears which outfit. A name before a group that still holds some of the old asset's pictures
-stays. This works in Generera, in the sequence clip editor and in *Skapa bild…*.
+**A closer look.** Rest the pointer on a reference thumbnail (or Tab to it) and a larger picture shows beside it,
+with what it is: `@Image2 · Anna · foto 2 av 3`, and *skickas inte* for one past the model's limit. It goes away
+while you drag and never covers the thumbnail or its ✕. The start and end images and *Skapa bild…*'s references
+show it too.
+
+**Swapping.** Click a reference picture (or press Enter on it) to swap it — a drag never does; it reorders (above).
+A library photo opens a list of the library's assets, its own kind first, and the one you pick takes **every place**
+of that asset. One character for another brings everything that belongs to it along: its outfit goes to the new
+character's default outfit (or, when the new one has none, the old outfit stays and the new character wears it), its
+voice to the new one's voice (when it has one), and poses (*gäller*) and products (*hålls av*) that applied to it
+apply to the new one. *Välj en enskild bild i stället…* swaps only the picture you clicked. A picture of your own
+opens the picture list: the library's photos by kind, saved pictures and *Från fil…*. No number changes, so the
+prompt keeps every token, and the name written right before a group of tokens that all changed follows
+(`Anna (@Image1, voice @Audio1)` → `Bo (@Image1, voice @Audio1)`), as does the description switch; what the swap did
+is said under the references for a moment. A name before a group that still holds some of the old asset's pictures
+stays. This works in Generera and in the sequence clip editor; a click on a start or end image, or on one of *Skapa
+bild…*'s references, swaps that one picture the same way. ✕ removes a picture.
 
 **Descriptions are appended to the prompt.** When a generation is sent, Studio appends the descriptions of the
 assets whose photos or voices it sends as a *References* legend, with each asset's tokens:
@@ -387,7 +398,7 @@ says what goes along. The characters stay themselves, also when they leave the p
 frame comes very close to the previous clip's last one but isn't guaranteed identical. Reorder, remove or add
 references in the clip they come from, and the clips that carry them keep each `@Image` and `@Audio` on the same
 picture or voice (and the frame's token on the frame); a token whose picture no longer goes along is taken out. Swap
-one there (*Byt bilden…*) and their tokens stay as they are, with the name in front following as in the clip itself. **Exakt startbild** sends
+one there (click it) and their tokens stay as they are, with the name in front following as in the clip itself. **Exakt startbild** sends
 image-to-video from the frame itself — an exact cut, but no references (the clip's own references and their `@`
 tokens are taken out). A clip that also ends on the next clip (*Slutbild från nästa klipp*, *Gör om mellan
 grannarna*) or has an end image of its own is always sent exactly. If the model takes 9 reference images and the
@@ -485,9 +496,9 @@ To check a request before you approve it, hover an `@ImageN` or `@AudioN` token 
 References legend (or Tab to it): a card shows the picture large enough to recognise — the asset, *foto 2 av 3*, and
 *skickas inte* for one past the model's limit — or names the voice with its window and a play button for exactly the
 part that is sent (Enter on a focused voice token plays it too). Tokens and the reference tiles or voice rows they name
-light up together, whichever you hover. Click a tile, an image token, a start or end image, a neighbour's frame or a
-storyboard board to see it large, with ← / → and a filmstrip through the request's pictures; nothing can be changed
-there, and Esc closes the viewer (then the card) before it closes the dialog.
+light up together, whichever you hover. The tiles, start and end images, a neighbour's frame, storyboard boards and
+an edit's frames show a larger picture the same way when hovered or tabbed to. Nothing opens on a click — a request
+can be looked at there, not changed — and Esc closes a card before it closes the dialog.
 
 Turn it on under **Inställningar → Agentanslutning**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
 Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 90

@@ -9,9 +9,10 @@ import StillThumb from '../images/StillThumb'
 import { KIND_TONE } from './assetKinds'
 import { imageCount, matchesQuery } from './text'
 
-// The side panel of the reference viewer that picks what takes a picture's place: another photo, a saved picture or
-// a file ("Byt bilden…"), or another library asset for every place of this one ("Byt hela Anna…"). The panel only
-// picks; the form swaps (in place, so no @ImageN number changes).
+// What a click on a reference thumbnail opens, anchored to it: another library asset for every place of the
+// picture's asset (a library photo), or another photo, a saved picture or a file for just that place (a picture of
+// its own, or "Välj en enskild bild i stället…"). The panel only picks; the form swaps (in place, so no @ImageN
+// number changes).
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i
 /** Saved pictures shown before "Visa fler". */
@@ -36,6 +37,28 @@ function PanelHeader({ title, hint, onClose }: { title: string; hint?: string; o
         aria-label="Stäng väljaren"
       >
         ✕
+      </button>
+    </div>
+  )
+}
+
+/** The other way to swap, as a link under the list: "Välj en enskild bild i stället…". */
+export interface SwapAlternative {
+  label: string
+  title?: string
+  onClick: () => void
+}
+
+function AlternativeLink({ alternative }: { alternative?: SwapAlternative }) {
+  if (!alternative) return null
+  return (
+    <div className="border-t border-line px-4 py-2">
+      <button
+        onClick={alternative.onClick}
+        title={alternative.title}
+        className="rounded text-[12px] text-muted underline decoration-line underline-offset-2 outline-none transition hover:text-text focus-visible:ring-2 focus-visible:ring-muted"
+      >
+        {alternative.label}
       </button>
     </div>
   )
@@ -87,11 +110,13 @@ interface ImageProps {
   sequenceId?: string
   /** Their heading; default "Sekvensens bilder" or "Sparade bilder". */
   stillsLabel?: string
+  /** E.g. "Byt hela Anna i stället…", under the list. */
+  alternative?: SwapAlternative
   onPick: (path: string) => void
   onClose: () => void
 }
 
-/** "Byt bilden…": every library asset's photos (the swapped picture's kind first), saved pictures, "Från fil…". */
+/** Another picture for one place: every library asset's photos (the swapped one's kind first), saved pictures, a file. */
 export function SwapImagePicker({
   title,
   hint,
@@ -102,6 +127,7 @@ export function SwapImagePicker({
   stills,
   sequenceId,
   stillsLabel,
+  alternative,
   onPick,
   onClose
 }: ImageProps) {
@@ -156,7 +182,7 @@ export function SwapImagePicker({
                   const at = isCurrent ? undefined : placeOf?.(img.path)
                   const of = a.images.length > 1 ? `${k + 1}/${a.images.length}` : undefined
                   const photo = of ? `foto ${k + 1} av ${a.images.length}` : 'foto'
-                  const state = isCurrent ? ' (den som visas nu)' : at ? ` (finns redan som ${at})` : ''
+                  const state = isCurrent ? ' (den som byts)' : at ? ` (finns redan som ${at})` : ''
                   return (
                     <PhotoButton
                       key={img.id}
@@ -184,6 +210,7 @@ export function SwapImagePicker({
           onPick={onPick}
         />
       </div>
+      <AlternativeLink alternative={alternative} />
     </>
   )
 }
@@ -288,7 +315,7 @@ function StillGrid({ stills, label, current, placeOf, onPick }: LooseProps & { s
 }
 
 interface AssetProps {
-  /** E.g. "Byt hela Anna mot…". */
+  /** E.g. "Byt Anna mot…". */
   title: string
   hint?: string
   library: readonly Asset[]
@@ -296,12 +323,14 @@ interface AssetProps {
   from: Asset
   /** Ids of the assets already among the references; they get a marker. */
   present?: ReadonlySet<string>
+  /** E.g. "Välj en enskild bild i stället…", under the list. */
+  alternative?: SwapAlternative
   onPick: (asset: Asset) => void
   onClose: () => void
 }
 
-/** "Byt hela Anna…": the library's assets with photos, the swapped one's kind first. */
-export function SwapAssetPicker({ title, hint, library, from, present, onPick, onClose }: AssetProps) {
+/** Another asset for every place of `from`: the library's assets with photos, `from`'s kind first. */
+export function SwapAssetPicker({ title, hint, library, from, present, alternative, onPick, onClose }: AssetProps) {
   const [query, setQuery] = useState('')
   const sections = useMemo(
     () =>
@@ -357,6 +386,7 @@ export function SwapAssetPicker({ title, hint, library, from, present, onPick, o
           </section>
         ))}
       </div>
+      <AlternativeLink alternative={alternative} />
     </>
   )
 }

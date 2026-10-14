@@ -13,8 +13,8 @@ import {
   type PictureInfo
 } from './studio'
 
-// Swapping a reference in place (swap_reference; "Byt bilden…" and "Byt hela …" in Studio): another picture – or
-// every place of one asset, with its voice – takes the same places, so no @ImageN / @AudioN number changes. The rules
+// Swapping a reference in place (swap_reference; a click on a reference thumbnail in Studio): another picture – or
+// every place of one asset, with its voice and a character's outfit – takes the same places, so no @ImageN / @AudioN number changes. The rules
 // are the shared ones (shared/reference-swap.ts), which the form, the clip editor and the agents' tool all apply.
 // Here: reading the place and the new picture an agent names, and saying what now shows what.
 
@@ -119,7 +119,7 @@ export function swapsNothing(plan: ReadySwap, paths: readonly string[]): boolean
 /** The shared swap on `params` (whose referenceImages are the list the plan was read against). */
 export function applySwap(params: GenerationParams, plan: ReadySwap, assets: readonly Asset[]): SwapResult {
   return plan.whole
-    ? swapReferenceAsset(params, plan.from, plan.to)
+    ? swapReferenceAsset(params, plan.from, plan.to, assets)
     : swapReferenceImage(params, plan.place, plan.path, assets)
 }
 
@@ -205,8 +205,17 @@ export function swapNotes(
   const followed =
     after.prompt !== before.prompt || (after.negativePrompt ?? '') !== (before.negativePrompt ?? '')
   const tokens = [...swapped.images, ...swapped.audios].map((s) => s.token)
-  if (followed) {
-    const to = plan.whole ? plan.to.name : swapped.images[0] ? nameOf(swapped.images[0].now) : undefined
+  if (followed && plan.whole) {
+    // By the asset each token shows now: a character's outfit may have followed it under a name of its own.
+    const groups = new Map<string, string[]>()
+    for (const s of [...swapped.images, ...swapped.audios]) {
+      const name = nameOf(s.now)
+      groups.set(name, [...(groups.get(name) ?? []), s.token])
+    }
+    const named = [...groups].map(([name, list]) => `${list.join(', ')} är nu ${q(name)}`)
+    notes.push(`Prompten följde med: namnet framför ${named.join(' och framför ')} – inga nummer ändrades.`)
+  } else if (followed) {
+    const to = swapped.images[0] ? nameOf(swapped.images[0].now) : undefined
     notes.push(
       `Prompten följde med: namnet framför ${tokens.join(', ')} är nu ${to ? q(to) : 'det nya'} – inga nummer ändrades.`
     )

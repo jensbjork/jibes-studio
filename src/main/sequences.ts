@@ -1508,7 +1508,7 @@ export class SequenceService {
       if (!was || !now || beforeRows[was.fromIndex]?.id !== afterRows[now.fromIndex]?.id) return
       if (!inheritedTokensChanged(was, now)) return
       const params = store.parseParams(row.params)
-      // A picture or voice swapped in place ("Byt bilden…", swap_reference) keeps its number, so the tokens stay and
+      // A picture or voice swapped in place (a click on its thumbnail, swap_reference) keeps its number, so the tokens stay and
       // only the name in front of them may follow (inherited-swap.ts); any other change renumbers them.
       const swapped = swappedInPlace(was, now)
       const follow = (text: string): string =>

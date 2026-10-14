@@ -46,7 +46,6 @@ import {
   type FormAudio
 } from '../pickers/audioRefs'
 import Modal from '../pickers/Modal'
-import type { ViewedPicture } from '../pickers/ReferenceViewer'
 import { markKey } from '../prompt/promptText'
 import { effectiveParams, needsTake, parseConsent, pendingTake } from '../sequences/sequenceUtils'
 import {
@@ -58,7 +57,7 @@ import {
   expiresText,
   slotName
 } from './agentText'
-import { ApprovalViewer, ImageTile, useViewPictures, type Photo } from './ApprovalPictures'
+import { ImageTile, type Photo } from './ApprovalPictures'
 import { DeleteSummary, useDeleteCheck } from './DeleteApproval'
 import { EditSummary, ResumeSummary, VoiceDesignSummary, useEditApproval } from './EditApproval'
 import PromptText, { type TokenTarget } from './PromptText'
@@ -549,135 +548,133 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
       footer={footer}
       maxWidth={620}
     >
-      <ApprovalViewer library={assets}>
-        <div className="space-y-5">
-          {error && (
-            <p className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[12px] leading-relaxed text-[#ffb3b5] select-text">
-              {error}
-            </p>
-          )}
-          {!pending && phase !== 'failed' && phase !== 'submitting' && (
-            <p className="rounded-md border border-line bg-raised px-3 py-2 text-[12px] text-muted">{approvalOutcome(a)}</p>
-          )}
-          {phase === 'done' && madeStill && (
-            <MadeStill stillId={madeStill} sequenceId={a.sequenceId} inStoryboard={!!storyboardId} />
-          )}
+      <div className="space-y-5">
+        {error && (
+          <p className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[12px] leading-relaxed text-[#ffb3b5] select-text">
+            {error}
+          </p>
+        )}
+        {!pending && phase !== 'failed' && phase !== 'submitting' && (
+          <p className="rounded-md border border-line bg-raised px-3 py-2 text-[12px] text-muted">{approvalOutcome(a)}</p>
+        )}
+        {phase === 'done' && madeStill && (
+          <MadeStill stillId={madeStill} sequenceId={a.sequenceId} inStoryboard={!!storyboardId} />
+        )}
 
-          {a.note && (
-            <div className="rounded-md border border-line bg-raised/60 px-3 py-2.5">
-              <p className="mb-1 text-[11px] text-muted">{agentDisplayName(a.client)} skriver:</p>
-              <p className="whitespace-pre-wrap leading-relaxed select-text">{a.note}</p>
-            </div>
-          )}
+        {a.note && (
+          <div className="rounded-md border border-line bg-raised/60 px-3 py-2.5">
+            <p className="mb-1 text-[11px] text-muted">{agentDisplayName(a.client)} skriver:</p>
+            <p className="whitespace-pre-wrap leading-relaxed select-text">{a.note}</p>
+          </div>
+        )}
 
-          {sequenceError && a.sequenceId && !storyboardId && (
-            <p className="text-[12px] text-accent">Sekvensen kunde inte läsas: {sequenceError}</p>
-          )}
-          {storyboardError && storyboardId && (
-            <p className="text-[12px] text-accent">Storyboarden kunde inte läsas: {storyboardError}</p>
-          )}
+        {sequenceError && a.sequenceId && !storyboardId && (
+          <p className="text-[12px] text-accent">Sekvensen kunde inte läsas: {sequenceError}</p>
+        )}
+        {storyboardError && storyboardId && (
+          <p className="text-[12px] text-accent">Storyboarden kunde inte läsas: {storyboardError}</p>
+        )}
 
-          {image && (
-            <ImageSummary
-              image={image}
-              sequenceName={ownerName}
-              hasSequence={!!a.sequenceId}
-              inStoryboard={!!storyboardId}
-              clipNumber={imageTarget?.clipNumber}
-              boardTarget={
-                image.assignToBoard
-                  ? (boardTarget ?? { number: image.assignToBoard.boardNumber })
-                  : undefined
-              }
-            />
-          )}
-          {image === null && <p className="text-accent">Förfrågan saknar uppgifter om bilden.</p>}
+        {image && (
+          <ImageSummary
+            image={image}
+            sequenceName={ownerName}
+            hasSequence={!!a.sequenceId}
+            inStoryboard={!!storyboardId}
+            clipNumber={imageTarget?.clipNumber}
+            boardTarget={
+              image.assignToBoard
+                ? (boardTarget ?? { number: image.assignToBoard.boardNumber })
+                : undefined
+            }
+          />
+        )}
+        {image === null && <p className="text-accent">Förfrågan saknar uppgifter om bilden.</p>}
 
-          {editRequest && a.kind === 'edit' && editRequest.resumeJobId && (
-            <ResumeSummary approval={a} request={editRequest} state={editState} />
-          )}
-          {editRequest && a.kind === 'edit' && !editRequest.resumeJobId && (
-            <EditSummary
-              approval={a}
-              request={editRequest}
-              state={editState}
-              assets={assets}
-              consent={cloneConsent}
-              onConsent={setCloneConsent}
-            />
-          )}
-          {editRequest && a.kind === 'voice-design' && <VoiceDesignSummary request={editRequest} />}
-          {editRequest === null && <p className="text-accent">Förfrågan saknar uppgifter om ändringen.</p>}
+        {editRequest && a.kind === 'edit' && editRequest.resumeJobId && (
+          <ResumeSummary approval={a} request={editRequest} state={editState} />
+        )}
+        {editRequest && a.kind === 'edit' && !editRequest.resumeJobId && (
+          <EditSummary
+            approval={a}
+            request={editRequest}
+            state={editState}
+            assets={assets}
+            consent={cloneConsent}
+            onConsent={setCloneConsent}
+          />
+        )}
+        {editRequest && a.kind === 'voice-design' && <VoiceDesignSummary request={editRequest} />}
+        {editRequest === null && <p className="text-accent">Förfrågan saknar uppgifter om ändringen.</p>}
 
-          {removal && <DeleteSummary approval={a} request={removal} check={deleteCheck} />}
-          {removal === null && <p className="text-accent">Förfrågan saknar uppgifter om vad som ska tas bort.</p>}
+        {removal && <DeleteSummary approval={a} request={removal} check={deleteCheck} />}
+        {removal === null && <p className="text-accent">Förfrågan saknar uppgifter om vad som ska tas bort.</p>}
 
-          {clips.map((clip) => (
-            <ClipSummary
-              key={clip.key}
-              clip={clip}
-              models={models}
-              photos={photos}
-              voices={voices}
-              compact={clips.length > 1}
-              frames={clip === frameClip ? frames : undefined}
-            />
-          ))}
-          {transitions.map((view) => (
-            <TransitionSummary
-              key={view.key}
-              view={view}
-              models={models}
-              aspectRatio={storyboard?.aspectRatio}
-              compact={transitions.length > 1}
-            />
-          ))}
-          {a.kind === 'generate-all' && sequence && !clips.length && (
-            <p className="text-muted">Alla klipp i sekvensen har redan en färdig tagning.</p>
-          )}
-          {a.kind === 'generate-all' && storyboard && !transitions.length && (
-            <p className="text-muted">Alla övergångar i storyboarden har redan en färdig tagning.</p>
-          )}
-          {a.kind !== 'generation' &&
-            image === undefined &&
-            editRequest === undefined &&
-            removal === undefined &&
-            !storyboardId &&
-            !sequence &&
-            !sequenceError &&
-            !clips.length && <p className="text-muted">Läser sekvensen…</p>}
-          {storyboardId && a.kind === 'generate-all' && !storyboard && !storyboardError && (
-            <p className="text-muted">Läser storyboarden…</p>
-          )}
+        {clips.map((clip) => (
+          <ClipSummary
+            key={clip.key}
+            clip={clip}
+            models={models}
+            photos={photos}
+            voices={voices}
+            compact={clips.length > 1}
+            frames={clip === frameClip ? frames : undefined}
+          />
+        ))}
+        {transitions.map((view) => (
+          <TransitionSummary
+            key={view.key}
+            view={view}
+            models={models}
+            aspectRatio={storyboard?.aspectRatio}
+            compact={transitions.length > 1}
+          />
+        ))}
+        {a.kind === 'generate-all' && sequence && !clips.length && (
+          <p className="text-muted">Alla klipp i sekvensen har redan en färdig tagning.</p>
+        )}
+        {a.kind === 'generate-all' && storyboard && !transitions.length && (
+          <p className="text-muted">Alla övergångar i storyboarden har redan en färdig tagning.</p>
+        )}
+        {a.kind !== 'generation' &&
+          image === undefined &&
+          editRequest === undefined &&
+          removal === undefined &&
+          !storyboardId &&
+          !sequence &&
+          !sequenceError &&
+          !clips.length && <p className="text-muted">Läser sekvensen…</p>}
+        {storyboardId && a.kind === 'generate-all' && !storyboard && !storyboardError && (
+          <p className="text-muted">Läser storyboarden…</p>
+        )}
 
-          {/* A removal costs nothing; its panel ends with what happens to the files instead. */}
-          {removal === undefined && (
-            <div className="flex items-baseline justify-between gap-4 border-t border-line pt-4">
-              <span className="text-muted">
-                {clips.length > 1
-                  ? `Totalt för ${clips.length} klipp`
-                  : transitions.length > 1
-                    ? `Totalt för ${transitions.length} övergångar`
-                    : 'Kostnad'}
-                <span className="ml-1.5 text-[11px]">(dras från ditt Venice-konto)</span>
-              </span>
-              <span className="text-lg font-semibold tabular-nums">
-                {a.priceUsd !== undefined ? priceShown(a.priceUsd) : 'Okänt pris'}
-              </span>
-            </div>
-          )}
-          {phase === 'submitting' && image !== undefined && (
-            <p className="text-[12px] text-muted">Venice skapar bilden – det brukar ta 10–30 sekunder.</p>
-          )}
-          {/* A removal says what changed at the top of its list (DeleteSummary). */}
-          {blocking && removal === undefined && (
-            <p className="text-[12px] text-accent">
-              {cannot} som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {agentInSentence(a.client)}{' '}
-              {askAgain ? 'fråga igen' : 'rätta det'}, eller avböj.
-            </p>
-          )}
-        </div>
-      </ApprovalViewer>
+        {/* A removal costs nothing; its panel ends with what happens to the files instead. */}
+        {removal === undefined && (
+          <div className="flex items-baseline justify-between gap-4 border-t border-line pt-4">
+            <span className="text-muted">
+              {clips.length > 1
+                ? `Totalt för ${clips.length} klipp`
+                : transitions.length > 1
+                  ? `Totalt för ${transitions.length} övergångar`
+                  : 'Kostnad'}
+              <span className="ml-1.5 text-[11px]">(dras från ditt Venice-konto)</span>
+            </span>
+            <span className="text-lg font-semibold tabular-nums">
+              {a.priceUsd !== undefined ? priceShown(a.priceUsd) : 'Okänt pris'}
+            </span>
+          </div>
+        )}
+        {phase === 'submitting' && image !== undefined && (
+          <p className="text-[12px] text-muted">Venice skapar bilden – det brukar ta 10–30 sekunder.</p>
+        )}
+        {/* A removal says what changed at the top of its list (DeleteSummary). */}
+        {blocking && removal === undefined && (
+          <p className="text-[12px] text-accent">
+            {cannot} som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {agentInSentence(a.client)}{' '}
+            {askAgain ? 'fråga igen' : 'rätta det'}, eller avböj.
+          </p>
+        )}
+      </div>
     </Modal>
   )
 }
@@ -877,7 +874,6 @@ function ClipSummary({
   const model = models.find((m) => m.id === p.model)
   const kind = kindOfModelId(p.model)
   const mode = KINDS.find((k) => k.id === kind)?.label
-  const view = useViewPictures()
   // The picture or clip ("image:2", "audio:1") hovered among the tiles or in the texts: its tokens and tile light up.
   const [lit, setLit] = useState<string>()
   const light = (key: string | undefined) => (on: boolean) => setLit((cur) => (on ? key : cur === key ? undefined : cur))
@@ -898,12 +894,6 @@ function ClipSummary({
       ...(i >= refs.length ? { unsent } : {})
     }
   })
-  const referencePictures: ViewedPicture[] = listed.map((path, i) => ({
-    path,
-    place: `@Image${i + 1}`,
-    ...(i >= refs.length ? { warning: `${unsent}.` } : {})
-  }))
-  const openReference = view ? (n: number) => view('Referensbilder', referencePictures, n - 1) : undefined
   // Only what is sent: paramsForSubmit already dropped audio the model doesn't take (and past its limit).
   const audios = formAudios(p.referenceAudios ?? [], voices, Infinity, true)
   const audioTargets: TokenTarget[] = audios.map((a) => ({
@@ -915,26 +905,9 @@ function ClipSummary({
     count: a.source ? audioClipsOf(a.source.asset).length : undefined,
     window: { start: a.start, length: a.length }
   }))
-  // The start and end images (or the neighbours' frames), stepped through together in the viewer.
+  // The neighbours' frames, when the start or end image is taken from them.
   const startFrame = frames?.start?.source === 'previous' ? frames.start.path : undefined
   const endFrame = frames?.end?.source === 'next' ? frames.end.path : undefined
-  const startPicture: ViewedPicture | undefined = clip.continuesFrom
-    ? startFrame
-      ? { path: startFrame, place: 'Startbild', name: `Sista bildrutan från klipp ${clip.continuesFrom}` }
-      : undefined
-    : p.startImage
-      ? { path: p.startImage, place: 'Startbild' }
-      : undefined
-  const endPicture: ViewedPicture | undefined = clip.endsAt
-    ? endFrame
-      ? { path: endFrame, place: 'Slutbild', name: `Första bildrutan från klipp ${clip.endsAt}` }
-      : undefined
-    : p.endImage
-      ? { path: p.endImage, place: 'Slutbild' }
-      : undefined
-  const framePictures = [startPicture, endPicture].filter((f): f is ViewedPicture => !!f)
-  const openFrame = (picture: ViewedPicture | undefined) =>
-    view && picture ? () => view('Start- och slutbild', framePictures, framePictures.indexOf(picture)) : undefined
   const settings = [
     model?.name ?? p.model,
     mode,
@@ -957,7 +930,6 @@ function ClipSummary({
           audioTargets={audioTargets}
           highlighted={lit}
           onHighlight={setLit}
-          onOpenImage={openReference}
           className={`overflow-y-auto rounded-md border border-line bg-raised px-3 py-2 ${compact ? 'max-h-32' : 'max-h-60'}`}
         />
       ) : (
@@ -971,7 +943,6 @@ function ClipSummary({
           audioTargets={audioTargets}
           highlighted={lit}
           onHighlight={setLit}
-          onOpenImage={openReference}
           sentLength={clip.sentLength}
           limit={clip.limit}
           changed={clip.descriptionsChanged}
@@ -998,7 +969,6 @@ function ClipSummary({
                   path={path}
                   badge={`@Image${i + 1}`}
                   photo={photos.get(path)}
-                  onOpen={openReference && (() => openReference(i + 1))}
                   lit={lit === key}
                   onLight={light(key)}
                 />
@@ -1037,15 +1007,9 @@ function ClipSummary({
                 preview={!!frames}
                 path={startFrame}
                 text={`Sista bildrutan från klipp ${clip.continuesFrom}${frameTime(frames?.start?.time)}`}
-                onOpen={openFrame(startPicture)}
               />
             ) : p.startImage ? (
-              <ImageTile
-                path={p.startImage}
-                badge="Start"
-                photo={photos.get(p.startImage)}
-                onOpen={openFrame(startPicture)}
-              />
+              <ImageTile path={p.startImage} badge="Start" photo={photos.get(p.startImage)} />
             ) : (
               <p className="text-[12px] text-accent">Ingen startbild.</p>
             )}
@@ -1055,17 +1019,9 @@ function ClipSummary({
                 preview={!!frames}
                 path={endFrame}
                 text={`Första bildrutan från klipp ${clip.endsAt}${frameTime(frames?.end?.time)}`}
-                onOpen={openFrame(endPicture)}
               />
             ) : (
-              p.endImage && (
-                <ImageTile
-                  path={p.endImage}
-                  badge="Slut"
-                  photo={photos.get(p.endImage)}
-                  onOpen={openFrame(endPicture)}
-                />
-              )
+              p.endImage && <ImageTile path={p.endImage} badge="Slut" photo={photos.get(p.endImage)} />
             )}
           </div>
         </>
@@ -1103,7 +1059,6 @@ function DescriptionLegend({
   audioTargets,
   highlighted,
   onHighlight,
-  onOpenImage,
   sentLength,
   limit,
   changed,
@@ -1115,7 +1070,6 @@ function DescriptionLegend({
   /** As for PromptText: the tokens lit with the prompt's and the tiles'. */
   highlighted?: string
   onHighlight: (key: string | undefined) => void
-  onOpenImage?: (n: number) => void
   sentLength?: number
   limit?: number
   /** The library gives another legend by now (a description was edited after the request). */
@@ -1142,7 +1096,6 @@ function DescriptionLegend({
         audioTargets={audioTargets}
         highlighted={highlighted}
         onHighlight={onHighlight}
-        onOpenImage={onOpenImage}
         className={`overflow-y-auto text-[12px] text-muted ${compact ? 'max-h-24' : 'max-h-40'}`}
       />
       {changed && (
@@ -1208,22 +1161,19 @@ function AutoFrame({
   badge,
   path,
   text,
-  preview,
-  onOpen
+  preview
 }: {
   badge: string
   path?: string
   text: string
   /** The frame can be previewed (one clip's request); otherwise the neighbour's take is still to be made. */
   preview: boolean
-  /** Shows the preview large. */
-  onOpen?: () => void
 }) {
   if (!preview) return <p className="text-[12px] text-muted">{text}.</p>
   return (
     <div className="w-40 space-y-1">
       {path ? (
-        <ImageTile path={path} badge={badge} caption="Förhandsvisning" large onOpen={onOpen} />
+        <ImageTile path={path} badge={badge} caption="Förhandsvisning" title={text} large />
       ) : (
         <div className="flex h-24 w-40 items-center justify-center rounded border border-dashed border-line px-2 text-center text-[11px] text-muted">
           Ingen förhandsvisning än
@@ -1278,12 +1228,6 @@ function ImageSummary({
   const p = image.params
   const safeMode = useImageSafeMode()
   const references = image.references
-  const view = useViewPictures()
-  const pictures: ViewedPicture[] = references.map((ref, i) => ({
-    path: ref.path,
-    place: i === 0 ? 'Referens 1 (grunden)' : `Referens ${i + 1}`,
-    name: ref.name ?? ref.label
-  }))
   const settings = [
     image.modelName ?? p.model,
     references.length ? `bild från ${references.length === 1 ? '1 referens' : `${references.length} referenser`}` : 'bild från text',
@@ -1326,7 +1270,7 @@ function ImageSummary({
                 caption={ref.name ?? ref.label}
                 title={ref.label}
                 captionTone={ref.kind && ref.kind !== 'still' ? KIND_TONE[ref.kind].caption : undefined}
-                onOpen={view && (() => view('Referensbilder', pictures, i))}
+                kind={ref.kind && ref.kind !== 'still' ? ref.kind : undefined}
               />
             ))}
           </div>

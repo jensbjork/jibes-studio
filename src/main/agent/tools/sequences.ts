@@ -1007,8 +1007,8 @@ export async function reorderClipReferences(
 
 /**
  * swap_reference for a sequence clip: the picture in one place – or every place of one asset, with its voice – taken
- * by another (the shared swapReferenceImage / swapReferenceAsset, as the clip editor's "Byt bilden…" and "Byt hela …"
- * do), no number changed, saved through the sequence service in one change; the clips that carry its references keep
+ * by another (the shared swapReferenceImage / swapReferenceAsset, as a click on a thumbnail in the clip editor
+ * does), no number changed, saved through the sequence service in one change; the clips that carry its references keep
  * their tokens (the service sees a swap in place). Refused like reorderClipReferences, and for a clip that carries
  * another clip's references the answer names that clip.
  */

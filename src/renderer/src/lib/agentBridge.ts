@@ -649,7 +649,7 @@ export function applyReorderReferences(
  * Applies swap_reference to the form: the picture in one place (`image`, by path – the place it is in now, `index`
  * telling which when it is there twice – and `path`, the new picture), or every place of one asset
  * (`from_asset_id`) taken by another (`to_asset_id`, with its voice), by the shared swapReferenceImage /
- * swapReferenceAsset that "Byt bilden…" and "Byt hela …" use: no number changes, and the name in front of fully
+ * swapReferenceAsset that a click on a reference thumbnail uses: no number changes, and the name in front of fully
  * swapped token groups follows, in one change. All or nothing. The notes are the shared ones.
  */
 export function applySwapReference(current: GenerationParams, rawArgs: unknown, assets: readonly Asset[] = []): FormChange {
@@ -667,7 +667,7 @@ export function applySwapReference(current: GenerationParams, rawArgs: unknown, 
       const from = assets.find((a) => a.id === fromId)
       const to = assets.find((a) => a.id === toId)
       if (!from || !to) throw new BridgeError('Inget ändrades: tillgången finns inte (längre).')
-      return swapReferenceAsset(current, from, to)
+      return swapReferenceAsset(current, from, to, assets)
     }
     const image = field(args, 'image')
     const path = field(args, 'path')

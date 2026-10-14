@@ -11,6 +11,7 @@ import { audioRole, windowLabel } from './audioRefs'
 // A card that shows what an @ImageN or @AudioN token in a read-only prompt points at – the picture large enough
 // to recognise, or the clip with a play button for the part that is sent – so a prompt can be checked against its
 // references without leaving it. The token spans stay plain text until a card opens: nothing is loaded before.
+// The same card shows a reference thumbnail (or an approval tile) larger while it is hovered: the picture variant.
 
 /** What @ImageN (or @AudioN; index N-1) points at, for colouring the token and for its card. */
 export interface TokenTarget {
@@ -41,22 +42,27 @@ export interface TokenCardContent {
   target?: TokenTarget
   /** Why the token names nothing that is sent (misspelled, out of range); the card then says only that, in red. */
   problem?: string
+  /** A last line on what the picture does, e.g. "Klicka för att byta – dra för att flytta". */
+  hint?: string
 }
 
 interface BindOptions {
-  /** Clicking the token (or Enter) opens its picture large; the card's picture opens it too. */
-  onOpen?: () => void
   /** The key ("image:2", "audio:1") reported to `onHighlight` while the token is hovered or focused. */
   highlight?: string
   onHighlight?: (key: string | undefined) => void
 }
+
+/** What shows the card on an element that has its own focus, clicks and keys (a thumbnail, a tile). */
+export type CardHover = Pick<
+  HTMLAttributes<HTMLElement>,
+  'onMouseEnter' | 'onMouseLeave' | 'onFocus' | 'onBlur' | 'aria-describedby'
+>
 
 interface Open {
   id: number
   content: TokenCardContent
   anchor: HTMLElement
   rect: DOMRect
-  onOpen?: () => void
 }
 
 /** The card waits this long, so it doesn't flash up while the pointer only passes over a token. */
@@ -65,13 +71,18 @@ const OPEN_DELAY_MS = 150
 const CLOSE_DELAY_MS = 150
 
 /**
- * One token card for a prompt: `bind(id, content)` gives a token's span what it needs (focusable; the card after a
- * short delay on hover, at once on keyboard focus; Enter opens or plays), `card` is the card itself. The card stays
- * while the pointer is on it, closes on leave, Escape (only the card – not a dialog underneath), scroll or resize,
- * and is placed above or below the token, never over it, inside the window.
+ * One card for a prompt's tokens or a row of pictures: `bind(id, content)` gives a token's span what it needs
+ * (focusable; the card after a short delay on hover, at once on keyboard focus; Enter plays a clip), `hover(id,
+ * content)` only the card's hover and focus handlers, for a picture that has its own focus, click and keys, `hide()`
+ * closes it at once (a press or a drag on the picture), and `card` is the card itself. The card stays while the
+ * pointer is on it (to reach a clip's play button; a picture's card lets the pointer through), closes on leave,
+ * Escape (only the card – not a dialog underneath), scroll or resize, and is placed above or below its anchor, never
+ * over it, inside the window.
  */
 export function useTokenCard(): {
   bind: (id: number, content: TokenCardContent, options?: BindOptions) => HTMLAttributes<HTMLElement>
+  hover: (id: number, content: TokenCardContent, options?: BindOptions) => CardHover
+  hide: () => void
   card: ReactNode
 } {
   const cardId = useId()
@@ -129,77 +140,62 @@ export function useTokenCard(): {
     }
   }, [isOpen])
 
-  const bind = (id: number, content: TokenCardContent, options: BindOptions = {}): HTMLAttributes<HTMLElement> => {
-    const { onOpen, highlight, onHighlight } = options
-    const next = (anchor: HTMLElement): Omit<Open, 'rect'> => ({ id, content, anchor, onOpen })
-    const clipWindow = content.ref === 'audio' ? content.target?.window : undefined
-    const audioPath = content.target && !content.target.unsent ? content.target.path : undefined
+  // A card whose anchor left the page (a swapped picture is a new element) is not shown, nor counted as open.
+  const shown = open && open.anchor.isConnected ? open : undefined
+
+  const hover = (id: number, content: TokenCardContent, options: BindOptions = {}): CardHover => {
+    const { highlight, onHighlight } = options
+    const next = (anchor: HTMLElement): Omit<Open, 'rect'> => ({ id, content, anchor })
     return {
-      tabIndex: 0,
-      role: onOpen ? 'button' : undefined,
-      'aria-describedby': open?.id === id ? cardId : undefined,
+      'aria-describedby': shown?.id === id ? cardId : undefined,
       onMouseEnter: (e) => {
         onHighlight?.(highlight)
-        // From one token to the next the card follows at once.
-        show(next(e.currentTarget), openRef.current ? 0 : OPEN_DELAY_MS)
+        // From one token (or picture) to the next the card follows at once.
+        show(next(e.currentTarget), openRef.current?.anchor.isConnected ? 0 : OPEN_DELAY_MS)
       },
       onMouseLeave: () => {
         onHighlight?.(undefined)
         hide()
       },
       onFocus: (e) => {
-        // Keyboard focus only: a click focuses the token too (and then opens the picture), as does the viewer
-        // handing the focus back when it closes.
-        if (!e.currentTarget.matches(':focus-visible')) return
+        // Keyboard focus only: a click focuses a token or a thumbnail too, as does a picker handing the focus back.
+        if (e.target !== e.currentTarget || !e.currentTarget.matches(':focus-visible')) return
         onHighlight?.(highlight)
         show(next(e.currentTarget), 0)
       },
       onBlur: (e) => {
+        if (e.target !== e.currentTarget) return
         onHighlight?.(undefined)
         if (!(e.relatedTarget instanceof Node && cardRef.current?.contains(e.relatedTarget))) hide(0)
-      },
-      onClick: onOpen
-        ? () => {
-            // Not when a text selection ended on the token.
-            if (window.getSelection()?.isCollapsed === false) return
-            hide(0)
-            onOpen()
-          }
-        : undefined,
-      onKeyDown: (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return
-        if (onOpen) {
-          e.preventDefault()
-          hide(0)
-          onOpen()
-        } else if (audioPath && clipWindow?.length) {
-          e.preventDefault()
-          toggleClip(audioPath, clipWindow.start, clipWindow.length)
-        }
       }
     }
   }
 
-  const shown = open && open.anchor.isConnected ? open : undefined
+  const bind = (id: number, content: TokenCardContent, options: BindOptions = {}): HTMLAttributes<HTMLElement> => {
+    const clipWindow = content.ref === 'audio' ? content.target?.window : undefined
+    const audioPath = content.target && !content.target.unsent ? content.target.path : undefined
+    return {
+      tabIndex: 0,
+      ...hover(id, content, options),
+      onKeyDown: (e) => {
+        if ((e.key !== 'Enter' && e.key !== ' ') || !audioPath || !clipWindow?.length) return
+        e.preventDefault()
+        toggleClip(audioPath, clipWindow.start, clipWindow.length)
+      }
+    }
+  }
+
   const card = shown ? (
     <ReferenceCard
       id={cardId}
       ref={cardRef}
       content={shown.content}
       rect={shown.rect}
-      onOpen={
-        shown.onOpen
-          ? () => {
-              hide(0)
-              shown.onOpen?.()
-            }
-          : undefined
-      }
       onMouseEnter={clear}
       onMouseLeave={() => hide()}
     />
   ) : null
-  return { bind, card }
+  return { bind, hover, hide: () => hide(0), card }
 }
 
 const WIDTH = 256
@@ -207,6 +203,8 @@ const WIDTH = 256
 const PICTURE = 240
 /** Room under the picture for the lines that say what it is. */
 const TEXT_ROOM = 76
+/** And for a hint under them. */
+const HINT_ROOM = 18
 
 function fileName(path: string): string {
   return path.split('/').pop() ?? path
@@ -232,7 +230,6 @@ function ReferenceCard({
   ref,
   content,
   rect,
-  onOpen,
   onMouseEnter,
   onMouseLeave
 }: {
@@ -240,13 +237,13 @@ function ReferenceCard({
   ref: Ref<HTMLDivElement>
   content: TokenCardContent
   rect: DOMRect
-  onOpen?: () => void
   onMouseEnter: () => void
   onMouseLeave: () => void
 }) {
   const { token, target, problem } = content
   const picture = content.ref === 'image' && target?.path && !problem ? target.path : undefined
-  const height = picture ? PICTURE + TEXT_ROOM : 96
+  const room = TEXT_ROOM + (content.hint ? HINT_ROOM : 0)
+  const height = picture ? PICTURE + room : 96
   const place = placeBeside(rect, WIDTH, height, height)
   const tone = target?.kind ? KIND_TONE[target.kind].text : 'text-text'
   const where = target ? placeOf(target, content.ref) : undefined
@@ -294,8 +291,7 @@ function ReferenceCard({
           <CardPicture
             path={picture}
             dim={!!target.unsent}
-            maxHeight={Math.max(60, Math.min(PICTURE, place.maxHeight - TEXT_ROOM))}
-            onOpen={onOpen}
+            maxHeight={Math.max(60, Math.min(PICTURE, place.maxHeight - room))}
           />
         )}
         <p className="mt-1.5 flex items-baseline gap-2">
@@ -308,16 +304,17 @@ function ReferenceCard({
             <span className={`shrink-0 text-[11px] ${KIND_TONE[target.kind].text}`}>{ASSET_COPY[target.kind].singular}</span>
           )}
         </p>
-        <p className="text-[11px] text-muted">
-          {[where ?? (target.name ? undefined : 'egen bild'), onOpen ? 'klicka för att förstora' : undefined]
-            .filter(Boolean)
-            .join(' · ')}
-        </p>
+        {(where || (!target.name && target.path)) && (
+          <p className="text-[11px] text-muted">{where ?? 'egen bild'}</p>
+        )}
         {target.unsent && <p className="text-[11px] leading-snug text-accent">{target.unsent}</p>}
+        {content.hint && <p className="mt-0.5 text-[11px] leading-snug text-muted">{content.hint}</p>}
       </>
     )
   }
 
+  // A picture's card has nothing to reach: the pointer goes through it, so it never covers a neighbour's ✕ or a drop.
+  const through = content.ref === 'image'
   return createPortal(
     <div
       id={id}
@@ -326,7 +323,9 @@ function ReferenceCard({
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       // no-drag: near the top it can lie over a title-bar drag region.
-      className="no-drag fixed z-[70] flex flex-col overflow-hidden rounded-lg border border-line bg-panel p-2 text-[12px] text-text shadow-2xl shadow-black/60"
+      className={`no-drag fixed z-[70] flex flex-col overflow-hidden rounded-lg border border-line bg-panel p-2 text-[12px] text-text shadow-2xl shadow-black/60 ${
+        through ? 'pointer-events-none' : ''
+      }`}
       style={{ top: place.top, bottom: place.bottom, left: place.left, width: WIDTH, maxHeight: place.maxHeight }}
     >
       {body}
@@ -335,18 +334,8 @@ function ReferenceCard({
   )
 }
 
-/** The picture, whole (contained, its long side at most PICTURE px); a click opens it large. */
-function CardPicture({
-  path,
-  dim,
-  maxHeight,
-  onOpen
-}: {
-  path: string
-  dim: boolean
-  maxHeight: number
-  onOpen?: () => void
-}) {
+/** The picture, whole (contained, its long side at most PICTURE px). */
+function CardPicture({ path, dim, maxHeight }: { path: string; dim: boolean; maxHeight: number }) {
   const [missing, setMissing] = useState(false)
   if (missing) {
     return (
@@ -356,10 +345,7 @@ function CardPicture({
     )
   }
   return (
-    <span
-      onClick={onOpen}
-      className={`flex min-h-16 items-center justify-center overflow-hidden rounded bg-black/40 ${onOpen ? 'cursor-zoom-in' : ''}`}
-    >
+    <span className="flex min-h-16 items-center justify-center overflow-hidden rounded bg-black/40">
       <img
         src={mediaUrl(path)}
         alt=""

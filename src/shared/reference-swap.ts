@@ -1,11 +1,13 @@
-// Swapping a reference in place ("Byt bilden…", "Byt hela Anna…"): another picture – or every place of one asset,
-// with its voice – takes the same places, so no @ImageN / @AudioN number changes and the prompt keeps every token.
+// Swapping a reference in place (a click on a reference thumbnail, or swap_reference): another picture – or every
+// place of one asset, with its voice and, for a character, its outfit – takes the same places, so no @ImageN /
+// @AudioN number changes and the prompt keeps every token.
 // The name written in front of the swapped tokens follows ("Anna (@Image1)" → "Bo (@Image1)"), and so do the
 // description switch and who wears which outfit. Pure and shared: the form, the clip editor and the agents' tools
 // swap by the same rules.
 
 import { pathKey } from './generation-filter'
 import { sanitizeReferenceAudios } from './models'
+import { resolveOutfitWearers, withOutfitWearer } from './outfits'
 import { renameReferenceNames } from './prompt-remap'
 import type { Asset, AssetAudio, GenerationParams, ReferenceAudio } from './types'
 
@@ -95,8 +97,65 @@ export function swapReferenceImage(
  * Every place of `from` among the references taken by `to`: its pictures in order (reused from the start when it has
  * fewer, so every place keeps a picture; the first ones when it has more) and – in reference mode with audio – its
  * voice or sound clips the same way. No number changes. `from`'s clips stay when `to` has none (a note says so).
+ *
+ * One character for another, given the `library`: what `from` wore follows too – the outfit it wears among the
+ * references (shared/outfits.ts) gives its places to `to`'s default outfit, or, when `to` has none, stays and is worn
+ * by `to` from now on.
  */
-export function swapReferenceAsset(params: GenerationParams, from: Asset, to: Asset): SwapResult {
+export function swapReferenceAsset(
+  params: GenerationParams,
+  from: Asset,
+  to: Asset,
+  library?: readonly Asset[]
+): SwapResult {
+  const swapped = swapAsset(params, from, to)
+  if (!library || from.kind !== 'character' || to.kind !== 'character' || from.id === to.id) return swapped
+  return followOutfits(params, swapped, from, to, library)
+}
+
+/** The outfits `from` wore among `before`'s references, handed to `to` in `after` (see swapReferenceAsset). */
+function followOutfits(
+  before: GenerationParams,
+  after: SwapResult,
+  from: Asset,
+  to: Asset,
+  library: readonly Asset[]
+): SwapResult {
+  const present: Asset[] = []
+  for (const path of before.referenceImages ?? []) {
+    const owner = ownerOf(library, path, 'image')
+    if (owner && !present.some((a) => a.id === owner.id)) present.push(owner)
+  }
+  const worn = present.filter(
+    (a) => a.kind === 'outfit' && resolveOutfitWearers(present, before.outfitWearers).get(a.id) === from.id
+  )
+  if (!worn.length) return after
+  const own = library.find((a) => a.id === to.defaultOutfitId && a.kind === 'outfit' && a.images.length > 0)
+  let result = after
+  worn.forEach((outfit, i) => {
+    if (i === 0 && own && own.id !== outfit.id) {
+      const next = swapAsset(result.params, outfit, own)
+      result = {
+        params: { ...next.params, outfitWearers: withOutfitWearer(next.params.outfitWearers, own.id, to.id) },
+        notes: [...result.notes, ...next.notes, `${outfit.name} byttes mot ${to.name}s kläder, ${own.name}.`]
+      }
+      return
+    }
+    result = {
+      params: { ...result.params, outfitWearers: withOutfitWearer(result.params.outfitWearers, outfit.id, to.id) },
+      notes: [
+        ...result.notes,
+        own?.id === outfit.id
+          ? `${to.name} har samma förvalda kläder, ${outfit.name}.`
+          : `${to.name} har inga förvalda kläder, så ${outfit.name} ligger kvar och bärs nu av ${to.name}.`
+      ]
+    }
+  })
+  return result
+}
+
+/** Every place of `from` given to `to` (pictures, then clips), with the name before its tokens and its switches. */
+function swapAsset(params: GenerationParams, from: Asset, to: Asset): SwapResult {
   if (from.id === to.id) return { params, notes: [] }
   const images = [...(params.referenceImages ?? [])]
   const fromImages = new Set(from.images.map((i) => pathKey(i.path)))

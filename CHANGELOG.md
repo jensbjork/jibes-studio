@@ -14,16 +14,21 @@ breaking changes; they are called out under **Changed** or **Removed**.
   or `@AudioN` token in the prompt or the References legend shows a card with the picture large enough to recognise –
   the asset, *foto 2 av 3*, *skickas inte* past the model's limit – or the voice with its window and a play button for
   exactly the part that is sent; misspelled tokens say what is wrong. Tokens and the reference tiles or voice rows
-  they name light up together, and clicking a tile, an image token, a start or end image, a neighbour's frame or a
-  storyboard board opens it large – ← / → and a filmstrip through the request's pictures, read only; Esc closes the
-  viewer first, not the dialog. A finished clip's drawer shows the same cards on its prompt's tokens.
-- **Swap a reference without losing the prompt**: click a reference picture in Generera, a sequence clip or *Skapa
-  bild…* to see it large (← → step through them), then *Byt bilden…* swaps it for another picture in the same place,
-  and *Byt hela Anna…* gives every place of that asset – and its voice, when both have one – to another asset. No
+  they name light up together, and hovering a tile, a start or end image, a neighbour's frame, a storyboard board or
+  an edit's frame shows it larger the same way. Nothing opens on a click (a request is looked at there, not changed),
+  and Esc closes a card before the dialog. A finished clip's drawer shows the same cards on its prompt's tokens.
+- **Look at and swap a reference without losing the prompt**: hovering a reference thumbnail in Generera, a
+  sequence clip or *Skapa bild…* (or tabbing to it) shows it larger with what it is – `@Image2 · Anna · foto 2 av 3`,
+  *skickas inte* past the model's limit. A click on it (not a drag, which still reorders) swaps it: a library photo
+  gives every place of its asset to the asset you pick (its own kind first), and one character for another brings
+  everything that belongs to it along – its outfit goes to the new character's default outfit (or stays, worn by the
+  new character, when it has none), its voice to the new one's, and the poses (*gäller*) and products (*hålls av*)
+  that applied to it apply to the new one. *Välj en enskild bild i stället…*, a picture of its own, a start or end
+  image and *Skapa bild…*'s references swap just that place, for a library photo, a saved picture or a file. No
   `@ImageN` or `@AudioN` number changes, and the name written right before a fully swapped group follows
   (`Anna (@Image1)` → `Bo (@Image1)`), as do the description switch and who wears which outfit; clips that carry the
-  references keep their tokens. Agents: `swap_reference` (`image`, `with`, `whole_asset`, for the form or a clip),
-  90 tools in all (35 read, 46 write, 9 ask for approval).
+  references keep their tokens. Agents: `swap_reference` (`image`, `with`, `whole_asset` – which for a character
+  hands over its outfit too –, for the form or a clip), 90 tools in all (35 read, 46 write, 9 ask for approval).
 - **The prompt says who wears the clothes**: with *Ta med beskrivningar* on, the References legend names the
   character wearing each outfit – `Röd klänning (@Image3), worn by Anna (@Image1, @Image2): …` (`bärs av` in
   Swedish) – also for an outfit without a description, so the model can't take the clothes for anyone else's. The

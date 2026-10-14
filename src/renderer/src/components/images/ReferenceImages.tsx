@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import type { Asset, AssetKind, Still } from '@shared/types'
-import { ASSET_COPY } from '../../lib/assets'
 import { mediaUrl } from '../../lib/media'
 import AssetPicker from '../pickers/AssetPicker'
 import { KIND_TONE } from '../pickers/assetKinds'
 import { assetsByPath } from '../pickers/assetRefs'
 import Popover from '../pickers/Popover'
-import ReferenceViewer, { type ViewedPicture } from '../pickers/ReferenceViewer'
+import { useTokenCard, type TokenCardContent } from '../pickers/ReferenceCard'
+import { SwapImagePicker } from '../pickers/SwapPicker'
 import { stillSourceLabel } from './imageModels'
 import StillThumb, { isStillDrag, stillIdFromDrop } from './StillThumb'
 
@@ -71,8 +71,8 @@ type Picker = 'library' | 'stills'
 /**
  * The reference images of a still: thumbnails in send order (the first is the base), with pickers for the
  * library (characters, environments, products, outfits, poses) and the sequence's stills, a file dialog, drag and
- * drop of files and stills, and drag to reorder. A click on a thumbnail (or Enter / Space) shows it large, where it
- * can be swapped for another picture in the same place or removed.
+ * drop of files and stills, and drag to reorder. Hovering a thumbnail shows it larger; a click on it (or Enter /
+ * Space) opens a picker anchored to it that puts another picture in the same place.
  */
 export default function ReferenceImages({
   value,
@@ -89,13 +89,16 @@ export default function ReferenceImages({
   onPickerOpen
 }: Props) {
   const [picker, setPicker] = useState<Picker | null>(null)
-  // The picture shown large (its index), or null.
-  const [viewing, setViewing] = useState<number | null>(null)
-  // Whether the press that ends in a click started a drag (a reorder): that click doesn't open the viewer.
+  // The picture whose swap picker is open (its path: it follows the picture if the order changes meanwhile).
+  const [swapping, setSwapping] = useState<string>()
+  // Whether the press that ends in a click started a drag (a reorder): that click doesn't open the swap picker.
   const dragged = useRef(false)
   const list = useRef<HTMLDivElement>(null)
-  // The viewer counts as a picker: Escape and clicks in it are its own, not the dialog's.
-  useEffect(() => onPickerOpen?.(picker !== null || viewing !== null), [picker, viewing !== null])
+  const swapAnchor = useRef<HTMLElement | null>(null)
+  const swapIndex = swapping === undefined ? -1 : value.indexOf(swapping)
+  // The swap picker counts as a picker: Escape and clicks in it are its own, not the dialog's.
+  useEffect(() => onPickerOpen?.(picker !== null || swapIndex !== -1), [picker, swapIndex !== -1])
+  const card = useTokenCard()
   const libraryButton = useRef<HTMLButtonElement>(null)
   const stillsButton = useRef<HTMLButtonElement>(null)
   const [over, setOver] = useState(false)
@@ -171,34 +174,55 @@ export default function ReferenceImages({
 
   const pickFiles = async () => add(await window.studio.pickImages(true))
 
-  /**
-   * "Byt bilden…" in the viewer: the picture takes this one's place, the order (and so "image 2" in the prompt)
-   * stays. A picture already among the references isn't added twice.
-   */
-  const swap = (i: number, path: string): string | undefined => {
-    if (!IMAGE_EXT.test(path)) return 'Bara bilder i formatet JPG, PNG eller WebP kan användas.'
-    if (value.some((p, j) => j !== i && p === path)) return 'Bilden finns redan bland referensbilderna.'
-    onNote(undefined)
-    onChange(value.map((p, j) => (j === i ? path : p)))
-    return undefined
+  /** A click or Enter on thumbnail i: its swap picker, or (clicked again) none. */
+  const openSwap = (i: number, el: HTMLElement) => {
+    card.hide()
+    if (swapping === value[i]) return setSwapping(undefined)
+    swapAnchor.current = el
+    setSwapping(value[i])
   }
 
-  /** "Ta bort" in the viewer: the viewer goes on to the next picture, or closes after the last. */
-  const removeViewed = (i: number) => {
-    remove(i)
-    setViewing(value.length > 1 ? Math.min(i, value.length - 2) : null)
+  /**
+   * The picture picked in the swap picker takes place i, the order (and so "image 2" in the prompt) stays. A picture
+   * already among the references isn't added twice.
+   */
+  const swap = (i: number, path: string) => {
+    setSwapping(undefined)
+    if (!IMAGE_EXT.test(path)) return onNote('Bara bilder i formatet JPG, PNG eller WebP kan användas.')
+    if (value.some((p, j) => j !== i && p === path)) return onNote('Bilden finns redan bland referensbilderna.')
+    onNote(undefined)
+    onChange(value.map((p, j) => (j === i ? path : p)))
+    focusAfterSwap.current = i
   }
+  // Then focus on the picture now in that place, once the list shows it (the thumbnails are keyed by their file).
+  const focusAfterSwap = useRef<number | null>(null)
+  useEffect(() => {
+    const i = focusAfterSwap.current
+    if (i === null) return
+    focusAfterSwap.current = null
+    list.current?.querySelectorAll<HTMLElement>(':scope > [role=listitem]')[i]?.focus({ preventScroll: true })
+  })
 
   const place = (i: number): string => (i === 0 ? 'Basbild' : `Bild ${i + 1}`)
 
-  /** What a picture is called in the viewer (its place; a role, a still's source or the file when it isn't a photo). */
-  const viewed = (path: string, i: number): ViewedPicture => {
+  /** What thumbnail i's hover card says: its place, what it is (a photo, a role, a still) and whether it is sent. */
+  const cardOf = (path: string, i: number): TokenCardContent => {
+    const asset = byPath.get(path)
     const still = stillByPath.get(path)
+    const photo = asset ? asset.images.findIndex((img) => img.path === path) + 1 : 0
     return {
-      path,
-      place: place(i),
-      name: pathLabels?.[path] ?? (still ? stillSourceLabel(still) : undefined),
-      warning: i >= max ? `Skickas inte – modellen tar högst ${max} bilder.` : undefined
+      token: place(i),
+      ref: 'image',
+      target: {
+        kind: asset?.kind,
+        label: asset?.name ?? path.split('/').pop() ?? path,
+        path,
+        name: pathLabels?.[path] ?? asset?.name ?? (still ? stillSourceLabel(still) : undefined),
+        number: photo || undefined,
+        count: asset?.images.length,
+        ...(i >= max ? { unsent: `Skickas inte – modellen tar högst ${max} bilder` } : {})
+      },
+      hint: 'Klicka för att byta bilden – dra för att flytta'
     }
   }
 
@@ -270,30 +294,26 @@ export default function ReferenceImages({
               : still
                 ? { text: still.source === 'frame' ? 'Bildruta' : 'Bild', className: 'bg-black/70' }
                 : undefined
-          const described = asset
-            ? `${asset.name} (${ASSET_COPY[asset.kind].singular}) · ${name}`
-            : still
-              ? `${stillSourceLabel(still)}${still.prompt ? ` · ${still.prompt}` : ''}`
-              : name
-          const title = notSent
-            ? `Skickas inte – modellen tar högst ${max} bilder`
-            : missing.has(path)
-              ? `Filen saknas: ${path}`
-              : role
-                ? `${role} · ${described}`
-                : described
+          const picked = swapping === path
+          // The card shows the picture larger on hover – not while a picture is dragged or a picker is open.
+          const hover = dragIndex !== undefined || swapIndex !== -1 ? undefined : card.hover(i, cardOf(path, i))
           return (
             <div
               key={path}
               role="listitem"
               tabIndex={0}
-              aria-label={`${place(i)}: ${caption?.text ?? name}. Enter visar den större.`}
+              aria-label={`${place(i)}: ${caption?.text ?? name}. Enter byter den.`}
+              aria-haspopup="dialog"
+              aria-expanded={picked}
               draggable
+              {...hover}
               onMouseDown={() => {
                 dragged.current = false
+                card.hide()
               }}
               onDragStart={(e) => {
                 dragged.current = true
+                card.hide()
                 e.dataTransfer.setData(REORDER_TYPE, String(i))
                 e.dataTransfer.effectAllowed = 'move'
                 setDragIndex(i)
@@ -305,21 +325,20 @@ export default function ReferenceImages({
               }}
               onDrop={(e) => onDrop(e, i)}
               onClick={(e) => {
-                // A click shows it large; not the end of a drag, nor a click on ✕ or "Gör till bas".
+                // A click swaps it; not the end of a drag, nor a click on ✕ or "Gör till bas".
                 if (dragged.current || (e.target as HTMLElement).closest('button')) return
-                setViewing(i)
+                openSwap(i, e.currentTarget)
               }}
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
                 e.preventDefault()
-                setViewing(i)
+                openSwap(i, e.currentTarget)
               }}
-              title={`${title}\nKlicka för att visa den större – dra för att ändra ordningen`}
               className={`group relative h-[66px] w-[66px] cursor-grab overflow-hidden rounded bg-raised outline-none ring-offset-2 ring-offset-panel focus-visible:ring-2 focus-visible:ring-muted active:cursor-grabbing ${
                 notSent ? 'opacity-40' : ''
-              } ${missing.has(path) ? 'ring-1 ring-accent' : i === 0 ? 'ring-1 ring-accent/70' : ''} ${
-                dragIndex === i ? 'opacity-50' : ''
-              }`}
+              } ${
+                picked ? 'ring-2 ring-text' : missing.has(path) ? 'ring-1 ring-accent' : i === 0 ? 'ring-1 ring-accent/70' : ''
+              } ${dragIndex === i ? 'opacity-50' : ''}`}
             >
               {missing.has(path) ? (
                 <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
@@ -393,22 +412,33 @@ export default function ReferenceImages({
             'kläder och en viss pose, eller med en produkt i handen.'}
       </p>
 
-      {viewing !== null && value.length > 0 && (
-        <ReferenceViewer
-          label="Referensbilder"
-          pictures={value.map(viewed)}
-          index={viewing}
-          onIndex={setViewing}
-          onClose={() => setViewing(null)}
-          library={assets}
-          stills={stills}
-          stillsLabel={copy.name}
-          swapHint="Bilden byts på samma plats i ordningen, så prompten behöver inte ändras."
-          onSwapImage={swap}
-          onRemove={removeViewed}
-          returnFocus={(i) => list.current?.querySelectorAll<HTMLElement>(':scope > [role=listitem]')[i]}
-        />
-      )}
+      {card.card}
+      <Popover
+        anchorRef={swapAnchor}
+        open={swapIndex !== -1}
+        onClose={() => setSwapping(undefined)}
+        width={360}
+        maxHeight={480}
+        label={`Byt ${swapIndex === -1 ? 'bilden' : place(swapIndex).toLocaleLowerCase('sv')}`}
+      >
+        {swapIndex !== -1 && (
+          <SwapImagePicker
+            title={`Byt ${place(swapIndex).toLocaleLowerCase('sv')} mot…`}
+            hint="Bilden byts på samma plats i ordningen, så prompten behöver inte ändras."
+            library={assets}
+            current={value[swapIndex]}
+            currentKind={byPath.get(value[swapIndex])?.kind}
+            placeOf={(path) => {
+              const at = value.indexOf(path)
+              return at === -1 ? undefined : place(at)
+            }}
+            stills={stills}
+            stillsLabel={copy.name}
+            onPick={(path) => swap(swapIndex, path)}
+            onClose={() => setSwapping(undefined)}
+          />
+        )}
+      </Popover>
 
       <Popover
         anchorRef={libraryButton}

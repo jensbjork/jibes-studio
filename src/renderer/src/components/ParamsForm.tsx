@@ -118,7 +118,7 @@ interface Props {
   onSubmit?: () => void
   /** Lets the pickers link to the library views (characters, environments, products, outfits, poses, prompts). */
   navigate?: Navigate
-  /** A sequence clip's sequence: "Byt bilden…" offers its saved pictures (else every saved picture). */
+  /** A sequence clip's sequence: the swap picker offers its saved pictures (else every saved picture). */
   sequenceId?: string
 }
 
@@ -333,8 +333,7 @@ export default function ParamsForm({
   const caption = (path: string): ImageCaption | undefined => {
     const a = byPath.get(path)
     if (!a) return undefined
-    const title = `${a.name} (${ASSET_COPY[a.kind].singular})`
-    return { text: a.name, title, className: KIND_TONE[a.kind].caption }
+    return { text: a.name, className: KIND_TONE[a.kind].caption }
   }
 
   const refs = params.referenceImages ?? []
@@ -527,29 +526,31 @@ export default function ParamsForm({
   }
 
   /**
-   * "Byt bilden…" / "Byt hela Anna…" in the enlarged view: another picture (or asset) takes the same places, so no
-   * @ImageN or @AudioN number changes and the prompt keeps every token. Not a removal and an addition through
-   * setReferences, which would renumber or drop them: the shared rules (shared/reference-swap) change the pictures,
-   * clips, the name in front of the swapped tokens, the description switch and the wearers in one update, and the
-   * form's own "gäller" and "hålls av" choices follow here. Returns the note to show in the viewer too.
+   * A reference thumbnail clicked and another picture (or, for a library photo, another asset) picked: it takes the
+   * same places, so no @ImageN or @AudioN number changes and the prompt keeps every token. Not a removal and an
+   * addition through setReferences, which would renumber or drop them: the shared rules (shared/reference-swap)
+   * change the pictures, clips, the name in front of the swapped tokens, the description switch, the wearers and – one
+   * character for another – the outfit it wore, in one update, and the form's own "gäller" and "hålls av" choices
+   * follow here. What the swap did, or why nothing changed, is the note under the references.
    */
-  const swapReference = (index: number, choice: SwapChoice): string | undefined => {
+  const swapReference = (index: number, choice: SwapChoice): void => {
     const old = refs[index]
-    if (old === undefined) return undefined
+    if (old === undefined) return
     const from = byPath.get(old)
     const target = choice.kind === 'asset' ? assets.find((a) => a.id === choice.assetId) : byPath.get(choice.path)
     const apply = (p: GenerationParams): SwapResult => {
       if (choice.kind === 'image') return swapReferenceImage(p, index, choice.path, assets)
-      if (!from || !target) throw new Error('Biblioteket har ändrats – stäng bilden och försök igen.')
-      return swapReferenceAsset(p, from, target)
+      if (!from || !target) throw new Error('Biblioteket har ändrats – försök igen.')
+      return swapReferenceAsset(p, from, target, assets)
     }
     let result: SwapResult
     try {
       result = apply(params)
     } catch (e) {
-      return e instanceof Error ? e.message : String(e)
+      setRefNote(e instanceof Error ? e.message : String(e))
+      return
     }
-    if (result.params === params) return undefined
+    if (result.params === params) return
     if (result.params.prompt !== params.prompt) ownPrompt.current = result.params.prompt
     // On the latest params, like every setter here; nothing happens if the picture left that place meanwhile.
     setParams((p) => {
@@ -584,9 +585,7 @@ export default function ParamsForm({
         )
       )
     }
-    const note = result.notes.join(' ') || undefined
-    setRefNote(note)
-    return note
+    setRefNote(result.notes.join(' ') || undefined)
   }
 
   // ── References as the prompt sees them (@ImageN) ────────────────────────────

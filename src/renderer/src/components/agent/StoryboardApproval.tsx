@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ApprovalImageRequest, ApprovalRequest, GenerationParams, Storyboard, VideoModel } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
-import type { ViewedPicture } from '../pickers/ReferenceViewer'
-import { useViewPictures } from './ApprovalPictures'
+import { PictureHover } from './ApprovalPictures'
 
 // What the approval dialog shows for a request about a storyboard (ApprovalRequest.sequenceKind 'storyboard'): a
 // transition is the clip from one board's picture to the next one's, so the user sees the two pictures side by
@@ -173,49 +172,58 @@ function boxRatio(aspectRatio: string | undefined): string {
   return m ? `${m[1]} / ${m[2]}` : '16 / 9'
 }
 
-/** One board's picture with its number and note under it; a click shows it large. */
+/** One board's picture with its number and note under it; hovering it shows it larger, with what it is. */
 function BoardPicture({
   path,
   board,
   role,
-  aspectRatio,
-  onOpen
+  aspectRatio
 }: {
   path: string | undefined
   board: BoardView
   role: 'Start' | 'Slut'
   aspectRatio?: string
-  onOpen?: () => void
 }) {
   const [missing, setMissing] = useState(false)
-  const Box = onOpen ? 'button' : 'div'
+  const name = board.number ? `Ruta ${board.number}` : 'Ruta'
+  const className = `relative block w-full overflow-hidden rounded-md bg-raised ${missing || !path ? 'ring-1 ring-accent' : ''}`
+  const style = { aspectRatio: boxRatio(aspectRatio) }
+  const content = (
+    <>
+      {path && !missing ? (
+        <img
+          src={mediaUrl(path)}
+          draggable={false}
+          onError={() => setMissing(true)}
+          className="h-full w-full object-contain"
+        />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center p-2 text-center text-[11px] text-accent">
+          {path ? 'Bilden saknas' : 'Ingen bild'}
+        </span>
+      )}
+      <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 text-[10px]">{role}</span>
+    </>
+  )
   return (
     <figure className="min-w-0 flex-1">
-      <Box
-        type={onOpen ? 'button' : undefined}
-        onClick={onOpen}
-        title={onOpen ? 'Klicka för att förstora' : undefined}
-        className={`relative block w-full overflow-hidden rounded-md bg-raised ${missing || !path ? 'ring-1 ring-accent' : ''} ${
-          onOpen ? 'cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-white/70' : ''
-        }`}
-        style={{ aspectRatio: boxRatio(aspectRatio) }}
-      >
-        {path && !missing ? (
-          <img
-            src={mediaUrl(path)}
-            draggable={false}
-            onError={() => setMissing(true)}
-            className="h-full w-full object-contain"
-          />
-        ) : (
-          <span className="flex h-full w-full items-center justify-center p-2 text-center text-[11px] text-accent">
-            {path ? 'Bilden saknas' : 'Ingen bild'}
-          </span>
-        )}
-        <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 text-[10px]">{role}</span>
-      </Box>
+      {path ? (
+        <PictureHover
+          path={path}
+          badge={role}
+          info={{ name }}
+          className={`${className} outline-none focus-visible:ring-2 focus-visible:ring-white/70`}
+          style={style}
+        >
+          {content}
+        </PictureHover>
+      ) : (
+        <div className={className} style={style}>
+          {content}
+        </div>
+      )}
       <figcaption className="mt-1.5 text-[12px] leading-snug">
-        <span className="font-medium">{board.number ? `Ruta ${board.number}` : 'Ruta'}</span>
+        <span className="font-medium">{name}</span>
         {board.note?.trim() && <span className="line-clamp-2 text-muted select-text">{board.note.trim()}</span>}
       </figcaption>
     </figure>
@@ -239,15 +247,6 @@ export function TransitionSummary({
 }) {
   const p = view.params
   const model = models.find((m) => m.id === p.model)
-  const open = useViewPictures()
-  const boardName = (board: BoardView): string => (board.number ? `Ruta ${board.number}` : 'Ruta')
-  const pictures: ViewedPicture[] = [
-    ...(p.startImage ? [{ path: p.startImage, place: 'Startbild', name: boardName(view.from) }] : []),
-    ...(p.endImage ? [{ path: p.endImage, place: 'Slutbild', name: boardName(view.to) }] : [])
-  ]
-  // By place, not by file: two boards can have the same picture.
-  const openAt = (at: number, path: string | undefined) =>
-    open && path ? () => open(`Övergång ${view.number}`, pictures, at) : undefined
   // Always image-to-video from the two pictures, so the mode goes unsaid.
   const settings = [
     model?.name ?? p.model,
@@ -274,7 +273,6 @@ export function TransitionSummary({
           board={view.from}
           role="Start"
           aspectRatio={aspectRatio}
-          onOpen={openAt(0, p.startImage)}
         />
         <span aria-hidden className="mt-[18%] shrink-0 text-lg text-muted">
           →
@@ -284,7 +282,6 @@ export function TransitionSummary({
           board={view.to}
           role="Slut"
           aspectRatio={aspectRatio}
-          onOpen={openAt(p.startImage ? 1 : 0, p.endImage)}
         />
       </div>
 
@@ -312,23 +309,19 @@ export function TransitionSummary({
 /** Where an image request's picture goes in a storyboard: the board, its note, and the picture it replaces. */
 export function BoardTargetSummary({ target, storyboardName }: { target: BoardTarget; storyboardName?: string }) {
   const where = storyboardName ? ` i ”${storyboardName}”` : ''
-  const open = useViewPictures()
   const current = target.currentImage
   return (
     <div className="mt-3 flex items-start gap-3">
       {current && (
-        <button
-          type="button"
-          onClick={() =>
-            open?.('Rutans bild', [{ path: current, place: 'Ersätts', name: `Bilden i ruta ${target.number ?? ''}`.trim() }], 0)
-          }
-          disabled={!open}
-          className="relative h-16 w-24 shrink-0 cursor-zoom-in overflow-hidden rounded bg-raised outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:cursor-default"
-          title="Bilden rutan har nu – klicka för att förstora"
+        <PictureHover
+          path={current}
+          badge="Ersätts"
+          info={{ name: `Bilden i ruta ${target.number ?? ''}`.trim() }}
+          className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-raised outline-none focus-visible:ring-2 focus-visible:ring-white/70"
         >
           <img src={mediaUrl(current)} alt="" draggable={false} className="h-full w-full object-cover opacity-70" />
           <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">Ersätts</span>
-        </button>
+        </PictureHover>
       )}
       <p className="text-[12px] leading-relaxed text-muted">
         {target.number

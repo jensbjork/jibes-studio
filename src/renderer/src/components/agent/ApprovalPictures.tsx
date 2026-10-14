@@ -1,11 +1,12 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
-import type { Asset } from '@shared/types'
+import { useState, type CSSProperties, type ReactNode } from 'react'
+import type { Asset, AssetKind } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { KIND_TONE } from '../pickers/assetKinds'
-import ReferenceViewer, { type ViewedPicture } from '../pickers/ReferenceViewer'
+import { useTokenCard } from '../pickers/ReferenceCard'
 
-// The pictures of an approval request: small tiles that light up with the prompt's tokens naming them, and the
-// large viewer they open in. The viewer is read only here – a request can be looked at from the dialog, not changed.
+// The pictures of an approval request: small tiles that light up with the prompt's tokens naming them, and show the
+// picture larger while hovered (or focused from the keyboard). Nothing opens on a click: a request can be looked at
+// from the dialog, not changed.
 
 /** A library photo: its asset and its place among the asset's photos. */
 export interface Photo {
@@ -14,39 +15,68 @@ export interface Photo {
   number: number
 }
 
-/** Opens `pictures` in the viewer at `index`; `label` says what the list is ("Referensbilder"). */
-type View = (label: string, pictures: readonly ViewedPicture[], index: number) => void
-
-const ViewContext = createContext<View | undefined>(undefined)
-
-/** The viewer for the request's pictures, over the dialog; Esc closes it first, the dialog stays. */
-export function ApprovalViewer({ library, children }: { library: readonly Asset[]; children: ReactNode }) {
-  const [viewing, setViewing] = useState<{ label: string; pictures: readonly ViewedPicture[]; index: number }>()
-  return (
-    <ViewContext.Provider value={(label, pictures, index) => setViewing({ label, pictures, index })}>
-      {children}
-      {viewing && viewing.pictures.length > 0 && (
-        <ReferenceViewer
-          label={viewing.label}
-          pictures={viewing.pictures}
-          index={viewing.index}
-          onIndex={(index) => setViewing((v) => v && { ...v, index })}
-          onClose={() => setViewing(undefined)}
-          library={library}
-        />
-      )}
-    </ViewContext.Provider>
-  )
-}
-
-/** Opens pictures large in the dialog's viewer; undefined outside ApprovalViewer (the tiles then don't open). */
-export function useViewPictures(): View | undefined {
-  return useContext(ViewContext)
+/** What a picture's hover card says besides its badge: the asset's photo, or a name of its own. */
+export interface PictureInfo {
+  photo?: Photo
+  /** What it is when it isn't a library photo: "Ruta 2", "Sista bildrutan från klipp 3". */
+  name?: string
+  /** Its kind when it isn't a library photo (the colour of its name). */
+  kind?: AssetKind
 }
 
 /**
- * One picture of a request: a reference photo, a start or end image, a frame. Clicking it (with `onOpen`) shows it
- * large; `lit` rings it while a token naming it is hovered, and `onLight` tells while it is hovered itself.
+ * A request's picture (`children`) with its hover card: the picture larger after a short delay on hover, at once on
+ * keyboard focus, with `badge` and what it is. `onLight` tells while it is hovered or focused.
+ */
+export function PictureHover({
+  path,
+  badge,
+  info,
+  onLight,
+  className,
+  style,
+  children
+}: {
+  path: string
+  badge: string
+  info: PictureInfo
+  onLight?: (on: boolean) => void
+  className: string
+  style?: CSSProperties
+  children: ReactNode
+}) {
+  const card = useTokenCard()
+  const { photo, name, kind } = info
+  const hover = card.hover(
+    0,
+    {
+      token: badge,
+      ref: 'image',
+      target: {
+        kind: photo?.asset.kind ?? kind,
+        label: photo ? `${photo.asset.name} (foto ${photo.number})` : (name ?? path.split('/').pop() ?? path),
+        path,
+        name: photo?.asset.name ?? name,
+        number: photo?.number,
+        count: photo?.asset.images.length
+      }
+    },
+    onLight && { highlight: badge, onHighlight: (key) => onLight(key !== undefined) }
+  )
+  const what = photo ? `${photo.asset.name}, foto ${photo.number}` : (name ?? path.split('/').pop() ?? path)
+  return (
+    <>
+      <div tabIndex={0} aria-label={`${badge}: ${what}`} {...hover} className={className} style={style}>
+        {children}
+      </div>
+      {card.card}
+    </>
+  )
+}
+
+/**
+ * One picture of a request: a reference photo, a start or end image, a frame. Hovering it shows it larger; `lit`
+ * rings it while a token naming it is hovered, and `onLight` tells while it is hovered itself.
  */
 export function ImageTile({
   path,
@@ -56,7 +86,7 @@ export function ImageTile({
   captionTone,
   large,
   title,
-  onOpen,
+  kind,
   lit,
   onLight
 }: {
@@ -68,28 +98,23 @@ export function ImageTile({
   captionTone?: string
   /** A bigger, wide tile (frames and stills rather than reference photos). */
   large?: boolean
-  /** The hover text's name when it says more than the caption. */
+  /** The hover card's name when it says more than the caption. */
   title?: string
-  onOpen?: () => void
+  /** The kind of a picture that isn't a library photo (the colour of its name on the card). */
+  kind?: AssetKind
   lit?: boolean
   onLight?: (on: boolean) => void
 }) {
   const [missing, setMissing] = useState(false)
-  const name =
-    title ?? caption ?? (photo ? `${photo.asset.name} (foto ${photo.number})` : (path.split('/').pop() ?? path))
-  const Root = onOpen ? 'button' : 'div'
   return (
-    <Root
-      type={onOpen ? 'button' : undefined}
-      onClick={onOpen}
-      onMouseEnter={() => onLight?.(true)}
-      onMouseLeave={() => onLight?.(false)}
-      onFocus={(e) => e.currentTarget.matches(':focus-visible') && onLight?.(true)}
-      onBlur={() => onLight?.(false)}
-      title={`${missing ? `Filen saknas: ${path}` : `${badge} · ${name}`}${onOpen ? ' – klicka för att förstora' : ''}`}
-      className={`relative block shrink-0 overflow-hidden rounded bg-raised text-left transition-shadow ${large ? 'h-24 w-40' : 'h-16 w-16'} ${
-        lit ? 'ring-2 ring-white/70' : missing ? 'ring-1 ring-accent' : ''
-      } ${onOpen ? 'cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-white/70' : ''}`}
+    <PictureHover
+      path={path}
+      badge={badge}
+      info={{ photo, name: title ?? caption, kind }}
+      onLight={onLight}
+      className={`relative block shrink-0 overflow-hidden rounded bg-raised text-left outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-white/70 ${
+        large ? 'h-24 w-40' : 'h-16 w-16'
+      } ${lit ? 'ring-2 ring-white/70' : missing ? 'ring-1 ring-accent' : ''}`}
     >
       {missing ? (
         <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
@@ -120,6 +145,6 @@ export function ImageTile({
           </span>
         )
       )}
-    </Root>
+    </PictureHover>
   )
 }
