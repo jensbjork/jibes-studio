@@ -1,6 +1,6 @@
 // A clip that inherits its references (continuing in reference mode with none of its own) names them by the numbers
-// they have in the clip it carries them from. When a picture or clip there is swapped in place – "Byt bilden…" or
-// "Byt hela …" in the clip editor, swap_reference for an agent – no number changes, so its tokens stay as they are
+// they have in the clip it carries them from. When a picture or clip there is swapped in place – a click on its
+// thumbnail in the clip editor, swap_reference for an agent – no number changes, so its tokens stay as they are
 // (renumbering would take a swapped picture's token out as if it were removed); only the name written right before a
 // group of tokens that all changed follows, by the rule the clip's own prompt follows (shared/reference-swap.ts).
 

@@ -15,8 +15,6 @@ interface Props {
   /** The picture or clip ("image:2", "audio:1") whose tokens are lit: hovered here, in another text or among the tiles. */
   highlighted?: string
   onHighlight?: (key: string | undefined) => void
-  /** Opens @ImageN's picture large (N 1-based): its tokens are then clickable. */
-  onOpenImage?: (n: number) => void
   className?: string
 }
 
@@ -41,7 +39,6 @@ export default function PromptText({
   audioTargets = [],
   highlighted,
   onHighlight,
-  onOpenImage,
   className = ''
 }: Props) {
   const card = useTokenCard()
@@ -51,7 +48,6 @@ export default function PromptText({
     const key = markKey(ref, t.index)
     const tone = target?.kind ? KIND_TONE[target.kind].text : 'text-text'
     const lit = highlighted !== undefined && key === highlighted ? ' ring-1 ring-white/50' : ''
-    const onOpen = ref === 'image' && target?.path && onOpenImage ? () => onOpenImage(t.index) : undefined
     const token = `${ref === 'image' ? '@Image' : '@Audio'}${t.index}`
     marks.push({
       start: t.start,
@@ -62,9 +58,9 @@ export default function PromptText({
           {...card.bind(
             t.start,
             { token, ref, target, ...(target ? {} : { problem: `${t.raw} ${nothing}` }) },
-            { onOpen, highlight: key, onHighlight }
+            { highlight: key, onHighlight }
           )}
-          className={`${target && !target.unsent ? `${tokenBase} bg-white/5 ${tone}` : broken}${lit}${onOpen ? ' cursor-zoom-in' : ''}`}
+          className={`${target && !target.unsent ? `${tokenBase} bg-white/5 ${tone}` : broken}${lit}`}
         >
           {t.raw}
         </span>

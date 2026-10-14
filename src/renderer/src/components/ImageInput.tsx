@@ -1,9 +1,13 @@
-import { useRef, useState, type DragEvent, type ReactNode, type Ref } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type Ref, type RefObject } from 'react'
 import type { Asset, Still } from '@shared/types'
 import { mediaUrl } from '../lib/media'
 import { useSeenPictureWhenVisible } from '../lib/work'
-import ReferenceViewer, { type ViewedPicture } from './pickers/ReferenceViewer'
+import { assetsByPath } from './pickers/assetRefs'
+import { possessive } from './pickers/audioRefs'
+import Popover from './pickers/Popover'
+import { useTokenCard, type TokenCardContent } from './pickers/ReferenceCard'
 import { moveItem } from './pickers/reorder'
+import { SwapAssetPicker, SwapImagePicker } from './pickers/SwapPicker'
 import { occurrenceKeys, useReorder } from './pickers/useReorder'
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i
@@ -12,14 +16,12 @@ const NO_ASSETS: Asset[] = []
 /** Drag payload of a reference image being moved within its strip (its key). */
 export const REFERENCE_IMAGE_DRAG_TYPE = 'application/x-studio-reference-image'
 
-/** What takes a picture's place in the enlarged view: another picture, or (every place of its asset) another asset. */
+/** What takes a clicked picture's place: another picture, or (every place of its asset) another asset. */
 export type SwapChoice = { kind: 'image'; path: string } | { kind: 'asset'; assetId: string }
 
 /** A label on a thumbnail, e.g. the library asset the photo belongs to. */
 export interface ImageCaption {
   text: string
-  /** Tooltip; defaults to the text. */
-  title?: string
   /** Background of the name strip (e.g. the asset kind's colour); defaults to a dark strip. */
   className?: string
 }
@@ -43,24 +45,32 @@ interface Props {
   showCount?: boolean
   /** Whether several images can be put in another order by dragging them (multiple only). Default true. */
   reorderable?: boolean
-  /** The library: names a picture in the enlarged view and is what "Byt bilden…" offers. */
+  /** The library: names a picture on its hover card and is what the swap picker offers. */
   library?: Asset[]
-  /** Saved pictures "Byt bilden…" offers; left out, it lists them itself (`sequenceId`'s, or all of them). */
+  /** Saved pictures the swap picker offers; left out, it lists them itself (`sequenceId`'s, or all of them). */
   stills?: Still[]
   sequenceId?: string
   /**
-   * Swaps the picture at `index` (0-based) in place, so its number and the prompt's tokens stay; returns a note to show
-   * (Swedish), e.g. what the swap left as it was. Also offers "Byt hela <asset>…" (multiple). Left out, a swap is an
-   * ordinary change through onChange.
+   * Swaps the picture at `index` (0-based) in place, so its number and the prompt's tokens stay (the parent says what
+   * the swap did). With it, a click on a library photo (multiple) offers another asset for every place of its asset.
+   * Left out, a swap is an ordinary change through onChange.
    */
-  onSwap?: (index: number, choice: SwapChoice) => string | undefined
+  onSwap?: (index: number, choice: SwapChoice) => void
+}
+
+/** The swap picker: for the picture with this key (it follows the picture when the list changes meanwhile). */
+interface Swapping {
+  key: string
+  /** Another asset for every place of the picture's asset, or another picture for this place only. */
+  mode: 'asset' | 'image'
 }
 
 /**
  * Drop zone + thumbnails for one or more local images. With several, the order is the @ImageN order: drag a
  * thumbnail to another place (or focus it and press ⌥← / ⌥→) and the numbers follow. Images past `max` stay
- * visible but are marked as not sent – moving one in front pushes the last one that was sent out. A click on a
- * thumbnail (or Enter / Space on a focused one) shows it large, where it can be swapped in place or removed.
+ * visible but are marked as not sent – moving one in front pushes the last one that was sent out. Hovering a
+ * thumbnail shows it larger with what it is; a click (not the end of a drag) or Enter / Space swaps it in place: a
+ * library photo for another asset everywhere its asset is (with onSwap), any other picture for another picture.
  */
 export default function ImageInput({
   label,
@@ -79,13 +89,14 @@ export default function ImageInput({
   onSwap
 }: Props) {
   const [over, setOver] = useState(false)
-  // The picture shown large (its index), or null.
-  const [viewing, setViewing] = useState<number | null>(null)
-  // Whether the press that ends in a click started a drag (a reorder): that click doesn't open the viewer.
+  const [swapping, setSwapping] = useState<Swapping>()
+  // Whether the press that ends in a click started a drag (a reorder): that click doesn't open the swap picker.
   const dragged = useRef(false)
   // Remembered images can point at files that were deleted since (e.g. a removed character photo).
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set())
   const keys = occurrenceKeys(value)
+  const byPath = useMemo(() => assetsByPath(library), [library])
+  const card = useTokenCard()
 
   const reorder = useReorder({
     type: REFERENCE_IMAGE_DRAG_TYPE,
@@ -133,26 +144,80 @@ export default function ImageInput({
 
   const pick = async () => add(await window.studio.pickImages(multiple))
 
-  // ── The enlarged view ────────────────────────────────────────────────────────
-  // What a single image is called there: the label without its "(valfri)".
+  // ── Swapping a picture in place ──────────────────────────────────────────────
+  // What a single image is called on its card and in the picker: the label without its "(valfri)".
   const place = label.replace(/\s*\(.*\)\s*$/, '')
   const list = useRef<HTMLDivElement>(null)
-  const closeViewer = () => setViewing(null)
-  /** The thumbnail of picture i, for focus after the viewer closes. */
+  const anchor = useRef<HTMLElement | null>(null)
+  const swapIndex = swapping ? keys.indexOf(swapping.key) : -1
+  // A picture that left the list (removed, or swapped by an agent meanwhile) takes its picker along.
+  useEffect(() => {
+    if (swapping && swapIndex === -1) setSwapping(undefined)
+  }, [swapping, swapIndex])
+  /** The thumbnail of picture i, for focus after a swap (a swapped-in picture is a new element). */
   const thumbnail = (i: number) => list.current?.querySelectorAll<HTMLElement>(':scope > [tabindex="0"]')[i]
+  // Every place of an asset can be swapped through onSwap only (in a list, where the prompt names the places).
+  const wholeAsset = multiple && !!onSwap
 
-  /** "Byt bilden…": in place through onSwap when given (the prompt keeps its tokens), else an ordinary change. */
-  const swapImage = (i: number, path: string): string | undefined => {
-    if (onSwap) return onSwap(i, { kind: 'image', path })
-    onChange(multiple ? value.map((p, j) => (j === i ? path : p)) : [path])
-    return undefined
+  /** A click or Enter on thumbnail i: its picker, or (clicked again) none. */
+  const openSwap = (i: number, el: HTMLElement) => {
+    card.hide()
+    const key = keys[i]
+    if (swapping?.key === key) return setSwapping(undefined)
+    anchor.current = el
+    setSwapping({ key, mode: wholeAsset && byPath.has(value[i]) ? 'asset' : 'image' })
+  }
+  const closeSwap = () => setSwapping(undefined)
+  // After a pick, focus goes to the picture now in that place (from the keyboard its card then says what it is) –
+  // once the list shows it: a swapped-in picture is a new element.
+  const focusAfterSwap = useRef<number | null>(null)
+  useEffect(() => {
+    const i = focusAfterSwap.current
+    if (i === null) return
+    focusAfterSwap.current = null
+    thumbnail(i)?.focus({ preventScroll: true })
+  })
+  const settle = (i: number) => {
+    closeSwap()
+    focusAfterSwap.current = i
   }
 
-  /** "Ta bort" in the viewer: as the ✕ does; the viewer goes on to the next picture, or closes after the last. */
-  const removeAt = (i: number) => {
-    onChange(value.filter((_, j) => j !== i))
-    setViewing(value.length > 1 ? Math.min(i, value.length - 2) : null)
+  /** Another picture in place i: through onSwap when given (the prompt keeps its tokens), else an ordinary change. */
+  const swapImage = (i: number, path: string) => {
+    settle(i)
+    if (onSwap) onSwap(i, { kind: 'image', path })
+    else onChange(multiple ? value.map((p, j) => (j === i ? path : p)) : [path])
   }
+  /** Another asset in every place of picture i's asset. */
+  const swapAsset = (i: number, to: Asset) => {
+    settle(i)
+    onSwap?.(i, { kind: 'asset', assetId: to.id })
+  }
+
+  /** Place i as the card and the picker name it: "@Image2", "Bild 5" past the limit, "Startbild" for a single one. */
+  const nameOf = (i: number): string => (!multiple ? place : i < max ? `@Image${i + 1}` : `Bild ${i + 1}`)
+
+  /** What thumbnail i's card says: its place, what it is and whether it is sent. */
+  const cardOf = (p: string, at: number, overflow: boolean): TokenCardContent => {
+    const asset = byPath.get(p)
+    const photo = asset ? asset.images.findIndex((img) => img.path === p) + 1 : 0
+    const what = wholeAsset && asset ? asset.name : 'bilden'
+    return {
+      token: nameOf(at),
+      ref: 'image',
+      target: {
+        kind: asset?.kind,
+        label: asset ? `${asset.name} (foto ${photo})` : (p.split('/').pop() ?? p),
+        path: p,
+        name: asset?.name,
+        number: photo || undefined,
+        count: asset?.images.length,
+        ...(overflow ? { unsent: `Skickas inte – modellen tar max ${max} bilder` } : {})
+      },
+      hint: `Klicka för att byta ${what}${reorder.enabled ? ' – dra för att flytta' : ''}`
+    }
+  }
+
   const full = value.length >= (multiple ? max : 1)
   const dragging = reorder.dragging !== -1
   const overflowCount = multiple ? Math.max(0, value.length - max) : 0
@@ -197,55 +262,50 @@ export default function ImageInput({
           const cap = typeof raw === 'string' ? { text: raw } : raw
           const name = p.split('/').pop()
           const isMissing = missing.has(p)
-          const describe = overflow
-            ? `Skickas inte – modellen tar max ${max} bilder`
-            : isMissing
-              ? `Filen saknas: ${p}`
-              : cap
-                ? `${cap.title ?? cap.text} · ${name}`
-                : (name ?? p)
           const { ref, onDragStart, onKeyDown, ...item } = reorder.itemProps(i)
           const shown = cap?.text ?? name ?? p
+          const picked = swapping?.key === keys[i]
+          // The card shows the picture larger on hover – not while a picture is dragged or a picker is open.
+          const hover = dragging || swapping ? undefined : card.hover(i, cardOf(p, at, overflow))
           return (
             <div
               key={keys[i]}
               ref={ref as Ref<HTMLDivElement>}
               {...item}
+              {...hover}
               onMouseDown={() => {
                 dragged.current = false
+                card.hide()
               }}
               onDragStart={(e) => {
                 dragged.current = true
+                card.hide()
                 onDragStart?.(e)
               }}
               onClick={(e) => {
-                // A click shows it large; not the end of a drag (which normally fires none), nor a click on the ✕.
+                // A click swaps it; not the end of a drag (which normally fires none), nor a click on the ✕.
                 if (dragged.current || (e.target as HTMLElement).closest('button')) return
-                setViewing(i)
+                openSwap(i, e.currentTarget)
               }}
               onKeyDown={(e) => {
                 onKeyDown?.(e)
                 if (e.defaultPrevented || e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
                 e.preventDefault()
-                setViewing(i)
+                openSwap(i, e.currentTarget)
               }}
               role={multiple ? 'listitem' : 'button'}
               tabIndex={0}
+              aria-haspopup="dialog"
+              aria-expanded={picked}
               aria-label={
                 multiple
-                  ? `${overflow ? 'Skickas inte' : `@Image${at + 1}`}: ${shown}. Enter visar den större` +
+                  ? `${overflow ? 'Skickas inte' : `@Image${at + 1}`}: ${shown}. Enter byter den` +
                     (reorder.enabled ? ', flytta med ⌥← och ⌥→.' : '.')
-                  : `${label}: ${shown}. Enter visar den större.`
-              }
-              title={
-                dragging
-                  ? describe
-                  : `${describe}\nKlicka för att visa den större` +
-                    (reorder.enabled ? ' – dra för att ändra ordningen (eller ⌥← / ⌥→)' : '')
+                  : `${label}: ${shown}. Enter byter den.`
               }
               className={`group relative h-16 w-16 shrink-0 rounded bg-raised outline-none ring-offset-2 ring-offset-panel transition focus-visible:ring-2 focus-visible:ring-muted ${
-                reorder.enabled ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in'
-              } ${isMissing ? 'ring-1 ring-accent' : ''} ${reorder.dragging === i ? 'opacity-30' : ''}`}
+                reorder.enabled ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+              } ${picked ? 'ring-2 ring-text' : isMissing ? 'ring-1 ring-accent' : ''} ${reorder.dragging === i ? 'opacity-30' : ''}`}
             >
               <div className={`h-full w-full overflow-hidden rounded ${overflow ? 'opacity-40' : ''}`}>
                 {isMissing ? (
@@ -327,30 +387,129 @@ export default function ImageInput({
       <span className="sr-only" aria-live="polite">
         {reorder.announcement}
       </span>
-      {viewing !== null && value.length > 0 && (
-        <ReferenceViewer
-          label={label}
-          pictures={value.map((p, i): ViewedPicture => ({
-            path: p,
-            place: !multiple ? place : i < max ? `@Image${i + 1}` : `Bild ${i + 1}`,
-            warning: multiple && i >= max ? `Skickas inte – modellen tar max ${max} bilder.` : undefined
-          }))}
-          index={viewing}
-          onIndex={setViewing}
-          onClose={closeViewer}
-          library={library}
-          stills={stills}
-          sequenceId={sequenceId}
-          onSwapImage={swapImage}
-          onSwapAsset={
-            multiple && onSwap ? (i, to) => onSwap(i, { kind: 'asset', assetId: to.id }) : undefined
-          }
-          onRemove={removeAt}
-          returnFocus={thumbnail}
-          swapHint={multiple ? 'Bilden byts på samma plats: numret och prompten är kvar.' : undefined}
-        />
-      )}
+      {card.card}
+      <SwapPopover
+        open={swapIndex !== -1}
+        anchorRef={anchor}
+        onClose={closeSwap}
+        mode={swapping?.mode ?? 'image'}
+        index={swapIndex}
+        values={value}
+        nameOf={nameOf}
+        library={library}
+        byPath={byPath}
+        stills={stills}
+        sequenceId={sequenceId}
+        wholeAsset={wholeAsset}
+        onMode={(mode) => setSwapping((cur) => cur && { ...cur, mode })}
+        onPickImage={(path) => swapImage(swapIndex, path)}
+        onPickAsset={(to) => swapAsset(swapIndex, to)}
+      />
     </div>
+  )
+}
+
+/**
+ * The picker a clicked thumbnail opens, anchored to it. A library photo in a list (`wholeAsset`): another asset for
+ * every place of its asset – a character's outfit, voice, poses and products follow (shared/reference-swap) – with
+ * "Välj en enskild bild i stället…" for this place only. Any other picture: another picture for its place.
+ */
+function SwapPopover({
+  open,
+  anchorRef,
+  onClose,
+  mode,
+  index,
+  values,
+  nameOf,
+  library,
+  byPath,
+  stills,
+  sequenceId,
+  wholeAsset,
+  onMode,
+  onPickImage,
+  onPickAsset
+}: {
+  open: boolean
+  anchorRef: RefObject<HTMLElement | null>
+  onClose: () => void
+  mode: Swapping['mode']
+  /** The picture swapped (its index in `values`). */
+  index: number
+  values: readonly string[]
+  nameOf: (i: number) => string
+  library: readonly Asset[]
+  byPath: ReadonlyMap<string, Asset>
+  stills?: Still[]
+  sequenceId?: string
+  wholeAsset: boolean
+  onMode: (mode: Swapping['mode']) => void
+  onPickImage: (path: string) => void
+  onPickAsset: (to: Asset) => void
+}) {
+  const path = values[index]
+  const asset = path === undefined ? undefined : byPath.get(path)
+  const present = useMemo(() => new Set(values.flatMap((p) => byPath.get(p)?.id ?? [])), [values, byPath])
+  const place = index === -1 ? '' : nameOf(index)
+  const placeOf = (p: string): string | undefined => {
+    const at = values.indexOf(p)
+    return at === -1 ? undefined : nameOf(at)
+  }
+  const whole = wholeAsset && mode === 'asset' && asset
+  // "startbild" in a sentence, "@Image2" as it is.
+  const inText = place.startsWith('@') ? place : place.charAt(0).toLocaleLowerCase('sv') + place.slice(1)
+
+  let body: ReactNode = null
+  if (open && path !== undefined && whole) {
+    const places = values.flatMap((p, i) => (byPath.get(p)?.id === asset.id ? [nameOf(i)] : []))
+    const follows =
+      asset.kind === 'character'
+        ? ` ${possessive(asset.name, 'sv')} kläder, röst, poser och produkter följer med.`
+        : asset.audio.length
+          ? ' Har båda ljud byts det också.'
+          : ''
+    body = (
+      <SwapAssetPicker
+        title={`Byt ${asset.name} mot…`}
+        hint={`Alla platser där ${asset.name} finns (${places.join(', ')}) får den nya – numren i prompten är desamma.${follows}`}
+        library={library}
+        from={asset}
+        present={present}
+        alternative={{
+          label: 'Välj en enskild bild i stället…',
+          title: `Byt bara ${inText}, inte ${possessive(asset.name, 'sv')} andra platser`,
+          onClick: () => onMode('image')
+        }}
+        onPick={onPickAsset}
+        onClose={onClose}
+      />
+    )
+  } else if (open && path !== undefined) {
+    body = (
+      <SwapImagePicker
+        title={`Byt ${inText} mot…`}
+        hint={values.length > 1 ? 'Bara den här platsen byts – numret och prompten är kvar.' : undefined}
+        library={library}
+        current={path}
+        currentKind={asset?.kind}
+        placeOf={placeOf}
+        stills={stills}
+        sequenceId={sequenceId}
+        alternative={
+          wholeAsset && asset
+            ? { label: `Byt hela ${asset.name} i stället…`, onClick: () => onMode('asset') }
+            : undefined
+        }
+        onPick={onPickImage}
+        onClose={onClose}
+      />
+    )
+  }
+  return (
+    <Popover anchorRef={anchorRef} open={open && !!body} onClose={onClose} width={360} maxHeight={480} label={`Byt ${inText}`}>
+      {body}
+    </Popover>
   )
 }
 

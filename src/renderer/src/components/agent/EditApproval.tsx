@@ -15,9 +15,8 @@ import { formatUsd, mediaUrl } from '../../lib/media'
 import AudioPlayButton from '../pickers/AudioPlayButton'
 import { possessive } from '../pickers/audioRefs'
 import { KIND_TONE } from '../pickers/assetKinds'
-import type { ViewedPicture } from '../pickers/ReferenceViewer'
 import { markKey } from '../prompt/promptText'
-import { ImageTile, useViewPictures } from './ApprovalPictures'
+import { ImageTile, PictureHover } from './ApprovalPictures'
 import PromptText, { type TokenTarget } from './PromptText'
 
 // The approval dialog's panels for Redigera's paid requests: an operation on a version of an edit (the version's
@@ -167,22 +166,21 @@ function Label({ children, className = '' }: { children: ReactNode; className?: 
   return <p className={`mb-1.5 text-[11px] text-muted ${className}`}>{children}</p>
 }
 
-/** A frame or a poster: a wide tile with a badge (a click shows it large), or a dashed box when the file is missing. */
-function Frame({ path, badge, caption, onOpen }: { path?: string; badge: string; caption?: string; onOpen?: () => void }) {
+/** A frame or a poster: a wide tile with a badge (hovering shows it larger), or a dashed box when the file is missing. */
+function Frame({ path, badge, caption }: { path?: string; badge: string; caption?: string }) {
   const [missing, setMissing] = useState(false)
   return (
     <div className="w-40 space-y-1">
       {path && !missing ? (
-        <button
-          type="button"
-          onClick={onOpen}
-          disabled={!onOpen}
-          className="relative block h-24 w-40 cursor-zoom-in overflow-hidden rounded bg-raised outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:cursor-default"
-          title={`${badge}${caption ? ` · ${caption}` : ''}${onOpen ? ' – klicka för att förstora' : ''}`}
+        <PictureHover
+          path={path}
+          badge={badge}
+          info={{ name: caption }}
+          className="relative block h-24 w-40 overflow-hidden rounded bg-raised outline-none focus-visible:ring-2 focus-visible:ring-white/70"
         >
           <img src={mediaUrl(path)} alt="" draggable={false} onError={() => setMissing(true)} className="h-full w-full object-cover" />
           <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">{badge}</span>
-        </button>
+        </PictureHover>
       ) : (
         <div className="flex h-24 w-40 items-center justify-center rounded border border-dashed border-line px-2 text-center text-[11px] text-muted">
           {path ? 'Bilden saknas' : 'Ingen bild'}
@@ -328,16 +326,7 @@ export function EditSummary({
   const settings = op ? settingsOf(op) : []
   const editName = state.edit?.name ?? request.editName
   const captions = frameCaptions(op)
-  const view = useViewPictures()
-  // The version's poster and the frames it works from, stepped through together in the viewer.
   const versionBadge = request.baseNumber ? `v${request.baseNumber}` : 'Version'
-  const framePictures: ViewedPicture[] = [
-    ...(poster ? [{ path: poster, place: versionBadge, name: 'Versionen som ändras' }] : []),
-    ...(request.frames?.start ? [{ path: request.frames.start, place: 'Start', name: captions.start.sv }] : []),
-    ...(request.frames?.end ? [{ path: request.frames.end, place: 'Slut', name: captions.end.sv }] : [])
-  ]
-  const openFrame = (path: string | undefined) =>
-    view && path ? () => view('Bilder', framePictures, framePictures.findIndex((f) => f.path === path)) : undefined
   // A Seedance edit's pictures to start from are @Image1… in its prompt: the tokens and tiles light up together.
   const [lit, setLit] = useState<string>()
   const targets: TokenTarget[] = references.map(({ id, photo }) => ({
@@ -348,16 +337,6 @@ export function EditSummary({
     number: photo?.number,
     count: photo?.asset.images.length
   }))
-  const referencePictures: ViewedPicture[] = references.flatMap(({ photo }, i) =>
-    photo ? [{ path: photo.path, place: `@Image${i + 1}` }] : []
-  )
-  const openReference = view
-    ? (n: number) => {
-        const path = references[n - 1]?.photo?.path
-        const at = referencePictures.findIndex((x) => x.path === path)
-        if (at >= 0) view('Bilder att utgå från', referencePictures, at)
-      }
-    : undefined
 
   return (
     <section className="space-y-3">
@@ -372,20 +351,13 @@ export function EditSummary({
       </div>
 
       <div className="flex flex-wrap items-start gap-3">
-        <Frame path={poster} badge={versionBadge} caption="Versionen som ändras" onOpen={openFrame(poster)} />
+        <Frame path={poster} badge={versionBadge} caption="Versionen som ändras" />
         {request.frames?.start !== undefined || request.frames?.end !== undefined ? (
           <>
             {request.frames?.start && (
-              <Frame
-                path={request.frames.start}
-                badge="Start"
-                caption={captions.start.sv}
-                onOpen={openFrame(request.frames.start)}
-              />
+              <Frame path={request.frames.start} badge="Start" caption={captions.start.sv} />
             )}
-            {request.frames?.end && (
-              <Frame path={request.frames.end} badge="Slut" caption={captions.end.sv} onOpen={openFrame(request.frames.end)} />
-            )}
+            {request.frames?.end && <Frame path={request.frames.end} badge="Slut" caption={captions.end.sv} />}
           </>
         ) : null}
       </div>
@@ -401,7 +373,6 @@ export function EditSummary({
               targets={targets}
               highlighted={lit}
               onHighlight={setLit}
-              onOpenImage={openReference}
               className="max-h-48 overflow-y-auto rounded-md border border-line bg-raised px-3 py-2"
             />
           ) : (
@@ -424,7 +395,6 @@ export function EditSummary({
                   path={photo.path}
                   badge={`@Image${i + 1}`}
                   photo={photo}
-                  onOpen={openReference && (() => openReference(i + 1))}
                   lit={lit === key}
                   onLight={(on) => setLit((cur) => (on ? key : cur === key ? undefined : cur))}
                 />
