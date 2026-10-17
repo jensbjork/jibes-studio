@@ -126,7 +126,6 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
   const [creating, setCreating] = useState(false)
   const [addingImages, setAddingImages] = useState<Adding>({})
   const [addingAudio, setAddingAudio] = useState<Adding>({})
-  const [query, setQuery] = useState('')
   const [notice, setNotice] = useState<Notice>()
   // A clip to point out in Röst (a new voice opened from Pågår och klart); a new object each time it is asked for.
   const [focusAudio, setFocusAudio] = useState<SoundFocus>()
@@ -154,6 +153,17 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
     [all, selected, removed]
   )
 
+  // Outfit id → who wears it by default, for the list's question before an outfit is deleted.
+  const wearerNames = useMemo(() => {
+    if (kind !== 'outfit') return undefined
+    const map = new Map<string, string[]>()
+    for (const c of all) {
+      if (c.kind !== 'character' || !c.defaultOutfitId || removed.has(c.id)) continue
+      map.set(c.defaultOutfitId, [...(map.get(c.defaultOutfitId) ?? []), c.name])
+    }
+    return map
+  }, [kind, all, removed])
+
   useEffect(() => {
     if (selected && selected.id !== selectedId) setSelectedId(selected.id)
   }, [selected, selectedId])
@@ -169,7 +179,6 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
     if (intent?.type !== 'open-asset') return
     setSelectedId(intent.assetId)
     setCreatedId(undefined)
-    setQuery('')
     setFocusAudio(
       intent.audioId || intent.jobId ? { audioId: intent.audioId, jobId: intent.jobId } : undefined
     )
@@ -200,7 +209,6 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
     try {
       const a = await window.studio.saveAsset({ kind, name: uniqueNewName(assets, copy.newName), description: '' })
       updated(a)
-      setQuery('')
       setSelectedId(a.id)
       setCreatedId(a.id)
     } catch (e) {
@@ -210,14 +218,20 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
     }
   }
 
-  /** Throws so the editor can show the error and resume autosaving. */
-  const remove = async (id: string) => {
+  /**
+   * From the editor's Radera or a row's ✕ in the list; the open one gives way to its neighbour (from the list: the row
+   * that took its place among those the search shows). Throws so the editor (which then resumes autosaving) or the
+   * row can show the error.
+   */
+  const remove = async (id: string, nextId?: string) => {
     const i = assets.findIndex((a) => a.id === id)
-    const neighbor = assets[i + 1] ?? assets[i - 1]
+    const neighbor = nextId ?? (assets[i + 1] ?? assets[i - 1])?.id
     await window.studio.deleteAsset(id)
     setRemoved((s) => new Set(s).add(id))
-    setSelectedId(neighbor?.id)
-    setCreatedId(undefined)
+    if (id === selected?.id) {
+      setSelectedId(neighbor)
+      setCreatedId(undefined)
+    }
   }
 
   const addImages = async (assetId: string, images: string[]) => {
@@ -271,10 +285,9 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
         kind={kind}
         assets={assets}
         outfitNames={outfitNames}
+        wearerNames={wearerNames}
         selectedId={selected?.id}
         ready={loaded || assets.length > 0}
-        query={query}
-        onQuery={setQuery}
         onSelect={select}
         onCreate={create}
         creating={creating}
@@ -284,6 +297,7 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
           select(id)
           addFiles(id, paths)
         }}
+        onDelete={remove}
       />
 
       <section className="min-w-0 flex-1">

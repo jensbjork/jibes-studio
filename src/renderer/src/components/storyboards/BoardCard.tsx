@@ -136,7 +136,7 @@ export default function BoardCard({
             question="Ta bort rutan?"
             confirmLabel="Ta bort"
             onConfirm={onDelete}
-            title="Ta bort rutan. Övergångarna till och från den tas bort med sina prompter; deras klipp finns kvar under Generera."
+            title="Ta bort rutan. Övergångarna till och från den tas bort med sina prompter; deras klipp finns kvar i Mediabanken."
             className="flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition hover:bg-raised hover:text-accent focus-visible:opacity-100 group-hover/card:opacity-100 group-focus-within/card:opacity-100"
           >
             <CloseIcon size={11} />

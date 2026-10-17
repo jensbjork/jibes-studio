@@ -9,8 +9,7 @@ import {
   type GenerationParams,
   type RunningWork,
   type Segment,
-  type Sequence,
-  type SequenceSummary
+  type Sequence
 } from '@shared/types'
 import { ipcErrorMessage, useModels } from '../../lib/hooks'
 import { LAST_SEQUENCE_KEY } from '../../lib/library'
@@ -28,8 +27,7 @@ import { ownEndImageRefused, sendInputProblem } from './clipChecks'
 import { CloseIcon, FilmIcon } from './icons'
 import PreviewPlayer from './PreviewPlayer'
 import SegmentEditor, { type EditorHandle } from './SegmentEditor'
-import Modal from '../pickers/Modal'
-import SequenceHeader, { DELETE_SEQUENCE_TEXT } from './SequenceHeader'
+import SequenceHeader from './SequenceHeader'
 import SequenceList from './SequenceList'
 import Timeline, { type ClipSource } from './Timeline'
 import TrimControls, { type PlayRequest, type TakePlayerHandle } from './TrimControls'
@@ -145,8 +143,6 @@ interface Props {
 export default function SequencesView({ intent, onIntentHandled, navigate }: Props) {
   const { models, error: modelsError } = useModels()
   const { sequences, reload } = useSequenceList()
-  /** The sequence whose ✕ in the list was clicked: asked about before it goes. */
-  const [confirmDelete, setConfirmDelete] = useState<SequenceSummary>()
   const [selectedId, setSelectedId] = useState<string | undefined>(() =>
     intent?.type === 'open-sequence' ? intent.sequenceId : loadLastOpen()
   )
@@ -351,12 +347,17 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     }
   }
 
-  const deleteSequence = async (id: string) => {
+  /** The list's ✕ (after its question in the row) and ⋯ → Radera sekvensen…; throws, so the row can show the error. */
+  const removeSequence = async (id: string, nextId?: string) => {
     // Let go of it first: main announces the change before it answers, and the open sequence would otherwise be
-    // fetched again in between and found gone ("Sekvensen finns inte längre" in the log on every delete).
+    // fetched again in between and found gone ("Sekvensen finns inte längre" in the log on every delete). The open
+    // one gives way to its neighbour in the list.
     const wasOpen = id === selectedId
+    const rest = (sequences ?? []).filter((s) => s.id === id || !gone.current.has(s.id))
+    const at = rest.findIndex((s) => s.id === id)
+    const neighbor = nextId ?? (at === -1 ? undefined : (rest[at + 1] ?? rest[at - 1])?.id)
     gone.current.add(id)
-    if (wasOpen) setSelectedId(undefined)
+    if (wasOpen) setSelectedId(neighbor)
     try {
       await window.studio.deleteSequence(id)
       try {
@@ -367,10 +368,14 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     } catch (e) {
       gone.current.delete(id)
       if (wasOpen) setSelectedId(id)
-      setNotice({ text: ipcErrorMessage(e) })
+      throw e
+    } finally {
+      void reload()
     }
-    void reload()
   }
+
+  const deleteSequence = (id: string) =>
+    removeSequence(id).catch((e: unknown) => setNotice({ text: ipcErrorMessage(e) }))
 
   const rename = (name: string) => {
     if (!sequenceId) return
@@ -892,37 +897,6 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
 
   return (
     <div className="flex h-full">
-      {confirmDelete && (
-        <Modal
-          title={`Radera ”${confirmDelete.name}”?`}
-          onClose={() => setConfirmDelete(undefined)}
-          footer={
-            <>
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(undefined)}
-                className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text"
-              >
-                Avbryt
-              </button>
-              <button
-                type="button"
-                autoFocus
-                onClick={() => {
-                  const id = confirmDelete.id
-                  setConfirmDelete(undefined)
-                  void deleteSequence(id)
-                }}
-                className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover"
-              >
-                Radera sekvensen
-              </button>
-            </>
-          }
-        >
-          <p className="leading-relaxed text-muted">{DELETE_SEQUENCE_TEXT}</p>
-        </Modal>
-      )}
       <SequenceList
         sequences={sequences}
         selectedId={selectedId}
@@ -932,7 +906,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
           setSelectedId(id)
         }}
         onCreate={() => void createSequence()}
-        onDelete={(id) => setConfirmDelete(sequences?.find((x) => x.id === id))}
+        onDelete={removeSequence}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -1050,7 +1024,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       {importFlow.dialog}
       <GenerationPickerDialog
         open={!!picking}
-        title={picking?.source === 'edit' ? 'Lägg till en version från Redigera' : 'Lägg till ett klipp från klippflödet'}
+        title={picking?.source === 'edit' ? 'Lägg till en version från Redigera' : 'Lägg till ett klipp från Mediabanken'}
         sources={picking?.source === 'edit' ? ['edit'] : ['generated', 'import', 'edit']}
         onClose={() => setPicking(undefined)}
         onPicked={(g) => picking && void addPicked(g.id, picking)}

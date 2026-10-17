@@ -18,9 +18,9 @@ import { useEdit, useTimeline, useTranscript } from './useEdit'
 import { useRunner, type PendingConfirm } from './useEditOps'
 import VersionsPanel from './VersionsPanel'
 
-// One edit open: the header, the player and the timeline on the left, Åtgärder above Versioner on the right.
-// Operations work on the current version; the player can show another one beside it (Jämför ⇄). Keys: space, J/K/L,
-// ← → (frames, with ⇧ seconds), I/O, Esc, ⌘Z/⌘⇧Z.
+// One edit open, beside Redigera's list: the header, the player and the timeline, and Åtgärder above Versioner on the
+// right. Operations work on the current version; the player can show another one beside it (Jämför ⇄). Keys: space,
+// J/K/L, ← → (frames, with ⇧ seconds), I/O, Esc, ⌘Z/⌘⇧Z.
 
 interface Notice {
   tone: 'error' | 'success'
@@ -375,7 +375,8 @@ export default function EditWorkspace({
               opRange={opRange}
             />
           </div>
-          <aside className="flex w-[380px] shrink-0 flex-col border-l border-line @min-[83rem]/main:w-[440px]">
+          {/* Narrower in a narrow window, where Redigera's list beside it leaves the player little room. */}
+          <aside className="flex w-[320px] shrink-0 flex-col border-l border-line @min-[61rem]/main:w-[380px] @min-[83rem]/main:w-[440px]">
             <ActionsPanel tab={tab} onTab={setTab} />
             <VersionsPanel
               edit={edit}

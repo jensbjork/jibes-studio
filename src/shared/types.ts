@@ -1748,7 +1748,7 @@ export interface ApprovalDeleteItem {
   assetKind?: AssetKind
   /** Prompts, learnings, reviews: a text excerpt (≤ 200 chars). */
   text?: string
-  /** Swedish lines: what else happens, e.g. "3 tagningar blir vanliga klipp i Generera". */
+  /** Swedish lines: what else happens, e.g. "3 tagningar blir vanliga klipp i Mediabanken". */
   effects: string[]
   /** What goes to the Trash. */
   trash?: { files: number; bytes?: number }

@@ -142,7 +142,7 @@ export default function GenerationPickerDialog({ open, title, sources, onClose, 
             {query.trim()
               ? 'Inget klipp matchar sökningen.'
               : tab === 'import'
-                ? 'Inga egna klipp än. Importera dem från Generera eller dra in dem i en sekvens.'
+                ? 'Inga egna klipp än. Importera dem i Mediabanken eller dra in dem i en sekvens.'
                 : tab === 'edit'
                   ? 'Inga versioner från Redigera än.'
                   : 'Inga färdiga klipp än.'}

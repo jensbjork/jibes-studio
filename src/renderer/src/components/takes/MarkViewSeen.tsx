@@ -1,11 +1,11 @@
 import { markAllSeen } from '../../lib/work'
 import { CheckAllIcon } from '../sequences/icons'
 
-const VIEW_NAMES = { sequences: 'Sekvenser', storyboards: 'Storyboards' } as const
+const VIEW_NAMES = { sequences: 'Sekvenser', storyboards: 'Storyboards', editor: 'Redigera' } as const
 
 /**
- * "Markera alla som sedda" for a whole view, under its list's heading while something there is new (Sekvenser and
- * Storyboards share it; one sequence or storyboard is marked from its ⋯ menu). The Ångra toast follows.
+ * "Markera alla som sedda" for a whole view, under its list's heading while something there is new (Sekvenser,
+ * Storyboards and Redigera share it; one sequence or storyboard is marked from its ⋯ menu). The Ångra toast follows.
  */
 export default function MarkViewSeen({ view }: { view: keyof typeof VIEW_NAMES }) {
   return (

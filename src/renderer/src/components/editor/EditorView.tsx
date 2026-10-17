@@ -9,12 +9,14 @@ import Modal from '../pickers/Modal'
 import { Banner } from '../storyboards/ui'
 import { ExportPickerDialog, OpenChoiceDialog } from './dialogs'
 import EditList from './EditList'
+import EditSideList from './EditSideList'
 import { DELETE_EDIT_TEXT, editsContaining, editsFrom } from './editorUtils'
 import EditWorkspace, { type ShowVersionRequest } from './EditWorkspace'
 
 // Redigera: change one finished film — a clip from the feed, a take, an exported film or the user's own — with free
-// local operations and priced AI ones. Every change is a new version; the original is never touched. The view shows
-// the list of edits, or one edit open (remembered, like the open sequence).
+// local operations and priced AI ones. Every change is a new version; the original is never touched. The list of
+// edits is always on the left (as in Sekvenser); on the right one edit open (remembered, like the open sequence), or
+// with none open the overview of them all.
 
 type Source = { generationId: string } | { exportId: string }
 
@@ -85,6 +87,24 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
       setNotice({ tone: 'error', text: ipcErrorMessage(e) })
     } finally {
       setDeleting(false)
+      void reload()
+    }
+  }
+
+  /**
+   * The side list's ✕, after its question in the row; throws, so the row can show the error. The open edit is let go
+   * of first (its workspace would otherwise fetch it again and find it gone) and the overview takes its place.
+   */
+  const removeEdit = async (edit: EditSummary) => {
+    const wasOpen = edit.id === openId
+    if (wasOpen) setOpenId(undefined)
+    try {
+      await window.studio.deleteEdit(edit.id)
+      if (loadLast() === edit.id) remember(undefined)
+    } catch (e) {
+      if (wasOpen) setOpenId(edit.id)
+      throw e
+    } finally {
       void reload()
     }
   }
@@ -242,6 +262,8 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
   const pickOwnFilm = async () => {
     try {
       const paths = await window.studio.pickVideos(false)
+      // The import's progress shows in the overview: an open edit closes (it stays remembered until another opens).
+      if (paths.length) setOpenId(undefined)
       await importFilms(paths)
     } catch (e) {
       setNotice({ tone: 'error', text: ipcErrorMessage(e) })
@@ -257,44 +279,71 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
 
   // ── Render ──
 
+  const busyText = busy ?? (imports.inspecting ? 'Läser filen…' : undefined)
+
   return (
-    <div className="relative h-full">
-      {openId ? (
-        <EditWorkspace
-          key={openId}
-          editId={openId}
-          models={models}
-          modelsError={modelsError}
-          hasApiKey={hasApiKey}
-          navigate={navigate}
-          onBack={() => {
-            open(undefined)
-            void reload()
-          }}
-          onClosed={closed}
-          showVersion={showVersion?.editId === openId ? showVersion : undefined}
-        />
-      ) : (
-        <EditList
-          edits={edits}
-          error={listError}
-          importing={importing}
-          busy={busy ?? (imports.inspecting ? 'Läser filen…' : undefined)}
-          onOpen={open}
-          onOwnFilm={() => void pickOwnFilm()}
-          onDropFiles={(paths, other) => {
-            if (!paths.length) {
-              setNotice({ tone: 'warning', text: 'Släpp en filmfil (mp4, mov, m4v, webm eller mkv).' })
-              return
-            }
-            if (other) setNotice({ tone: 'warning', text: 'Bara filmfilerna öppnas; de andra filerna hoppades över.' })
-            void importFilms(paths)
-          }}
-          onFromFeed={() => setPicker('feed')}
-          onFromExport={() => setPicker('export')}
-          onDelete={setConfirmDelete}
-        />
-      )}
+    <div className="flex h-full">
+      <EditSideList
+        edits={edits}
+        selectedId={openId}
+        busy={!!busyText}
+        onSelect={open}
+        onOwnFilm={() => void pickOwnFilm()}
+        onFromFeed={() => setPicker('feed')}
+        onFromExport={() => setPicker('export')}
+        onDelete={removeEdit}
+      />
+      <div className="relative min-w-0 flex-1">
+        {openId ? (
+          <EditWorkspace
+            key={openId}
+            editId={openId}
+            models={models}
+            modelsError={modelsError}
+            hasApiKey={hasApiKey}
+            navigate={navigate}
+            onBack={() => {
+              open(undefined)
+              void reload()
+            }}
+            onClosed={closed}
+            showVersion={showVersion?.editId === openId ? showVersion : undefined}
+          />
+        ) : (
+          <EditList
+            edits={edits}
+            error={listError}
+            importing={importing}
+            busy={busyText}
+            onOpen={open}
+            onOwnFilm={() => void pickOwnFilm()}
+            onDropFiles={(paths, other) => {
+              if (!paths.length) {
+                setNotice({ tone: 'warning', text: 'Släpp en filmfil (mp4, mov, m4v, webm eller mkv).' })
+                return
+              }
+              if (other) setNotice({ tone: 'warning', text: 'Bara filmfilerna öppnas; de andra filerna hoppades över.' })
+              void importFilms(paths)
+            }}
+            onFromFeed={() => setPicker('feed')}
+            onFromExport={() => setPicker('export')}
+            onDelete={setConfirmDelete}
+          />
+        )}
+        {(notice || (openId && busy)) && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-4">
+            <div className="pointer-events-auto w-full max-w-xl [&>div]:mx-0">
+              {notice ? (
+                <Banner tone={notice.tone} onDismiss={() => setNotice(undefined)}>
+                  {notice.text}
+                </Banner>
+              ) : (
+                <Banner tone="success">{busy}</Banner>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
       {confirmDelete && (
         <Modal
           title={`Radera ”${confirmDelete.name}”?`}
@@ -323,19 +372,6 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
         >
           <p className="leading-relaxed text-muted">{DELETE_EDIT_TEXT}</p>
         </Modal>
-      )}
-      {(notice || (openId && busy)) && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-4">
-          <div className="pointer-events-auto w-full max-w-xl [&>div]:mx-0">
-            {notice ? (
-              <Banner tone={notice.tone} onDismiss={() => setNotice(undefined)}>
-                {notice.text}
-              </Banner>
-            ) : (
-              <Banner tone="success">{busy}</Banner>
-            )}
-          </div>
-        </div>
       )}
       {imports.dialog}
       <GenerationPickerDialog

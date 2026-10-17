@@ -82,9 +82,11 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   rate, rotation, ProRes, spatial audio, non-square pixels, sound and picture starting apart) gets an H.264 SDR
   working copy next to the untouched original. A film already imported is reused. Agents can import video files
   they upload the same way.
-- **Redigera**, the editor: open a feed clip, a take, an exported film or your own film and change it. Every change
-  is a new **version** (*v1 Original*, *v2* …) in a tree you can go back and forth in, compare (*Jämför ⇄*) and send
-  to a sequence; the original is never touched. A player with in/out marks and frame stepping, and a timeline with
+- **Redigera**, the editor: open a feed clip, a take, an exported film or your own film and change it. Every edit is
+  in the list on the left, as in Sekvenser; one opens beside it, and with none open (*‹ Redigeringar* in its header)
+  the overview *Alla redigeringar* shows them all as cards or a table. Every change is a new **version** (*v1
+  Original*, *v2* …) in a tree you can go back and forth in, compare (*Jämför ⇄*) and send to a sequence; the
+  original is never touched. A player with in/out marks and frame stepping, and a timeline with
   the picture, the sound's waveform, added sound layers and the transcript.
   - **Free, on your Mac:** keep or cut out a marked range, fade in and out, volume (the whole film, the marked
     range, or only the voice or the background), mute, *Ta bort rösten* / *Bara rösten* (voice and background
@@ -111,6 +113,12 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   lists everything that runs — with its progress and an estimate —, what is ready to watch and what failed, with
   *Markera alla som sedda* (and *Ångra*). A video counts as seen once it has played for a second or you chose it; the
   Dock icon shows the number of new results.
+- **The same list on the left** in Karaktärer, Miljöer, Produkter, Kläder, Poser, Sekvenser, Storyboards and
+  Redigera: *＋ Ny …* at the top, a search field (⌘F) that looks in the names — and in the descriptions of the library
+  kinds and where a film came from in Redigera —, ↑ / ↓ to move between the rows and Enter to open one. **✕ on a row**
+  (on hover or keyboard focus) asks in the row itself — *Radera ”Anna”?*, one line on what goes and what stays,
+  *Radera* / *Avbryt* — and shows there what went wrong if it couldn't; the open one gives way to the row below (in
+  Redigera, to the overview).
 - **A grouped sidebar that folds away:** *Skapa* (Generera, Sekvenser, Storyboards, Redigera) and *Bibliotek*
   (Mediabank, the five kinds and Prompter), one icon set, two slim status rows at the bottom — *Pågår och klart* and the agent
   connection — above *Inställningar*, and a 72 px icon rail (⌃⌘S, or the button by the wordmark) that gives the

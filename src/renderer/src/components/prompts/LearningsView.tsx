@@ -420,7 +420,7 @@ function EmptyLearnings({ hasLearnings, onNew }: { hasLearnings: boolean; onNew:
               Skriv första lärdomen
             </button>
             <p className="mt-4 text-[11px] text-muted">
-              Betygsätt klippen i Generera – dina betyg och anteckningar hjälper agenten att dra rätt slutsatser.
+              Betygsätt klippen i Mediabanken – dina betyg och anteckningar hjälper agenten att dra rätt slutsatser.
             </p>
           </div>
         )}

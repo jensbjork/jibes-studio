@@ -1,7 +1,7 @@
-import { useMemo, useRef, useState, type DragEvent } from 'react'
+import { useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
 import type { EditSummary } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
-import { markAllSeen, useHasUnseen, useOwnerWork, useRunning } from '../../lib/work'
+import { useOwnerWork, useRunning } from '../../lib/work'
 import { GridIcon, ListIcon } from '../feed/icons'
 import { carriesFiles, droppedVideoPaths, ImportCardView, useImportCards } from '../feed/ownClips'
 import { formatWhen } from '../prompts/prompt-utils'
@@ -12,9 +12,12 @@ import { CameraIcon, ScissorsIcon } from './icons'
 import { NewChip, Spinner } from '../work/StatusMark'
 import { countsTitle } from '../work/workText'
 
-// Redigeringar: every edit as a card (poster, name, where it came from, versions, length, spent) or as a table row
-// – the same Kort/Tabell switch as Generera's clip feed – and the ways to start one: an own film (file dialog, or
-// dropped on the list), a clip from the feed, an exported film. Each edit can be deleted from here (after a question).
+// Alla redigeringar, Redigera's overview beside the list while no edit is open: every edit as a card (poster, name,
+// where it came from, versions, length, spent) or as a table row – the same Kort/Tabell switch as Generera's clip
+// feed – and the ways to start one: an own film (file dialog, or dropped here), a clip from the feed, an exported
+// film. Each edit can be deleted from here too (after a question). It lays out by its own width (@container/edits):
+// in a narrow window the table drops its less needed columns and the header leaves the ways to start one to the
+// list's "＋ Ny redigering".
 
 export type EditListView = 'cards' | 'table'
 export type EditSort = 'updated' | 'name' | 'length' | 'cost' | 'versions'
@@ -122,7 +125,6 @@ export default function EditList({
   }
 
   const empty = edits?.length === 0 && cards.length === 0
-  const anyNew = useHasUnseen({ view: 'editor' })
   const actions = (
     <>
       <button type="button" onClick={onOwnFilm} disabled={!!busy} className={secondaryButton}>
@@ -140,14 +142,14 @@ export default function EditList({
 
   return (
     <div
-      className="relative flex h-full flex-col"
+      className="@container/edits relative flex h-full flex-col"
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
       <div className="drag flex h-12 shrink-0 items-center gap-3 border-b border-line pl-5 pr-3">
-        <h1 className="font-medium">Redigeringar</h1>
+        <h1 className="shrink-0 font-medium">Alla redigeringar</h1>
         {!empty && (
           <div
             role="radiogroup"
@@ -178,22 +180,8 @@ export default function EditList({
             </button>
           </div>
         )}
-        {busy && <span className="ml-2 text-[12px] text-muted">{busy}</span>}
-        {!empty && (
-          <div className="no-drag ml-auto flex items-center gap-2">
-            {anyNew && (
-              <button
-                type="button"
-                onClick={() => void markAllSeen({ view: 'editor' })}
-                title="Ta bort Ny från alla redigeringar"
-                className="rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
-              >
-                Markera alla som sedda
-              </button>
-            )}
-            {actions}
-          </div>
-        )}
+        {busy && <span className="ml-2 truncate text-[12px] text-muted">{busy}</span>}
+        {!empty && <div className="no-drag ml-auto hidden items-center gap-2 @min-[56rem]/edits:flex">{actions}</div>}
       </div>
       {error && <p className="mx-5 mt-3 text-[12px] text-accent select-text">{error}</p>}
 
@@ -203,7 +191,7 @@ export default function EditList({
             <ScissorsIcon size={30} className="mx-auto mb-4 text-muted" />
             <h2 className="mb-2 text-base font-semibold">Redigera en film</h2>
             <p className="leading-relaxed text-muted">
-              Öppna ett klipp från Generera, en exporterad film eller en egen film för att ändra den med AI. Originalet
+              Öppna ett klipp från Mediabanken, en exporterad film eller en egen film för att ändra den med AI. Originalet
               lämnas orört — varje ändring blir en ny version.
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-2">{actions}</div>
@@ -254,20 +242,21 @@ function jobLabel(label: string, editName: string): string {
   return label.startsWith(head) ? label.slice(head.length) : label
 }
 
-/** What an edit is doing and what is new in it (Pågår och klart), for its card and its table row. */
-function useEditStatus(edit: EditSummary) {
+/** What an edit is doing and what is new in it (Pågår och klart), for its card, its table row and its list row. */
+export function useEditStatus(edit: EditSummary) {
   // A paid job or a free render running for this edit (main counts both), new versions, failures.
   const counts = useOwnerWork(edit.id)
   const work = useRunning((w) => w.ownerId === edit.id && w.view === 'editor')
   const first = work[0]
   const running = edit.running || work.length > 0
+  const runningCount = Math.max(counts.running, work.length, edit.running ? 1 : 0)
   const runningText = first
     ? `${jobLabel(first.label, edit.name)}${first.progress !== undefined ? ` ${Math.round(first.progress * 100)} %` : ''}${
         work.length > 1 ? ` +${work.length - 1}` : ''
       }`
     : 'Pågår…'
   const title = countsTitle('edit', { ...counts, running: Math.max(counts.running, work.length) })
-  return { counts, running, runningText, title }
+  return { counts, running, runningCount, runningText, title }
 }
 
 /** The ✕ that deletes an edit (after the view's question), shown on hover or keyboard focus. */
@@ -348,19 +337,29 @@ interface Column {
   width: string
   align?: 'right'
   sort?: EditSort
+  /** Only where the overview is wide enough (≥ 50rem): a narrow window keeps poster, name, length and status. */
+  wide?: true
 }
 
 const COLUMNS: Column[] = [
   { id: 'thumb', label: '', width: '76px' },
-  { id: 'name', label: 'Namn', width: 'minmax(180px, 1fr)', sort: 'name' },
-  { id: 'versions', label: 'Versioner', width: '76px', align: 'right', sort: 'versions' },
+  { id: 'name', label: 'Namn', width: 'minmax(140px, 1fr)', sort: 'name' },
+  { id: 'versions', label: 'Versioner', width: '76px', align: 'right', sort: 'versions', wide: true },
   { id: 'length', label: 'Längd', width: '60px', align: 'right', sort: 'length' },
-  { id: 'cost', label: 'Kostnad', width: '72px', align: 'right', sort: 'cost' },
+  { id: 'cost', label: 'Kostnad', width: '72px', align: 'right', sort: 'cost', wide: true },
   { id: 'status', label: 'Status', width: '160px' },
-  { id: 'updated', label: 'Ändrad', width: '96px', sort: 'updated' },
+  { id: 'updated', label: 'Ändrad', width: '96px', sort: 'updated', wide: true },
   { id: 'actions', label: '', width: '40px' }
 ]
-const TEMPLATE = COLUMNS.map((c) => c.width).join(' ')
+// Both templates as variables; the grid takes the one its container's width calls for.
+const GRID_STYLE = {
+  '--edit-cols': COLUMNS.map((c) => c.width).join(' '),
+  '--edit-cols-narrow': COLUMNS.filter((c) => !c.wide)
+    .map((c) => c.width)
+    .join(' ')
+} as CSSProperties
+const GRID = '[grid-template-columns:var(--edit-cols-narrow)] @min-[50rem]/edits:[grid-template-columns:var(--edit-cols)]'
+const WIDE_CELL = 'hidden @min-[50rem]/edits:block'
 
 /**
  * Every edit as one row, like Generera's clip table: poster, name with where it came from, versions, length, spent,
@@ -383,8 +382,8 @@ function EditTable({
     <div role="table" aria-label="Redigeringar" aria-rowcount={edits.length + 1} className="pb-5">
       <div
         role="row"
-        className="sticky top-0 z-10 grid h-8 items-center border-b border-line bg-bg/95 px-5 text-[11px] text-muted backdrop-blur"
-        style={{ gridTemplateColumns: TEMPLATE }}
+        className={`sticky top-0 z-10 grid h-8 items-center border-b border-line bg-bg/95 px-5 text-[11px] text-muted backdrop-blur ${GRID}`}
+        style={GRID_STYLE}
       >
         {COLUMNS.map((c) => {
           const active = c.sort === sort
@@ -393,7 +392,7 @@ function EditTable({
               key={c.id}
               role="columnheader"
               aria-sort={c.sort ? (active ? (c.sort === 'name' ? 'ascending' : 'descending') : 'none') : undefined}
-              className={`min-w-0 px-2 ${c.align === 'right' ? 'text-right' : ''}`}
+              className={`min-w-0 px-2 ${c.align === 'right' ? 'text-right' : ''} ${c.wide ? WIDE_CELL : ''}`}
             >
               {c.sort ? (
                 <button
@@ -439,8 +438,8 @@ function EditRow({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => 
           onOpen()
         }
       }}
-      className="group grid h-12 cursor-pointer items-center border-b border-line/50 px-5 outline-none transition hover:bg-raised/60 focus-visible:bg-raised/60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-muted"
-      style={{ gridTemplateColumns: TEMPLATE }}
+      className={`group grid h-12 cursor-pointer items-center border-b border-line/50 px-5 outline-none transition hover:bg-raised/60 focus-visible:bg-raised/60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-muted ${GRID}`}
+      style={GRID_STYLE}
     >
       <div role="cell" className="px-2">
         <div className="flex h-9 w-[60px] items-center justify-center overflow-hidden rounded bg-black">
@@ -461,13 +460,13 @@ function EditRow({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => 
           </span>
         </p>
       </div>
-      <div role="cell" className="px-2 text-right tabular-nums text-muted">
+      <div role="cell" className={`px-2 text-right tabular-nums text-muted ${WIDE_CELL}`}>
         {edit.versionCount > 1 ? edit.versionCount : 'Original'}
       </div>
       <div role="cell" className="px-2 text-right tabular-nums text-muted">
         {formatLength(edit.duration)}
       </div>
-      <div role="cell" className="px-2 text-right tabular-nums text-muted">
+      <div role="cell" className={`px-2 text-right tabular-nums text-muted ${WIDE_CELL}`}>
         {edit.totalCostUsd > 0 ? formatPrice(edit.totalCostUsd) : '–'}
       </div>
       <div role="cell" className="flex min-w-0 items-center gap-1.5 px-2 text-[12px]">
@@ -484,7 +483,7 @@ function EditRow({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => 
           <span className="text-muted/60">–</span>
         )}
       </div>
-      <div role="cell" className="truncate px-2 text-[12px] text-muted">
+      <div role="cell" className={`truncate px-2 text-[12px] text-muted ${WIDE_CELL}`}>
         {formatWhen(edit.updatedAt)}
       </div>
       <div role="cell" className="flex justify-end">

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { Asset } from '@shared/types'
-import { ASSET_COPY, ASSET_FOLDER, assetAudio, audioCountLabel, swedishList } from '../../lib/assets'
+import { ASSET_COPY, ASSET_FOLDER, assetAudio, audioCountLabel } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
 import OpenFolderButton from '../library/OpenFolderButton'
@@ -8,6 +8,7 @@ import AssetAvatar from './AssetAvatar'
 import AssetImages from './AssetImages'
 import AssetSounds, { type SoundFocus } from './AssetSounds'
 import DefaultOutfitPicker from './DefaultOutfitPicker'
+import { deleteAssetFilesNote, deleteAssetQuestion, deleteOutfitNote } from './deleteText'
 import PromptField from '../prompt/PromptField'
 import { droppedPaths, fileDragKinds, imageCountLabel, isFileDrag, type FileDragKinds } from './imageUtils'
 import { useAssetDraft, type SaveState } from './useAssetDraft'
@@ -206,14 +207,9 @@ export default function AssetEditor({
             />
             <div className="ml-auto">
               <DeleteControl
-                name={draft.name.trim() || asset.name}
-                imageCount={imageCount}
-                audioLabel={audioCount > 0 ? audioLabel : undefined}
-                note={
-                  wearers.length
-                    ? `${swedishList(wearers.map((c) => c.name))} har den som standardklädsel och blir utan.`
-                    : undefined
-                }
+                question={deleteAssetQuestion(asset, draft.name.trim() || asset.name)}
+                filesNote={deleteAssetFilesNote(asset)}
+                note={deleteOutfitNote(wearers.map((c) => c.name))}
                 onConfirm={remove}
               />
             </div>
@@ -332,13 +328,6 @@ function Wearers({ wearers, onOpen }: { wearers: Asset[]; onOpen: (characterId: 
   )
 }
 
-/** " och 3 bilder", ", 3 bilder och 1 röstklipp", " och 1 röstklipp" or "": what goes with the asset. */
-function deletedFiles(imageCount: number, audioLabel: string | undefined): string {
-  const files = [imageCount ? imageCountLabel(imageCount) : undefined, audioLabel].filter(Boolean) as string[]
-  if (!files.length) return ''
-  return files.length === 1 ? ` och ${files[0]}` : `, ${swedishList(files)}`
-}
-
 function SaveIndicator({ state }: { state: SaveState }) {
   if (state.kind === 'saving') return <span className="text-[11px] text-muted">Sparar…</span>
   if (state.kind === 'saved') return <span className="text-[11px] text-muted">Sparat</span>
@@ -352,18 +341,17 @@ function SaveIndicator({ state }: { state: SaveState }) {
   return null
 }
 
-/** Inline two-step confirm; falls back to the plain button after a few seconds. */
+/** Inline two-step confirm; falls back to the plain button after a few seconds. The wording is the list's too. */
 function DeleteControl({
-  name,
-  imageCount,
-  audioLabel,
+  question,
+  filesNote,
   note,
   onConfirm
 }: {
-  name: string
-  imageCount: number
-  /** "2 röstklipp", when the asset has sound clips. */
-  audioLabel?: string
+  /** "Radera ”Anna” och 3 bilder?" */
+  question: string
+  /** Where the files go, on hover. */
+  filesNote: string
   /** A consequence worth knowing before confirming, shown under the question. */
   note?: string
   onConfirm: () => Promise<void>
@@ -400,11 +388,8 @@ function DeleteControl({
 
   return (
     <div className="flex items-center gap-2">
-      <span
-        className={`text-muted ${note ? 'max-w-xs' : ''}`}
-        title={`${audioLabel ? 'Bilderna och ljudklippen' : 'Bilderna'} flyttas till papperskorgen – utom de som genereringar eller klipp använder, de flyttas till Referensbilder.`}
-      >
-        Radera ”{name}”{deletedFiles(imageCount, audioLabel)}?
+      <span className={`text-muted ${note ? 'max-w-xs' : ''}`} title={filesNote}>
+        {question}
         {note && <span className="mt-0.5 block text-[11px] leading-snug">{note}</span>}
       </span>
       <button

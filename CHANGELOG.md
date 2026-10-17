@@ -348,6 +348,18 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- **One list on the left, the same everywhere, and Redigera has it too**: Karaktärer, Miljöer, Produkter, Kläder,
+  Poser, Sekvenser, Storyboards and Redigera share one side list (`SideList`) – the view's name with *＋ Ny …*, a
+  search field that is always there (⌘F; names, plus the descriptions in the library kinds and where a film came
+  from in Redigera; *Inga träffar för ”…”* with *Rensa sökningen*), rows of one height with the picture, the name,
+  one line and what runs or is new, ↑ / ↓ between the rows and Enter to open one. ✕ on a row (hover or keyboard
+  focus) asks in the row – *Radera ”Anna”?*, one line on what goes and what stays, *Radera* / *Avbryt* – and shows an
+  error there; the open item gives way to the row that takes its place, and a search stays as it was. Sekvenser's ✕
+  no longer asks twice. In Redigera the edits are always listed on the left: one opens beside the list, and with
+  none open (*‹ Redigeringar*, or deleting the open one) the overview *Alla redigeringar* is there, with *Kort* /
+  *Tabell* as before (the table keeps poster, name, length and status in a narrow window); *＋ Ny redigering* offers
+  an own film, a clip from the feed or an export, and *Markera alla som sedda* moved under the list's heading. The
+  workspace's right column narrows to 320 px in a small window so the player keeps room.
 - **"Nämns inte" only for references without an automatic description**: a reference whose description (or, for an
   outfit, wearer) the legend appends is no longer warned about when the prompt doesn't name it; the reference list
   marks it *beskrivs*. The same goes for the agents' `issues` and the approval dialog.

@@ -301,7 +301,7 @@ export default function SegmentEditor({
             <ConfirmButton
               question="Radera klippet?"
               onConfirm={remove}
-              title="Radera klippet (tagningarna finns kvar under Generera)"
+              title="Radera klippet (tagningarna finns kvar i Mediabanken)"
               className={deleteButton}
             >
               Radera

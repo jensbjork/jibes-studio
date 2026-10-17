@@ -270,21 +270,35 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     }
   }
 
-  const deleteStoryboard = async (id: string) => {
+  /**
+   * The list's ✕ (after its question in the row) and ⋯ → Radera storyboarden; throws, so the row can show the error.
+   * The open one is let go of first (as in Sekvenser) and gives way to its neighbour in the list.
+   */
+  const removeStoryboard = async (id: string, nextId?: string) => {
+    const wasOpen = id === selectedId
+    const rest = (storyboards ?? []).filter((s) => s.id === id || !gone.current.has(s.id))
+    const at = rest.findIndex((s) => s.id === id)
+    const neighbor = nextId ?? (at === -1 ? undefined : (rest[at + 1] ?? rest[at - 1])?.id)
+    gone.current.add(id)
+    if (wasOpen) setSelectedId(neighbor)
     try {
       await window.studio.deleteStoryboard(id)
-      gone.current.add(id)
-      if (id === selectedId) setSelectedId(undefined)
       try {
         if (loadLastOpen() === id) localStorage.removeItem(LAST_STORYBOARD_KEY)
       } catch {
         // Ignore unavailable storage.
       }
     } catch (e) {
-      setNotice({ text: ipcErrorMessage(e) })
+      gone.current.delete(id)
+      if (wasOpen) setSelectedId(id)
+      throw e
+    } finally {
+      void reload()
     }
-    void reload()
   }
+
+  const deleteStoryboard = (id: string) =>
+    removeStoryboard(id).catch((e: unknown) => setNotice({ text: ipcErrorMessage(e) }))
 
   const rename = (name: string) => {
     if (!storyboardId) return
@@ -746,7 +760,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
           setSelectedId(id)
         }}
         onCreate={createStoryboard}
-        onDelete={(id) => void deleteStoryboard(id)}
+        onDelete={removeStoryboard}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">

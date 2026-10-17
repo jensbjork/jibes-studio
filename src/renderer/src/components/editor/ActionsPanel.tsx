@@ -64,7 +64,8 @@ export default function ActionsPanel({ tab, onTab }: { tab: EditorTab; onTab: (t
             aria-controls={`${ids}-panel`}
             tabIndex={tab === t.id ? 0 : -1}
             onClick={() => onTab(t.id)}
-            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-2.5 py-2 transition ${
+            // A little tighter in the narrow column (EditWorkspace), so all five tabs still fit.
+            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-2 py-2 transition @min-[61rem]/main:px-2.5 ${
               tab === t.id ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'
             }`}
           >

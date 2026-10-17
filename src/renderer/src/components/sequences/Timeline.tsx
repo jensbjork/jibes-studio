@@ -332,7 +332,7 @@ function AddSplitButton({
         disabled={adding}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Eget klipp, från klippflödet eller från Redigera"
+        title="Eget klipp, från Mediabanken eller från Redigera"
         className={`flex h-7 shrink-0 items-center justify-center gap-1 border-t border-dashed border-line transition hover:bg-raised/60 hover:text-text disabled:opacity-40 ${
           open ? 'bg-raised/60 text-text' : ''
         }`}
@@ -405,7 +405,7 @@ function AddMenu({
           className={`${menuRow} flex-col items-start gap-0.5`}
         >
           <span>Från klippflödet…</span>
-          <span className="text-[11px] leading-snug text-muted">Ett klipp du redan har i Generera.</span>
+          <span className="text-[11px] leading-snug text-muted">Ett klipp du redan har i Mediabanken.</span>
         </button>
         <button
           type="button"

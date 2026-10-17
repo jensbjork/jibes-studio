@@ -193,7 +193,7 @@ async function latestExport(sequenceId: string): Promise<ExportSummary | undefin
 
 /** What deleting a sequence does, for its question (also asked from the list's ✕). */
 export const DELETE_SEQUENCE_TEXT =
-  'Klippen försvinner ur sekvensen. Tagningarna finns kvar under Generera, och exporterade filmer ligger kvar i mappen. Sekvensens bilder som inget annat använder flyttas till papperskorgen.'
+  'Klippen försvinner ur sekvensen. Tagningarna finns kvar i Mediabanken, och exporterade filmer ligger kvar i mappen. Sekvensens bilder som inget annat använder flyttas till papperskorgen.'
 
 /** ⋯: the Exportformat, the latest export into Redigera, marking what is new here as seen, and deleting it. */
 function MoreMenu({

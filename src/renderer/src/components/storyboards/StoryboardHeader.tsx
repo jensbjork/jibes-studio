@@ -267,7 +267,7 @@ function MoreMenu({
           <div className="p-3">
             <p className="mb-1 truncate">Radera ”{storyboard.name}”?</p>
             <p className="mb-3 text-[12px] leading-relaxed text-muted">
-              Rutorna och övergångarna försvinner. Klippen finns kvar under Generera, och färdiga filmer ligger kvar i
+              Rutorna och övergångarna försvinner. Klippen finns kvar i Mediabanken, och färdiga filmer ligger kvar i
               mappen. Storyboardens bilder som inget annat använder flyttas till papperskorgen.
             </p>
             <div className="flex justify-end gap-1.5">

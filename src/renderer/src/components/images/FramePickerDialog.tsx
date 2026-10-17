@@ -144,7 +144,7 @@ function FramePickerBody({
           {library ? 'Det finns inga färdiga klipp i biblioteket än.' : 'Ingen tagning i sekvensen är klar än.'}
           <br />
           {library
-            ? 'När en video är klar under Generera kan du ta en bildruta ur den här.'
+            ? 'När en video är klar kan du ta en bildruta ur den här.'
             : 'När ett klipp har en färdig tagning kan du ta en bildruta ur den här.'}
         </p>
       ) : (

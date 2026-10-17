@@ -361,7 +361,7 @@ export default function ClipFeed({
         type="button"
         onClick={() => void pickFiles()}
         disabled={importFlow.inspecting}
-        title="Lägg till dina egna filmer i klippflödet (eller dra in dem hit)"
+        title="Lägg till dina egna filmer (eller dra in dem hit)"
         aria-label={session ? importLabel : undefined}
         className="no-drag flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
       >

@@ -362,7 +362,7 @@ export function lostTransitionsText(storyboard: Pick<Storyboard, 'boards'>, lost
   const takes = lost.reduce((n, t) => n + t.takes.length, 0)
   if (takes) {
     sentences.push(
-      `${takes === 1 ? 'Tagningen' : 'Tagningarna'} finns kvar under Generera, men hör inte längre till storyboarden.`
+      `${takes === 1 ? 'Tagningen' : 'Tagningarna'} finns kvar i Mediabanken, men hör inte längre till storyboarden.`
     )
   }
   return sentences.join(' ')

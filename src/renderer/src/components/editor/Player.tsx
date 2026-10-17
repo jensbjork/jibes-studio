@@ -77,7 +77,8 @@ export default function Player({ current, other, comparing, onCompare, canUndo, 
         </div>
         <Clock player={player} duration={duration} rate={state.playing && state.rate !== 1 ? state.rate * state.direction : undefined} />
 
-        <div className="flex items-center gap-1">
+        {/* Wraps in a narrow window, where the player column beside Redigera's list is only a few hundred px. */}
+        <div className="flex flex-wrap items-center gap-1">
           <TextButton title="Markera in vid spelhuvudet (I)" onClick={markIn}>
             Markera in
           </TextButton>

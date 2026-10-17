@@ -81,7 +81,7 @@ export function relativeTime(at: number, now: number = Date.now()): string {
 
 // ── Where an edit came from ─────────────────────────────────────────────────
 
-/** The source badge: "Klipp från Generera", "Tagning av klipp 3 i ”X”", "Export av ”X”", "Egen film". */
+/** The source badge: "Klipp från Mediabanken", "Tagning av klipp 3 i ”X”", "Export av ”X”", "Egen film". */
 export function originLabel(origin: EditOrigin): string {
   switch (origin.kind) {
     case 'take':
@@ -95,7 +95,7 @@ export function originLabel(origin: EditOrigin): string {
     case 'import':
       return 'Egen film'
     default:
-      return 'Klipp från Generera'
+      return 'Klipp från Mediabanken'
   }
 }
 
