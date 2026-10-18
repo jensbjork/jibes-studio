@@ -169,7 +169,7 @@ export function usePromptDraft(prompts: SavedPrompt[]) {
     const id = await commit()
     const d = draftRef.current
     if (!d || !id) return
-    const title = `${d.title.trim() || known.current.get(id)?.title || titleFromBody(d.body)} (kopia)`
+    const title = `${d.title.trim() || known.current.get(id)?.title || titleFromBody(d.body)} (copy)`
     try {
       const saved = await window.studio.savePrompt({
         title,

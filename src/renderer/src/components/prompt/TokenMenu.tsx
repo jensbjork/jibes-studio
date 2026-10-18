@@ -74,22 +74,22 @@ export default function TokenMenu({
     >
       {replacing && (
         <p className="border-b border-line px-3 py-2 text-[11px] text-muted">
-          {only === 'audio' ? 'Välj ljudklippet som hänvisningen ska peka på' : 'Välj bilden som hänvisningen ska peka på'}
+          {only === 'audio' ? 'Choose the sound clip the reference should point at' : 'Choose the image the reference should point at'}
         </p>
       )}
       <div
         id={id}
         role="listbox"
-        aria-label={only === 'audio' ? 'Hänvisa till ett ljudklipp' : 'Hänvisa till en bild eller ett ljudklipp'}
+        aria-label={only === 'audio' ? 'Refer to a sound clip' : 'Refer to an image or a sound clip'}
         className="min-h-0 flex-1 overflow-y-auto p-1"
       >
         {empty ? (
           <div className="px-3 py-4 text-center text-[12px] text-muted">
-            {query ? <p>Inget heter ”@{query}”.</p> : <p>Inget att hänvisa till än.</p>}
+            {query ? <p>Nothing is called “@{query}”.</p> : <p>Nothing to refer to yet.</p>}
             {noReferences && (
               <p className="mt-1 text-[11px]">
-                Lägg till bilder med ＋ Karaktär, ＋ Miljö, ＋ Produkt, ＋ Kläder eller ＋ Pose ovanför – de får
-                nummer @Image1, @Image2 … och röster @Audio1 …
+                Add images with ＋ Character, ＋ Environment, ＋ Product, ＋ Outfit or ＋ Pose above – they get the
+                numbers @Image1, @Image2 … and voices @Audio1 …
               </p>
             )}
           </div>
@@ -117,14 +117,14 @@ export default function TokenMenu({
               })}
               {section.more > 0 && (
                 <p className="px-2 py-1 text-[11px] text-muted">
-                  {section.more} till – skriv en del av namnet för att söka
+                  {section.more} more – type part of the name to search
                 </p>
               )}
             </div>
           ))
         )}
       </div>
-      <p className="border-t border-line px-3 py-1.5 text-[10px] text-muted">↑↓ välj · ↩ eller ⇥ infoga · esc stäng</p>
+      <p className="border-t border-line px-3 py-1.5 text-[10px] text-muted">↑↓ choose · ↩ or ⇥ insert · esc close</p>
     </div>,
     document.body
   )
@@ -172,10 +172,10 @@ function OptionContent({ item }: { item: MenuItem }) {
           <span className="block truncate font-medium">{asset.name}</span>
           <span className="block truncate text-[11px] text-muted">
             {ASSET_COPY[asset.kind].singular}
-            {audios?.length ? (asset.kind === 'character' ? ' · med röst' : ' · med ljud') : ''}
-            {outfits?.length ? ` · bär ${promptList(outfits.map((o) => o.name), 'sv')}` : ''}
-            {asset.kind === 'pose' && people?.length ? ` · ${promptList(people.map((p) => p.name), 'sv')}` : ''}
-            {asset.kind === 'product' && holder ? ` · hålls av ${holder.name}` : ''}
+            {audios?.length ? (asset.kind === 'character' ? ' · with voice' : ' · with sound') : ''}
+            {outfits?.length ? ` · wears ${promptList(outfits.map((o) => o.name), 'en')}` : ''}
+            {asset.kind === 'pose' && people?.length ? ` · ${promptList(people.map((p) => p.name), 'en')}` : ''}
+            {asset.kind === 'product' && holder ? ` · held by ${holder.name}` : ''}
           </span>
         </span>
         <span className={`shrink-0 text-[11px] ${tone.text}`}>
@@ -196,7 +196,7 @@ function OptionContent({ item }: { item: MenuItem }) {
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
           {name} · {detail} · {windowLabel(a)}
         </span>
-        {!a.sent && <span className="shrink-0 text-[11px] text-accent">skickas inte</span>}
+        {!a.sent && <span className="shrink-0 text-[11px] text-accent">not sent</span>}
       </>
     )
   }
@@ -209,9 +209,9 @@ function OptionContent({ item }: { item: MenuItem }) {
           @Image{r.index}
         </span>
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
-          {r.asset ? `${r.asset.name} · foto ${r.photo ?? 1}` : `egen bild · ${fileName(r.path)}`}
+          {r.asset ? `${r.asset.name} · photo ${r.photo ?? 1}` : `own image · ${fileName(r.path)}`}
         </span>
-        {!r.sent && <span className="shrink-0 text-[11px] text-accent">skickas inte</span>}
+        {!r.sent && <span className="shrink-0 text-[11px] text-accent">not sent</span>}
       </>
     )
   }

@@ -8,14 +8,14 @@ import { ASSET_COPY } from '../../lib/assets'
 export type FeedView = 'cards' | 'table'
 export type SortKey = NonNullable<GenerationFilter['sort']>
 export type StatusChoice = 'completed' | 'pending' | 'failed'
-/** A number is "at least that many stars" (tumme ner never counts); 'thumbsDown' is the clips given tumme ner. */
+/** A number is "at least that many stars" (thumbs down never counts); 'thumbsDown' is the clips given thumbs down. */
 export type RatingChoice = 1 | 2 | 3 | 'thumbsDown' | 'unrated' | 'reviewed'
 export type PeriodChoice = 'today' | '7d' | '30d'
 export type PlacementChoice = NonNullable<GenerationFilter['placement']>
 
 export interface FeedFilters {
   query: string
-  /** "Källa": Venice's clips, the user's own clips, or versions from Redigera. */
+  /** "Source": Venice's clips, the user's own clips, or versions from the Editor. */
   source?: GenerationSource
   status?: StatusChoice
   model?: string
@@ -23,50 +23,50 @@ export interface FeedFilters {
   rating?: RatingChoice
   period?: PeriodChoice
   placement?: PlacementChoice
-  /** "Nya": finished and not looked at yet (Pågår och klart's seen state). */
+  /** "New": finished and not looked at yet (Activity's seen state). */
   unseen?: boolean
 }
 
 export const NO_FILTERS: FeedFilters = { query: '' }
 
 export const SORT_OPTIONS: { id: SortKey; label: string }[] = [
-  { id: 'newest', label: 'Nyast' },
-  { id: 'oldest', label: 'Äldst' },
-  { id: 'rating', label: 'Betyg' },
-  { id: 'cost', label: 'Kostnad' },
-  { id: 'length', label: 'Längd' }
+  { id: 'newest', label: 'Newest' },
+  { id: 'oldest', label: 'Oldest' },
+  { id: 'rating', label: 'Rating' },
+  { id: 'cost', label: 'Cost' },
+  { id: 'length', label: 'Duration' }
 ]
 
 export const STATUS_OPTIONS: { id: StatusChoice; label: string }[] = [
-  { id: 'completed', label: 'Klara' },
-  { id: 'pending', label: 'Pågår' },
-  { id: 'failed', label: 'Misslyckade' }
+  { id: 'completed', label: 'Done' },
+  { id: 'pending', label: 'In progress' },
+  { id: 'failed', label: 'Failed' }
 ]
 
 export const RATING_OPTIONS: { id: RatingChoice; label: string }[] = [
   { id: 3, label: '★★★' },
-  { id: 2, label: '★★ eller mer' },
-  { id: 1, label: '★ eller mer' },
-  { id: 'thumbsDown', label: 'Tumme ner' },
-  { id: 'unrated', label: 'Ej betygsatt' },
-  { id: 'reviewed', label: 'Har granskningar' }
+  { id: 2, label: '★★ or more' },
+  { id: 1, label: '★ or more' },
+  { id: 'thumbsDown', label: 'Thumbs down' },
+  { id: 'unrated', label: 'Not rated' },
+  { id: 'reviewed', label: 'Has reviews' }
 ]
 
 export const PERIOD_OPTIONS: { id: PeriodChoice; label: string }[] = [
-  { id: 'today', label: 'Idag' },
-  { id: '7d', label: 'Senaste 7 dagarna' },
-  { id: '30d', label: 'Senaste 30 dagarna' }
+  { id: 'today', label: 'Today' },
+  { id: '7d', label: 'Last 7 days' },
+  { id: '30d', label: 'Last 30 days' }
 ]
 
 export const SOURCE_OPTIONS: { id: GenerationSource; label: string; text: string }[] = [
-  { id: 'generated', label: 'Genererade', text: 'Klipp som Venice har gjort' },
-  { id: 'import', label: 'Egna klipp', text: 'Dina egna filmer, importerade till biblioteket' },
-  { id: 'edit', label: 'Redigerade', text: 'Versioner gjorda i Redigera' }
+  { id: 'generated', label: 'Generated', text: 'Clips Venice has made' },
+  { id: 'import', label: 'Own clips', text: 'Your own films, imported into the library' },
+  { id: 'edit', label: 'Edited', text: 'Versions made in the Editor' }
 ]
 
 export const PLACEMENT_OPTIONS: { id: PlacementChoice; label: string }[] = [
-  { id: 'standalone', label: 'Fristående' },
-  { id: 'sequence', label: 'Tagningar' }
+  { id: 'standalone', label: 'Standalone' },
+  { id: 'sequence', label: 'Takes' }
 ]
 
 const DAY = 24 * 60 * 60 * 1000
@@ -131,7 +131,7 @@ export function modelName(id: string, models: readonly VideoModel[]): string {
 export function filterChips(f: FeedFilters, models: readonly VideoModel[], assets: readonly Asset[]): FilterChip[] {
   const chips: FilterChip[] = []
   const query = f.query.trim()
-  if (query) chips.push({ key: 'query', label: `”${query}”` })
+  if (query) chips.push({ key: 'query', label: `“${query}”` })
   if (f.source) chips.push({ key: 'source', label: SOURCE_OPTIONS.find((o) => o.id === f.source)?.label ?? f.source })
   if (f.status) chips.push({ key: 'status', label: STATUS_OPTIONS.find((o) => o.id === f.status)?.label ?? f.status })
   if (f.model) chips.push({ key: 'model', label: modelName(f.model, models) })
@@ -139,23 +139,23 @@ export function filterChips(f: FeedFilters, models: readonly VideoModel[], asset
     const asset = assets.find((a) => a.id === f.assetId)
     chips.push({
       key: 'assetId',
-      label: asset ? `${capitalize(ASSET_COPY[asset.kind].singular)}: ${asset.name}` : 'Tillgång'
+      label: asset ? `${capitalize(ASSET_COPY[asset.kind].singular)}: ${asset.name}` : 'Asset'
     })
   }
   if (f.rating) {
     const option = RATING_OPTIONS.find((o) => o.id === f.rating)
-    chips.push({ key: 'rating', label: typeof f.rating === 'number' ? `Betyg ${option?.label}` : (option?.label ?? '') })
+    chips.push({ key: 'rating', label: typeof f.rating === 'number' ? `Rating ${option?.label}` : (option?.label ?? '') })
   }
   if (f.period) chips.push({ key: 'period', label: PERIOD_OPTIONS.find((o) => o.id === f.period)?.label ?? '' })
   if (f.placement) {
     chips.push({ key: 'placement', label: PLACEMENT_OPTIONS.find((o) => o.id === f.placement)?.label ?? '' })
   }
-  if (f.unseen) chips.push({ key: 'unseen', label: 'Nya' })
+  if (f.unseen) chips.push({ key: 'unseen', label: 'New' })
   return chips
 }
 
 function capitalize(text: string): string {
-  return text.charAt(0).toLocaleUpperCase('sv') + text.slice(1)
+  return text.charAt(0).toLocaleUpperCase('en') + text.slice(1)
 }
 
 export function withoutFilter(f: FeedFilters, key: keyof FeedFilters): FeedFilters {
@@ -164,11 +164,11 @@ export function withoutFilter(f: FeedFilters, key: keyof FeedFilters): FeedFilte
 
 // ── Remembered choices ───────────────────────────────────────────────────────
 
-/** Kort or Tabell, remembered apart for the Mediabank's Videor ('library') and Generera's session list. */
+/** Cards or Table, remembered apart for Media's Videos ('library') and Generate's session list. */
 const VIEW_KEYS = { library: 'feed:view', session: 'feed:view:session' } as const
 const SORT_KEY = 'feed:sort'
 
-/** Which list a ClipFeed is: every clip (the Mediabank) or what was made in Generera this session. */
+/** Which list a ClipFeed is: every clip (Media) or what was made in Generate this session. */
 export type FeedMode = keyof typeof VIEW_KEYS
 
 export function isSortKey(value: unknown): value is SortKey {
@@ -209,7 +209,7 @@ export function saveSort(sort: SortKey): void {
 }
 
 /**
- * The filters outlive the view (switching to Prompter and back keeps them) but not a restart: a filter that
+ * The filters outlive the view (switching to Prompts and back keeps them) but not a restart: a filter that
  * silently hid clips the next morning would look like lost work.
  */
 let sessionFilters: FeedFilters = NO_FILTERS

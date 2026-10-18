@@ -12,8 +12,8 @@ import { PlayIcon } from '../sequences/icons'
 import { NewChip } from '../work/StatusMark'
 import { CountLine, MediaToolbar, NoticeRow } from './ui'
 
-// Filmer: every film exported from a sequence or a storyboard, newest first, as cards with the film's first frame.
-// A film plays in a player over the window, with the way on to Redigera, its sequence or storyboard, and Finder.
+// Films: every film exported from a sequence or a storyboard, newest first, as cards with the film's first frame.
+// A film plays in a player over the window, with the way on to the Editor, its sequence or storyboard, and Finder.
 // Films aren't deleted here.
 
 interface OpenRequest {
@@ -22,7 +22,7 @@ interface OpenRequest {
 }
 
 interface Props {
-  /** The Mediabank's tabs, at the start of the header. */
+  /** Media's tabs, at the start of the header. */
   tabs: ReactNode
   navigate: Navigate
   /** Open this film in the player; `source: 'agent'` neither plays it nor marks it seen. */
@@ -71,21 +71,21 @@ function useExports(): { exports: ExportSummary[]; loaded: boolean; reload: () =
 }
 
 function filmsText(n: number): string {
-  return n === 1 ? '1 film' : `${n} filmer`
+  return n === 1 ? '1 film' : `${n} films`
 }
 
 function filmName(e: ExportSummary): string {
   return e.sequenceName ?? fileName(e.path)
 }
 
-const KIND_LABEL = { sequence: 'Sekvens', storyboard: 'Storyboard' } as const
+const KIND_LABEL = { sequence: 'Sequence', storyboard: 'Storyboard' } as const
 
-/** "8 okt. 14:02 · 1:24 · 6 klipp". */
+/** "8 Oct 14:02 · 1:24 · 6 clips". */
 function filmFacts(e: ExportSummary): string[] {
   return [
     formatStillTime(e.createdAt),
     e.duration !== undefined ? formatLength(e.duration) : undefined,
-    e.cuts ? `${e.cuts.length + 1} klipp` : undefined
+    e.cuts ? `${e.cuts.length + 1} ${e.cuts.length ? 'clips' : 'clip'}` : undefined
   ].filter((f): f is string => !!f)
 }
 
@@ -94,7 +94,7 @@ export default function FilmsTab({ tabs, navigate, openRequest, onOpenRequestHan
   const [notice, setNotice] = useState<string>()
   const [opened, setOpened] = useState<{ id: string; byAgent: boolean }>()
 
-  // Pågår och klart or an agent showing a film: it opens in the player. One that just finished may not be listed
+  // Activity or an agent showing a film: it opens in the player. One that just finished may not be listed
   // yet, so the list is read once more before it counts as gone.
   const handled = useRef<OpenRequest>(undefined)
   useEffect(() => {
@@ -104,7 +104,7 @@ export default function FilmsTab({ tabs, navigate, openRequest, onOpenRequestHan
     const show = (list: readonly ExportSummary[]) => {
       if (list.some((e) => e.id === request.exportId)) {
         setOpened({ id: request.exportId, byAgent: request.source === 'agent' })
-      } else setNotice('Filmen finns inte längre i biblioteket.')
+      } else setNotice('The film is no longer in the library.')
     }
     if (exports.some((e) => e.id === request.exportId)) show(exports)
     else void reload().then(show)
@@ -127,7 +127,7 @@ export default function FilmsTab({ tabs, navigate, openRequest, onOpenRequestHan
         {!loaded ? null : exports.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted">
             <p className="max-w-sm leading-relaxed">
-              Inga exporterade filmer än. Exportera en sekvens eller en storyboard, så hamnar filmen här.
+              No exported films yet. Export a sequence or a storyboard and the film ends up here.
             </p>
           </div>
         ) : (
@@ -142,7 +142,7 @@ export default function FilmsTab({ tabs, navigate, openRequest, onOpenRequestHan
       {opened && openIndex >= 0 && (
         <FilmPlayer
           film={exports[openIndex]}
-          position={exports.length > 1 ? `${openIndex + 1} av ${exports.length}` : undefined}
+          position={exports.length > 1 ? `${openIndex + 1} of ${exports.length}` : undefined}
           byAgent={opened.byAgent}
           onPrev={openIndex > 0 ? () => setOpened({ id: exports[openIndex - 1].id, byAgent: false }) : undefined}
           onNext={
@@ -169,13 +169,13 @@ const FilmCard = memo(function FilmCard({ film, onOpen }: { film: ExportSummary;
       <button
         type="button"
         onClick={() => onOpen(film)}
-        title={missing ? `Filen saknas: ${film.path}` : `Spela upp ”${name}”`}
+        title={missing ? `File missing: ${film.path}` : `Play “${name}”`}
         className="relative block aspect-video w-full overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-muted"
       >
         {missing ? (
           <span className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-[12px] text-accent">
             <FilmIcon size={18} className="text-muted" />
-            Filen saknas
+            File missing
           </span>
         ) : (
           <>
@@ -198,7 +198,7 @@ const FilmCard = memo(function FilmCard({ film, onOpen }: { film: ExportSummary;
         )}
         {(fresh || film.sequenceKind) && (
           <span className="absolute left-2 top-2 flex items-center gap-1">
-            {fresh && <NewChip variant="overlay" title="Klar och inte tittad på än" />}
+            {fresh && <NewChip variant="overlay" title="Done and not looked at yet" />}
             {film.sequenceKind && (
               <span className="rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-text backdrop-blur">
                 {KIND_LABEL[film.sequenceKind]}
@@ -213,7 +213,7 @@ const FilmCard = memo(function FilmCard({ film, onOpen }: { film: ExportSummary;
         </p>
         <p className="mt-0.5 truncate text-[11px] text-muted">
           {filmFacts(film).join(' · ')}
-          {missing && <span className="text-accent"> · Filen saknas</span>}
+          {missing && <span className="text-accent"> · File missing</span>}
         </p>
       </div>
     </div>
@@ -269,7 +269,7 @@ function FilmPlayer({
   }, [onClose, onPrev, onNext])
 
   const ownerLabel =
-    film.sequenceKind === 'storyboard' ? 'Gå till storyboarden' : film.sequenceKind === 'sequence' ? 'Gå till sekvensen' : undefined
+    film.sequenceKind === 'storyboard' ? 'Go to the storyboard' : film.sequenceKind === 'sequence' ? 'Go to the sequence' : undefined
   const goToOwner = () => {
     if (!film.sequenceId) return
     if (film.sequenceKind === 'storyboard') {
@@ -304,7 +304,7 @@ function FilmPlayer({
           />
         ) : (
           <p className="max-w-sm text-center text-muted select-text">
-            Filen finns inte längre.
+            The file is gone.
             <br />
             <span className="text-[11px] break-all">{film.path}</span>
           </p>
@@ -330,10 +330,10 @@ function FilmPlayer({
               markSeen([key])
               navigate('editor', { type: 'open-editor', exportId: film.id })
             }}
-            title={film.exists ? 'Redigera filmen (exporten lämnas orörd)' : 'Filen saknas'}
+            title={film.exists ? 'Edit the film (the export is left untouched)' : 'File missing'}
             className={action}
           >
-            Öppna i Redigera
+            Open in the Editor
           </button>
           {ownerLabel && film.sequenceId && (
             <button type="button" onClick={goToOwner} className={action}>
@@ -349,10 +349,10 @@ function FilmPlayer({
             }}
             className={action}
           >
-            Visa i Finder
+            Show in Finder
           </button>
           <button type="button" onClick={onClose} className={action}>
-            Stäng
+            Close
           </button>
         </div>
       </div>
@@ -367,8 +367,8 @@ function NavButton({ side, onClick }: { side: 'left' | 'right'; onClick?: () => 
       type="button"
       onClick={onClick}
       disabled={!onClick}
-      aria-label={side === 'left' ? 'Föregående film' : 'Nästa film'}
-      title={side === 'left' ? 'Föregående (←)' : 'Nästa (→)'}
+      aria-label={side === 'left' ? 'Previous film' : 'Next film'}
+      title={side === 'left' ? 'Previous (←)' : 'Next (→)'}
       className={`absolute top-1/2 -translate-y-1/2 rounded-full bg-black/50 px-3 py-2 text-lg leading-none text-white/80 transition hover:bg-black/80 hover:text-white disabled:opacity-0 ${
         side === 'left' ? 'left-3' : 'right-3'
       }`}

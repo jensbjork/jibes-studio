@@ -1,4 +1,4 @@
-// Searching and filtering learnings ("Lärdomar"), and how they are described in the list.
+// Searching and filtering learnings ("Learnings"), and how they are described in the list.
 
 import type { Learning } from '@shared/types'
 import { REVIEW_TAGS } from '../feed/feedText'
@@ -64,17 +64,17 @@ export function learningTagSuggestions(learnings: readonly Learning[]): string[]
       else counts.set(key, { label: tag.trim(), count: 1 })
     }
   }
-  const used = [...counts.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'sv'))
+  const used = [...counts.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'en'))
   const seen = new Set(used.map((u) => fold(u.label)))
   return [...used.map((u) => u.label), ...REVIEW_TAGS.map((t) => t.tag).filter((t) => !seen.has(t))]
 }
 
-/** "1 klipp", "3 klipp" as evidence. */
+/** "1 clip", "3 clips" as evidence. */
 export function evidenceText(n: number): string {
-  return `${n} klipp`
+  return `${n} ${n === 1 ? 'clip' : 'clips'}`
 }
 
-// ── The Prompter view's tab ──────────────────────────────────────────────────
+// ── The Prompts view's tab ───────────────────────────────────────────────────
 
 export type PromptsTab = 'prompts' | 'learnings'
 

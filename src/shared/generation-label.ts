@@ -1,7 +1,7 @@
 // How a generation is named and marked wherever it is listed: the feed, takes, frame pickers, file names and the
-// agents' summaries. A Venice generation is named by its prompt; the user's own imported film ("Egna klipp") and a
-// version made in Redigera have no prompt of their own and are named by their title instead (the file's name,
-// "<redigering> v3"), so they are never listed as an empty prompt. Pure (no Node or DOM), like everything in
+// agents' summaries. A Venice generation is named by its prompt; the user's own imported film ("Own clips") and a
+// version made in the Editor have no prompt of their own and are named by their title instead (the file's name,
+// "<edit> v3"), so they are never listed as an empty prompt. Pure (no Node or DOM), like everything in
 // src/shared.
 
 import type { Generation, GenerationSource } from './types'
@@ -15,7 +15,7 @@ export function generationSource(g: Partial<Pick<Generation, 'source'>>): Genera
   return g.source === 'import' || g.source === 'edit' ? g.source : 'generated'
 }
 
-/** Made by Venice (also an AI take made in Redigera), as opposed to an import or a version. */
+/** Made by Venice (also an AI take made in the Editor), as opposed to an import or a version. */
 export function isVeniceGeneration(g: Partial<Pick<Generation, 'source'>>): boolean {
   return generationSource(g) === 'generated'
 }
@@ -24,11 +24,11 @@ export function isVeniceGeneration(g: Partial<Pick<Generation, 'source'>>): bool
 function fallbackTitle(source: GenerationSource): string {
   switch (source) {
     case 'import':
-      return 'Eget klipp'
+      return 'Own clip'
     case 'edit':
       return 'Version'
     default:
-      return 'Utan prompt'
+      return 'No prompt'
   }
 }
 
@@ -47,7 +47,7 @@ function shorten(text: string, max: number): string {
 
 /**
  * The name a generation is listed by: its title when it has one (an import's file name, a version's
- * "<redigering> v3"), else its prompt, else "Eget klipp" / "Version" / "Utan prompt" by source. With `max` the
+ * "<edit> v3"), else its prompt, else "Own clip" / "Version" / "No prompt" by source. With `max` the
  * text is flattened to one line and shortened to at most that many characters ("…"); without it a prompt comes
  * back as written (several lines), for views that clamp it themselves.
  */
@@ -58,36 +58,36 @@ export function generationTitle(g: LabelledGeneration, max?: number): string {
   return typeof max === 'number' && Number.isFinite(max) ? shorten(text, max) : text
 }
 
-/** What kind of badge a row gets in the feed: own clip, version, or an AI take made in Redigera. */
+/** What kind of badge a row gets in the feed: own clip, version, or an AI take made in the Editor. */
 export type SourceBadgeKind = 'own' | 'edited' | 'edit-take'
 
 export interface SourceBadge {
   kind: SourceBadgeKind
-  /** Short Swedish label for the badge: "Egen", "Redigerad", "Redigering". */
+  /** Short label for the badge: "Own", "Edited", "Edit". */
   label: string
-  /** Swedish, for a tooltip. */
+  /** For a tooltip. */
   description: string
 }
 
 /**
- * The feed's source badge: "Egen" for the user's own imported film, "Redigerad" for a version made in Redigera,
- * "Redigering" for an AI take made there; undefined for an ordinary Venice generation (no badge).
+ * The feed's source badge: "Own" for the user's own imported film, "Edited" for a version made in the Editor,
+ * "Edit" for an AI take made there; undefined for an ordinary Venice generation (no badge).
  */
 export function sourceBadge(g: Partial<Pick<Generation, 'source' | 'editId'>>): SourceBadge | undefined {
   switch (generationSource(g)) {
     case 'import':
-      return { kind: 'own', label: 'Egen', description: 'Din egen film, importerad till biblioteket.' }
+      return { kind: 'own', label: 'Own', description: 'Your own film, imported into the library.' }
     case 'edit':
-      return { kind: 'edited', label: 'Redigerad', description: 'En version gjord i Redigera.' }
+      return { kind: 'edited', label: 'Edited', description: 'A version made in the Editor.' }
     default:
       return g.editId
-        ? { kind: 'edit-take', label: 'Redigering', description: 'En AI-tagning gjord i Redigera.' }
+        ? { kind: 'edit-take', label: 'Edit', description: 'An AI take made in the Editor.' }
         : undefined
   }
 }
 
 /**
- * Whether the row's settings can be put back in the Generate form ("Använd igen", "Använd prompt"): only a Venice
+ * Whether the row's settings can be put back in the Generate form ("Use again", "Use prompt"): only a Venice
  * generation made from a prompt, not an import, a version, or a take of a video-to-video model (its source video
  * is an edit's proxy the form can't hold).
  */
@@ -98,9 +98,9 @@ export function canUseAgain(g: Partial<Pick<Generation, 'source' | 'params'>>): 
   return !p.sourceVideo && !(Array.isArray(p.referenceVideos) && p.referenceVideos.length > 0)
 }
 
-/** The labels of the feed's "Källa" filter, by source. */
+/** The labels of the feed's "Source" filter, by source. */
 export const SOURCE_LABELS: Readonly<Record<GenerationSource, string>> = {
-  generated: 'Genererade',
-  import: 'Egna klipp',
-  edit: 'Redigerade'
+  generated: 'Generated',
+  import: 'Own clips',
+  edit: 'Edited'
 }

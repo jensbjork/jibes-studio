@@ -192,7 +192,7 @@ export function clearImageModelCache(): void {
 async function fetchModels(type: 'image' | 'inpaint'): Promise<RawImageModel[]> {
   const res = await call(`/models?type=${type}`, { method: 'GET', timeoutMs: LIST_TIMEOUT_MS, requireKey: false })
   const json = (await res.json().catch(() => undefined)) as { data?: unknown } | undefined
-  if (!json || !Array.isArray(json.data)) throw new VeniceError('Venice skickade en oväntad modellista.', res.status)
+  if (!json || !Array.isArray(json.data)) throw new VeniceError('Venice sent an unexpected model list.', res.status)
   return json.data as RawImageModel[]
 }
 
@@ -386,7 +386,7 @@ export async function inputImageDataUrl(path: string): Promise<string> {
     return await encodeInputImage(path)
   } catch (err) {
     if (err instanceof VeniceError) throw err
-    throw new Error(`Referensbilden ${shortName(path)} kunde inte läsas: ${fileErrorReason(err)}.`, { cause: err })
+    throw new Error(`The reference image ${shortName(path)} could not be read: ${fileErrorReason(err)}.`, { cause: err })
   }
 }
 
@@ -395,7 +395,7 @@ async function encodeInputImage(path: string): Promise<string> {
   const { image: img, bytes } = await decodeImageFile(path)
   if (!img) {
     if (bytes.length > MAX_INPUT_BYTES) {
-      throw new VeniceError(`Referensbilden ${shortName(path)} är för stor för Venice (över 20 MB).`, 413)
+      throw new VeniceError(`The reference image ${shortName(path)} is too large for Venice (over 20 MB).`, 413)
     }
     return `data:${MIME[ext] ?? 'image/png'};base64,${bytes.toString('base64')}`
   }
@@ -428,11 +428,11 @@ interface CallOptions {
   requireKey?: boolean
 }
 
-const NO_KEY = 'Ingen API-nyckel är inställd. Lägg till den under Inställningar.'
+const NO_KEY = 'No API key is set. Add it in Settings.'
 const CONTENT_VIOLATION =
-  'Venice stoppade bilden eftersom den bryter mot Venices användarvillkor. Ändra prompten eller referensbilderna och försök igen.'
+  "Venice stopped the image because it breaks Venice's terms of use. Change the prompt or the reference images and try again."
 
-/** fetch() with the key, a deadline and Swedish errors; resolves only with a 2xx response that isn't a violation. */
+/** fetch() with the key, a deadline and plain errors; resolves only with a 2xx response that isn't a violation. */
 async function call(path: string, opts: CallOptions): Promise<Response> {
   const headers = new Headers()
   const key = getApiKey()
@@ -469,19 +469,19 @@ function transportError(err: unknown, opts: CallOptions): Error {
   if (name === 'TimeoutError' || name === 'AbortError') {
     const minutes = Math.round(opts.timeoutMs / 60_000)
     const waited =
-      minutes >= 1 ? `${minutes} ${minutes === 1 ? 'minut' : 'minuter'}` : `${Math.round(opts.timeoutMs / 1000)} s`
+      minutes >= 1 ? `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}` : `${Math.round(opts.timeoutMs / 1000)} s`
     return new VeniceError(
       paid
-        ? `Venice svarade inte inom ${waited}, så Studio slutade vänta. Bilden kan ändå ha debiterats – kontrollera saldot innan du försöker igen.`
-        : `Venice svarade inte inom ${waited}. Försök igen om en stund.`,
+        ? `Venice did not answer within ${waited}, so Studio stopped waiting. The image may have been charged anyway – check your balance before you try again.`
+        : `Venice did not answer within ${waited}. Try again in a moment.`,
       0,
       undefined
     )
   }
   return new VeniceError(
     paid
-      ? 'Anslutningen till Venice bröts. Kontrollera internetanslutningen; bilden kan ha debiterats ändå, så kontrollera saldot innan du försöker igen.'
-      : 'Kunde inte nå Venice. Kontrollera internetanslutningen och försök igen.',
+      ? 'The connection to Venice was lost. Check your internet connection; the image may have been charged anyway, so check your balance before you try again.'
+      : 'Could not reach Venice. Check your internet connection and try again.',
     0,
     err
   )
@@ -499,7 +499,7 @@ function detailOf(body: unknown, text: string): string {
 }
 
 /**
- * A failed response in Swedish, with Venice's own detail where it helps the user fix the request. `what`: the
+ * A failed response in plain words, with Venice's own detail where it helps the user fix the request. `what`: the
  * model list (free) or a picture (paid).
  */
 export async function responseError(res: Response, what: 'list' | 'image' = 'image'): Promise<VeniceError> {
@@ -517,45 +517,45 @@ export async function responseError(res: Response, what: 'list' | 'image' = 'ima
   switch (res.status) {
     case 400:
     case 422:
-      message = withDetail('Venice godtog inte förfrågan.')
+      message = withDetail('Venice did not accept the request.')
       break
     case 401:
       message = /pro/i.test(detail)
-        ? 'Modellen kräver Venice Pro. Välj en annan modell eller uppgradera kontot hos Venice.'
-        : 'Venice godtog inte API-nyckeln. Kontrollera den under Inställningar.'
+        ? 'The model requires Venice Pro. Choose another model or upgrade your Venice account.'
+        : 'Venice did not accept the API key. Check it in Settings.'
       break
     case 402:
-      message = 'Saldot på ditt Venice-konto räcker inte. Fyll på hos Venice och försök igen.'
+      message = 'Your Venice balance is too low. Top it up at Venice and try again.'
       break
     case 403:
-      message = withDetail('Venice nekade förfrågan för den här API-nyckeln.')
+      message = withDetail('Venice refused the request for this API key.')
       break
     case 404:
-      message = 'Venice känner inte till modellen längre. Välj en annan modell.'
+      message = "Venice doesn't know the model any more. Choose another model."
       break
     case 413:
-      message = 'Referensbilderna är för stora för Venice. Använd färre eller mindre bilder.'
+      message = 'The reference images are too large for Venice. Use fewer or smaller images.'
       break
     case 415:
-      message = withDetail('Venice kunde inte läsa förfrågan.')
+      message = withDetail('Venice could not read the request.')
       break
     case 429:
-      message = 'Venice tar inte emot fler förfrågningar just nu. Vänta en stund och försök igen.'
+      message = "Venice isn't taking more requests right now. Wait a moment and try again."
       break
     case 503:
-      message = 'Modellen är fullt upptagen hos Venice just nu. Försök igen om en stund eller välj en annan modell.'
+      message = 'The model is fully busy at Venice right now. Try again in a moment or choose another model.'
       break
     default:
       message =
         res.status >= 500
-          ? `Venice kunde inte skapa bilden (serverfel ${res.status}). Försök igen om en stund.`
-          : withDetail(`Venice svarade med fel ${res.status}.`)
+          ? `Venice could not create the image (server error ${res.status}). Try again in a moment.`
+          : withDetail(`Venice answered with error ${res.status}.`)
   }
   if (code === 'INSUFFICIENT_BALANCE') {
-    message = 'Saldot på ditt Venice-konto räcker inte. Fyll på hos Venice och försök igen.'
+    message = 'Your Venice balance is too low. Top it up at Venice and try again.'
   }
   if (what === 'list' && res.status !== 401 && res.status !== 429) {
-    message = `Venice kunde inte skicka listan över bildmodeller (fel ${res.status}). Försök igen om en stund.`
+    message = `Venice could not send the list of image models (error ${res.status}). Try again in a moment.`
   }
   return new VeniceError(message, res.status, body)
 }
@@ -580,7 +580,7 @@ export function imageFormat(data: Buffer): ImageResult['format'] | undefined {
 
 function asImage(data: Buffer, res: Response): ImageResult {
   const format = imageFormat(data)
-  if (!format) throw new VeniceError('Venice skickade något som inte är en bild. Försök igen.', res.status)
+  if (!format) throw new VeniceError('Venice sent something that is not an image. Try again.', res.status)
   return { data, format }
 }
 
@@ -593,14 +593,14 @@ export async function requestGenerate(body: GenerateImageBody): Promise<ImageRes
   } catch (err) {
     if (err instanceof SyntaxError) {
       throw new VeniceError(
-        'Venice skickade ett svar som inte gick att läsa. Bilden kan ändå ha debiterats – kontrollera saldot innan du försöker igen.',
+        'Venice sent an answer that could not be read. The image may have been charged anyway – check your balance before you try again.',
         res.status
       )
     }
     throw transportError(err, { method: 'POST', timeoutMs: GENERATE_TIMEOUT_MS })
   }
   const first = Array.isArray(json?.images) ? json.images[0] : undefined
-  if (typeof first !== 'string' || !first) throw new VeniceError('Venice skickade ingen bild. Försök igen.', res.status)
+  if (typeof first !== 'string' || !first) throw new VeniceError('Venice sent no image. Try again.', res.status)
   // Venice sends plain base64; a data URL prefix is tolerated all the same.
   return asImage(Buffer.from(first.replace(/^data:[^,]*,/, ''), 'base64'), res)
 }

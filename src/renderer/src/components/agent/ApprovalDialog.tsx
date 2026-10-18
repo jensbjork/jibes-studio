@@ -71,10 +71,10 @@ import {
 } from './StoryboardApproval'
 
 /**
- * What an agent asks for that needs the user's OK waits here: paid generations (videos, pictures, Redigera's paid
+ * What an agent asks for that needs the user's OK waits here: paid generations (videos, pictures, the Editor's paid
  * operations, voices) and removals. Shown above every view; several requests queue up and are shown one at a time.
- * Nothing is sent to Venice until "Godkänn och generera" ("Godkänn och skapa" for a picture), and nothing is removed
- * until "Godkänn och ta bort".
+ * Nothing is sent to Venice until "Approve and generate" ("Approve and create" for a picture), and nothing is removed
+ * until "Approve and delete".
  */
 export default function ApprovalDialog() {
   const agent = useAgentState()
@@ -109,13 +109,13 @@ export default function ApprovalDialog() {
 /**
  * done: an image request was approved and its picture is made, or a removal was carried out but not all of it went
  * (shown until the user closes the dialog).
- * confirming: an edit or a voice design above BIG_PRICE_USD, with an unknown price or a part without one asks "Det
- * här kostar … Fortsätt?" once more before it is approved (Redigera's own rule for a paid click); a removal of a
+ * confirming: an edit or a voice design above BIG_PRICE_USD, with an unknown price or a part without one asks "This
+ * costs … Continue?" once more before it is approved (the Editor's own rule for a paid click); a removal of a
  * container (an asset, a sequence, a storyboard, an edit) or of more than 5 things asks its own question.
  */
 type Phase = 'review' | 'confirming' | 'declining' | 'submitting' | 'failed' | 'done'
 
-/** Redigera's rule for every paid click (D5): above this price a second step asks once more. */
+/** The Editor's rule for every paid click (D5): above this price a second step asks once more. */
 const BIG_PRICE_USD = 5
 
 interface PanelProps {
@@ -166,7 +166,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     () => (assetsLoaded && language && models.length ? makeComposer(assets, language, models) : undefined),
     [assets, assetsLoaded, language, models]
   )
-  // The library changed (files moved by "Städa upp" or a renamed asset come as new assets): main lists the request
+  // The library changed (files moved by "Tidy up" or a renamed asset come as new assets): main lists the request
   // with its params following the moves, so its pictures and legend are read from the files as they are now – a
   // move is not taken for an edited description.
   const pendingNow = a.status === 'pending'
@@ -178,23 +178,23 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const [error, setError] = useState<string>()
   const [consent, setConsent] = useState<ConsentRequest>()
   const [reason, setReason] = useState('')
-  // A decline on its way: the buttons then say so, not the approve button's "Tar bort…" or "Skickar…".
+  // A decline on its way: the buttons then say so, not the approve button's "Deleting…" or "Sending…".
   const [declineSending, setDeclineSending] = useState(false)
   /** The still an approved image request made. */
   const [madeStill, setMadeStill] = useState<string>()
-  // Redigera's requests: an operation on an edit's version, or a new voice for a character.
+  // The Editor's requests: an operation on an edit's version, or a new voice for a character.
   const editRequest = a.kind === 'edit' || a.kind === 'voice-design' ? (a.edit ?? null) : undefined
   const editState = useEditApproval(a)
   // A removal: what goes, checked again while it is on screen for review.
   const removal = a.kind === 'delete' ? (a.delete ?? null) : undefined
   const deleteCheck = useDeleteCheck(a, removal !== undefined && (phase === 'review' || phase === 'confirming'))
-  /** "Jag har rätt att använda den här rösten", ticked in this dialog (a cloned voice needs it). */
+  /** "I have the right to use this voice", ticked in this dialog (a cloned voice needs it). */
   const [cloneConsent, setCloneConsent] = useState(false)
   const consentClip = a.kind === 'edit' ? a.edit?.needsCloneConsent : undefined
   const consentGiven =
     !!consentClip && assets.some((asset) => asset.audio?.some((x) => x.id === consentClip.audioId && x.cloneConsent))
   const consentMissing = !!consentClip && !consentGiven && !cloneConsent
-  // Redigera's requests (an edit, a voice design) ask once more, as Redigera's own buttons and the voice design dialog
+  // The Editor's requests (an edit, a voice design) ask once more, as the Editor's own buttons and the voice design dialog
   // do, when the price is above $5, unknown, or leaves a part out.
   const redigera = a.kind === 'edit' || a.kind === 'voice-design'
   const partialPrice = redigera && !!a.edit?.partialPrice
@@ -270,13 +270,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     descriptionsChanged ??
     // What stands in the way of the clip's start and end frames (a neighbour without a finished take …).
     frames?.problems[0] ??
-    (image === null ? 'Förfrågan saknar uppgifter om bilden' : undefined) ??
+    (image === null ? 'The request doesn’t say anything about the image' : undefined) ??
     imageTarget?.problem ??
     transitionState?.blocking ??
     boardTarget?.problem ??
-    (editRequest === null ? 'Förfrågan saknar uppgifter om ändringen' : undefined) ??
+    (editRequest === null ? 'The request doesn’t say anything about the change' : undefined) ??
     editState.blocking ??
-    (removal === null ? 'Förfrågan saknar uppgifter om vad som ska tas bort' : undefined) ??
+    (removal === null ? 'The request doesn’t say what should be deleted' : undefined) ??
     (removal ? deleteCheck.problem : undefined)
   // Changed since the agent asked (rather than something the agent can fix): the agent has to ask again.
   const askAgain =
@@ -387,13 +387,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   }
 
   const ownerName = storyboard?.name ?? sequence?.name ?? a.sequenceName
-  /** "Kan inte genereras" a video, "Kan inte göras" an edit or a voice, "Kan inte tas bort" a removal. */
+  /** "Can't be generated" a video, "Can't be done" an edit or a voice, "Can't be deleted" a removal. */
   const cannot =
-    removal !== undefined ? 'Kan inte tas bort' : editRequest !== undefined ? 'Kan inte göras' : 'Kan inte genereras'
+    removal !== undefined ? 'Can’t be deleted' : editRequest !== undefined ? 'Can’t be done' : 'Can’t be generated'
   const subtitle = [
     approvalTitle(a, ownerName),
     pending ? expiresText(expiresAt, now) : undefined,
-    position && position.total > 1 ? `${position.index} av ${position.total} som väntar` : undefined
+    position && position.total > 1 ? `${position.index} of ${position.total} waiting` : undefined
   ]
     .filter(Boolean)
     .join(' · ')
@@ -401,9 +401,9 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const footer =
     phase === 'confirming' && removal ? (
       <>
-        <span className="mr-auto text-[13px]">{removal.confirm ?? 'Fortsätt?'}</span>
+        <span className="mr-auto text-[13px]">{removal.confirm ?? 'Continue?'}</span>
         <button onClick={() => setPhase('review')} className={secondary}>
-          Tillbaka
+          Back
         </button>
         <button
           autoFocus
@@ -412,20 +412,20 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           title={blocking ? `${cannot}: ${blocking}` : undefined}
           className={primary}
         >
-          Ja, ta bort
+          Yes, delete
         </button>
       </>
     ) : phase === 'confirming' ? (
       <>
         <span className="mr-auto text-[13px]">
           {a.priceUsd === undefined
-            ? 'Venice anger inget pris för det här i förväg. Fortsätt?'
+            ? 'Venice gives no price for this in advance. Continue?'
             : partialPrice
-              ? `Det kostar minst ${formatUsd(a.priceUsd)} – en del anger Venice inget pris för. Fortsätt?`
-              : `Det här kostar ${formatUsd(a.priceUsd)}. Fortsätt?`}
+              ? `It costs at least ${formatUsd(a.priceUsd)} – Venice gives no price for part of it. Continue?`
+              : `This costs ${formatUsd(a.priceUsd)}. Continue?`}
         </span>
         <button onClick={() => setPhase('review')} className={secondary}>
-          Tillbaka
+          Back
         </button>
         <button
           autoFocus
@@ -433,7 +433,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           disabled={!!blocking || !pending || expired || consentMissing || !armed}
           className={primary}
         >
-          Ja, fortsätt
+          Yes, continue
         </button>
       </>
     ) : phase === 'declining' ? (
@@ -443,29 +443,29 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void decline()}
-          placeholder="Varför? (valfritt – agenten får se det)"
+          placeholder="Why? (optional – the agent gets to see it)"
           className="min-w-0 flex-1 rounded-md border border-line bg-raised px-3 py-2 outline-none focus:border-muted"
         />
         <button onClick={() => setPhase('review')} className={secondary}>
-          Tillbaka
+          Back
         </button>
         <button onClick={() => void decline()} className={secondary}>
-          Avböj
+          Decline
         </button>
       </>
     ) : phase === 'done' ? (
       <button onClick={close} className={secondary}>
-        {othersWaiting ? 'Visa nästa förfrågan' : 'Stäng'}
+        {othersWaiting ? 'Show the next request' : 'Close'}
       </button>
     ) : !pending && phase === 'review' ? (
       // Lapsed or replaced while it was on screen: nothing to approve here; the next one is opened on purpose.
       <button onClick={close} className={secondary}>
-        {othersWaiting ? 'Visa nästa förfrågan' : 'Stäng'}
+        {othersWaiting ? 'Show the next request' : 'Close'}
       </button>
     ) : phase === 'failed' ? (
       <>
         <button onClick={close} className={pending ? `mr-auto ${secondary}` : secondary}>
-          Stäng
+          Close
         </button>
         {pending && (
           <button
@@ -473,7 +473,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             disabled={!!blocking || !armed || framesPending || consentMissing}
             className={primary}
           >
-            Försök igen
+            Try again
           </button>
         )}
       </>
@@ -482,13 +482,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         <button
           onClick={close}
           disabled={phase === 'submitting'}
-          title="Låt begäran vänta – du hittar den under Agent i sidofältet"
+          title="Let the request wait – you’ll find it under Agent in the sidebar"
           className="mr-auto text-[12px] text-muted transition hover:text-text disabled:opacity-40"
         >
-          Senare
+          Later
         </button>
         <button onClick={() => setPhase('declining')} disabled={phase === 'submitting'} className={secondary}>
-          {declineSending ? 'Avböjer…' : 'Avböj'}
+          {declineSending ? 'Declining…' : 'Decline'}
         </button>
         <button
           onClick={() => (bigPrice || removal?.confirm ? setPhase('confirming') : void approve())}
@@ -507,17 +507,17 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             blocking
               ? `${cannot}: ${blocking}`
               : expired
-                ? 'Begäran har gått ut – be agenten fråga igen'
+                ? 'The request has expired – ask the agent to ask again'
                 : framesPending
-                  ? 'Hämtar start- och slutbilden…'
+                  ? 'Fetching the start and end images…'
                   : editPlanPending
-                    ? 'Läser redigeringen…'
+                    ? 'Reading the edit…'
                     : deleteCheckPending
-                      ? 'Kontrollerar att inget har ändrats…'
+                      ? 'Checking that nothing has changed…'
                       : consentMissing
-                        ? 'Bocka i att du har rätt att använda rösten först'
+                        ? 'Tick that you have the right to use the voice first'
                         : !armed
-                          ? 'Läs igenom förfrågan först'
+                          ? 'Read through the request first'
                           : undefined
           }
           className={`flex items-center gap-2 ${primary}`}
@@ -525,12 +525,12 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           <span>
             {phase === 'submitting' && !declineSending
               ? image !== undefined
-                ? 'Skapar bilden…'
+                ? 'Creating the image…'
                 : removal !== undefined
-                  ? 'Tar bort…'
+                  ? 'Deleting…'
                   : a.kind === 'edit'
-                    ? 'Startar…'
-                    : 'Skickar…'
+                    ? 'Starting…'
+                    : 'Sending…'
               : approveLabel(a)}
           </span>
           {(phase !== 'submitting' || declineSending) && a.priceUsd !== undefined && (
@@ -563,16 +563,16 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
 
         {a.note && (
           <div className="rounded-md border border-line bg-raised/60 px-3 py-2.5">
-            <p className="mb-1 text-[11px] text-muted">{agentDisplayName(a.client)} skriver:</p>
+            <p className="mb-1 text-[11px] text-muted">{agentDisplayName(a.client)} writes:</p>
             <p className="whitespace-pre-wrap leading-relaxed select-text">{a.note}</p>
           </div>
         )}
 
         {sequenceError && a.sequenceId && !storyboardId && (
-          <p className="text-[12px] text-accent">Sekvensen kunde inte läsas: {sequenceError}</p>
+          <p className="text-[12px] text-accent">The sequence couldn’t be read: {sequenceError}</p>
         )}
         {storyboardError && storyboardId && (
-          <p className="text-[12px] text-accent">Storyboarden kunde inte läsas: {storyboardError}</p>
+          <p className="text-[12px] text-accent">The storyboard couldn’t be read: {storyboardError}</p>
         )}
 
         {image && (
@@ -589,7 +589,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             }
           />
         )}
-        {image === null && <p className="text-accent">Förfrågan saknar uppgifter om bilden.</p>}
+        {image === null && <p className="text-accent">The request doesn’t say anything about the image.</p>}
 
         {editRequest && a.kind === 'edit' && editRequest.resumeJobId && (
           <ResumeSummary approval={a} request={editRequest} state={editState} />
@@ -605,10 +605,10 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           />
         )}
         {editRequest && a.kind === 'voice-design' && <VoiceDesignSummary request={editRequest} />}
-        {editRequest === null && <p className="text-accent">Förfrågan saknar uppgifter om ändringen.</p>}
+        {editRequest === null && <p className="text-accent">The request doesn’t say anything about the change.</p>}
 
         {removal && <DeleteSummary approval={a} request={removal} check={deleteCheck} />}
-        {removal === null && <p className="text-accent">Förfrågan saknar uppgifter om vad som ska tas bort.</p>}
+        {removal === null && <p className="text-accent">The request doesn’t say what should be deleted.</p>}
 
         {clips.map((clip) => (
           <ClipSummary
@@ -631,10 +631,10 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           />
         ))}
         {a.kind === 'generate-all' && sequence && !clips.length && (
-          <p className="text-muted">Alla klipp i sekvensen har redan en färdig tagning.</p>
+          <p className="text-muted">Every clip in the sequence already has a finished take.</p>
         )}
         {a.kind === 'generate-all' && storyboard && !transitions.length && (
-          <p className="text-muted">Alla övergångar i storyboarden har redan en färdig tagning.</p>
+          <p className="text-muted">Every transition in the storyboard already has a finished take.</p>
         )}
         {a.kind !== 'generation' &&
           image === undefined &&
@@ -643,9 +643,9 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           !storyboardId &&
           !sequence &&
           !sequenceError &&
-          !clips.length && <p className="text-muted">Läser sekvensen…</p>}
+          !clips.length && <p className="text-muted">Reading the sequence…</p>}
         {storyboardId && a.kind === 'generate-all' && !storyboard && !storyboardError && (
-          <p className="text-muted">Läser storyboarden…</p>
+          <p className="text-muted">Reading the storyboard…</p>
         )}
 
         {/* A removal costs nothing; its panel ends with what happens to the files instead. */}
@@ -653,25 +653,25 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           <div className="flex items-baseline justify-between gap-4 border-t border-line pt-4">
             <span className="text-muted">
               {clips.length > 1
-                ? `Totalt för ${clips.length} klipp`
+                ? `Total for ${clips.length} clips`
                 : transitions.length > 1
-                  ? `Totalt för ${transitions.length} övergångar`
-                  : 'Kostnad'}
-              <span className="ml-1.5 text-[11px]">(dras från ditt Venice-konto)</span>
+                  ? `Total for ${transitions.length} transitions`
+                  : 'Cost'}
+              <span className="ml-1.5 text-[11px]">(charged to your Venice account)</span>
             </span>
             <span className="text-lg font-semibold tabular-nums">
-              {a.priceUsd !== undefined ? priceShown(a.priceUsd) : 'Okänt pris'}
+              {a.priceUsd !== undefined ? priceShown(a.priceUsd) : 'Unknown price'}
             </span>
           </div>
         )}
         {phase === 'submitting' && image !== undefined && (
-          <p className="text-[12px] text-muted">Venice skapar bilden – det brukar ta 10–30 sekunder.</p>
+          <p className="text-[12px] text-muted">Venice is creating the image – it usually takes 10–30 seconds.</p>
         )}
         {/* A removal says what changed at the top of its list (DeleteSummary). */}
         {blocking && removal === undefined && (
           <p className="text-[12px] text-accent">
-            {cannot} som det ser ut nu: {blocking.replace(/\.$/, '')}. Be {agentInSentence(a.client)}{' '}
-            {askAgain ? 'fråga igen' : 'rätta det'}, eller avböj.
+            {cannot} as it looks now: {blocking.replace(/\.$/, '')}. Ask {agentInSentence(a.client)} to{' '}
+            {askAgain ? 'ask again' : 'fix it'}, or decline.
           </p>
         )}
       </div>
@@ -689,7 +689,7 @@ function photoIndex(assets: readonly Asset[]): Map<string, Photo> {
 
 interface Clip {
   key: string
-  /** "Klipp 3"; undefined for the Generate form. */
+  /** "Clip 3"; undefined for the Generate form. */
   title?: string
   /** What will be sent (inputs the mode doesn't use are dropped). */
   params: GenerationParams
@@ -697,7 +697,7 @@ interface Clip {
   checked: GenerationParams
   /** The start frame comes from the previous clip's end, so there is no start image yet. */
   continuesFrom?: number
-  /** The end frame comes from this (next) clip's first frame ("Slutbild från nästa klipp"). */
+  /** The end frame comes from this (next) clip's first frame ("End on the next clip's first frame"). */
   endsAt?: number
   blocking?: string
   warnings: string[]
@@ -717,7 +717,7 @@ interface Clip {
 
 /** Why a request with a composed prompt can't be approved once a description has changed. */
 const DESCRIPTIONS_CHANGED =
-  'En beskrivning som läggs till i prompten har ändrats sedan agenten frågade, så det som skulle skickas är inte längre det du ser här'
+  'A description that is added to the prompt has changed since the agent asked, so what would be sent is no longer what you see here'
 
 interface Composer {
   /**
@@ -824,7 +824,7 @@ function segmentClip(segment: Segment, index: number, sequence: Sequence): Clip 
   return clipOf(
     segment.id,
     effectiveParams(own, index, sequence),
-    `Klipp ${index + 1}`,
+    `Clip ${index + 1}`,
     continuing ? index : undefined,
     endsAt
   )
@@ -842,7 +842,7 @@ function clipsOf(a: ApprovalRequest, sequence: Sequence | undefined): Clip[] {
     const continuesFrom = hit && hit.segment.continueFromPrevious && hit.index > 0 ? hit.index : undefined
     const endsAt = hit ? endsAtClip(hit.segment, hit.index, count) : undefined
     // Main submits exactly the settings in the request (and refuses if the clip has changed since).
-    if (a.params) return [clipOf(a.id, a.params, number ? `Klipp ${number}` : undefined, continuesFrom, endsAt)]
+    if (a.params) return [clipOf(a.id, a.params, number ? `Clip ${number}` : undefined, continuesFrom, endsAt)]
     return hit && sequence ? [segmentClip(hit.segment, hit.index, sequence)] : []
   }
   if (!sequence) return []
@@ -881,12 +881,12 @@ function ClipSummary({
   // The reference images as asked for: those past the model's limit aren't sent (paramsForSubmit cut them off), but
   // a token naming one still shows which picture it is, and why it isn't sent.
   const listed = kind === 'reference-to-video' ? (clip.checked.referenceImages ?? refs) : refs
-  const unsent = `Skickas inte – modellen tar max ${maxReferenceImages(p.model)} bilder`
+  const unsent = `Not sent – the model takes at most ${maxReferenceImages(p.model)} images`
   const targets: TokenTarget[] = listed.map((path, i) => {
     const photo = photos.get(path)
     return {
       kind: photo?.asset.kind,
-      label: photo ? `${photo.asset.name} (foto ${photo.number})` : (path.split('/').pop() ?? path),
+      label: photo ? `${photo.asset.name} (photo ${photo.number})` : (path.split('/').pop() ?? path),
       path,
       name: photo?.asset.name,
       number: photo?.number,
@@ -914,7 +914,7 @@ function ClipSummary({
     p.duration,
     p.resolution,
     p.aspectRatio,
-    p.audio === undefined ? undefined : p.audio ? 'med ljud' : 'utan ljud'
+    p.audio === undefined ? undefined : p.audio ? 'with sound' : 'without sound'
   ].filter(Boolean)
 
   return (
@@ -933,7 +933,7 @@ function ClipSummary({
           className={`overflow-y-auto rounded-md border border-line bg-raised px-3 py-2 ${compact ? 'max-h-32' : 'max-h-60'}`}
         />
       ) : (
-        <p className="text-accent">Prompten är tom.</p>
+        <p className="text-accent">The prompt is empty.</p>
       )}
 
       {clip.legend && (
@@ -952,14 +952,14 @@ function ClipSummary({
 
       {p.negativePrompt && (
         <>
-          <Label className="mt-3">Negativ prompt</Label>
+          <Label className="mt-3">Negative prompt</Label>
           <p className="whitespace-pre-wrap text-muted select-text">{p.negativePrompt}</p>
         </>
       )}
 
       {kind === 'reference-to-video' && refs.length > 0 && (
         <>
-          <Label className="mt-3">Referensbilder</Label>
+          <Label className="mt-3">Reference images</Label>
           <div className="flex flex-wrap gap-2">
             {refs.map((path, i) => {
               const key = markKey('image', i + 1)
@@ -980,7 +980,7 @@ function ClipSummary({
 
       {kind === 'reference-to-video' && audios.length > 0 && (
         <>
-          <Label className="mt-3">Röster och ljud</Label>
+          <Label className="mt-3">Voices & sound</Label>
           <ul className="space-y-1">
             {audios.map((a) => {
               const key = markKey('audio', a.index)
@@ -999,29 +999,29 @@ function ClipSummary({
 
       {kind === 'image-to-video' && (
         <>
-          <Label className="mt-3">Startbild{p.endImage || clip.endsAt ? ' och slutbild' : ''}</Label>
+          <Label className="mt-3">Start image{p.endImage || clip.endsAt ? ' and end image' : ''}</Label>
           <div className="flex flex-wrap items-start gap-3">
             {clip.continuesFrom ? (
               <AutoFrame
                 badge="Start"
                 preview={!!frames}
                 path={startFrame}
-                text={`Sista bildrutan från klipp ${clip.continuesFrom}${frameTime(frames?.start?.time)}`}
+                text={`The last frame of clip ${clip.continuesFrom}${frameTime(frames?.start?.time)}`}
               />
             ) : p.startImage ? (
               <ImageTile path={p.startImage} badge="Start" photo={photos.get(p.startImage)} />
             ) : (
-              <p className="text-[12px] text-accent">Ingen startbild.</p>
+              <p className="text-[12px] text-accent">No start image.</p>
             )}
             {clip.endsAt ? (
               <AutoFrame
-                badge="Slut"
+                badge="End"
                 preview={!!frames}
                 path={endFrame}
-                text={`Första bildrutan från klipp ${clip.endsAt}${frameTime(frames?.end?.time)}`}
+                text={`The first frame of clip ${clip.endsAt}${frameTime(frames?.end?.time)}`}
               />
             ) : (
-              p.endImage && <ImageTile path={p.endImage} badge="Slut" photo={photos.get(p.endImage)} />
+              p.endImage && <ImageTile path={p.endImage} badge="End" photo={photos.get(p.endImage)} />
             )}
           </div>
         </>
@@ -1076,17 +1076,17 @@ function DescriptionLegend({
   changed?: boolean
   compact: boolean
 }) {
-  const count = (n: number): string => n.toLocaleString('sv-SE')
+  const count = (n: number): string => n.toLocaleString('en-GB')
   return (
     <div className={`mt-2 rounded-md border border-dashed px-3 py-2 ${changed ? 'border-accent/60' : 'border-line'}`}>
       <div className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-muted">
-        <span>Läggs till i prompten · beskrivningarna av referenserna</span>
+        <span>Added to the prompt · the descriptions of the references</span>
         {sentLength !== undefined && (
           <span
             className="ml-auto tabular-nums"
-            title="Så många tecken skickas till Venice: prompten och beskrivningarna tillsammans"
+            title="This many characters are sent to Venice: the prompt and the descriptions together"
           >
-            {limit ? `${count(sentLength)} av ${count(limit)} tecken` : `${count(sentLength)} tecken`}
+            {limit ? `${count(sentLength)} of ${count(limit)} characters` : `${count(sentLength)} characters`}
           </span>
         )}
       </div>
@@ -1100,7 +1100,7 @@ function DescriptionLegend({
       />
       {changed && (
         <p className="mt-1.5 text-[11px] leading-snug text-accent">
-          En beskrivning har ändrats sedan agenten frågade – det här är vad som skulle ha skickats då.
+          A description has changed since the agent asked – this is what would have been sent then.
         </p>
       )}
     </div>
@@ -1111,11 +1111,11 @@ function Label({ children, className = '' }: { children: ReactNode; className?: 
   return <p className={`mb-1.5 text-[11px] text-muted ${className}`}>{children}</p>
 }
 
-/** " (0:07,5)": where in the neighbour's take an automatic frame is taken, when main said. */
+/** " (0:07.5)": where in the neighbour's take an automatic frame is taken, when main said. */
 function frameTime(seconds: number | undefined): string {
   if (seconds === undefined || !Number.isFinite(seconds)) return ''
   const m = Math.floor(seconds / 60)
-  const s = (seconds - m * 60).toFixed(1).replace('.', ',').padStart(4, '0')
+  const s = (seconds - m * 60).toFixed(1).padStart(4, '0')
   return ` (${m}:${s})`
 }
 
@@ -1138,15 +1138,15 @@ function MadeStill({ stillId, sequenceId, inStoryboard }: { stillId: string; seq
       <p className="text-[12px] text-muted">
         {sequenceId
           ? inStoryboard
-            ? 'Bilden är sparad bland storyboardens bilder.'
-            : 'Bilden är sparad bland sekvensens bilder.'
-          : 'Bilden är sparad i Referensbilder.'}
+            ? 'The image is saved among the storyboard’s images.'
+            : 'The image is saved among the sequence’s images.'
+          : 'The image is saved in “Referensbilder”.'}
       </p>
     )
   }
   return (
     <div>
-      <Label>Den nya bilden</Label>
+      <Label>The new image</Label>
       <img
         src={mediaUrl(path)}
         draggable={false}
@@ -1173,10 +1173,10 @@ function AutoFrame({
   return (
     <div className="w-40 space-y-1">
       {path ? (
-        <ImageTile path={path} badge={badge} caption="Förhandsvisning" title={text} large />
+        <ImageTile path={path} badge={badge} caption="Preview" title={text} large />
       ) : (
         <div className="flex h-24 w-40 items-center justify-center rounded border border-dashed border-line px-2 text-center text-[11px] text-muted">
-          Ingen förhandsvisning än
+          No preview yet
         </div>
       )}
       <p className="text-[11px] leading-snug text-muted">{text}</p>
@@ -1195,11 +1195,11 @@ function imageTargetNow(
 ): { clipNumber?: number; problem?: string } | undefined {
   if (!target || !sequence) return undefined
   const index = sequence.segments.findIndex((s) => s.id === target.segmentId)
-  if (index === -1) return { problem: 'Klippet som bilden skulle sättas i finns inte längre' }
+  if (index === -1) return { problem: 'The clip the image was meant for is gone' }
   if (index + 1 !== target.clipNumber) {
     return {
       clipNumber: index + 1,
-      problem: `Klippet har flyttats sedan agenten frågade (det var klipp ${target.clipNumber}, nu klipp ${index + 1})`
+      problem: `The clip has moved since the agent asked (it was clip ${target.clipNumber}, now clip ${index + 1})`
     }
   }
   return { clipNumber: index + 1 }
@@ -1230,13 +1230,13 @@ function ImageSummary({
   const references = image.references
   const settings = [
     image.modelName ?? p.model,
-    references.length ? `bild från ${references.length === 1 ? '1 referens' : `${references.length} referenser`}` : 'bild från text',
+    references.length ? `image from ${references.length === 1 ? '1 reference' : `${references.length} references`}` : 'image from text',
     p.aspectRatio,
     p.resolution,
-    p.quality ? `kvalitet ${p.quality}` : undefined
+    p.quality ? `quality ${p.quality}` : undefined
   ].filter(Boolean)
   const target = image.assignTo
-  const where = sequenceName ? ` i ”${sequenceName}”` : ''
+  const where = sequenceName ? ` in “${sequenceName}”` : ''
 
   return (
     <section>
@@ -1248,25 +1248,25 @@ function ImageSummary({
           {p.prompt}
         </p>
       ) : (
-        <p className="text-accent">Prompten är tom.</p>
+        <p className="text-accent">The prompt is empty.</p>
       )}
 
       {p.negativePrompt && (
         <>
-          <Label className="mt-3">Negativ prompt</Label>
+          <Label className="mt-3">Negative prompt</Label>
           <p className="whitespace-pre-wrap text-muted select-text">{p.negativePrompt}</p>
         </>
       )}
 
       {references.length > 0 && (
         <>
-          <Label className="mt-3">Referensbilder (den första är grunden som bilden byggs på)</Label>
+          <Label className="mt-3">Reference images (the first is the base the image is built on)</Label>
           <div className="flex flex-wrap gap-2">
             {references.map((ref, i) => (
               <ImageTile
                 key={`${ref.path}:${i}`}
                 path={ref.path}
-                badge={i === 0 ? '1 · grund' : String(i + 1)}
+                badge={i === 0 ? '1 · base' : String(i + 1)}
                 caption={ref.name ?? ref.label}
                 title={ref.label}
                 captionTone={ref.kind && ref.kind !== 'still' ? KIND_TONE[ref.kind].caption : undefined}
@@ -1285,17 +1285,17 @@ function ImageSummary({
           boardTarget
             ? undefined
             : target
-              ? `Bilden sparas bland sekvensens bilder och blir ${slotName(target.slot)} för klipp ${clipNumber ?? target.clipNumber}${where}.`
+              ? `The image is saved among the sequence’s images and becomes the ${slotName(target.slot)} of clip ${clipNumber ?? target.clipNumber}${where}.`
               : hasSequence
                 ? inStoryboard
-                  ? `Bilden sparas bland storyboardens bilder${where}.`
-                  : `Bilden sparas bland sekvensens bilder${where}.`
-                : 'Bilden hör inte till någon sekvens eller storyboard och sparas i Referensbilder, bland alla bilder.',
+                  ? `The image is saved among the storyboard’s images${where}.`
+                  : `The image is saved among the sequence’s images${where}.`
+                : 'The image belongs to no sequence or storyboard and is saved in “Referensbilder”, among all images.',
           safeMode === undefined
             ? undefined
             : safeMode
-              ? 'Säkert läge är på: Venice suddar ut vuxet innehåll.'
-              : 'Säkert läge är av: Venice suddar inte ut vuxet innehåll.'
+              ? 'Safe mode is on: Venice blurs adult content.'
+              : 'Safe mode is off: Venice doesn’t blur adult content.'
         ]
           .filter(Boolean)
           .join(' ')}
@@ -1336,7 +1336,7 @@ function AudioRow({ audio, lit, onLight }: { audio: FormAudio; lit?: boolean; on
 // ── Hooks ───────────────────────────────────────────────────────────────────
 
 /**
- * "Promptspråk" from Settings (the legend's words: "References" or "Referenser"); undefined until read, so a
+ * "Prompt language" from Settings (the legend's words: "References" or "Referenser"); undefined until read, so a
  * legend is never compared in the wrong language. Read again when the window comes back to the front.
  */
 function usePromptLanguageSetting(): PromptLanguage | undefined {
@@ -1358,7 +1358,7 @@ function usePromptLanguageSetting(): PromptLanguage | undefined {
   return language
 }
 
-/** "Säkert läge för bilder" from Settings; undefined until read. */
+/** "Safe mode for images" from Settings; undefined until read. */
 function useImageSafeMode(): boolean | undefined {
   const [on, setOn] = useState<boolean>()
   useEffect(() => {
@@ -1369,7 +1369,7 @@ function useImageSafeMode(): boolean | undefined {
         () => {}
       )
     void read()
-    // Switched in Inställningar or the image dialog while the request is on screen.
+    // Switched in Settings or the image dialog while the request is on screen.
     const off = window.studio.onSettingsChange(() => void read())
     return () => {
       active = false

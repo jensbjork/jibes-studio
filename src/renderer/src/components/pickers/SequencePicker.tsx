@@ -47,7 +47,7 @@ export default function SequencePicker({ generation, onAdded }: Props) {
     // The new clip is the last one using this generation (it may already be in the sequence once).
     const target =
       sequence.segments.filter((s) => s.selectedGenerationId === generation.id).at(-1) ?? sequence.segments.at(-1)
-    if (!target) throw new Error('Klippet kunde inte läggas till.')
+    if (!target) throw new Error('The clip couldn’t be added.')
     onAdded({ sequence, clipNumber: target.position + 1, segmentId: target.id })
   }
 
@@ -74,15 +74,15 @@ export default function SequencePicker({ generation, onAdded }: Props) {
   return (
     <>
       <div className="border-b border-line px-3 py-2.5">
-        <p className="font-medium">Lägg i sekvens</p>
-        <p className="mt-0.5 text-[11px] text-muted">Videon blir ett nytt klipp sist i sekvensen.</p>
+        <p className="font-medium">Add to sequence</p>
+        <p className="mt-0.5 text-[11px] text-muted">The video becomes a new clip at the end of the sequence.</p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {!sequences ? (
-          <p className="px-3 py-4 text-center text-muted">Hämtar sekvenser…</p>
+          <p className="px-3 py-4 text-center text-muted">Loading sequences…</p>
         ) : sequences.length === 0 ? (
-          <p className="px-3 py-4 text-center text-muted">Inga sekvenser än – skapa en nedan.</p>
+          <p className="px-3 py-4 text-center text-muted">No sequences yet – create one below.</p>
         ) : (
           sequences.map((s) => (
             <button
@@ -98,8 +98,8 @@ export default function SequencePicker({ generation, onAdded }: Props) {
                 <span className="block truncate">{s.name}</span>
                 <span className="block text-[11px] text-muted">
                   {busy === s.id
-                    ? 'Lägger till…'
-                    : `${s.segmentCount} klipp · ${formatDuration(s.totalDuration)}`}
+                    ? 'Adding…'
+                    : `${s.segmentCount} ${s.segmentCount === 1 ? 'clip' : 'clips'} · ${formatDuration(s.totalDuration)}`}
                 </span>
               </span>
             </button>
@@ -123,7 +123,7 @@ export default function SequencePicker({ generation, onAdded }: Props) {
               value={name}
               onFocus={(e) => e.currentTarget.select()}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Namn på sekvensen"
+              placeholder="Name of the sequence"
               className="min-w-0 flex-1 rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted"
             />
             <button
@@ -131,7 +131,7 @@ export default function SequencePicker({ generation, onAdded }: Props) {
               disabled={!!busy}
               className="rounded-md bg-accent px-3 py-1.5 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
             >
-              {busy === 'new' ? 'Skapar…' : 'Skapa'}
+              {busy === 'new' ? 'Creating…' : 'Create'}
             </button>
           </form>
         ) : (
@@ -140,7 +140,7 @@ export default function SequencePicker({ generation, onAdded }: Props) {
             disabled={!!busy}
             className="w-full rounded-md px-2.5 py-1.5 text-left text-muted hover:bg-raised hover:text-text disabled:opacity-40"
           >
-            ＋ Ny sekvens…
+            ＋ New sequence…
           </button>
         )}
       </div>

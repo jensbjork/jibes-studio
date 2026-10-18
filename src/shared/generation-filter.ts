@@ -9,7 +9,7 @@ export type GenerationSort = NonNullable<GenerationFilter['sort']>
 
 /**
  * What filterGenerations and queryGenerations take: a GenerationFilter, plus `thumbsDown` – true keeps only the clips
- * the user gave tumme ner (the feed's Betyg filter "Tumme ner", list_generations' thumbs_down).
+ * the user gave thumbs down (the feed's Rating filter "Thumbs down", list_generations' thumbs_down).
  */
 export type GenerationQuery = GenerationFilter & { thumbsDown?: boolean }
 
@@ -18,7 +18,7 @@ export const GENERATION_SORTS: readonly GenerationSort[] = ['newest', 'oldest', 
 /**
  * What filtering and sorting read of a generation (a Generation has all of it). `source` and `title` may be left
  * out: a row without a source is a Venice generation. `unseen` is not part of a Generation: the caller fills it from
- * the status summary (finished and not looked at yet) when it wants the "Nya" filter to work.
+ * the status summary (finished and not looked at yet) when it wants the "New" filter to work.
  */
 export type FilterableGeneration = Pick<
   Generation,
@@ -121,20 +121,20 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
  * The generations that pass every filter set in `filter`, in the order given (sort with sortGenerations, or use
  * queryGenerations for both). Filters left out don't filter:
  * - query: every word appears in the prompt, the negative prompt or the title (an own clip's file name, a
- *   version's "<redigering> v3"); letter case ignored.
+ *   version's "<edit> v3"); letter case ignored.
  * - status: that status; 'pending' is queued or processing.
  * - model: that model id.
  * - assetId: the params use one of that asset's photos or audio clips (needs `assets`: the asset list or
  *   indexAssetPaths of it; without it nothing matches).
- * - minRating: the user gave at least that many stars (1–3). Tumme ner counts below one star, so it never passes:
+ * - minRating: the user gave at least that many stars (1–3). Thumbs down counts below one star, so it never passes:
  *   a minimum of 1 means "at least one star". unrated: true for the ones the user hasn't graded. thumbsDown: true
  *   for the ones the user gave tumme ner.
  * - since: created at or after that time (epoch ms).
  * - placement: 'standalone' (not a take) or 'sequence' (a take of a sequence clip or a storyboard transition).
  * - hasReviews: true for the ones with a review (the user's or an agent's), false for the ones without.
- * - source ("Källa"): 'generated' (made by Venice, also AI takes made in Redigera), 'import' (the user's own
- *   clips) or 'edit' (versions made in Redigera). A row without a source counts as 'generated'.
- * - unseen ("Nya"): true keeps only the rows marked `unseen: true` (finished, and the user hasn't looked at them).
+ * - source ("Source"): 'generated' (made by Venice, also AI takes made in the Editor), 'import' (the user's own
+ *   clips) or 'edit' (versions made in the Editor). A row without a source counts as 'generated'.
+ * - unseen ("New"): true keeps only the rows marked `unseen: true` (finished, and the user hasn't looked at them).
  */
 export function filterGenerations<T extends FilterableGeneration>(
   list: readonly T[],
@@ -155,7 +155,7 @@ export function filterGenerations<T extends FilterableGeneration>(
       if (f.status === 'pending' ? !pending : g.status !== f.status) return false
     }
     if (f.model && g.model !== f.model) return false
-    // Tumme ner is -1, below every star, so a minimum of stars leaves it out.
+    // Thumbs down is -1, below every star, so a minimum of stars leaves it out.
     if (minRating !== undefined && !(finite(g.rating) && g.rating >= minRating)) return false
     if (f.unrated === true && finite(g.rating)) return false
     if (f.thumbsDown === true && g.rating !== THUMBS_DOWN) return false
@@ -237,7 +237,7 @@ export interface GenerationTotals {
   seconds: number
 }
 
-/** The feed's summary line in numbers ("42 klipp · $38.20 · 5 min 12 s"). */
+/** The feed's summary line in numbers ("42 clips · $38.20 · 5 min 12 s"). */
 export function summarizeGenerations(list: readonly FilterableGeneration[]): GenerationTotals {
   let costUsd = 0
   let seconds = 0

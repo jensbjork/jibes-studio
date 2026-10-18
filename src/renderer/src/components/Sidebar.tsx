@@ -28,25 +28,25 @@ interface Item {
 }
 
 const CREATE: Item[] = [
-  { id: 'generate', label: 'Generera', icon: <SparkleIcon size={16} /> },
-  { id: 'sequences', label: 'Sekvenser', icon: <FilmIcon /> },
+  { id: 'generate', label: 'Generate', icon: <SparkleIcon size={16} /> },
+  { id: 'sequences', label: 'Sequences', icon: <FilmIcon /> },
   { id: 'storyboards', label: 'Storyboards', icon: <StoryboardIcon size={16} /> },
-  { id: 'editor', label: 'Redigera', icon: <ScissorsIcon size={16} /> }
+  { id: 'editor', label: 'Editor', icon: <ScissorsIcon size={16} /> }
 ]
 
-// The Mediabank (everything made: videos, pictures, films), every asset kind in the app's order (Karaktärer, Miljöer,
-// Produkter, Kläder, Poser), then the prompt library.
+// Media (everything made: videos, pictures, films), every asset kind in the app's order (Characters, Environments,
+// Products, Outfits, Poses), then the prompt library.
 const LIBRARY: Item[] = [
-  { id: 'media', label: 'Mediabank', icon: <MediaIcon /> },
+  { id: 'media', label: 'Media', icon: <MediaIcon /> },
   ...ASSET_KINDS.map((kind) => ({
     id: ASSET_VIEW[kind],
     label: ASSET_COPY[kind].plural,
     icon: <AssetIcon kind={kind} size={16} />
   })),
-  { id: 'prompts', label: 'Prompter', icon: <QuoteIcon /> }
+  { id: 'prompts', label: 'Prompts', icon: <QuoteIcon /> }
 ]
 
-const SETTINGS: Item = { id: 'settings', label: 'Inställningar', icon: <GearIcon /> }
+const SETTINGS: Item = { id: 'settings', label: 'Settings', icon: <GearIcon /> }
 
 const WORK_VIEWS = new Set<View>([
   'generate',
@@ -75,7 +75,7 @@ interface RowProps {
 function Row({ item, active, collapsed, onSelect }: RowProps) {
   const workView = workViewOf(item.id)
   const counts = useViewWork(workView ?? 'generate')
-  // Uploads have no view; rows without one (Prompter, Inställningar) must not pick them up.
+  // Uploads have no view; rows without one (Prompts, Settings) must not pick them up.
   const running = useRunning((w) => workView !== undefined && w.view === workView)
   const unseen = useUnseen((w) => workView !== undefined && w.view === workView)
   const status = workView ? viewStatusText(workView, counts, running, unseen) : undefined
@@ -151,16 +151,16 @@ interface Props {
   /** The icon rail instead of the full sidebar. */
   collapsed: boolean
   onToggleCollapsed: () => void
-  /** Which panel next to the sidebar is open: the agent drawer or Pågår och klart. */
+  /** Which panel next to the sidebar is open: the agent drawer or Activity. */
   panel?: 'agent' | 'work'
   onTogglePanel: (panel: 'agent' | 'work') => void
 }
 
 /**
- * The window's navigation: Skapa (the places that make things) and Bibliotek (what was made, and what it is made
+ * The window's navigation: Create (the places that make things) and Library (what was made, and what it is made
  * from), each row
- * with what runs there and what is new. At the bottom two slim status rows – Pågår och klart and the agent
- * connection – and, below a divider, Inställningar as the last row. Collapses to a 72 px icon rail (⌃⌘S) whose rows
+ * with what runs there and what is new. At the bottom two slim status rows – Activity and the agent
+ * connection – and, below a divider, Settings as the last row. Collapses to a 72 px icon rail (⌃⌘S) whose rows
  * keep their status as badges and explain themselves in tooltips.
  */
 export default function Sidebar({
@@ -172,13 +172,13 @@ export default function Sidebar({
   panel,
   onTogglePanel
 }: Props) {
-  const toggleLabel = collapsed ? 'Fäll ut sidofältet (⌃⌘S)' : 'Fäll ihop sidofältet (⌃⌘S)'
+  const toggleLabel = collapsed ? 'Expand the sidebar (⌃⌘S)' : 'Collapse the sidebar (⌃⌘S)'
   const toggleTip = useRailTooltip(collapsed, toggleLabel)
 
   return (
     <aside
       id={SIDEBAR_ID}
-      aria-label="Sidofält"
+      aria-label="Sidebar"
       style={{ width: 'var(--sidebar-w)' }}
       className="drag relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel px-3 pb-3 pt-12 transition-[width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none"
     >
@@ -214,11 +214,11 @@ export default function Sidebar({
 
       {/* Scrolls when the window is too short, so the bottom stack is never pushed out. */}
       <nav
-        aria-label="Navigering"
+        aria-label="Navigation"
         className="no-drag -mx-3 mb-2 flex min-h-0 flex-col gap-1 overflow-y-auto overflow-x-hidden px-3"
       >
-        <Group title="Skapa" items={CREATE} view={view} collapsed={collapsed} onSelect={onChange} />
-        <Group title="Bibliotek" items={LIBRARY} view={view} collapsed={collapsed} onSelect={onChange} />
+        <Group title="Create" items={CREATE} view={view} collapsed={collapsed} onSelect={onChange} />
+        <Group title="Library" items={LIBRARY} view={view} collapsed={collapsed} onSelect={onChange} />
       </nav>
 
       <div className="no-drag mt-auto flex shrink-0 flex-col border-t border-line pt-2">

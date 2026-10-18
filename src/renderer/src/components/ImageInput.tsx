@@ -105,14 +105,14 @@ export default function ImageInput({
     describeMove: (_, to) => {
       const sent = to < max
       return (
-        `Bilden flyttades till plats ${to + 1} av ${value.length}` +
-        (sent ? ` och heter nu @Image${to + 1}.` : ` och skickas inte – modellen tar max ${max} bilder.`)
+        `The image moved to place ${to + 1} of ${value.length}` +
+        (sent ? ` and is now @Image${to + 1}.` : ` and isn’t sent – the model takes at most ${max} images.`)
       )
     }
   })
 
   // Several: added only into free places. A list already at (or past) the limit keeps every picture it has – the
-  // ones marked "skickas inte" are kept on purpose (moved forward to be sent), never cut off by an addition.
+  // ones marked "not sent" are kept on purpose (moved forward to be sent), never cut off by an addition.
   const room = multiple ? Math.max(0, max - value.length) : 1
 
   const add = (paths: string[]) => {
@@ -145,7 +145,7 @@ export default function ImageInput({
   const pick = async () => add(await window.studio.pickImages(multiple))
 
   // ── Swapping a picture in place ──────────────────────────────────────────────
-  // What a single image is called on its card and in the picker: the label without its "(valfri)".
+  // What a single image is called on its card and in the picker: the label without its "(optional)".
   const place = label.replace(/\s*\(.*\)\s*$/, '')
   const list = useRef<HTMLDivElement>(null)
   const anchor = useRef<HTMLElement | null>(null)
@@ -194,27 +194,27 @@ export default function ImageInput({
     onSwap?.(i, { kind: 'asset', assetId: to.id })
   }
 
-  /** Place i as the card and the picker name it: "@Image2", "Bild 5" past the limit, "Startbild" for a single one. */
-  const nameOf = (i: number): string => (!multiple ? place : i < max ? `@Image${i + 1}` : `Bild ${i + 1}`)
+  /** Place i as the card and the picker name it: "@Image2", "Image 5" past the limit, "Start image" for a single one. */
+  const nameOf = (i: number): string => (!multiple ? place : i < max ? `@Image${i + 1}` : `Image ${i + 1}`)
 
   /** What thumbnail i's card says: its place, what it is and whether it is sent. */
   const cardOf = (p: string, at: number, overflow: boolean): TokenCardContent => {
     const asset = byPath.get(p)
     const photo = asset ? asset.images.findIndex((img) => img.path === p) + 1 : 0
-    const what = wholeAsset && asset ? asset.name : 'bilden'
+    const what = wholeAsset && asset ? asset.name : 'the image'
     return {
       token: nameOf(at),
       ref: 'image',
       target: {
         kind: asset?.kind,
-        label: asset ? `${asset.name} (foto ${photo})` : (p.split('/').pop() ?? p),
+        label: asset ? `${asset.name} (photo ${photo})` : (p.split('/').pop() ?? p),
         path: p,
         name: asset?.name,
         number: photo || undefined,
         count: asset?.images.length,
-        ...(overflow ? { unsent: `Skickas inte – modellen tar max ${max} bilder` } : {})
+        ...(overflow ? { unsent: `Not sent – the model takes at most ${max} images` } : {})
       },
-      hint: `Klicka för att byta ${what}${reorder.enabled ? ' – dra för att flytta' : ''}`
+      hint: `Click to swap ${what}${reorder.enabled ? ' – drag to move' : ''}`
     }
   }
 
@@ -225,7 +225,7 @@ export default function ImageInput({
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="text-muted">{label}</span>
+        <span className="shrink-0 whitespace-nowrap text-muted">{label}</span>
         <span className="flex items-center gap-2">
           {action}
           {multiple && showCount && (
@@ -240,7 +240,7 @@ export default function ImageInput({
         role={multiple ? 'list' : undefined}
         aria-label={
           multiple
-            ? `${label}${reorder.enabled ? ' – dra eller tryck ⌥← / ⌥→ för att ändra ordningen' : ''}`
+            ? `${label}${reorder.enabled ? ' – drag or press ⌥← / ⌥→ to change the order' : ''}`
             : undefined
         }
         onDragOver={onDragOver}
@@ -299,9 +299,9 @@ export default function ImageInput({
               aria-expanded={picked}
               aria-label={
                 multiple
-                  ? `${overflow ? 'Skickas inte' : `@Image${at + 1}`}: ${shown}. Enter byter den` +
-                    (reorder.enabled ? ', flytta med ⌥← och ⌥→.' : '.')
-                  : `${label}: ${shown}. Enter byter den.`
+                  ? `${overflow ? 'Not sent' : `@Image${at + 1}`}: ${shown}. Enter swaps it` +
+                    (reorder.enabled ? ', move it with ⌥← and ⌥→.' : '.')
+                  : `${label}: ${shown}. Enter swaps it.`
               }
               className={`group relative h-16 w-16 shrink-0 rounded bg-raised outline-none ring-offset-2 ring-offset-panel transition focus-visible:ring-2 focus-visible:ring-muted ${
                 reorder.enabled ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
@@ -310,7 +310,7 @@ export default function ImageInput({
               <div className={`h-full w-full overflow-hidden rounded ${overflow ? 'opacity-40' : ''}`}>
                 {isMissing ? (
                   <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
-                    Filen saknas
+                    File missing
                   </span>
                 ) : (
                   <>
@@ -336,7 +336,7 @@ export default function ImageInput({
               {multiple &&
                 (overflow ? (
                   <span className="absolute left-1 top-1 rounded bg-black/80 px-1 text-[9px] leading-[14px] text-accent">
-                    skickas inte
+                    not sent
                   </span>
                 ) : (
                   <span
@@ -358,8 +358,8 @@ export default function ImageInput({
                     ? ''
                     : 'group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:opacity-100'
                 }`}
-                title="Ta bort"
-                aria-label={`Ta bort ${cap?.text ?? name ?? 'bilden'}`}
+                title="Remove"
+                aria-label={`Remove ${cap?.text ?? name ?? 'the image'}`}
               >
                 ✕
               </button>
@@ -373,14 +373,14 @@ export default function ImageInput({
             onClick={pick}
             className="flex h-16 min-w-16 flex-1 items-center justify-center rounded text-muted hover:bg-raised hover:text-text"
           >
-            {value.length ? '+' : 'Släpp bild här eller klicka'}
+            {value.length ? '+' : 'Drop an image here or click'}
           </button>
         )}
       </div>
       {overflowCount > 0 && (
         <p className="mt-1 text-[11px] text-accent">
-          {overflowCount === 1 ? 'Den sista bilden' : `De sista ${overflowCount} bilderna`} skickas inte – modellen tar
-          max {max}.{reorder.enabled && ' Dra en bild längre fram för att skicka den i stället.'}
+          {overflowCount === 1 ? 'The last image isn’t' : `The last ${overflowCount} images aren’t`} sent – the model takes
+          at most {max}.{reorder.enabled && ' Drag an image further forward to send it instead.'}
         </p>
       )}
       {hint && <p className="mt-1 text-[11px] text-muted">{hint}</p>}
@@ -412,7 +412,7 @@ export default function ImageInput({
 /**
  * The picker a clicked thumbnail opens, anchored to it. A library photo in a list (`wholeAsset`): another asset for
  * every place of its asset – a character's outfit, voice, poses and products follow (shared/reference-swap) – with
- * "Välj en enskild bild i stället…" for this place only. Any other picture: another picture for its place.
+ * "Pick a single image instead…" for this place only. Any other picture: another picture for its place.
  */
 function SwapPopover({
   open,
@@ -457,28 +457,28 @@ function SwapPopover({
     return at === -1 ? undefined : nameOf(at)
   }
   const whole = wholeAsset && mode === 'asset' && asset
-  // "startbild" in a sentence, "@Image2" as it is.
-  const inText = place.startsWith('@') ? place : place.charAt(0).toLocaleLowerCase('sv') + place.slice(1)
+  // "start image" in a sentence, "@Image2" as it is.
+  const inText = place.startsWith('@') ? place : place.charAt(0).toLowerCase() + place.slice(1)
 
   let body: ReactNode = null
   if (open && path !== undefined && whole) {
     const places = values.flatMap((p, i) => (byPath.get(p)?.id === asset.id ? [nameOf(i)] : []))
     const follows =
       asset.kind === 'character'
-        ? ` ${possessive(asset.name, 'sv')} kläder, röst, poser och produkter följer med.`
+        ? ` ${possessive(asset.name, 'en')} outfits, voice, poses and products come along.`
         : asset.audio.length
-          ? ' Har båda ljud byts det också.'
+          ? ' If both have sound, it is swapped too.'
           : ''
     body = (
       <SwapAssetPicker
-        title={`Byt ${asset.name} mot…`}
-        hint={`Alla platser där ${asset.name} finns (${places.join(', ')}) får den nya – numren i prompten är desamma.${follows}`}
+        title={`Swap ${asset.name} for…`}
+        hint={`Every place ${asset.name} is in (${places.join(', ')}) gets the new one – the numbers in the prompt stay the same.${follows}`}
         library={library}
         from={asset}
         present={present}
         alternative={{
-          label: 'Välj en enskild bild i stället…',
-          title: `Byt bara ${inText}, inte ${possessive(asset.name, 'sv')} andra platser`,
+          label: 'Pick a single image instead…',
+          title: `Swap only ${inText}, not ${possessive(asset.name, 'en')} other places`,
           onClick: () => onMode('image')
         }}
         onPick={onPickAsset}
@@ -488,8 +488,8 @@ function SwapPopover({
   } else if (open && path !== undefined) {
     body = (
       <SwapImagePicker
-        title={`Byt ${inText} mot…`}
-        hint={values.length > 1 ? 'Bara den här platsen byts – numret och prompten är kvar.' : undefined}
+        title={`Swap ${inText} for…`}
+        hint={values.length > 1 ? 'Only this place is swapped – the number and the prompt stay.' : undefined}
         library={library}
         current={path}
         currentKind={asset?.kind}
@@ -498,7 +498,7 @@ function SwapPopover({
         sequenceId={sequenceId}
         alternative={
           wholeAsset && asset
-            ? { label: `Byt hela ${asset.name} i stället…`, onClick: () => onMode('asset') }
+            ? { label: `Swap all of ${asset.name} instead…`, onClick: () => onMode('asset') }
             : undefined
         }
         onPick={onPickImage}
@@ -507,7 +507,7 @@ function SwapPopover({
     )
   }
   return (
-    <Popover anchorRef={anchorRef} open={open && !!body} onClose={onClose} width={360} maxHeight={480} label={`Byt ${inText}`}>
+    <Popover anchorRef={anchorRef} open={open && !!body} onClose={onClose} width={360} maxHeight={480} label={`Swap ${inText}`}>
       {body}
     </Popover>
   )

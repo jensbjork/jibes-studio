@@ -16,75 +16,75 @@ const ENTRIES: Entry[] = [
   {
     target: 'characters',
     name: 'Karaktärer',
-    explanation: 'En mapp per karaktär med referensfotona, röstklippen och beskrivningen.',
-    example: () => 'Anna/foto.jpg, Anna/röst.mp3, Anna/Beskrivning.txt'
+    explanation: 'One folder per character with its reference photos, voice clips and description.',
+    example: () => 'Anna/photo.jpg, Anna/voice.mp3, Anna/Beskrivning.txt'
   },
   {
     target: 'environments',
     name: 'Miljöer',
-    explanation: 'En mapp per miljö med referensbilderna, ljudklippen och beskrivningen.',
-    example: () => 'Köket/kväll.jpg, Köket/sorl.wav'
+    explanation: 'One folder per environment with its reference images, sound clips and description.',
+    example: () => 'Kitchen/evening.jpg, Kitchen/murmur.wav'
   },
   {
     target: 'products',
     name: 'Produkter',
-    explanation: 'En mapp per produkt med produktbilderna och beskrivningen.',
-    example: () => 'Kaffeburken/framsida.jpg'
+    explanation: 'One folder per product with its product images and description.',
+    example: () => 'Coffee tin/front.jpg'
   },
   {
     target: 'outfits',
     name: 'Kläder',
-    explanation: 'En mapp per klädsel med bilderna och beskrivningen.',
-    example: () => 'Röd klänning/framsida.jpg'
+    explanation: 'One folder per outfit with its images and description.',
+    example: () => 'Red dress/front.jpg'
   },
   {
     target: 'poses',
     name: 'Poser',
-    explanation: 'En mapp per pose med foton eller skisser av positionerna och beskrivningen.',
-    example: () => 'Kram/skiss.png, Kram/Beskrivning.txt'
+    explanation: 'One folder per pose with photos or sketches of the positions and its description.',
+    example: () => 'Hug/sketch.png, Hug/Beskrivning.txt'
   },
   {
     target: 'references',
     name: 'Referensbilder',
-    explanation: 'Start-, slut- och referensbilder från andra ställen på datorn, kopierade hit per dag.',
-    example: (day) => `${day}/startbild.png`
+    explanation: 'Start, end and reference images from elsewhere on your computer, copied here by day.',
+    example: (day) => `${day}/start image.png`
   },
   {
     target: 'generations',
     name: 'Genereringar',
-    explanation: 'Alla videor du genererar, sorterade per dag och namngivna efter prompten.',
-    example: (day, time) => `${day}/${time} En katt på ett tak.mp4`
+    explanation: 'Every video you generate, sorted by day and named after its prompt.',
+    example: (day, time) => `${day}/${time} A cat on a roof.mp4`
   },
   {
     target: 'ownClips',
     name: 'Egna klipp',
-    explanation: 'Dina egna filmer som du har importerat, per dag. Behövs en arbetskopia ligger originalet bredvid.',
-    example: (day) => `${day}/Semester.mov`
+    explanation: 'Your own films that you imported, by day. When a working copy is needed, the original sits next to it.',
+    example: (day) => `${day}/Holiday.mov`
   },
   {
     target: 'sequences',
     name: 'Sekvenser',
-    explanation: 'En mapp per sekvens med tagningarna och de färdiga, exporterade filmerna.',
-    example: () => 'Min film/Tagningar/ och färdiga filmer'
+    explanation: 'One folder per sequence with its takes and the finished, exported films.',
+    example: () => 'My film/Tagningar/ and finished films'
   },
   {
     target: 'storyboards',
     name: 'Storyboards',
-    explanation: 'En mapp per storyboard med bilderna, klippen mellan dem och de färdiga, exporterade filmerna.',
-    example: () => 'Min storyboard/Bilder/, Övergångar/ och färdiga filmer'
+    explanation: 'One folder per storyboard with its images, the clips between them and the finished, exported films.',
+    example: () => 'My storyboard/Bilder/, Övergångar/ and finished films'
   },
   {
     target: 'edits',
     name: 'Redigeringar',
-    explanation: 'En mapp per redigering med versionerna, nytt ljud och AI-tagningarna. Originalet lämnas orört.',
-    example: () => 'Min film/Min film v2 – Klippte bort.mp4, Ljud/, Tagningar/'
+    explanation: 'One folder per edit with its versions, new sound and the AI takes. The original is left untouched.',
+    example: () => 'My film/My film v2 – Cut 0:02–0:04.mp4, Ljud/, Tagningar/'
   }
 ]
 
 const HIDDEN = {
   name: '.studio',
-  explanation: 'Databasen och miniatyrbilderna. Dold i Finder – ändra inget där.',
-  example: 'dold – databas och miniatyrer'
+  explanation: "The database and thumbnails. Hidden in Finder – don't change anything there.",
+  example: 'hidden – database and thumbnails'
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -121,7 +121,7 @@ export default function FolderTree({ rootName, rootDetail, detail, onOpen }: Pro
 
   return (
     <div className="text-[12px] leading-[18px]">
-      <Row onClick={onOpen && (() => onOpen('root'))} title="Öppna grundmappen i Finder">
+      <Row onClick={onOpen && (() => onOpen('root'))} title="Open the library folder in Finder">
         <FolderIcon size={14} className="mt-0.5 shrink-0 text-accent" />
         <span className="shrink-0 font-medium text-text">{rootName}</span>
         {rootDetail && (
@@ -144,7 +144,7 @@ export default function FolderTree({ rootName, rootDetail, detail, onOpen }: Pro
               <span className="absolute left-[15px] h-px w-3.5 bg-line" style={{ top: TICK_TOP }} />
               <Row
                 onClick={onOpen && row.target ? () => onOpen(row.target!) : undefined}
-                title={`Öppna ${row.name} i Finder`}
+                title={`Open “${row.name}” in Finder`}
               >
                 <FolderIcon size={13} className={`mt-0.5 shrink-0 ${hidden ? 'text-muted/50' : 'text-muted'}`} />
                 <span className={`w-28 shrink-0 ${hidden ? 'text-muted' : 'text-text'}`}>{row.name}</span>
@@ -170,7 +170,7 @@ function Row({ onClick, title, children }: { onClick?: () => void; title: string
   return (
     <button type="button" onClick={onClick} title={title} className={`group ${layout} transition hover:bg-raised`}>
       {children}
-      <span className="shrink-0 text-[11px] text-muted opacity-0 transition group-hover:opacity-100">Öppna</span>
+      <span className="shrink-0 text-[11px] text-muted opacity-0 transition group-hover:opacity-100">Open</span>
     </button>
   )
 }

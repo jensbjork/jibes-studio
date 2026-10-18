@@ -40,8 +40,11 @@ import {
 /** Shortest piece of a take that trimming may leave, in seconds. */
 export const MIN_REMAINING_SECONDS = 0.2
 
-export const UNTITLED_SEQUENCE = 'Namnlös sekvens'
-export const UNTITLED_STORYBOARD = 'Namnlös storyboard'
+export const UNTITLED_SEQUENCE = 'Untitled sequence'
+export const UNTITLED_STORYBOARD = 'Untitled storyboard'
+/** Folder-name fallbacks for a name that leaves nothing: they name folders on disk, so they stay as they were. */
+const UNTITLED_SEQUENCE_FOLDER = 'Namnlös sekvens'
+const UNTITLED_STORYBOARD_FOLDER = 'Namnlös storyboard'
 
 export interface SequenceRow {
   id: string
@@ -109,7 +112,7 @@ export function getSequenceRow(id: string): SequenceRow | undefined {
 
 export function requireSequenceRow(id: string): SequenceRow {
   const row = typeof id === 'string' ? getSequenceRow(id) : undefined
-  if (!row) throw new Error('Sekvensen finns inte längre.')
+  if (!row) throw new Error('The sequence no longer exists.')
   return row
 }
 
@@ -119,21 +122,21 @@ export function kindOf(row: Pick<SequenceRow, 'kind'>): SequenceKind {
 }
 
 /** Said when a storyboard's id reaches something that only works on sequences. */
-export const IS_STORYBOARD = 'Det här är en storyboard, inte en sekvens. Den finns under Storyboards.'
+export const IS_STORYBOARD = 'This is a storyboard, not a sequence. It is under Storyboards.'
 /** Said when one of a storyboard's transitions reaches something that only works on sequence clips. */
 export const IS_TRANSITION =
-  'Det här är en övergång i en storyboard, inte ett klipp i en sekvens. Ändra den under Storyboards.'
+  'This is a transition in a storyboard, not a clip in a sequence. Change it under Storyboards.'
 /** Said when a sequence's id reaches something that only works on storyboards. */
-export const IS_SEQUENCE = 'Det här är en sekvens, inte en storyboard. Den finns under Sekvenser.'
+export const IS_SEQUENCE = 'This is a sequence, not a storyboard. It is under Sequences.'
 
-/** A sequence (not a storyboard): for the handlers and tools of Sekvenser. */
+/** A sequence (not a storyboard): for the handlers and tools of Sequences. */
 export function requirePlainSequence(id: string): SequenceRow {
   const row = requireSequenceRow(id)
   if (kindOf(row) !== 'sequence') throw new Error(IS_STORYBOARD)
   return row
 }
 
-/** A clip of a sequence (not a storyboard's transition): for the clip handlers and tools of Sekvenser. */
+/** A clip of a sequence (not a storyboard's transition): for the clip handlers and tools of Sequences. */
 export function requirePlainSegment(id: string): SegmentRow {
   const row = requireSegmentRow(id)
   const sequence = getSequenceRow(row.sequence_id)
@@ -147,7 +150,7 @@ export function getSegmentRow(id: string): SegmentRow | undefined {
 
 export function requireSegmentRow(id: string): SegmentRow {
   const row = typeof id === 'string' ? getSegmentRow(id) : undefined
-  if (!row) throw new Error('Klippet finns inte längre.')
+  if (!row) throw new Error('The clip no longer exists.')
   return row
 }
 
@@ -212,11 +215,11 @@ export function continueModeOfRow(row: Pick<SegmentRow, 'continue_mode'>): Conti
   return continueModeOf(row.continue_mode)
 }
 
-/** A continue mode from the window or an agent, or a Swedish refusal; undefined stays undefined (no change). */
+/** A continue mode from the window or an agent, or a refusal; undefined stays undefined (no change). */
 export function cleanContinueMode(value: unknown): ContinueMode | undefined {
   if (value === undefined) return undefined
   if (isContinueMode(value)) return value
-  throw new Error('Okänt sätt att fortsätta: välj ”Med referensbilder” (references) eller ”Exakt startbild” (exact).')
+  throw new Error('Unknown way to continue: choose “With references” (references) or “Exact start frame” (exact).')
 }
 
 /** A segment row as the shared continuation rules read it (continuation.ts). */
@@ -237,7 +240,7 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v 
  * Normalises params coming from the renderer, an agent or JSON, dropping anything malformed. Reference audio
  * clips keep their windows; whether the model can use them is decided when a take is sent (paramsForSubmit).
  * The description switches (includeDescriptions, excludedDescriptionAssetIds) and who wears each outfit
- * (outfitWearers) are kept: they decide what a take appends to its prompt, and "Använd igen" on a take brings them
+ * (outfitWearers) are kept: they decide what a take appends to its prompt, and "Use again" on a take brings them
  * back.
  */
 export function sanitizeParams(input: Partial<GenerationParams> | undefined): GenerationParams {
@@ -333,7 +336,7 @@ export function madeFromEarlierBoards(row: SegmentRow, take: Generation): boolea
 /**
  * A storyboard transition left without a selected take (the one it had was deleted) gets its newest finished take
  * made from the pictures its boards hold now, else its newest finished one: while it has a take to use, it isn't
- * shown as not generated or paid for again by "Generera saknade". Sequence clips are left as they are. True when
+ * shown as not generated or paid for again by "Generate missing". Sequence clips are left as they are. True when
  * one was selected.
  */
 export function reselectTransitionTake(segmentId: string): boolean {
@@ -385,8 +388,8 @@ export function clampTrims(
 /**
  * The trims a segment keeps when `take` becomes its selected take. Trims belong to the segment and carry over to
  * another take, except at a side the take was made to meet exactly: a start made from the previous clip's last
- * frame (the clip continues from it), or from a frame of one of the segment's own takes (where "Gör om mellan
- * grannarna" lets the first clip keep its opening); an end made from the next clip's first frame (the clip ends on
+ * frame (the clip continues from it), or from a frame of one of the segment's own takes (where "Redo between
+ * neighbours" lets the first clip keep its opening); an end made from the next clip's first frame (the clip ends on
  * it). A trim there was meant for another take, and would cut away the very frame this one was generated from, and
  * with it the seamless cut it was paid for. `row` carries the link flags the segment has (or is about to have).
  */
@@ -531,7 +534,7 @@ export function loadSequence(id: string, run: RunInfo): Sequence {
   })
   // The user's grade and the review count, like the feed shows them (one query for every take).
   attachReviewSummary(segments.flatMap((s) => s.takes))
-  // Which takes Redigera keeps, so the take list offers "Ta bort" (off the clip) rather than "Radera" for them.
+  // Which takes the Editor keeps, so the take list offers "Remove" (off the clip) rather than "Delete" for them.
   attachKeptByEdit(segments.flatMap((s) => s.takes))
 
   return {
@@ -625,7 +628,7 @@ export function setSequenceFolder(id: string, folder: string): void {
 
 /**
  * Remembers a finished export, so moving or tidying the library carries it along. `cuts`: where its clips meet in
- * the film (seconds, the start of every clip after the first), so Redigera knows the film's Klippgränser exactly.
+ * the film (seconds, the start of every clip after the first), so the Editor knows the film's cut markers exactly.
  * Returns the export's id.
  */
 export function recordExport(sequenceId: string, path: string, cuts?: readonly number[]): string {
@@ -637,22 +640,22 @@ export function recordExport(sequenceId: string, path: string, cuts?: readonly n
   return id
 }
 
-// ── Exportformat ─────────────────────────────────────────────────────────────
+// ── Export format ────────────────────────────────────────────────────────────
 
-/** The heights "Exportformat" offers besides Automatiskt (the first clip's own size). */
+/** The heights "Export format" offers besides Automatic (the first clip's own size). */
 export const EXPORT_HEIGHTS: readonly number[] = [480, 720, 1080]
 
-/** The sequence's Exportformat as stored: one of EXPORT_HEIGHTS, or null (Automatiskt; also anything unknown). */
+/** The sequence's export format as stored: one of EXPORT_HEIGHTS, or null (Automatic; also anything unknown). */
 export function exportHeightOf(row: Pick<SequenceRow, 'export_height'>): number | null {
   const h = row.export_height
   return typeof h === 'number' && EXPORT_HEIGHTS.includes(h) ? h : null
 }
 
-/** A height from the window as it may be stored, or a Swedish refusal. null (and undefined) is Automatiskt. */
+/** A height from the window as it may be stored, or a refusal. null (and undefined) is Automatic. */
 export function cleanExportHeight(value: unknown): number | null {
   if (value === null || value === undefined) return null
   if (typeof value === 'number' && EXPORT_HEIGHTS.includes(value)) return value
-  throw new Error('Exportformatet kan vara Automatiskt, 480p, 720p eller 1080p.')
+  throw new Error('The export format can be Automatic, 480p, 720p or 1080p.')
 }
 
 export function setExportHeight(sequenceId: string, height: number | null): void {
@@ -681,7 +684,7 @@ export function stillsPath(folder: string, kind: SequenceKind = 'sequence'): str
 
 /** What a sequence's (or storyboard's) folder is called before de-duplication. */
 export function folderBaseName(sequenceName: string, kind: SequenceKind = 'sequence'): string {
-  return safeName(sequenceName, { fallback: kind === 'storyboard' ? UNTITLED_STORYBOARD : UNTITLED_SEQUENCE })
+  return safeName(sequenceName, { fallback: kind === 'storyboard' ? UNTITLED_STORYBOARD_FOLDER : UNTITLED_SEQUENCE_FOLDER })
 }
 
 // macOS volumes are normally case-insensitive and may hand back decomposed å/ä/ö.
@@ -763,7 +766,7 @@ export function availableFileName(dir: string, base: string, ext: string): strin
  */
 function nameExcerpt(g: Pick<Generation, 'prompt' | 'title'>): string {
   // The title as it is (not generationTitle's display form), so a Venice generation keeps exactly the name it has
-  // always had and "Städa upp" never renames it.
+  // always had and "Tidy up" never renames it.
   return promptExcerpt(g.title?.trim() ? g.title : g.prompt)
 }
 
@@ -780,21 +783,21 @@ export function freeFileBase(g: Pick<Generation, 'createdAt' | 'prompt' | 'title
 
 /**
  * The row's file has a home of its own that sequence moves never change (the home rule, jobs.videoLocation): an
- * import (Egna klipp/<day>/, or an edit's folder for an export cloned in as an edit's v1), and anything Redigera
- * made for an edit (Redigeringar/<namn>/). Such a file is never moved into Tagningar nor renamed after a prompt.
+ * import (Egna klipp/<day>/, or an edit's folder for an export cloned in as an edit's v1), and anything the Editor
+ * made for an edit (Redigeringar/<name>/). Such a file is never moved into Tagningar nor renamed after a prompt.
  * An orphaned version (its edit deleted) follows today's rule like a Venice generation.
  */
 export function keepsOwnHome(g: Partial<Pick<Generation, 'source' | 'editId'>>): boolean {
   return generationSource(g) === 'import' || !!g.editId
 }
 
-/** Not a Venice generation: the user's own film or a version made in Redigera (an "own clip" in a sequence). */
+/** Not a Venice generation: the user's own film or a version made in the Editor (an "own clip" in a sequence). */
 export function isOwnClip(g: Partial<Pick<Generation, 'source'>> | undefined): boolean {
   return !!g && !isVeniceGeneration(g)
 }
 
 /**
- * The clip's selected take is an own clip whose file is gone (moved or deleted in Finder): what "Generera saknade"
+ * The clip's selected take is an own clip whose file is gone (moved or deleted in Finder): what "Generate missing"
  * and the clip editor say instead of asking for a prompt.
  */
 export function ownClipMissing(row: SegmentRow): boolean {
@@ -804,7 +807,7 @@ export function ownClipMissing(row: SegmentRow): boolean {
 
 /** Said for clip `number` whose own film is gone (see ownClipMissing). */
 export function ownClipMissingMessage(number: number): string {
-  return `Klipp ${number}:s egna video saknas (flyttad eller raderad i Finder). Lägg till filen igen eller generera en AI-tagning.`
+  return `Clip ${number}'s own video is missing (moved or deleted in Finder). Add the file again or generate an AI take.`
 }
 
 /**

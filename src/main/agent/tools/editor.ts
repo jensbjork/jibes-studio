@@ -38,7 +38,7 @@ import {
 import { READ_ONLY, WRITE, defineTool, priceValue, usd, type LabeledImage, type ToolContext } from './kit'
 import { URL_WAIT_MS, stageFiles, uploadSource, urlSource, type FileSource } from './sources'
 
-// Redigera for agents: edits (one film changed into versions), their versions, transcripts and audio models, the
+// The Editor for agents: edits (one film changed into versions), their versions, transcripts and audio models, the
 // free operations, plans of paid ones, the edit's own audio (from uploads, URLs or library clips) and stopping a
 // paid job. Everything goes through the edit service's own handlers (edits:*, audio:*), so an agent gets exactly the
 // checks, versions and change events the window gets. Paid operations – and resuming a stopped one – are only ever
@@ -66,7 +66,7 @@ export async function loadEdit(editId: string): Promise<Edit> {
   try {
     return await callService<Edit>('edits:get', editId)
   } catch (err) {
-    throw new Error(`${errorText(err)} list_edits visar vilka redigeringar som finns.`)
+    throw new Error(`${errorText(err)} list_edits lists the edits there are.`)
   }
 }
 
@@ -77,8 +77,8 @@ export function baseVersion(edit: Edit, versionId: string | undefined): EditVers
   if (!version) {
     throw new Error(
       versionId
-        ? `Versionen ${versionId} hör inte till redigeringen ${q(edit.name)}. get_edit visar dess versioner.`
-        : `Redigeringen ${q(edit.name)} har ingen aktuell version.`
+        ? `The version ${versionId} doesn't belong to the edit ${q(edit.name)}. get_edit shows its versions.`
+        : `The edit ${q(edit.name)} has no current version.`
     )
   }
   return version
@@ -182,7 +182,7 @@ export function jobInfo(j: EditJob): Record<string, unknown> {
     ...(j.canResume
       ? {
           can_resume: true,
-          note: 'Stopped with parts left: ask the user to continue it with request_edit_operation({edit_id, resume_job_id}) (they approve the price of the parts left), or the user presses "Fortsätt" in Redigera.'
+          note: 'Stopped with parts left: ask the user to continue it with request_edit_operation({edit_id, resume_job_id}) (they approve the price of the parts left), or the user presses "Continue" in the Editor.'
         }
       : {}),
     updated: localTime(j.updatedAt)
@@ -201,7 +201,7 @@ function mediaInfo(m: EditMedia): Record<string, unknown> {
 }
 
 const ORIGIN_WORDS: Record<EditSummary['origin']['kind'], string> = {
-  generation: 'a clip from the feed (the Mediabank)',
+  generation: 'a clip from the feed (Media)',
   take: 'a take of a sequence clip',
   export: 'an exported film',
   import: "the user's own film"
@@ -327,7 +327,7 @@ async function editInfo(edit: Edit, detail: boolean): Promise<Record<string, unk
     : 'None yet for the current version: request_edit_operation with {op: "transcribe"} makes one (about $0.01 a minute).'
   data.separation = sep
     ? { available: sep.available, ...(sep.quality ? { quality: sep.quality } : {}), ...(sep.message ? { message: sep.message } : {}) }
-    : { available: false, message: 'Okänt just nu.' }
+    : { available: false, message: 'Unknown right now.' }
   data.voice_changer = catalog
     ? catalog.voiceChangers.length
       ? { available: true, models: catalog.voiceChangers.map((m) => m.id) }
@@ -356,17 +356,17 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     ctx,
     'list_edits',
     {
-      title: 'List edits (Redigera)',
+      title: 'List edits (Editor)',
       description:
-        "The user's edits in Redigera, newest first: a film (a clip from the feed, a take, an exported film or the user's own film) being changed into versions. Each with its origin, current version, number of versions, length, whether a paid job is running and what it has cost so far. Open one with get_edit; start a new one with create_edit.",
+        "The user's edits in the Editor, newest first: a film (a clip from the feed, a take, an exported film or the user's own film) being changed into versions. Each with its origin, current version, number of versions, length, whether a paid job is running and what it has cost so far. Open one with get_edit; start a new one with create_edit.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'listade redigeringarna'
+      summary: () => 'listed the edits'
     },
     async () => {
       requireLibrary()
       const list = await callService<EditSummary[]>('edits:list')
-      return { data: { count: list.length, edits: list.map(summaryInfo) }, summary: `listade redigeringarna (${list.length} st)` }
+      return { data: { count: list.length, edits: list.map(summaryInfo) }, summary: `listed the edits (${list.length})` }
     }
   )
 
@@ -377,13 +377,13 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get edit',
       description:
-        "One edit in Redigera: its versions as a tree (v1 is the untouched original; each version has its parent_version_id, the operation that made it, its cost and which sequence clips use it), which one is current, the paid jobs (running or done, with errors), the AI takes made for picture operations, the edit's audio media (reusable with add_audio media_id), every version's added sound layers (layer_id for the layer op), and for the current version its cut markers (Klippgränser), its layers and muted spans as the timeline draws them, and a summary of its transcript – plus whether this Mac can separate voice and background and whether Venice offers a voice changer. With include_thumbnails (default true) the poster frames of the current version and the original come as images. Look at a version itself with review_generation(version_id) – frames and, with include_audio and audio_start, its sound.",
+        "One edit in the Editor: its versions as a tree (v1 is the untouched original; each version has its parent_version_id, the operation that made it, its cost and which sequence clips use it), which one is current, the paid jobs (running or done, with errors), the AI takes made for picture operations, the edit's audio media (reusable with add_audio media_id), every version's added sound layers (layer_id for the layer op), and for the current version its cut markers, its layers and muted spans as the timeline draws them, and a summary of its transcript – plus whether this Mac can separate voice and background and whether Venice offers a voice changer. With include_thumbnails (default true) the poster frames of the current version and the original come as images. Look at a version itself with review_generation(version_id) – frames and, with include_audio and audio_start, its sound.",
       input: {
         edit_id: editIdInput,
         include_thumbnails: z.boolean().default(true)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'tittade på en redigering'
+      summary: () => 'looked at an edit'
     },
     async ({ edit_id, include_thumbnails }) => {
       const edit = await loadEdit(edit_id)
@@ -403,7 +403,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
           if (block) images.push({ label: `${versionName(v)} (${what}, version_id ${v.id}) – poster frame`, image: block })
         }
       }
-      return { data, images, summary: `tittade på redigeringen ${q(edit.name)}` }
+      return { data, images, summary: `looked at the edit ${q(edit.name)}` }
     }
   )
 
@@ -420,7 +420,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
         format: z.enum(['json', 'srt']).default('json')
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'läste en transkription'
+      summary: () => 'read a transcript'
     },
     async ({ generation_id, format }) => {
       requireLibrary()
@@ -465,14 +465,14 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Plan an edit operation (free)',
       description:
-        "Checks an operation on a version exactly as Redigera's cards do and says what it would do and cost – without doing anything. Free; always call it first. Answers with the normalized operation (the range snapped to frames, cut markers and what the model allows, defaults filled in), paid, price_usd (the total of what Venice prices; undefined when it can't be priced), partial_price and price_note (e.g. billed per started minute, or a voice clone Venice doesn't price), the steps (parts) with their prices, notes, warnings (lip sync, real people, the old voice bleeding through, disk space) and problems (non-empty: it can't run as it is). For picture operations the frames come as images: regenerate's start and end frames (the frames before and after the range; the film's first frame when the range starts at 0), extend's start (the film's last frame), prompt_edit's first and last frame of the range; upscale has none. Free operations then go with apply_edit, paid ones with request_edit_operation (the user approves the price). Prompts are English.",
+        "Checks an operation on a version exactly as the Editor's cards do and says what it would do and cost – without doing anything. Free; always call it first. Answers with the normalized operation (the range snapped to frames, cut markers and what the model allows, defaults filled in), paid, price_usd (the total of what Venice prices; undefined when it can't be priced), partial_price and price_note (e.g. billed per started minute, or a voice clone Venice doesn't price), the steps (parts) with their prices, notes, warnings (lip sync, real people, the old voice bleeding through, disk space) and problems (non-empty: it can't run as it is). For picture operations the frames come as images: regenerate's start and end frames (the frames before and after the range; the film's first frame when the range starts at 0), extend's start (the film's last frame), prompt_edit's first and last frame of the range; upscale has none. Free operations then go with apply_edit, paid ones with request_edit_operation (the user approves the price). Prompts are English.",
       input: {
         edit_id: editIdInput,
         base_version_id: baseVersionInput,
         operation: operationInput
       },
       annotations: { ...READ_ONLY, idempotentHint: true, openWorldHint: true },
-      summary: () => 'planerade en ändring'
+      summary: () => 'planned a change'
     },
     async ({ edit_id, base_version_id, operation }) => {
       const edit = await loadEdit(edit_id)
@@ -499,7 +499,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
               : 'Free: make it with apply_edit (same operation).'
         },
         images,
-        summary: `planerade en ändring i ${q(edit.name)}: ${operationSummary(plan.operation, base.generation.videoDuration)}${plan.paid ? ` (${usd(plan.priceUsd)})` : ''}`
+        summary: `planned a change in ${q(edit.name)}: ${operationSummary(plan.operation, base.generation.videoDuration)}${plan.paid ? ` (${usd(plan.priceUsd)})` : ''}`
       }
     }
   )
@@ -511,12 +511,12 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List audio models',
       description:
-        "Venice's audio models for Redigera, with their voices, limits and prices: speech (text-to-speech for speak_lines: voices, max characters per line, price per 1000 characters, whether it clones a voice or takes a style prompt), music and effects (durations per model), transcription (price per minute; word or segment timestamps), voice_changers (speech-to-speech for change_voice; empty while Venice lists none) and voice_design (request_voice_design). Also whether this Mac can separate voice and background (separation: needed for the voice/background targets and to keep music under a new voice) and the default models. Exact prices for a given film come from plan_edit_operation (free).",
+        "Venice's audio models for the Editor, with their voices, limits and prices: speech (text-to-speech for speak_lines: voices, max characters per line, price per 1000 characters, whether it clones a voice or takes a style prompt), music and effects (durations per model), transcription (price per minute; word or segment timestamps), voice_changers (speech-to-speech for change_voice; empty while Venice lists none) and voice_design (request_voice_design). Also whether this Mac can separate voice and background (separation: needed for the voice/background targets and to keep music under a new voice) and the default models. Exact prices for a given film come from plan_edit_operation (free).",
       input: {
         refresh: z.boolean().default(false).describe('Fetch the list again instead of the ten-minute cache.')
       },
       annotations: { ...READ_ONLY, idempotentHint: true, openWorldHint: true },
-      summary: () => 'listade ljudmodellerna'
+      summary: () => 'listed the audio models'
     },
     async ({ refresh }) => {
       const [catalog, sep] = await Promise.all([callService<AudioCatalog>('audio:models', refresh), separation()])
@@ -572,7 +572,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
           voice_design: catalog.voiceDesign.map((m) => ({ id: m.id, name: m.name })),
           separation: sep
             ? { available: sep.available, ...(sep.quality ? { quality: sep.quality } : {}), ...(sep.message ? { message: sep.message } : {}) }
-            : { available: false, message: 'Okänt just nu.' },
+            : { available: false, message: 'Unknown right now.' },
           ...(notes.length ? { notes } : {})
         }
       }
@@ -586,24 +586,24 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     ctx,
     'create_edit',
     {
-      title: 'Create an edit (Redigera)',
+      title: 'Create an edit (Editor)',
       description:
-        "Opens a film in Redigera as a new edit, free: a finished generation (generation_id – a clip from the feed, a take of a sequence clip or storyboard transition, an imported own clip, or a version of another edit) or an exported film (export_id from list_exports; it is copied into the edit as v1). The original is never changed: every operation makes a new version. A film you have as a file: import it with import_own_clips first (target {feed: true}), then open its generation here. Answers with the edit (get_edit's fields) and, when there already are edits of the same film, a note naming them – reuse one instead of making another when that is what the user means.",
+        "Opens a film in the Editor as a new edit, free: a finished generation (generation_id – a clip from the feed, a take of a sequence clip or storyboard transition, an imported own clip, or a version of another edit) or an exported film (export_id from list_exports; it is copied into the edit as v1). The original is never changed: every operation makes a new version. A film you have as a file: import it with import_own_clips first (target {feed: true}), then open its generation here. Answers with the edit (get_edit's fields) and, when there already are edits of the same film, a note naming them – reuse one instead of making another when that is what the user means.",
       input: {
         generation_id: z.string().optional().describe('A finished generation (list_generations, get_sequence…).'),
         export_id: z.string().optional().describe('An exported film (list_exports).'),
         name: z.string().min(1).max(120).optional().describe("The edit's name; default the film's title or prompt.")
       },
       annotations: WRITE,
-      summary: () => 'skapade en redigering'
+      summary: () => 'created an edit'
     },
     async ({ generation_id, export_id, name }) => {
       requireLibrary()
-      if (!generation_id === !export_id) throw new Error('Ange antingen generation_id eller export_id.')
+      if (!generation_id === !export_id) throw new Error('Give either generation_id or export_id.')
       if (generation_id) {
         const g = db.getGeneration(generation_id)
-        if (!g) throw new Error(`Genereringen ${generation_id} finns inte (längre). list_generations visar vilka som finns.`)
-        if (g.status !== 'completed') throw new Error('Bara en färdig generering kan redigeras.')
+        if (!g) throw new Error(`The generation ${generation_id} doesn't exist (any more). list_generations lists the ones there are.`)
+        if (g.status !== 'completed') throw new Error('Only a finished generation can be edited.')
       }
       const existing = (await callService<EditSummary[]>('edits:list')).filter((e) =>
         generation_id
@@ -625,7 +625,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
               }
             : {})
         },
-        summary: `skapade redigeringen ${q(edit.name)}`
+        summary: `created the edit ${q(edit.name)}`
       }
     }
   )
@@ -644,13 +644,13 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
         operation: operationInput
       },
       annotations: WRITE,
-      summary: () => 'ändrade en film i Redigera'
+      summary: () => 'changed a film in the Editor'
     },
     async ({ edit_id, base_version_id, operation }) => {
       const edit = await loadEdit(edit_id)
       const base = baseVersion(edit, base_version_id)
       const op = await editOperation(operation)
-      const paidRefusal = `${operation.op} kostar pengar hos Venice och görs bara när användaren har godkänt det: planera med plan_edit_operation och be om lov med request_edit_operation.`
+      const paidRefusal = `${operation.op} costs money at Venice and is only done once the user has approved it: plan it with plan_edit_operation and ask for permission with request_edit_operation.`
       if (isPaidOperation(op)) throw new Error(paidRefusal)
       const plan = await planOperation(edit.id, op, base.id)
       if (plan.paid) throw new Error(paidRefusal)
@@ -658,7 +658,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
       const result = await callService<EditRunResult>('edits:run', edit.id, op, { baseId: base.id })
       const after = await loadEdit(edit.id)
       const made = result.versionId ? after.versions.find((v) => v.id === result.versionId) : undefined
-      // As the version list names it, in the log: "<agent> gjorde v3 av ”X”: Tonade in från svart 1,0 s".
+      // As the version list names it, in the log: "<agent> made v3 of “X”: Faded in from black 1.0 s".
       const what = operationLabel(plan.operation)
       return {
         data: {
@@ -670,7 +670,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
           ...(plan.warnings.length ? { warnings: plan.warnings } : {}),
           next: made ? `Look at it with review_generation({generation_id: "${made.id}", include_audio: true}).` : undefined
         },
-        summary: `gjorde ${made ? versionName(made) : 'en ny version'} av ${q(edit.name)}: ${what}`
+        summary: `made ${made ? versionName(made) : 'a new version'} of ${q(edit.name)}: ${what}`
       }
     }
   )
@@ -682,10 +682,10 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Set current version',
       description:
-        "Makes a version the edit's current one – what Redigera shows, what operations build on by default and what \"Skicka till\" sends. Free; nothing is deleted (an undo is choosing the parent again).",
+        "Makes a version the edit's current one – what the Editor shows, what operations build on by default and what \"Send to\" sends. Free; nothing is deleted (an undo is choosing the parent again).",
       input: { edit_id: editIdInput, version_id: z.string().describe("One of get_edit's version_ids.") },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'valde en version'
+      summary: () => 'selected a version'
     },
     async ({ edit_id, version_id }) => {
       const edit = await loadEdit(edit_id)
@@ -693,7 +693,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
       const after = await callService<Edit>('edits:setCurrent', edit.id, version.id)
       return {
         data: { edit_id: after.id, current_version_id: after.currentId, version: versionName(version) },
-        summary: `gjorde ${versionName(version)} aktuell i ${q(edit.name)}`
+        summary: `made ${versionName(version)} current in ${q(edit.name)}`
       }
     }
   )
@@ -707,12 +707,12 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
       description: "Renames an edit; its folder under Redigeringar and its versions' titles follow.",
       input: { edit_id: editIdInput, name: z.string().min(1).max(120) },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: ({ name }) => `döpte om en redigering till ${q(name)}`
+      summary: ({ name }) => `renamed an edit to ${q(name)}`
     },
     async ({ edit_id, name }) => {
       const edit = await loadEdit(edit_id)
       const after = await callService<Edit>('edits:rename', edit.id, name.trim())
-      return { data: { edit_id: after.id, name: after.name }, summary: `döpte om ${q(edit.name)} till ${q(after.name)}` }
+      return { data: { edit_id: after.id, name: after.name }, summary: `renamed ${q(edit.name)} to ${q(after.name)}` }
     }
   )
 
@@ -732,7 +732,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
           .max(500)
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: ({ segments }) => `rättade ${segments.length === 1 ? 'en rad' : `${segments.length} rader`} i en transkription`
+      summary: ({ segments }) => `corrected ${segments.length === 1 ? 'a line' : `${segments.length} lines`} of a transcript`
     },
     async ({ generation_id, segments }) => {
       requireLibrary()
@@ -761,7 +761,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Send a version to a sequence',
       description:
-        "Puts a version into a sequence, free: with segment_id as a new take of that clip (selected), or with sequence_id as a new own clip (after after_segment_id, or at the end). The next clip can then continue from its last frame like from any clip. Not into storyboards, and not while \"Generera saknade\" runs there.",
+        "Puts a version into a sequence, free: with segment_id as a new take of that clip (selected), or with sequence_id as a new own clip (after after_segment_id, or at the end). The next clip can then continue from its last frame like from any clip. Not into storyboards, and not while \"Generate missing\" runs there.",
       input: {
         version_id: z.string().describe("A version_id from get_edit."),
         segment_id: z.string().optional().describe('As a new, selected take of this clip.'),
@@ -769,15 +769,15 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
         after_segment_id: z.string().optional().describe('With sequence_id: after this clip; at the end when left out.')
       },
       annotations: WRITE,
-      summary: () => 'skickade en version till en sekvens'
+      summary: () => 'sent a version to a sequence'
     },
     async ({ version_id, segment_id, sequence_id, after_segment_id }) => {
       requireLibrary()
-      if (!segment_id === !sequence_id) throw new Error('Ange antingen segment_id (ny tagning) eller sequence_id (nytt klipp).')
-      if (segment_id && after_segment_id) throw new Error('after_segment_id gäller bara tillsammans med sequence_id.')
+      if (!segment_id === !sequence_id) throw new Error('Give either segment_id (a new take) or sequence_id (a new clip).')
+      if (segment_id && after_segment_id) throw new Error('after_segment_id only applies together with sequence_id.')
       const owner = segment_id ? store.getSegmentRow(segment_id)?.sequence_id : sequence_id
-      if (segment_id && !owner) throw new Error('Klippet finns inte längre.')
-      if (owner && isStoryboardId(owner)) throw new Error('Versioner kan bara skickas till sekvenser, inte till storyboards.')
+      if (segment_id && !owner) throw new Error('The clip no longer exists.')
+      if (owner && isStoryboardId(owner)) throw new Error('Versions can only be sent to sequences, not to storyboards.')
       const target: SendTarget = segment_id ? { segmentId: segment_id } : { sequenceId: sequence_id!, afterSegmentId: after_segment_id }
       const sent = await callService<{ sequenceId: string; segmentId: string }>('edits:send', version_id, target)
       const sequence = await within(callService<Sequence>('sequences:get', sent.sequenceId), 5000)
@@ -790,7 +790,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
           ...(clip ? { clip_number: clip } : {}),
           as: segment_id ? 'take' : 'clip'
         },
-        summary: `skickade ${v ? q(generationTitle(v, 40)) : 'en version'} till ${clip ? `klipp ${clip} i ` : ''}${sequence ? q(sequence.name) : 'en sekvens'}`
+        summary: `sent ${v ? q(generationTitle(v, 40)) : 'a version'} to ${clip ? `clip ${clip} in ` : ''}${sequence ? q(sequence.name) : 'a sequence'}`
       }
     }
   )
@@ -802,7 +802,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Add audio to an edit',
       description:
-        "Adds sound files to an edit's audio (Redigera's media: music, effects, lines) so apply_edit can lay them on a version with {op: \"add_audio\", media_id}. sources (1–6): {upload_id} (a ready audio upload), {url} (fetched like begin_upload({url}); waits at most 45 s in all) or {asset_audio_id} (a character's voice or an environment's sound from the library). Any sound longer than 0.05 s (a click or a whoosh too). Free; nothing is mixed yet. Answers each new media_id with its label (the file's name) and length.",
+        "Adds sound files to an edit's audio (the Editor's media: music, effects, lines) so apply_edit can lay them on a version with {op: \"add_audio\", media_id}. sources (1–6): {upload_id} (a ready audio upload), {url} (fetched like begin_upload({url}); waits at most 45 s in all) or {asset_audio_id} (a character's voice or an environment's sound from the library). Any sound longer than 0.05 s (a click or a whoosh too). Free; nothing is mixed yet. Answers each new media_id with its label (the file's name) and length.",
       input: {
         edit_id: editIdInput,
         sources: z
@@ -812,7 +812,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
       },
       annotations: WRITE,
       summary: ({ sources }) =>
-        `lade till ${sources.length === 1 ? 'ett ljud' : `${sources.length} ljud`} i en redigering`
+        `added ${sources.length === 1 ? 'a sound' : `${sources.length} sounds`} to an edit`
     },
     async ({ edit_id, sources }) => {
       const edit = await loadEdit(edit_id)
@@ -839,7 +839,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
           })),
           next: 'Lay it on a version with apply_edit({edit_id, operation: {op: "add_audio", media_id, start}}) – check with plan_edit_operation first.'
         },
-        summary: `lade till ${added.length === 1 ? `ljudet ${q(added[0].label)}` : `${added.length} ljud`} i ${q(edit.name)}`
+        summary: `added ${added.length === 1 ? `the sound ${q(added[0].label)}` : `${added.length} sounds`} to ${q(edit.name)}`
       }
     }
   )
@@ -851,21 +851,21 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Stop a paid edit job',
       description:
-        "Stops a running paid job in Redigera (get_edit's jobs) like the user's Avbryt: no further parts are sent to Venice, so nothing more is paid. Parts already sent finish and are kept. A picture operation (regenerate, prompt_edit, extend, upscale) can't be stopped once its take is at Venice. Free.",
+        "Stops a running paid job in the Editor (get_edit's jobs) like the user's Cancel: no further parts are sent to Venice, so nothing more is paid. Parts already sent finish and are kept. A picture operation (regenerate, prompt_edit, extend, upscale) can't be stopped once its take is at Venice. Free.",
       input: { job_id: z.string().describe("A job_id from get_edit's jobs.") },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'stoppade ett jobb i Redigera'
+      summary: () => 'stopped a job in the Editor'
     },
     async ({ job_id }) => {
       requireLibrary()
       const row = db.getDb().prepare('SELECT id, edit_id, status FROM media_jobs WHERE id = ?').get(job_id) as
         | { id: string; edit_id: string | null; status: string }
         | undefined
-      if (!row) throw new Error('Det finns inget jobb med det id:t. get_edit visar en redigerings jobb.')
+      if (!row) throw new Error('There is no job with that id. get_edit shows an edit\'s jobs.')
       if (row.status !== 'running') {
         return {
           data: { job_id, status: row.status, note: 'The job is not running.' },
-          summary: 'försökte stoppa ett jobb som inte körde'
+          summary: 'tried to stop a job that wasn\'t running'
         }
       }
       await callService('edits:cancel', job_id)
@@ -876,7 +876,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
           ...(job ? jobInfo(job) : { job_id, status: 'cancelled' }),
           note: 'No more parts are sent. Parts already at Venice finish and are kept.'
         },
-        summary: edit ? `stoppade ${job ? q(job.label) : 'ett jobb'} i ${q(edit.name)}` : 'stoppade ett jobb'
+        summary: edit ? `stopped ${job ? q(job.label) : 'a job'} in ${q(edit.name)}` : 'stopped a job'
       }
     }
   )

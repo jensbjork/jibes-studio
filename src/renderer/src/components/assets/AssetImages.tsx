@@ -32,7 +32,7 @@ interface Props {
   onError: (message: string) => void
 }
 
-/** Reference photo grid: add, remove, reorder (drag or "Sätt som omslag") and size warnings. */
+/** Reference photo grid: add, remove, reorder (drag or "Make cover") and size warnings. */
 export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated, onError }: Props) {
   const copy = ASSET_COPY[asset.kind]
   const layout = LAYOUT[asset.kind]
@@ -161,21 +161,21 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
     <div>
       <div className="mb-3 flex items-end justify-between gap-4">
         <div>
-          <h2 className="font-medium">Referensbilder</h2>
+          <h2 className="font-medium">Reference images</h2>
           {images.length > 0 && (
             <p className="mt-0.5 text-[11px] text-muted">
-              {images.length > 1 ? 'Dra för att ändra ordning. ' : ''}Första bilden är omslaget. Bilderna följer med i
-              den här ordningen när du genererar – sina @Image-nummer får de i Generera, efter bilderna som redan
-              ligger där.
+              {images.length > 1 ? 'Drag to reorder. ' : ''}The first image is the cover. The images come along in
+              this order when you generate – they get their @Image numbers in Generate, after the images already
+              there.
             </p>
           )}
         </div>
         {flagged > 0 && (
           <span
             className="shrink-0 text-[11px] text-amber-400"
-            title="Venice nekar bilder med under 300 px på kortaste sidan eller ett sidförhållande utanför 0,4–2,5."
+            title="Venice rejects images under 300 px on the shortest side or with an aspect ratio outside 0.4–2.5."
           >
-            ⚠ {flagged === 1 ? '1 bild' : `${flagged} bilder`} kan nekas av Venice
+            ⚠ {flagged === 1 ? '1 image' : `${flagged} images`} may be rejected by Venice
           </span>
         )}
       </div>
@@ -188,9 +188,9 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
           }`}
         >
           <span className="text-2xl">＋</span>
-          <span className="text-sm">{fileOver ? 'Släpp för att lägga till' : 'Släpp bilder här eller klicka för att välja'}</span>
+          <span className="text-sm">{fileOver ? 'Drop to add' : 'Drop images here or click to choose'}</span>
           <span className="max-w-sm text-[11px] leading-relaxed text-muted">
-            JPG, PNG eller WebP, minst 300 px på kortaste sidan. {copy.imageTips}
+            JPG, PNG or WebP, at least 300 px on the shortest side. {copy.imageTips}
           </span>
         </button>
       ) : (
@@ -231,7 +231,7 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
               className={`flex ${layout.tile} flex-col items-center justify-center gap-1 rounded-md border border-dashed border-line text-muted transition hover:border-muted hover:text-text`}
             >
               <span className="text-xl">＋</span>
-              <span>Lägg till</span>
+              <span>Add</span>
             </button>
           </div>
         </div>
@@ -239,8 +239,8 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
 
       {images.length > MAX_REFERENCES && (
         <p className="mt-3 text-[11px] text-muted">
-          Venice tar emot högst {MAX_REFERENCES} referensbilder per generering, sammanlagt. När du genererar{' '}
-          {copy.generatePhrase} följer de första med, så många som får plats.
+          Venice takes at most {MAX_REFERENCES} reference images per generation, in total. When you generate{' '}
+          {copy.generatePhrase}, the first ones come along, as many as fit.
         </p>
       )}
 
@@ -330,7 +330,7 @@ function ImageTile({
       >
         {broken ? (
           <div className="flex h-full items-center justify-center p-3 text-center text-[11px] text-muted">
-            Bilden kunde inte läsas
+            Couldn't read the image
           </div>
         ) : (
           <img
@@ -347,7 +347,7 @@ function ImageTile({
         )}
 
         <div className="absolute left-1.5 top-1.5 flex flex-col items-start gap-1">
-          {index === 0 && <span className="rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium">Omslag</span>}
+          {index === 0 && <span className="rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium">Cover</span>}
           {issues.map((issue) => (
             <span key={issue.label} className="rounded bg-amber-400/90 px-1.5 py-0.5 text-[10px] font-medium text-black">
               ⚠ {issue.label}
@@ -360,7 +360,7 @@ function ImageTile({
             e.stopPropagation()
             onRemove()
           }}
-          title="Ta bort bild"
+          title="Remove image"
           className="absolute right-1.5 top-1.5 hidden h-6 w-6 items-center justify-center rounded-full bg-black/70 text-[11px] hover:bg-accent group-hover:flex group-focus-visible:flex"
         >
           ✕
@@ -374,7 +374,7 @@ function ImageTile({
             }}
             className="absolute inset-x-0 bottom-0 bg-black/70 py-1.5 text-[11px] opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-black/90"
           >
-            Sätt som omslag
+            Make cover
           </button>
         )}
       </div>

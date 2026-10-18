@@ -19,13 +19,13 @@ interface Props {
   model?: VideoModel
   onReuse: (g: Generation) => void
   onDelete: (g: Generation) => void
-  /** Enables "Öppna" after adding to a sequence and opening the take's sequence or storyboard from the badge. */
+  /** Enables "Open" after adding to a sequence and opening the take's sequence or storyboard from the badge. */
   navigate?: Navigate
-  /** Receives a locally patched copy, e.g. with segmentId set after "Lägg i sekvens". */
+  /** Receives a locally patched copy, e.g. with segmentId set after "Add to sequence". */
   onChange?: (g: Generation) => void
   /** Opens the clip in the detail drawer. */
   onOpen?: (g: Generation) => void
-  /** Sets (or with null clears) the user's rating: -1 = tumme ner, 1–3 stars. */
+  /** Sets (or with null clears) the user's rating: -1 = thumbs down, 1–3 stars. */
   onRate?: (g: Generation, rating: number | null) => void
   /** The clip is the one shown in the detail drawer. */
   selected?: boolean
@@ -104,7 +104,7 @@ function GenerationCard({
       if (owner) openTakeOwner(owner, g.segmentId, navigate, g.id)
     } catch (e) {
       // The badge is only a shortcut; if the lookup fails the take is still reachable from the sidebar.
-      console.warn('Kunde inte hitta var tagningen hör hemma', e)
+      console.warn('Could not find where the take belongs', e)
     } finally {
       setOpeningSequence(false)
     }
@@ -144,15 +144,15 @@ function GenerationCard({
   }
 
   const keepActionsVisible = pickerOpen || confirmingDelete
-  // Agents' reviews only: the user's own (a rating, or just a note or tags) isn't a "granskning" to read.
+  // Agents' reviews only: the user's own (a rating, or just a note or tags) isn't a "review" to read.
   const otherReviews = g.agentReviewCount
-  // Own films and versions from Redigera: named by their title, marked, without a model; their settings aren't a form.
+  // Own films and versions from the Editor: named by their title, marked, without a model; their settings aren't a form.
   const badge = sourceBadge(g)
   const own = badge?.kind === 'own' || badge?.kind === 'edited'
   const title = generationTitle(g)
   const editable = g.status === 'completed' && !!g.filePath && !!navigate
 
-  // Pågår och klart: a finished clip the user hasn't played or opened yet is "Ny"; a failure counts as seen once
+  // Activity: a finished clip the user hasn't played or opened yet is "New"; a failure counts as seen once
   // its message has been on screen for a moment.
   const key = workKey.generation(g.id)
   const unseen = useIsUnseen(key)
@@ -195,7 +195,7 @@ function GenerationCard({
             <button
               type="button"
               onClick={play}
-              title="Spela upp"
+              title="Play"
               className="group/poster flex h-full w-full items-center justify-center outline-none"
             >
               {g.thumbPath && (
@@ -217,7 +217,7 @@ function GenerationCard({
           <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-muted">
             <span className="flex items-center gap-2">
               <Spinner />
-              {g.status === 'queued' ? 'I kö…' : 'Genererar…'}
+              {g.status === 'queued' ? 'Queued…' : 'Generating…'}
             </span>
             <div className="h-1 w-full max-w-48 overflow-hidden rounded bg-raised">
               <div
@@ -227,7 +227,7 @@ function GenerationCard({
             </div>
             <span className="text-[11px]">
               {formatSeconds(g.executionDuration)}
-              {g.averageExecutionTime ? ` av ~${formatSeconds(g.averageExecutionTime)}` : ''}
+              {g.averageExecutionTime ? ` of ~${formatSeconds(g.averageExecutionTime)}` : ''}
             </span>
           </div>
         )}
@@ -236,12 +236,12 @@ function GenerationCard({
             ref={failureRef}
             className="flex h-full items-center justify-center overflow-y-auto p-4 text-center text-accent"
           >
-            {g.error ?? 'Misslyckades'}
+            {g.error ?? 'Failed'}
           </div>
         )}
         {(g.segmentId || badge || fresh) && (
           <div className="absolute left-2 top-2 flex items-center gap-1">
-            {fresh && <NewChip variant="overlay" title="Klar och inte tittad på än" />}
+            {fresh && <NewChip variant="overlay" title="Done and not watched yet" />}
             {badge && (
               <span
                 title={badge.description}
@@ -257,12 +257,12 @@ function GenerationCard({
                 disabled={!navigate || openingSequence}
                 title={
                   navigate
-                    ? 'Tagning i en sekvens eller storyboard – klicka för att öppna den'
-                    : 'Tagning i en sekvens eller storyboard'
+                    ? 'Take in a sequence or storyboard – click to open it'
+                    : 'Take in a sequence or storyboard'
                 }
                 className="rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-text backdrop-blur transition enabled:hover:bg-black/90 disabled:cursor-default"
               >
-                ▤ {openingSequence ? 'Öppnar…' : 'Tagning'}
+                ▤ {openingSequence ? 'Opening…' : 'Take'}
               </button>
             )}
           </div>
@@ -273,7 +273,7 @@ function GenerationCard({
             <button
               type="button"
               onClick={() => onOpen?.(g)}
-              title={`${reviewCountText(otherReviews)} – öppna för att läsa`}
+              title={`${reviewCountText(otherReviews)} – open to read`}
               className="flex h-[22px] items-center gap-1 rounded bg-black/70 px-1.5 text-[10px] text-text backdrop-blur hover:bg-black/90"
             >
               <ReviewIcon size={11} />
@@ -293,7 +293,7 @@ function GenerationCard({
             <button
               type="button"
               onClick={() => onOpen(g)}
-              title="Visa detaljer"
+              title="Show details"
               className="flex h-[22px] w-[22px] items-center justify-center rounded bg-black/70 text-text opacity-0 backdrop-blur transition hover:bg-black/90 focus-visible:opacity-100 group-hover:opacity-100"
             >
               <ExpandIcon size={11} />
@@ -307,7 +307,7 @@ function GenerationCard({
             type="button"
             data-card-open
             onClick={() => onOpen(g)}
-            title="Visa detaljer"
+            title="Show details"
             className="mb-2 line-clamp-2 w-full text-left outline-none transition hover:text-white focus-visible:underline"
           >
             {title}
@@ -319,7 +319,7 @@ function GenerationCard({
         )}
         <div className="relative flex items-center gap-2 text-[11px] text-muted">
           <span className="truncate" title={own ? undefined : g.model}>
-            {own ? (badge?.kind === 'edited' ? 'Redigerad film' : 'Eget klipp') : (model?.name ?? g.model)}
+            {own ? (badge?.kind === 'edited' ? 'Edited film' : 'Own clip') : (model?.name ?? g.model)}
           </span>
           <span>·</span>
           <span className="shrink-0">{g.params.duration}</span>
@@ -337,7 +337,7 @@ function GenerationCard({
             </>
           )}
           {(g.params.referenceAudios?.length ?? 0) > 0 && (
-            <span className="shrink-0" title="Med ljudreferens">
+            <span className="shrink-0" title="With a sound reference">
               · ♪
             </span>
           )}
@@ -349,7 +349,7 @@ function GenerationCard({
           >
             {confirmingDelete ? (
               <>
-                <span className="whitespace-nowrap">{g.segmentId ? 'Används som tagning – radera?' : 'Radera videon?'}</span>
+                <span className="whitespace-nowrap">{g.segmentId ? 'Used as a take – delete?' : 'Delete the video?'}</span>
                 <button
                   autoFocus
                   onClick={() => {
@@ -358,30 +358,30 @@ function GenerationCard({
                   }}
                   className="rounded bg-accent px-2 py-0.5 font-medium text-white hover:bg-accent-hover"
                 >
-                  Radera
+                  Delete
                 </button>
                 <button onClick={() => setConfirmingDelete(false)} className={action}>
-                  Avbryt
+                  Cancel
                 </button>
               </>
             ) : (
               <>
                 {canUseAgain(g) && (
                   <button onClick={() => onReuse(g)} className={action}>
-                    Använd igen
+                    Use again
                   </button>
                 )}
                 {editable && (
                   <button
                     onClick={() => {
-                      // Taking a clip into Redigera is choosing it on purpose.
+                      // Taking a clip into the Editor is choosing it on purpose.
                       markSeen([key])
                       navigate?.('editor', { type: 'open-editor', generationId: g.id })
                     }}
-                    title="Ändra klippet med AI i Redigera (originalet lämnas orört)"
+                    title="Change the clip with AI in the Editor (the original is left untouched)"
                     className={action}
                   >
-                    Redigera…
+                    Edit…
                   </button>
                 )}
                 {g.status !== 'failed' && (
@@ -390,12 +390,12 @@ function GenerationCard({
                     onClick={() => setPickerOpen((o) => !o)}
                     className={`${action} ${pickerOpen ? 'bg-raised text-text' : ''}`}
                   >
-                    Lägg i sekvens
+                    Add to sequence
                   </button>
                 )}
                 {g.filePath && (
                   <button onClick={() => window.studio.revealFile(g.filePath!)} className={action}>
-                    Visa fil
+                    Show file
                   </button>
                 )}
                 {!pending && (
@@ -404,10 +404,10 @@ function GenerationCard({
                       setPickerOpen(false)
                       setConfirmingDelete(true)
                     }}
-                    title="Flyttar videon till papperskorgen"
+                    title="Moves the video to the Trash"
                     className="rounded px-1.5 py-0.5 hover:bg-raised hover:text-accent"
                   >
-                    Radera
+                    Delete
                   </button>
                 )}
               </>
@@ -419,21 +419,21 @@ function GenerationCard({
           <div className="mt-2 flex items-center gap-2 rounded-md bg-raised px-2.5 py-1.5 text-[11px]">
             <span className="text-emerald-400">✓</span>
             <span className="min-w-0 flex-1 truncate">
-              Klipp {added.clipNumber} i ”{added.name}”
+              Clip {added.clipNumber} in “{added.name}”
             </span>
             {navigate && (
               <button onClick={() => openSequence(added.sequenceId)} className="shrink-0 font-medium text-accent hover:underline">
-                Öppna
+                Open
               </button>
             )}
-            <button onClick={() => setAdded(undefined)} className="shrink-0 text-muted hover:text-text" title="Stäng">
+            <button onClick={() => setAdded(undefined)} className="shrink-0 text-muted hover:text-text" title="Close">
               ✕
             </button>
           </div>
         )}
       </div>
 
-      <Popover anchorRef={sequenceButton} open={pickerOpen} onClose={closePicker} align="end" width={300} label="Lägg i sekvens">
+      <Popover anchorRef={sequenceButton} open={pickerOpen} onClose={closePicker} align="end" width={300} label="Add to sequence">
         <SequencePicker generation={g} onAdded={onAdded} />
       </Popover>
     </div>

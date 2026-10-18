@@ -7,14 +7,14 @@ import { formatClock, markedIn, markedOut, versionName } from './editorUtils'
 import { CompareIcon, FrameBackIcon, FrameForwardIcon, LoopIcon, RedoIcon, UndoIcon } from './icons'
 import { usePlayhead, usePlayerState, type PlayerController } from './playerController'
 
-// The big player: the current version, or the version it is compared with (Jämför ⇄) at the same playhead.
+// The big player: the current version, or the version it is compared with (Compare ⇄) at the same playhead.
 // Transport, marking in and out, looping the marked range, and undo/redo between versions.
 
 const EVENTS = ['play', 'playing', 'pause', 'ended', 'timeupdate', 'seeked', 'loadedmetadata'] as const
 
 interface Props {
   current: EditVersion
-  /** The version Jämför shows (the current one's parent, or one picked under Versioner). */
+  /** The version Compare shows (the current one's parent, or one picked under Versions). */
   other?: EditVersion
   comparing: boolean
   onCompare: () => void
@@ -46,53 +46,53 @@ export default function Player({ current, other, comparing, onCompare, canUndo, 
         ))}
         {comparing && other && (
           <span className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/70 px-2 py-1 text-[12px] text-white">
-            Visar {versionName(other)}
+            Showing {versionName(other)}
           </span>
         )}
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line px-3 py-2">
         <div className="flex items-center gap-0.5">
-          <IconButton title="Till början" onClick={() => player.seek(selection?.start ?? 0)}>
+          <IconButton title="To the start" onClick={() => player.seek(selection?.start ?? 0)}>
             <PrevIcon size={12} />
           </IconButton>
-          <IconButton title="En bildruta bakåt (←, ⇧← en sekund)" onClick={() => player.stepFrames(-1)}>
+          <IconButton title="One frame back (←, ⇧← one second)" onClick={() => player.stepFrames(-1)}>
             <FrameBackIcon size={13} />
           </IconButton>
           <button
             type="button"
             onClick={() => player.toggle()}
-            title={state.playing ? 'Pausa (mellanslag, K)' : 'Spela (mellanslag, L)'}
-            aria-label={state.playing ? 'Pausa' : 'Spela'}
+            title={state.playing ? 'Pause (space, K)' : 'Play (space, L)'}
+            aria-label={state.playing ? 'Pause' : 'Play'}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-raised text-text transition hover:bg-line"
           >
             {state.playing ? <PauseIcon size={12} /> : <PlayIcon size={12} className="translate-x-px" />}
           </button>
-          <IconButton title="En bildruta framåt (→, ⇧→ en sekund)" onClick={() => player.stepFrames(1)}>
+          <IconButton title="One frame forward (→, ⇧→ one second)" onClick={() => player.stepFrames(1)}>
             <FrameForwardIcon size={13} />
           </IconButton>
-          <IconButton title="Till slutet" onClick={() => player.seek(selection?.end ?? duration)}>
+          <IconButton title="To the end" onClick={() => player.seek(selection?.end ?? duration)}>
             <NextIcon size={12} />
           </IconButton>
         </div>
         <Clock player={player} duration={duration} rate={state.playing && state.rate !== 1 ? state.rate * state.direction : undefined} />
 
-        {/* Wraps in a narrow window, where the player column beside Redigera's list is only a few hundred px. */}
+        {/* Wraps in a narrow window, where the player column beside the Editor's list is only a few hundred px. */}
         <div className="flex flex-wrap items-center gap-1">
-          <TextButton title="Markera in vid spelhuvudet (I)" onClick={markIn}>
-            Markera in
+          <TextButton title="Mark in at the playhead (I)" onClick={markIn}>
+            Mark in
           </TextButton>
-          <TextButton title="Markera ut vid spelhuvudet (O)" onClick={markOut}>
-            Markera ut
+          <TextButton title="Mark out at the playhead (O)" onClick={markOut}>
+            Mark out
           </TextButton>
           <TextButton
-            title={selection ? 'Spelar markeringen om och om igen' : 'Markera ett avsnitt först'}
+            title={selection ? 'Plays the selection over and over' : 'Mark a section first'}
             onClick={() => player.loopRange(state.looping ? undefined : selection)}
             disabled={!selection}
             active={state.looping}
           >
             <LoopIcon size={12} />
-            Spela markeringen
+            Play selection
           </TextButton>
         </div>
 
@@ -101,21 +101,21 @@ export default function Player({ current, other, comparing, onCompare, canUndo, 
             title={
               other
                 ? comparing
-                  ? `Tillbaka till ${versionName(current)}`
-                  : `Visa ${versionName(other)} vid samma ställe`
-                : 'Det finns ingen annan version att jämföra med än'
+                  ? `Back to ${versionName(current)}`
+                  : `Show ${versionName(other)} at the same spot`
+                : 'There’s no other version to compare with yet'
             }
             onClick={onCompare}
             disabled={!other}
             active={comparing}
           >
             <CompareIcon size={12} />
-            {other ? `Jämför${comparing ? '' : ` med v${other.number}`}` : 'Jämför'}
+            {other ? `Compare${comparing ? '' : ` with v${other.number}`}` : 'Compare'}
           </TextButton>
-          <IconButton title="Ångra – gå tillbaka till versionen före (⌘Z)" onClick={onUndo} disabled={!canUndo}>
+          <IconButton title="Undo – go back to the version before (⌘Z)" onClick={onUndo} disabled={!canUndo}>
             <UndoIcon size={13} />
           </IconButton>
-          <IconButton title="Gör om – gå till den nyaste versionen efter (⌘⇧Z)" onClick={onRedo} disabled={!canRedo}>
+          <IconButton title="Redo – go to the newest version after (⌘⇧Z)" onClick={onRedo} disabled={!canRedo}>
             <RedoIcon size={13} />
           </IconButton>
         </div>
@@ -146,7 +146,7 @@ function VideoOf({ version, player, visible }: { version: EditVersion; player: P
 
   if (!path || version.generation.fileMissing) {
     return visible ? (
-      <p className="px-6 text-center text-muted">Filmfilen för {versionName(version)} saknas (flyttad eller raderad i Finder).</p>
+      <p className="px-6 text-center text-muted">The film file for {versionName(version)} is missing (moved or deleted in Finder).</p>
     ) : null
   }
   return (

@@ -1,17 +1,17 @@
-// "Pågår och klart": what Studio is doing right now and what finished that the user hasn't looked at yet, wherever it
+// Activity: what Studio is doing right now and what finished that the user hasn't looked at yet, wherever it
 // was started. One summary (WorkSummary) is built here from two halves and pushed whole to the windows as
 // `work:change`:
 // - running: videos at Venice (pending generations rows) and what only lives in the services' memory, read through
-//   their small registries: takes and form generations on their way to Venice, "Generera saknade" runs, pictures
-//   being made, Redigera's paid jobs and free renders, exports, imports of own clips, approved agent requests being
+//   their small registries: takes and form generations on their way to Venice, "Generate missing" runs, pictures
+//   being made, the Editor's paid jobs and free renders, exports, imports of own clips, approved agent requests being
 //   carried out and agents' uploads;
 // - finished but not seen: the library's `unseen` table. A row is added where work finishes (a video settling, a
 //   still saved, an export placed, a paid version or a designed voice written, a paid job or a picture, export or run
 //   failing) and leaves only through the user's work:markSeen / work:markAllSeen, or with the item itself (its foreign
 //   key cascades; an error-only row goes with its owner, see dropOrphans).
 // Every item counts under one sidebar view and its owner (a sequence, storyboard, edit or asset) and clip, so the
-// sidebar, the lists and the cards read their counts from the same summary. What Generera made counts there while it
-// is in its list (this session, shared/session.ts) and under the Mediabank after that, as does a picture of no
+// sidebar, the lists and the cards read their counts from the same summary. What Generate made counts there while it
+// is in its list (this session, shared/session.ts) and under Media after that, as does a picture of no
 // sequence or storyboard. Agents may read it (get_work_status) but never mark anything seen. Building the summary
 // (buildWorkSummary) is pure, so it is tested on its own.
 
@@ -52,7 +52,7 @@ import { typicalStillMs, type StillWork } from './stills'
 import type { StoryboardService } from './storyboards'
 
 /** Said when an agent's call reaches what only the user may do (marking things seen). */
-const USER_ONLY = 'Det här kan bara du göra i Studio.'
+const USER_ONLY = 'Only you can do this in Studio.'
 
 /** A structural change is pushed this long after the last one in a burst ("trailing")… */
 const STRUCTURE_DEBOUNCE_MS = 120
@@ -60,7 +60,7 @@ const STRUCTURE_DEBOUNCE_MS = 120
 const STRUCTURE_MAX_WAIT_MS = 500
 /** Progress alone (a percentage, a poll's timings) is pushed at most this often. */
 const PROGRESS_INTERVAL_MS = 1000
-/** How long "Markera alla som sedda" can be undone. */
+/** How long "Mark all as seen" can be undone. */
 const UNDO_MS = 10_000
 /**
  * The summary lists at most this many finished items (the newest) in full; its counts are always exact, and the rest
@@ -151,8 +151,8 @@ export interface Registries {
   posters: Record<string, string | undefined>
   names: WorkNames
   /**
-   * This session (main/session.ts): what Generera made before it, and didn't settle in it, has left Generera's list
-   * and counts under the Mediabank.
+   * This session (main/session.ts): what Generate made before it, and didn't settle in it, has left Generate's list
+   * and counts under Media.
    */
   session: GenerateSession
 }
@@ -161,9 +161,9 @@ export interface Registries {
 
 const percent = (fraction: number): number => Math.round(Math.min(1, Math.max(0, fraction)) * 100)
 
-/** "”A woman walks along the pier…”": a generation's name in a label. */
+/** "“A woman walks along the pier…”": a generation's name in a label. */
 function quoted(text: string): string {
-  return `”${text}”`
+  return `“${text}”`
 }
 
 /** The sidebar view of an asset kind (the renderer's View ids). */
@@ -190,7 +190,7 @@ interface Place {
   target: WorkTarget
 }
 
-/** A clip of a sequence or a transition of a storyboard, with "Klipp 3 i ”Sommar”" / "Övergång 2 i ”Resa”". */
+/** A clip of a sequence or a transition of a storyboard, with "Clip 3 in “Sommar”" / "Transition 2 in “Resa”". */
 function segmentPlace(
   names: WorkNames,
   segmentId: string,
@@ -205,7 +205,7 @@ function segmentPlace(
       view: 'storyboards',
       ownerId: segment.sequenceId,
       segmentId,
-      label: `Övergång ${number} i ”${sequence.name}”`,
+      label: `Transition ${number} in “${sequence.name}”`,
       target: { view: 'storyboards', storyboardId: segment.sequenceId, transitionId: segmentId, ...extra }
     }
   }
@@ -213,7 +213,7 @@ function segmentPlace(
     view: 'sequences',
     ownerId: segment.sequenceId,
     segmentId,
-    label: `Klipp ${number} i ”${sequence.name}”`,
+    label: `Clip ${number} in “${sequence.name}”`,
     target: { view: 'sequences', sequenceId: segment.sequenceId, segmentId, ...extra }
   }
 }
@@ -232,8 +232,8 @@ function sequencePlace(names: WorkNames, sequenceId: string | undefined, extra: 
 }
 
 /**
- * A picture's place and label: "Bild till ruta 3 i ”Resa”", "Bild till klipp 2 i ”Sommar”", "Bild i ”…”", or "Bild" in
- * the Mediabank.
+ * A picture's place and label: "Image for board 3 in “Resa”", "Image for clip 2 in “Sommar”", "Image in “…”", or "Image"
+ * in Media.
  */
 function stillPlace(
   names: WorkNames,
@@ -246,7 +246,7 @@ function stillPlace(
     return {
       view: 'storyboards',
       ownerId: board.storyboardId,
-      label: `Bild till ruta ${board.position + 1} i ”${boardOwner.name}”`,
+      label: `Image for board ${board.position + 1} in “${boardOwner.name}”`,
       target: { view: 'storyboards', storyboardId: board.storyboardId, boardId: where.boardId, ...extra }
     }
   }
@@ -258,7 +258,7 @@ function stillPlace(
       view: storyboard ? 'storyboards' : 'sequences',
       ownerId: clip.sequenceId,
       segmentId: where.segmentId,
-      label: `Bild till ${storyboard ? 'övergång' : 'klipp'} ${clip.position + 1} i ”${clipOwner.name}”`,
+      label: `Image for ${storyboard ? 'transition' : 'clip'} ${clip.position + 1} in “${clipOwner.name}”`,
       target: storyboard
         ? { view: 'storyboards', storyboardId: clip.sequenceId, transitionId: where.segmentId, ...extra }
         : { view: 'sequences', sequenceId: clip.sequenceId, segmentId: where.segmentId, ...extra }
@@ -266,16 +266,16 @@ function stillPlace(
   }
   const sequence = where.sequenceId ? names.sequences[where.sequenceId] : undefined
   if (where.sequenceId && sequence) {
-    return { ...sequencePlace(names, where.sequenceId, extra), label: `Bild i ”${sequence.name}”` }
+    return { ...sequencePlace(names, where.sequenceId, extra), label: `Image in “${sequence.name}”` }
   }
-  // A loose picture: the Mediabank's Bilder.
-  return { view: 'media', label: 'Bild', target: { view: 'media', ...extra } }
+  // A loose picture: Media's Images.
+  return { view: 'media', label: 'Image', target: { view: 'media', ...extra } }
 }
 
-/** An edit's name in a label ("”Intervju”"), or a stand-in when it is gone. */
+/** An edit's name in a label ("“Intervju”"), or a stand-in when it is gone. */
 function editName(names: WorkNames, editId: string | undefined): string {
   const edit = editId ? names.edits[editId] : undefined
-  return edit ? quoted(edit.name) : 'Redigeringen'
+  return edit ? quoted(edit.name) : 'The edit'
 }
 
 /** The time an ffmpeg job has left, once it is far enough in to tell (elapsed × (1 − f) / f). */
@@ -285,7 +285,7 @@ function ffmpegRemaining(startedAt: number, fraction: number | undefined, now: n
   return Math.max(0, Math.round((elapsed * (1 - fraction)) / fraction))
 }
 
-/** "Del 2 av 3" from "del 2 av 3": a phase starts with a capital letter. */
+/** "Part 2 of 3" from "part 2 of 3": a phase starts with a capital letter. */
 function capitalized(text: string): string {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : text
 }
@@ -298,20 +298,20 @@ function videoProgress(
 ): Pick<RunningWork, 'detail' | 'progress' | 'remainingMs' | 'typicalMs' | 'measuredAt'> {
   const typicalMs = reg.typicalVideo[g.model]
   const measuredAt = reg.measuredAt[g.id] ?? now
-  if (g.status === 'queued') return { detail: 'I kö hos Venice', measuredAt, ...(typicalMs ? { typicalMs } : {}) }
+  if (g.status === 'queued') return { detail: 'Queued at Venice', measuredAt, ...(typicalMs ? { typicalMs } : {}) }
   const avg = g.averageExecutionTime
   const exec = g.executionDuration
   if (avg && avg > 0 && typeof exec === 'number' && exec >= 0) {
     const progress = Math.min(0.97, exec / avg)
     return {
-      detail: exec >= avg ? 'Snart klar' : `Genererar ${percent(progress)} %`,
+      detail: exec >= avg ? 'Almost done' : `Generating ${percent(progress)}%`,
       progress,
       remainingMs: Math.max(0, Math.round(avg - exec)),
       measuredAt,
       ...(typicalMs ? { typicalMs } : {})
     }
   }
-  return { detail: 'Genererar', measuredAt, ...(typicalMs ? { typicalMs } : {}) }
+  return { detail: 'Generating', measuredAt, ...(typicalMs ? { typicalMs } : {}) }
 }
 
 /** What a running video has left from `now`: Venice's own estimate, else the typical time less what has passed. */
@@ -374,7 +374,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
   const jobTakes = new Map(reg.editJobs.filter((j) => j.takeId).map((j) => [j.takeId!, j]))
   const pendingById = new Map(pending.map((g) => [g.id, g]))
 
-  // Videos at Venice. One made in Generera stays in its list while it is being made (shared/session.ts).
+  // Videos at Venice. One made in Generate stays in its list while it is being made (shared/session.ts).
   for (const g of pending) {
     if (jobTakes.has(g.id)) continue
     const progress = videoProgress(g, reg, now)
@@ -395,7 +395,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
         ...base,
         view: 'editor',
         ownerId: g.editId,
-        label: `${editName(names, g.editId)} – tagning`,
+        label: `${editName(names, g.editId)} – take`,
         target: { view: 'editor', editId: g.editId, generationId: g.id }
       })
     } else {
@@ -420,7 +420,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       kind: 'sending',
       ...where,
       label,
-      detail: 'Skickas till Venice',
+      detail: 'Sending to Venice',
       startedAt: s.startedAt,
       measuredAt: now
     })
@@ -432,7 +432,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
     const common = {
       key: `send:${s.token}`,
       kind: 'sending' as const,
-      detail: 'Skickas till Venice',
+      detail: 'Sending to Venice',
       startedAt: s.startedAt,
       measuredAt: now,
       ...(typicalMs ? { typicalMs } : {})
@@ -450,7 +450,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
     }
   }
 
-  // "Generera saknade".
+  // "Generate missing".
   for (const run of reg.sequenceRuns) {
     const sequence = names.sequences[run.sequenceId]
     if (!sequence) continue
@@ -468,8 +468,8 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       key: `run:${run.sequenceId}`,
       kind: 'run',
       ...sequencePlace(names, run.sequenceId),
-      label: `Generera saknade i ”${sequence.name}”`,
-      detail: `Klipp ${current} av ${total}`,
+      label: `Generate missing in “${sequence.name}”`,
+      detail: `Clip ${current} of ${total}`,
       startedAt: run.startedAt,
       progress: run.done / total,
       ...(remainingMs !== undefined ? { remainingMs } : {}),
@@ -484,8 +484,8 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       key: `run:${run.storyboardId}`,
       kind: 'run',
       ...sequencePlace(names, run.storyboardId),
-      label: `Generera saknade i ”${storyboard.name}”`,
-      detail: `Övergång ${Math.min(run.sent + 1, total)} av ${total}`,
+      label: `Generate missing in “${storyboard.name}”`,
+      detail: `Transition ${Math.min(run.sent + 1, total)} of ${total}`,
       startedAt: run.startedAt,
       progress: run.sent / total,
       measuredAt: now
@@ -501,14 +501,14 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       kind: 'still',
       ...where,
       label,
-      detail: 'Skapar bilden…',
+      detail: 'Creating the image…',
       startedAt: s.startedAt,
       measuredAt: now,
       ...(typicalMs ? { typicalMs } : {})
     })
   }
 
-  // Redigera: paid jobs (and designed voices), free renders.
+  // The Editor: paid jobs (and designed voices), free renders.
   for (const job of reg.editJobs) {
     const take = job.takeId ? pendingById.get(job.takeId) : undefined
     if (!job.editId && job.assetId) {
@@ -519,8 +519,8 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
         kind: 'voice-design',
         view,
         ownerId: job.assetId,
-        label: asset ? `Ny röst till ”${asset.name}”` : 'Ny röst',
-        detail: 'Skapar rösten…',
+        label: asset ? `New voice for “${asset.name}”` : 'New voice',
+        detail: 'Creating the voice…',
         startedAt: job.startedAt,
         measuredAt: now,
         target: { view, assetId: job.assetId, jobId: job.jobId }
@@ -531,7 +531,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
     const progress = fromTake?.progress ?? job.fraction
     const detail =
       fromTake?.detail ??
-      (job.currentStep ? capitalized(job.currentStep) : progress !== undefined ? `${percent(progress)} %` : undefined)
+      (job.currentStep ? capitalized(job.currentStep) : progress !== undefined ? `${percent(progress)}%` : undefined)
     const poster = job.baseId ? reg.posters[job.baseId] : undefined
     items.push({
       key: workKey.job(job.jobId),
@@ -558,7 +558,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       view: 'editor',
       ownerId: r.editId,
       label: `${editName(names, r.editId)} – ${r.label}`,
-      detail: r.fraction > 0 ? `Skapar versionen ${percent(r.fraction)} %` : 'Skapar versionen…',
+      detail: r.fraction > 0 ? `Creating the version ${percent(r.fraction)}%` : 'Creating the version…',
       startedAt: r.startedAt,
       progress: r.fraction,
       ...(remainingMs !== undefined ? { remainingMs } : {}),
@@ -576,8 +576,8 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       key: `export:${e.sequenceId}`,
       kind: 'export',
       ...sequencePlace(names, e.sequenceId),
-      label: `Export av ”${sequence.name}”`,
-      detail: `Exporterar ${percent(e.progress)} %`,
+      label: `Export of “${sequence.name}”`,
+      detail: `Exporting ${percent(e.progress)}%`,
       startedAt: e.startedAt,
       progress: e.progress,
       ...(remainingMs !== undefined ? { remainingMs } : {}),
@@ -588,7 +588,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
   // Own clips being imported.
   for (const f of reg.imports) {
     const t = f.target
-    // Into a clip, as new clips of a sequence, or into the clip feed (Generera).
+    // Into a clip, as new clips of a sequence, or into the clip feed (Generate).
     const where: Place = (t.kind === 'segment' ? segmentPlace(names, t.segmentId) : undefined) ??
       (t.kind === 'sequence' && names.sequences[t.sequenceId] ? sequencePlace(names, t.sequenceId) : undefined) ?? {
         view: 'generate',
@@ -602,7 +602,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       ...(where.ownerId ? { ownerId: where.ownerId } : {}),
       ...(where.segmentId ? { segmentId: where.segmentId } : {}),
       label: f.name,
-      detail: `Importerar ${percent(f.fraction)} %`,
+      detail: `Importing ${percent(f.fraction)}%`,
       startedAt: f.startedAt,
       progress: f.fraction,
       ...(remainingMs !== undefined ? { remainingMs } : {}),
@@ -616,18 +616,18 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
     const fraction = u.bytes ? Math.min(1, u.received / u.bytes) : undefined
     const detail =
       u.status === 'checking'
-        ? 'Kontrollerar…'
+        ? 'Checking…'
         : u.status === 'downloading'
           ? fraction !== undefined
-            ? `Hämtar ${percent(fraction)} %`
-            : 'Hämtar…'
+            ? `Downloading ${percent(fraction)}%`
+            : 'Downloading…'
           : fraction !== undefined
-            ? `${percent(fraction)} %`
-            : 'Tar emot…'
+            ? `${percent(fraction)}%`
+            : 'Receiving…'
     items.push({
       key: `upload:${u.id}`,
       kind: 'upload',
-      label: `${agentDisplayName(u.client)} laddar upp ${u.fileName}`,
+      label: `${agentDisplayName(u.client)} is uploading ${u.fileName}`,
       detail,
       startedAt: u.startedAt,
       ...(fraction !== undefined && u.status !== 'checking' ? { progress: fraction } : {}),
@@ -636,7 +636,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
     })
   }
 
-  // What an approved request started (its videos, its Redigera job) carries the agent's name while it runs.
+  // What an approved request started (its videos, its Editor job) carries the agent's name while it runs.
   const via = viaByKey(reg)
   for (const item of items) {
     const agent = via.get(item.key)
@@ -658,7 +658,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       ...(view ? { view } : {}),
       ...(view && a.sequenceId && names.sequences[a.sequenceId] ? { ownerId: a.sequenceId } : {}),
       label: `${agentDisplayName(a.client)}: ${a.summary}`,
-      detail: 'Genomförs…',
+      detail: 'In progress…',
       startedAt: a.startedAt,
       measuredAt: now,
       via: a.client,
@@ -666,7 +666,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
     })
   }
 
-  // Videos and runs of a sequence an approved "Generera saknade" started carry the agent's name too.
+  // Videos and runs of a sequence an approved "Generate missing" started carry the agent's name too.
   for (const run of [...reg.sequenceRuns, ...reg.storyboardRuns]) {
     if (!run.approved) continue
     const sequenceId = 'sequenceId' in run ? run.sequenceId : run.storyboardId
@@ -716,7 +716,7 @@ function finishedItem(row: UnseenJoinedRow, names: WorkNames, session: GenerateS
       status: failed ? ('failed' as const) : ('completed' as const),
       finishedAt,
       generationId: g.id,
-      ...(failed ? { error: g.error || 'Genereringen misslyckades.' } : {}),
+      ...(failed ? { error: g.error || 'The generation failed.' } : {}),
       ...(!failed && g.filePath ? { mediaPath: g.filePath } : {}),
       ...(g.thumbPath ? { thumbPath: g.thumbPath } : {})
     }
@@ -743,11 +743,11 @@ function finishedItem(row: UnseenJoinedRow, names: WorkNames, session: GenerateS
         kind: 'video',
         view: 'editor',
         ownerId: g.editId,
-        label: `${editName(names, g.editId)} – tagning`,
+        label: `${editName(names, g.editId)} – take`,
         target: { view: 'editor', editId: g.editId, generationId: g.id }
       }
     }
-    // Generera's while it is in its list (this session); after that, and whatever else is left, the Mediabank's Videor.
+    // Generate's while it is in its list (this session); after that, and whatever else is left, Media's Videos.
     const view = inGenerateSession(g, session) ? 'generate' : 'media'
     return {
       ...common,
@@ -792,7 +792,7 @@ function finishedItem(row: UnseenJoinedRow, names: WorkNames, session: GenerateS
       kind: 'export',
       status: 'completed',
       ...sequencePlace(names, x.sequenceId, { exportId: x.id }),
-      label: `Export av ”${name}”`,
+      label: `Export of “${name}”`,
       finishedAt,
       mediaPath: x.path,
       exportId: x.id
@@ -809,7 +809,7 @@ function finishedItem(row: UnseenJoinedRow, names: WorkNames, session: GenerateS
       status: 'completed',
       view,
       ownerId: a.assetId,
-      label: asset ? `Ny röst till ”${asset.name}”` : 'Ny röst',
+      label: asset ? `New voice for “${asset.name}”` : 'New voice',
       finishedAt,
       mediaPath: a.path,
       audioId: a.id,
@@ -824,7 +824,7 @@ function finishedItem(row: UnseenJoinedRow, names: WorkNames, session: GenerateS
       key: workKey.job(j.id),
       kind: 'job' as const,
       status: 'failed' as const,
-      error: j.error || 'Jobbet misslyckades.',
+      error: j.error || 'The job failed.',
       finishedAt,
       jobId: j.id
     }
@@ -837,7 +837,7 @@ function finishedItem(row: UnseenJoinedRow, names: WorkNames, session: GenerateS
         ...common,
         view,
         ownerId: j.assetId,
-        label: asset ? `Ny röst till ”${asset.name}”` : 'Ny röst',
+        label: asset ? `New voice for “${asset.name}”` : 'New voice',
         target: { view, assetId: j.assetId, jobId: j.id }
       }
     }
@@ -902,7 +902,7 @@ const emptyCounts = (): WorkCounts => ({ running: 0, unseen: 0, failed: 0 })
 
 /**
  * The summary, from the joined unseen rows, the pending generations and the registries (pure). Each item counts once:
- * under its view, its owner and its clip. A "Generera saknade" run is an umbrella over the takes it sends: it counts
+ * under its view, its owner and its clip. A "Generate missing" run is an umbrella over the takes it sends: it counts
  * only while none of them shows (between two clips, say), so a run of one clip at Venice reads "1", not "2".
  */
 export function buildWorkSummary(
@@ -1081,7 +1081,7 @@ function readUnseen(): UnseenJoinedRow[] {
         ...(r.j_asset_id ? { assetId: r.j_asset_id } : {}),
         status: r.j_status,
         ...(r.j_error ? { error: r.j_error } : {}),
-        label: typeof request.label === 'string' && request.label ? request.label : (r.j_op ?? 'Jobb')
+        label: typeof request.label === 'string' && request.label ? request.label : (r.j_op ?? 'Job')
       }
     }
     return out
@@ -1128,7 +1128,7 @@ function readNames(): WorkNames {
 
 /**
  * Upkeep before reading: an error-only row whose owner (sequence, storyboard, asset, edit) was deleted has no foreign
- * key to go with it, so it goes here; and a failed job that is running again ("Fortsätt") or done is no failure any
+ * key to go with it, so it goes here; and a failed job that is running again ("Continue") or done is no failure any
  * more.
  */
 function dropOrphans(): void {
@@ -1204,7 +1204,7 @@ function safely<T>(what: string, read: () => T, fallback: T): T {
   }
 }
 
-/** The rows a "Markera alla som sedda" removed, kept for its Ångra. */
+/** The rows a "Mark all as seen" removed, kept for its Undo. */
 interface UndoEntry {
   rows: Record<string, unknown>[]
   timer: NodeJS.Timeout
@@ -1246,7 +1246,7 @@ export class WorkStatus {
   private registries(pending: readonly PendingRow[]): Registries {
     const sequences = safely('the sequences', () => this.src.sequences()?.activeWork(), undefined)
     const storyboardRuns = safely('the storyboards', () => this.src.storyboards()?.activeRuns() ?? [], [])
-    const edits = safely('Redigera', () => this.src.edits()?.activeWork(), undefined)
+    const edits = safely('the Editor', () => this.src.edits()?.activeWork(), undefined)
     const stills = safely('the pictures', () => this.src.stills(), [])
     const approvals = safely('the agent requests', () => this.src.approvals(), { executing: [], decided: [] })
     const sending = safely('the submits', () => this.src.jobs.sending(), [])
@@ -1385,8 +1385,8 @@ export class WorkStatus {
   }
 
   /**
-   * "Markera alla som sedda": every finished item (or those of one view or one owner – a sequence, storyboard, edit or
-   * asset, or a clip) is marked seen. The rows are kept for ten seconds, so Ångra can bring them back.
+   * "Mark all as seen": every finished item (or those of one view or one owner – a sequence, storyboard, edit or
+   * asset, or a clip) is marked seen. The rows are kept for ten seconds, so Undo can bring them back.
    */
   markAllSeen(scope?: SeenScope): { count: number; undoToken?: string } {
     if (!db.isDbOpen()) return { count: 0 }
@@ -1424,7 +1424,7 @@ export class WorkStatus {
     return { count: rows.length, undoToken }
   }
 
-  /** Ångra after "Markera alla som sedda": the rows come back where their item still exists. Returns how many. */
+  /** Undo after "Mark all as seen": the rows come back where their item still exists. Returns how many. */
   undo(token: unknown): number {
     if (typeof token !== 'string') return 0
     const entry = this.undoable.get(token)

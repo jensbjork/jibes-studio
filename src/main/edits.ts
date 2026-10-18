@@ -1,6 +1,6 @@
-// Redigera: one finished film changed into versions. An edit starts from any finished generation (a feed clip, a
+// The Editor: one finished film changed into versions. An edit starts from any finished generation (a feed clip, a
 // take, the user's own film) used where it is, or from an exported film cloned into the edit's folder; every change
-// is a new version (a completed generations row with source 'edit') in Redigeringar/<namn>/, so the original is
+// is a new version (a completed generations row with source 'edit') in Redigeringar/<name>/, so the original is
 // never touched. This module owns the edits:*, audio:* and voices:* IPC; the operations themselves (plans, renders,
 // paid jobs) are in edit-ops.ts, persistence in edit-store.ts, the layered sound in edit-mix.ts.
 
@@ -58,11 +58,13 @@ import type { SequenceService } from './sequences'
 import { assertAgentFiles } from './upload-paths'
 import { separationStatus } from './voice-separation'
 
-export const USER_ONLY = 'Det här kan bara du göra i Studio.'
-const UNNAMED = 'Namnlös redigering'
+export const USER_ONLY = 'Only you can do this in Studio.'
+const UNNAMED = 'Untitled edit'
+/** The folder-name fallback for a name that leaves nothing: it names folders on disk, so it stays as it was. */
+const UNNAMED_FOLDER = 'Namnlös redigering'
 /** The timeline cache (.studio/tidslinje): filmstrips and waveforms beyond this go, least recently used first. */
 const TIMELINE_CACHE_BYTES = 512 * 1024 ** 2
-const MONTHS = ['jan', 'feb', 'mars', 'apr', 'maj', 'juni', 'juli', 'aug', 'sep', 'okt', 'nov', 'dec']
+const SHORT_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
 
 export interface EditDeps extends OpsDeps {
   sequences: SequenceService
@@ -80,15 +82,15 @@ export interface EditDeps extends OpsDeps {
 
 export interface EditServiceHandle {
   isBusy(): string | undefined
-  /** Whether Redigera keeps the generation (a version, an export copy, an edit's original): see EditService.keeps. */
+  /** Whether the Editor keeps the generation (a version, an export copy, an edit's original): see EditService.keeps. */
   keeps(id: string): boolean
   /**
-   * Called right before generations:delete removes a generation: throws (Swedish) when Redigera's rules keep it (a
-   * running operation's base or a stopped, partly paid one's, an edit's original, a version Redigera wouldn't delete),
+   * Called right before generations:delete removes a generation: throws when the Editor's rules keep it (a
+   * running operation's base or a stopped, partly paid one's, an edit's original, a version the Editor wouldn't delete),
    * else hands on its transcript.
    */
   beforeGenerationDelete(id: string): void
-  /** Why Redigera's rules keep the generation from being deleted (Swedish), or null: the check alone, no changes. */
+  /** Why the Editor's rules keep the generation from being deleted, or null: the check alone, no changes. */
   deleteRefusal(id: string): string | null
   /** Running paid jobs and free renders, for the status summary (work.ts). */
   activeWork(): EditActiveWork
@@ -112,10 +114,9 @@ function cleanName(value: unknown): string {
   return typeof value === 'string' ? value.replace(/\s+/gu, ' ').trim().slice(0, 120) : ''
 }
 
-/** "7 okt" (local time). */
+/** "7 Oct" (local time). */
 function shortDate(ms: number): string {
-  const d = new Date(ms)
-  return `${d.getDate()} ${MONTHS[d.getMonth()]}`
+  return SHORT_DATE.format(new Date(ms))
 }
 
 /** A row as the window gets it, flagged when its finished video is gone (moved or deleted in Finder). */
@@ -150,7 +151,7 @@ class EditService {
   }
 
   isBusy(): string | undefined {
-    if (this.fileTasks || this.timelineWork) return 'Det pågår en redigering. Vänta tills den är klar och försök igen.'
+    if (this.fileTasks || this.timelineWork) return 'An edit is in progress. Wait until it is done and try again.'
     return this.ops.isBusy()
   }
 
@@ -273,7 +274,7 @@ class EditService {
   /** A folder name under Redigeringar/ that no other edit uses, isn't on disk and no row records paths under. */
   private freeFolder(name: string, own?: { id: string; folder: string | null }): string {
     const parent = join(libraryRoot(), FOLDERS.edits)
-    const base = safeName(name, { fallback: UNNAMED })
+    const base = safeName(name, { fallback: UNNAMED_FOLDER })
     const claimed = new Set(
       store
         .editFolders()
@@ -293,15 +294,15 @@ class EditService {
     const { generationId, exportId } = s
     if (typeof generationId === 'string') return this.fileTask(() => this.createFromGeneration(generationId, name))
     if (typeof exportId === 'string') return this.fileTask(() => this.createFromExport(exportId, name))
-    return Promise.reject(new Error('Välj en film att redigera.'))
+    return Promise.reject(new Error('Choose a film to edit.'))
   }
 
   private async createFromGeneration(generationId: string, name: unknown): Promise<Edit> {
     const g = db.getGeneration(store.safeId(generationId))
-    if (!g) throw new Error('Filmen finns inte längre.')
-    if (g.status !== 'completed') throw new Error('Filmen är inte klar än.')
+    if (!g) throw new Error('The film no longer exists.')
+    if (g.status !== 'completed') throw new Error('The film is not finished yet.')
     if (!g.filePath || !existsSync(g.filePath)) {
-      throw new Error('Filmens videofil saknas (flyttad eller raderad i Finder).')
+      throw new Error("The film's video file is missing (moved or deleted in Finder).")
     }
     const title = cleanName(name) || cleanName(generationTitle(g, 60)) || UNNAMED
     const folder = this.freeFolder(title)
@@ -327,9 +328,9 @@ class EditService {
 
   private async createFromExport(exportId: string, name: unknown): Promise<Edit> {
     const row = store.exportRow(store.safeId(exportId))
-    if (!row) throw new Error('Exporten finns inte längre.')
+    if (!row) throw new Error('The export no longer exists.')
     const file = fromStoredPath(row.file_path)
-    if (!existsSync(file)) throw new Error('Exportens fil saknas (flyttad eller raderad i Finder).')
+    if (!existsSync(file)) throw new Error("The export's file is missing (moved or deleted in Finder).")
     const title = cleanName(name) || `${row.sequence_name ?? 'Export'} (export ${shortDate(row.created_at)})`
     const folder = this.freeFolder(title)
     const dir = editDir(folder)
@@ -401,7 +402,7 @@ class EditService {
     return this.fileTask(async () => {
       const edit = store.requireEditRow(id)
       const next = cleanName(name)
-      if (!next) throw new Error('Redigeringen behöver ett namn.')
+      if (!next) throw new Error('The edit needs a name.')
       if (next === edit.name) return this.get(edit.id)
       const versions = store.listVersions(edit).filter((v) => v.source === 'edit' && v.editId === edit.id)
       const retitle = (): void => {
@@ -537,7 +538,7 @@ class EditService {
       const edit = store.getEditRow(store.safeId(id))
       if (!edit) return
       if (store.listJobs(edit.id).some((j) => j.status === 'running')) {
-        throw new Error('En åtgärd pågår i redigeringen. Vänta tills den är klar (eller avbryt den) och försök igen.')
+        throw new Error('An operation is running in the edit. Wait until it is done (or cancel it) and try again.')
       }
       const versions = store.listVersions(edit)
       const own = versions.filter((v) => v.editId === edit.id)
@@ -593,16 +594,16 @@ class EditService {
   // ── Versions ─────────────────────────────────────────────────────────────
 
   private versionOf(versionId: unknown): { edit: store.EditRow; version: db.StoredGeneration } {
-    const g = db.getGeneration(store.safeId(versionId, 'versions-id'))
+    const g = db.getGeneration(store.safeId(versionId, 'version ID'))
     const edit = g ? store.editOfVersion(g) : undefined
-    if (!g || !edit) throw new Error('Versionen finns inte längre.')
+    if (!g || !edit) throw new Error('The version no longer exists.')
     return { edit, version: g }
   }
 
   setCurrent(editId: unknown, versionId: unknown): Edit {
     const edit = store.requireEditRow(editId)
-    const id = store.safeId(versionId, 'versions-id')
-    if (!store.listVersions(edit).some((v) => v.id === id)) throw new Error('Versionen hör inte till redigeringen.')
+    const id = store.safeId(versionId, 'version ID')
+    if (!store.listVersions(edit).some((v) => v.id === id)) throw new Error('The version does not belong to the edit.')
     if (edit.current_generation_id !== id) {
       store.setEditCurrent(edit.id, id)
       this.notify(edit.id)
@@ -630,15 +631,15 @@ class EditService {
     }
   }
 
-  /** Whether Redigera keeps the generation: a version (or export copy) of an edit, or the film an edit started from. */
+  /** Whether the Editor keeps the generation: a version (or export copy) of an edit, or the film an edit started from. */
   keeps(id: string): boolean {
     const g = db.getGeneration(id)
     return !!g && !!store.editOfVersion(g)
   }
 
   /**
-   * Before a generation is deleted outside Redigera (the feed's Radera, a take list's): throws (Swedish) when
-   * Redigera's rules keep it (see deleteRefusal), and otherwise hands its transcript to the versions that inherit it.
+   * Before a generation is deleted outside the Editor (the feed's Delete, a take list's): throws when
+   * the Editor's rules keep it (see deleteRefusal), and otherwise hands its transcript to the versions that inherit it.
    */
   beforeGenerationDelete(id: string): void {
     const refused = this.deleteRefusal(id)
@@ -648,8 +649,8 @@ class EditService {
   }
 
   /**
-   * Why Redigera's rules keep a generation from being deleted outside Redigera (Swedish), or null: a running operation
-   * works on it (or is putting it, a paid take, into a film), an edit started from it, it is a version Redigera itself
+   * Why the Editor's rules keep a generation from being deleted outside the Editor, or null: a running operation
+   * works on it (or is putting it, a paid take, into a film), an edit started from it, it is a version the Editor itself
    * wouldn't delete, or a stopped job that has paid for parts builds on it. Reads only, so an agent's delete request
    * can ask it while planning (edits:deleteRefusal) without anything being handed on.
    */
@@ -657,32 +658,32 @@ class EditService {
     const g = typeof id === 'string' ? db.getGeneration(id) : undefined
     if (!g) return null
     if (store.runningJobsOnBase(id).length) {
-      return 'En pågående åtgärd i Redigera utgår från filmen. Vänta tills den är klar och försök igen.'
+      return 'A running operation in the Editor builds on the film. Wait until it is done and try again.'
     }
     // A paid AI take being put into its edit's film right now.
     if (g.status === 'completed' && store.jobForTake(id)?.status === 'running') {
-      return 'Tagningen sätts in i en redigering just nu. Vänta tills den är klar och försök igen.'
+      return 'The take is being put into an edit right now. Wait until that is done and try again.'
     }
     const startedFrom = store.editsStartedFrom(id)[0]
-    if (startedFrom) return `Filmen är originalet i redigeringen ”${startedFrom.name}”. Radera redigeringen först.`
+    if (startedFrom) return `The film is the original of the edit “${startedFrom.name}”. Delete the edit first.`
     const edit = g.editId && g.source !== 'generated' ? store.getEditRow(g.editId) : undefined
     if (edit) {
       const refused = this.keepReason(edit, g)
       if (refused) return refused
     }
-    // Outside Redigera nothing says so: the version is deleted there, where its confirm names what is lost.
+    // Outside the Editor nothing says so: the version is deleted there, where its confirm names what is lost.
     const paused = this.pausedPaidJob(id)
     if (paused) {
       return (
-        `Ett avbrutet jobb i Redigera (”${paused.label}”) utgår från filmen och har redan betalat ` +
-        `${formatPrice(paused.costUsd)}. Tryck Fortsätt på jobbet, eller radera versionen i Redigera.`
+        `A stopped job in the Editor (“${paused.label}”) builds on the film and has already paid ` +
+        `${formatPrice(paused.costUsd)}. Click Continue on the job, or delete the version in the Editor.`
       )
     }
     return null
   }
 
   /**
-   * A stopped (failed or cancelled) job that builds on the version and has already paid for parts that "Fortsätt"
+   * A stopped (failed or cancelled) job that builds on the version and has already paid for parts that "Continue"
    * would use: they can't be used once the version is gone. Picture jobs don't count – their paid take stays among
    * the edit's takes whatever happens to the version.
    */
@@ -697,12 +698,12 @@ class EditService {
 
   /** Why a version can't be removed, or undefined. */
   private keepReason(edit: store.EditRow, v: db.StoredGeneration): string | undefined {
-    if (v.id === edit.origin_generation_id) return 'Originalet kan inte raderas.'
+    if (v.id === edit.origin_generation_id) return 'The original cannot be deleted.'
     const used = store.usedBy(v.id)[0]
-    if (used) return `Versionen används i ”${used.sequenceName}” (klipp ${used.clipNumber}).`
+    if (used) return `The version is used in “${used.sequenceName}” (clip ${used.clipNumber}).`
     const other = store.editsStartedFrom(v.id, edit.id)[0]
-    if (other) return `Versionen är original i redigeringen ”${other.name}”.`
-    if (store.runningJobsOnBase(v.id).length) return 'En pågående åtgärd utgår från versionen.'
+    if (other) return `The version is the original of the edit “${other.name}”.`
+    if (store.runningJobsOnBase(v.id).length) return 'A running operation builds on the version.'
     return undefined
   }
 
@@ -799,7 +800,7 @@ class EditService {
 
   async timeline(generationId: unknown): Promise<EditTimeline> {
     const g = db.getGeneration(store.safeId(generationId))
-    if (!g?.filePath || !existsSync(g.filePath)) throw new Error('Videofilen saknas (flyttad eller raderad i Finder).')
+    if (!g?.filePath || !existsSync(g.filePath)) throw new Error('The video file is missing (moved or deleted in Finder).')
     const info = await probe(g.filePath)
     const cache = await this.timelineCache(g.filePath, info.hasAudio, info.duration)
     const recorded = g.recipe?.cuts
@@ -877,7 +878,7 @@ class EditService {
   updateTranscript(generationId: unknown, patch: unknown): Transcript {
     const id = store.safeId(generationId)
     const t = transcriptFor(id)
-    if (!t) throw new Error('Det finns ingen transkription att ändra.')
+    if (!t) throw new Error('There is no transcript to change.')
     const changes = (Array.isArray(patch) ? patch : []).filter(
       (p): p is { segmentId: string; text: string } =>
         !!p && typeof p === 'object' && typeof (p as { segmentId?: unknown }).segmentId === 'string' &&
@@ -886,9 +887,9 @@ class EditService {
     const segments = t.segments.map((s) => ({ ...s }))
     for (const c of changes) {
       const seg = segments.find((s) => s.id === c.segmentId)
-      if (!seg) throw new Error('Repliken finns inte i transkriptionen.')
+      if (!seg) throw new Error('The line is not in the transcript.')
       const text = c.text.replace(/\s+/gu, ' ').trim()
-      if (!text) throw new Error('En replik kan inte vara tom.')
+      if (!text) throw new Error('A line cannot be empty.')
       if (text !== seg.text) {
         seg.text = text
         seg.edited = true
@@ -914,12 +915,12 @@ class EditService {
   async saveSubtitles(e: IpcMainInvokeEvent, generationId: unknown): Promise<string> {
     const id = store.safeId(generationId)
     const t = transcriptFor(id)
-    if (!t?.segments.length) throw new Error('Det finns ingen transkription att spara.')
+    if (!t?.segments.length) throw new Error('There is no transcript to save.')
     const g = db.getGeneration(id)
-    const title = safeName(g ? generationTitle(g, 80) : 'Undertexter', { max: 80, fallback: 'Undertexter' })
+    const title = safeName(g ? generationTitle(g, 80) : 'Subtitles', { max: 80, fallback: 'Subtitles' })
     const options: Electron.SaveDialogOptions = {
       defaultPath: join(app.getPath('downloads'), `${title}.srt`),
-      filters: [{ name: 'Undertexter', extensions: ['srt'] }]
+      filters: [{ name: 'Subtitles', extensions: ['srt'] }]
     }
     const win = e?.sender ? BrowserWindow.fromWebContents(e.sender) : null
     const res = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
@@ -940,7 +941,7 @@ class EditService {
       const files = sources.filter((p) => allowed.has(extname(p).toLowerCase()))
       if (!files.length) {
         if (sources.length) {
-          throw new Error('Bara ljudfiler i MP3, WAV, M4A, AAC, AIFF, FLAC eller OGG kan läggas till.')
+          throw new Error('Only audio files in MP3, WAV, M4A, AAC, AIFF, FLAC or OGG can be added.')
         }
         return []
       }
@@ -954,13 +955,13 @@ class EditService {
         } catch (err) {
           throw new Error(`${name}: ${errorText(err)}`)
         }
-        if (!(duration > 0.05)) throw new Error(`Det finns inget ljud i ${name}.`)
+        if (!(duration > 0.05)) throw new Error(`There is no sound in ${name}.`)
         probed.push({ path, duration })
       }
       const added: EditMedia[] = []
       for (const p of probed) {
         const ext = extname(p.path)
-        const label = (p.path.split('/').pop() ?? 'Ljud').slice(0, -ext.length || undefined)
+        const label = (p.path.split('/').pop() ?? 'Audio').slice(0, -ext.length || undefined)
         const media = await this.ops.addMediaFile(edit, p.path, { kind: 'audio', label, duration: p.duration })
         added.push(mediaView(media))
       }
@@ -974,7 +975,7 @@ class EditService {
   async send(versionId: unknown, target: unknown): Promise<{ sequenceId: string; segmentId: string }> {
     const { edit, version } = this.versionOf(versionId)
     if (version.status !== 'completed' || !version.filePath || !existsSync(version.filePath)) {
-      throw new Error('Versionens videofil saknas (flyttad eller raderad i Finder).')
+      throw new Error("The version's video file is missing (moved or deleted in Finder).")
     }
     const t = (target && typeof target === 'object' ? target : {}) as Partial<SendTarget> & Record<string, unknown>
     const sequenceRow = (id: string): { id: string; kind: string; name: string } | undefined =>
@@ -983,10 +984,10 @@ class EditService {
         | undefined
     const check = (sequenceId: string): void => {
       const row = sequenceRow(sequenceId)
-      if (!row) throw new Error('Sekvensen finns inte längre.')
-      if (row.kind === 'storyboard') throw new Error('Versioner kan bara skickas till sekvenser.')
+      if (!row) throw new Error('The sequence no longer exists.')
+      if (row.kind === 'storyboard') throw new Error('Versions can only be sent to sequences.')
       if (this.deps.sequences.get(sequenceId).running) {
-        throw new Error('”Generera saknade” pågår för sekvensen. Vänta tills den är klar och försök igen.')
+        throw new Error('“Generate missing” is running for the sequence. Wait until it is done and try again.')
       }
     }
     let result: { sequenceId: string; segmentId: string }
@@ -996,7 +997,7 @@ class EditService {
         .prepare('SELECT sequence_id FROM segments WHERE id = ?')
         .pluck()
         .get(store.safeId(t.segmentId)) as string | undefined
-      if (!seg) throw new Error('Klippet finns inte längre.')
+      if (!seg) throw new Error('The clip no longer exists.')
       check(seg)
       const res = await this.deps.sequences.addTakeFrom(t.segmentId, version.id, { select: true })
       result = { sequenceId: res.sequenceId, segmentId: res.segmentId }
@@ -1008,7 +1009,7 @@ class EditService {
       })
       result = { sequenceId: t.sequenceId, segmentId: res.segmentId }
     } else {
-      throw new Error('Välj en sekvens att skicka versionen till.')
+      throw new Error('Choose a sequence to send the version to.')
     }
     this.changed(db.getGeneration(version.id))
     this.notify(edit.id)
@@ -1191,7 +1192,7 @@ export function registerEditIpc(deps: EditDeps): EditServiceHandle {
         console.warn('Forgetting the clones of a voice failed:', err)
       }
     }
-    // Other open views (Generera's pickers, Redigera's clone picker, an approval dialog) show the consent too.
+    // Other open views (Generate's pickers, the Editor's clone picker, an approval dialog) show the consent too.
     deps.libraryChanged?.()
     return asset
   })

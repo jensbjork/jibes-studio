@@ -2,18 +2,18 @@ import { z } from 'zod'
 import { formatTimecode, MAX_SPEAK_LINES } from '@shared/edit-plan'
 import type { BackgroundChoice, EditOperation, EditRange, SpeakLine, VoiceChoice } from '@shared/types'
 
-// Redigera's operations as agents write them: one zod discriminated union on `op`, mirroring EditOperation in
+// The Editor's operations as agents write them: one zod discriminated union on `op`, mirroring EditOperation in
 // snake_case, and the one helper that turns it into the EditOperation the edit service plans and runs (and back,
 // for answers). Every check of what an operation may do on a film lives in the service's plan
 // (planEditOperation), the same one the window's operation cards use; this only fills the defaults the window's
 // cards start from, so a plan an agent asks for is the plan the user would get from the same choices.
 
-/** The models Redigera's cards start from (spec §8.5); a plan with another model is checked by the service. */
+/** The models the Editor's cards start from (spec §8.5); a plan with another model is checked by the service. */
 export const EDIT_DEFAULT_MODELS = {
-  /** Gör om avsnittet and Förläng: image-to-video between (or from) frames of the film. */
+  /** Regenerate section and Extend: image-to-video between (or from) frames of the film. */
   regenerate: 'seedance-2-5-image-to-video-basic',
   extend: 'seedance-2-5-image-to-video-basic',
-  /** Ändra med prompt: Seedance 2.5 reference-to-video in its edit task. */
+  /** Edit with prompt: Seedance 2.5 reference-to-video in its edit task. */
   promptEdit: 'seedance-2-5-reference-to-video-basic',
   /** New spoken lines in a preset voice, and in a cloned one. */
   speech: 'elevenlabs-tts-multilingual-v2',
@@ -43,7 +43,7 @@ const voice = z
           .string()
           .min(1)
           .describe(
-            "A character's Röst clip (audio_id from list_assets), cloned for the new lines (speak_lines only; needs the user's consent, see clone_consent)."
+            "A character's Voice clip (audio_id from list_assets), cloned for the new lines (speak_lines only; needs the user's consent, see clone_consent)."
           )
       })
       .strict()
@@ -117,7 +117,7 @@ export const operationInput = z
         asset_audio_id: z
           .string()
           .optional()
-          .describe("A library audio clip (audio_id from list_assets: a character's Röst or an environment's Ljudmiljö)."),
+          .describe("A library audio clip (audio_id from list_assets: a character's Voice or an environment's Soundscape)."),
         at: z.number().min(0).describe('Seconds into the film where it starts.'),
         gain_db: z.number().min(-60).max(24).optional(),
         duck: z.boolean().optional().describe('Lower the film’s own sound while it plays.'),
@@ -221,7 +221,7 @@ export const operationInput = z
         audio: pictureAudio.optional()
       })
       .strict()
-      .describe('Paid. Gör om avsnittet: a new picture between the frame before and the frame after the range.'),
+      .describe('Paid. Regenerate section: a new picture between the frame before and the frame after the range.'),
     z
       .object({
         op: z.literal('prompt_edit'),
@@ -237,7 +237,7 @@ export const operationInput = z
         audio: pictureAudio.optional()
       })
       .strict()
-      .describe('Paid. Ändra med prompt: video-to-video change of a stretch.'),
+      .describe('Paid. Edit with prompt: video-to-video change of a stretch.'),
     z
       .object({
         op: z.literal('extend'),
@@ -248,11 +248,11 @@ export const operationInput = z
         audio: z.enum(['model', 'silence']).optional().describe('Sound of the new part: the model’s (default) or silence.')
       })
       .strict()
-      .describe('Paid. Förläng efter slutet, from the last frame.'),
+      .describe('Paid. Extend past the end, from the last frame.'),
     z
       .object({ op: z.literal('upscale'), factor: z.union([z.literal(2), z.literal(4)]) })
       .strict()
-      .describe('Paid. Uppskala the whole version 2× or 4× (Topaz; needs the API key for its price).')
+      .describe('Paid. Upscale the whole version 2× or 4× (Topaz; needs the API key for its price).')
   ])
   .describe(
     'The operation, by op. Free: trim, cut, fade, volume, mute, denoise, loudness, add_audio, layer. Paid: transcribe, change_voice, speak_lines, music, effect, regenerate, prompt_edit, extend, upscale.'
@@ -284,7 +284,7 @@ function clean<T extends object>(o: T): T {
 
 /**
  * The agent's operation as the EditOperation Studio's edit service takes, with the defaults the window's cards
- * start from. Throws (Swedish) for what the schema can't say: a voice changer while Venice lists none, a clone
+ * start from. Throws for what the schema can't say: a voice changer while Venice lists none, a clone
  * voice where only speak_lines takes one, add_audio without exactly one source.
  */
 export function toEditOperation(input: OperationInput, defaults: OperationDefaults): EditOperation {
@@ -295,7 +295,7 @@ export function toEditOperation(input: OperationInput, defaults: OperationDefaul
     case 'cut':
       return { op: 'cut', range: rangeOf(input.range)! }
     case 'fade':
-      if (!input.in_seconds && !input.out_seconds) throw new Error('Ange in_seconds och/eller out_seconds.')
+      if (!input.in_seconds && !input.out_seconds) throw new Error('Give in_seconds and/or out_seconds.')
       return clean<EditOperation>({ op: 'fade', inSeconds: input.in_seconds, outSeconds: input.out_seconds })
     case 'volume':
       return clean<EditOperation>({ op: 'volume', gainDb: input.gain_db, range: rangeOf(input.range), target: input.target })
@@ -308,7 +308,7 @@ export function toEditOperation(input: OperationInput, defaults: OperationDefaul
     case 'add_audio': {
       if (!input.media_id === !input.asset_audio_id) {
         throw new Error(
-          'Ange precis en ljudkälla: media_id (ljud som redan finns i redigeringen, get_edit) eller asset_audio_id (ett ljudklipp i biblioteket, list_assets). En egen ljudfil lägger du först till i redigeringen med add_edit_audio, som svarar med dess media_id.'
+          'Give exactly one sound source: media_id (sound already in the edit, get_edit) or asset_audio_id (an audio clip in the library, list_assets). Add a sound file of your own to the edit first with add_edit_audio, which answers with its media_id.'
         )
       }
       return clean<EditOperation>({
@@ -326,7 +326,7 @@ export function toEditOperation(input: OperationInput, defaults: OperationDefaul
     }
     case 'layer':
       if (input.gain_db === undefined && input.at === undefined && !input.remove) {
-        throw new Error('Ange gain_db, at eller remove för lagret.')
+        throw new Error('Give gain_db, at or remove for the layer.')
       }
       return clean<EditOperation>({ op: 'layer', layerId: input.layer_id, gainDb: input.gain_db, at: input.at, remove: input.remove })
     case 'transcribe':
@@ -335,13 +335,13 @@ export function toEditOperation(input: OperationInput, defaults: OperationDefaul
       const v = voiceOf(input.voice)
       if (v.kind === 'clone') {
         throw new Error(
-          'Röstbyte tar en av modellens röster ({preset}) eller ett röst-id ({voice_id}), inte en klonad röst. En karaktärs klonade röst går med speak_lines.'
+          'A voice change takes one of the model\'s voices ({preset}) or a voice id ({voice_id}), not a cloned voice. A character\'s cloned voice works with speak_lines.'
         )
       }
       const model = input.model ?? defaults.voiceChanger
       if (!model) {
         throw new Error(
-          'Röstbyte finns inte hos Venice just nu (ingen röstbytesmodell listas). Använd transcribe och sedan speak_lines för att läsa in replikerna på nytt.'
+          'Voice change isn\'t available at Venice right now (no voice changer model is listed). Use transcribe and then speak_lines to re-record the lines.'
         )
       }
       return clean<EditOperation>({
@@ -358,7 +358,7 @@ export function toEditOperation(input: OperationInput, defaults: OperationDefaul
       const v = voiceOf(input.voice)
       const lines: SpeakLine[] = input.lines.map((l) => {
         if (!l.segment_id === (l.at === undefined)) {
-          throw new Error('Varje replik behöver antingen segment_id (en rad i transkriptionen) eller at (en ny replik), inte båda.')
+          throw new Error('Each line needs either segment_id (a line of the transcript) or at (a new line), not both.')
         }
         return clean({ segmentId: l.segment_id, at: l.at, text: l.text.trim() })
       })
@@ -527,95 +527,95 @@ export function segmentIdsOf(op: EditOperation): string[] {
   return []
 }
 
-/** "0:41,0–0:45,0 (4,0 s)", the way Redigera names a range. */
+/** "0:41.0–0:45.0 (4.0 s)", the way the Editor names a range. */
 export function rangeText(r: EditRange): string {
-  const length = (r.end - r.start).toFixed(1).replace('.', ',')
+  const length = (r.end - r.start).toFixed(1)
   return `${formatTimecode(r.start)}–${formatTimecode(r.end)} (${length} s)`
 }
 
-/** "Hela filmen" or "markeringen 0:41,0–0:45,0 (4,0 s)". */
+/** "the whole film" or "the selection 0:41.0–0:45.0 (4.0 s)". */
 function scope(r: EditRange | undefined, whole: string): string {
-  return r ? `markeringen ${rangeText(r)}` : whole
+  return r ? `the selection ${rangeText(r)}` : whole
 }
 
-/** How a voice is named to the user: the preset's name, the id, or the character whose Röst is cloned. */
+/** How a voice is named to the user: the preset's name, the id, or the character whose Voice is cloned. */
 export interface VoiceNames {
-  /** The character (asset) name of a cloned Röst clip, by audio id. */
+  /** The character (asset) name of a cloned Voice clip, by audio id. */
   cloneOf?: (audioId: string) => string | undefined
 }
 
-/** "Anna" → "Annas", "Lars" → "Lars" (Swedish genitive). */
+/** "Anna" → "Anna's", "Lars" → "Lars'" (English possessive). */
 export function genitive(name: string): string {
   const n = name.trim()
-  return /[sxz]$/i.test(n) ? n : `${n}s`
+  return /s$/i.test(n) ? `${n}'` : `${n}'s`
 }
 
 export function voiceText(v: VoiceChoice, names: VoiceNames = {}): string {
   if (v.kind === 'preset') return v.voice
-  if (v.kind === 'custom') return `röst-id ${v.voiceId}`
+  if (v.kind === 'custom') return `voice id ${v.voiceId}`
   const who = names.cloneOf?.(v.audioId)
-  return who ? `${genitive(who)} klonade röst` : 'en klonad röst'
+  return who ? `${genitive(who)} cloned voice` : 'a cloned voice'
 }
 
 /**
- * What the operation will do, in Swedish, in one line: the approval dialog's summary, the activity log and the
- * agent's answers. `seconds`: the base version's length, for "hela filmen (2:41)".
+ * What the operation will do, in one line: the approval dialog's summary, the activity log and the
+ * agent's answers. `seconds`: the base version's length, for "the whole film (2:41)".
  */
 export function operationSummary(op: EditOperation, seconds: number | undefined, names: VoiceNames = {}): string {
-  const whole = seconds ? `hela filmen (${formatTimecode(seconds).replace(/,\d$/, '')})` : 'hela filmen'
-  const quote = (s: string): string => `”${s.length > 60 ? `${s.slice(0, 59)}…` : s}”`
+  const whole = seconds ? `the whole film (${formatTimecode(seconds).replace(/[.,]\d$/, '')})` : 'the whole film'
+  const quote = (s: string): string => `“${s.length > 60 ? `${s.slice(0, 59)}…` : s}”`
   switch (op.op) {
     case 'trim':
-      return `Behåll bara ${rangeText(op.keep)}`
+      return `Keep only ${rangeText(op.keep)}`
     case 'cut':
-      return `Klipp bort ${rangeText(op.range)}`
+      return `Cut out ${rangeText(op.range)}`
     case 'fade':
-      return [op.inSeconds ? `tona in ${op.inSeconds} s` : '', op.outSeconds ? `tona ut ${op.outSeconds} s` : '']
+      return [op.inSeconds ? `fade in ${op.inSeconds} s` : '', op.outSeconds ? `fade out ${op.outSeconds} s` : '']
         .filter(Boolean)
-        .join(' och ')
+        .join(' and ')
         .replace(/^./, (c) => c.toUpperCase())
     case 'volume':
-      return `Volym ${op.gainDb > 0 ? '+' : ''}${op.gainDb} dB${op.target && op.target !== 'all' ? (op.target === 'voice' ? ' på rösten' : ' på bakgrunden') : ''} – ${scope(op.range, whole)}`
+      return `Volume ${op.gainDb > 0 ? '+' : ''}${op.gainDb} dB${op.target && op.target !== 'all' ? (op.target === 'voice' ? ' on the voice' : ' on the background') : ''} – ${scope(op.range, whole)}`
     case 'mute':
-      return `${op.target === 'voice' ? 'Ta bort rösten' : op.target === 'background' ? 'Bara rösten' : 'Tysta'} – ${scope(op.range, whole)}`
+      return `${op.target === 'voice' ? 'Remove the voice' : op.target === 'background' ? 'Voice only' : 'Mute'} – ${scope(op.range, whole)}`
     case 'denoise':
-      return `Ta bort brus (${op.strength === 'strong' ? 'stark' : 'mild'})`
+      return `Remove noise (${op.strength === 'strong' ? 'strong' : 'mild'})`
     case 'loudness':
-      return `Jämna ut ljudnivån till ${op.lufs} LUFS`
+      return `Even out the loudness to ${op.lufs} LUFS`
     case 'add-audio':
-      return `Lägg till ljud vid ${formatTimecode(op.at)}`
+      return `Add sound at ${formatTimecode(op.at)}`
     case 'layer':
-      return op.remove ? 'Ta bort ett ljudlager' : 'Ändra ett ljudlager'
+      return op.remove ? 'Remove a sound layer' : 'Change a sound layer'
     case 'transcribe':
-      return `Transkribera ljudet – ${whole}`
+      return `Transcribe the sound – ${whole}`
     case 'change-voice': {
       const where = op.segmentIds?.length
-        ? `${op.segmentIds.length === 1 ? '1 vald replik' : `${op.segmentIds.length} valda repliker`}`
+        ? `${op.segmentIds.length === 1 ? '1 selected line' : `${op.segmentIds.length} selected lines`}`
         : scope(op.range, whole)
-      return `Byt röst till ${voiceText(op.voice, names)} – ${where}`
+      return `Change the voice to ${voiceText(op.voice, names)} – ${where}`
     }
     case 'speak-lines': {
       const replaced = op.lines.filter((l) => l.segmentId).length
       const added = op.lines.length - replaced
       const what = [
-        replaced ? `läs in ${replaced === 1 ? '1 replik' : `${replaced} repliker`} på nytt` : '',
-        added ? `lägg till ${added === 1 ? 'en ny replik' : `${added} nya repliker`}` : ''
+        replaced ? `re-record ${replaced === 1 ? '1 line' : `${replaced} lines`}` : '',
+        added ? `add ${added === 1 ? 'a new line' : `${added} new lines`}` : ''
       ]
         .filter(Boolean)
-        .join(' och ')
-      return `${what.replace(/^./, (c) => c.toUpperCase())} med ${voiceText(op.voice, names)}`
+        .join(' and ')
+      return `${what.replace(/^./, (c) => c.toUpperCase())} with ${voiceText(op.voice, names)}`
     }
     case 'music':
-      return `Skapa musik: ${quote(op.prompt)} – ${scope(op.range, whole)}`
+      return `Create music: ${quote(op.prompt)} – ${scope(op.range, whole)}`
     case 'effect':
-      return `Skapa ljudeffekt: ${quote(op.prompt)} vid ${formatTimecode(op.at)} (${op.seconds} s)`
+      return `Create sound effect: ${quote(op.prompt)} at ${formatTimecode(op.at)} (${op.seconds} s)`
     case 'regenerate':
-      return `Gör om avsnittet ${rangeText(op.range)}`
+      return `Regenerate section ${rangeText(op.range)}`
     case 'prompt-edit':
-      return `Ändra med prompt: ${rangeText(op.range)}`
+      return `Edit with prompt: ${rangeText(op.range)}`
     case 'extend':
-      return `Förläng efter slutet med ${op.seconds} s`
+      return `Extend past the end by ${op.seconds} s`
     case 'upscale':
-      return `Uppskala hela filmen ${op.factor}×`
+      return `Upscale the whole film ${op.factor}×`
   }
 }

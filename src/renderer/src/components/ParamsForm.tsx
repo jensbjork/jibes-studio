@@ -36,7 +36,7 @@ import {
   type SavedPrompt,
   type VideoModel
 } from '@shared/types'
-import { ASSET_COPY, ASSET_VIEW, swedishList } from '../lib/assets'
+import { ASSET_COPY, ASSET_VIEW, englishList } from '../lib/assets'
 import { useAssets, usePrompts } from '../lib/hooks'
 import type { Navigate } from '../lib/navigation'
 import ImageInput, { type ImageCaption, type SwapChoice } from './ImageInput'
@@ -95,7 +95,7 @@ interface Props {
   kinds?: Kind[]
   /** Replaces the start image input (not the end image) with a note, e.g. when the start frame comes from the previous clip. */
   startImageNote?: string
-  /** Replaces the end image input with a note, e.g. when the end frame comes from the next clip ("Slutbild från nästa klipp"). */
+  /** Replaces the end image input with a note, e.g. when the end frame comes from the next clip ("End on the next clip's first frame"). */
   endImageNote?: string
   /**
    * A sequence clip that continues from the previous clip: its mode is fixed, so the prompt checks advise
@@ -134,9 +134,9 @@ type Picker = 'library' | 'start' | 'end' | 'audio' | `references:${AssetKind}`
  */
 const SINGLE_IMAGE_KINDS: readonly AssetKind[] = ['environment', 'character', 'product', 'outfit', 'pose']
 
-/** "karaktärer, miljöer, produkter, kläder och poser": the kinds above in the app's order, for the button titles. */
-const SINGLE_IMAGE_KINDS_TEXT = swedishList(
-  ASSET_KINDS.filter((k) => SINGLE_IMAGE_KINDS.includes(k)).map((k) => ASSET_COPY[k].plural.toLocaleLowerCase('sv'))
+/** "characters, environments, products, outfits and poses": the kinds above in the app's order, for the button titles. */
+const SINGLE_IMAGE_KINDS_TEXT = englishList(
+  ASSET_KINDS.filter((k) => SINGLE_IMAGE_KINDS.includes(k)).map((k) => ASSET_COPY[k].plural.toLowerCase())
 )
 
 const select = 'w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted'
@@ -145,7 +145,7 @@ const smallButton =
 
 /** Why the selected model can't be used right now, or undefined if it can (or the list isn't loaded yet). */
 export function unavailableModel(model: VideoModel | undefined): string | undefined {
-  return model?.offline ? 'Modellen är offline – välj en annan' : undefined
+  return model?.offline ? 'The model is offline – pick another one' : undefined
 }
 
 /**
@@ -157,19 +157,19 @@ export function unavailableModel(model: VideoModel | undefined): string | undefi
  */
 export function missingInput(params: GenerationParams, continuing = false): string | undefined {
   const kind = kindOfModelId(params.model)
-  if (!params.prompt.trim()) return 'Skriv en prompt'
+  if (!params.prompt.trim()) return 'Write a prompt'
   if (continuing) return blockingContinuationError(params)?.replace(/\.\s*$/, '')
-  if (kind === 'image-to-video' && !params.startImage) return 'Lägg till en startbild'
+  if (kind === 'image-to-video' && !params.startImage) return 'Add a start image'
   if (kind === 'reference-to-video' && !params.referenceImages?.length) {
     // Venice refuses reference audio on its own, which is worth saying when a voice is all there is.
     return paramsForSubmit(params).referenceAudios?.length
-      ? 'Lägg till minst en referensbild – ljud skickas bara tillsammans med en bild'
-      : 'Lägg till minst en referensbild'
+      ? 'Add at least one reference image – sound is only sent together with an image'
+      : 'Add at least one reference image'
   }
   return blockingPromptError(params)?.replace(/\.\s*$/, '')
 }
 
-/** The form-only choices that shape how assets are named in the prompt ("gäller", "hålls av"). */
+/** The form-only choices that shape how assets are named in the prompt ("applies to", "held by"). */
 interface NamingChoices {
   posePeople: Readonly<Record<string, string[] | undefined>>
   productHolders: Readonly<Record<string, string | null | undefined>>
@@ -231,7 +231,7 @@ export function modelForKind(models: VideoModel[], currentModel: string, kind: K
   return preferred ?? [...list].sort((a, b) => a.name.localeCompare(b.name))[0]?.id
 }
 
-/** The params with these "bärs av" choices (left out when there are none, as the params store them). */
+/** The params with these "worn by" choices (left out when there are none, as the params store them). */
 function withOutfitWearers(params: GenerationParams, wearers: GenerationParams['outfitWearers']): GenerationParams {
   if (params.outfitWearers === wearers) return params
   const { outfitWearers: _, ...rest } = params
@@ -348,8 +348,8 @@ export default function ParamsForm({
     return () => clearTimeout(t)
   }, [refNote])
 
-  // Which @ImageN tokens belong to which asset, and who wears which outfit ("bärs av"). The choices are params
-  // (outfitWearers), so they travel with a sequence clip, "Använd igen" and an agent's form, and the References
+  // Which @ImageN tokens belong to which asset, and who wears which outfit ("worn by"). The choices are params
+  // (outfitWearers), so they travel with a sequence clip, "Use again" and an agent's form, and the References
   // legend says who wears what by the same rule (shared/outfits.ts); they also shape the text a character chip inserts.
   const assetRefs = assetRefsOf(refs, byPath, maxRefs)
   const pairings = resolvePairings(assetRefs, params.outfitWearers)
@@ -385,7 +385,7 @@ export default function ParamsForm({
     const nextRefs = next.refs ?? refs
     const nextAudios = next.audios ?? audioRefs
     if (sameList(nextRefs, refs) && sameAudios(nextAudios, audioRefs)) return
-    // "bärs av" choices for outfits (or characters) no longer among the pictures are forgotten, so an outfit added
+    // "worn by" choices for outfits (or characters) no longer among the pictures are forgotten, so an outfit added
     // again starts from its default wearer.
     const present = new Set(nextRefs.flatMap((path) => byPath.get(path)?.id ?? []))
     // A picture in several places (a swapped-in asset with fewer photos reuses them) is followed place by place by
@@ -433,7 +433,7 @@ export default function ParamsForm({
     setRefNote(undefined)
   }
 
-  /** "Ta med rösten" on a chip: the asset's first clip in, or all of its clips out. */
+  /** "Include the voice" on a chip: the asset's first clip in, or all of its clips out. */
   const toggleAssetAudio = (a: Asset, include: boolean) => {
     const first = clipsOf(a)[0]
     if (!include) {
@@ -462,7 +462,7 @@ export default function ParamsForm({
     setRefNote(undefined)
   }
 
-  // Which characters each pose applies to ("gäller"): form state only; it shapes the text a pose chip inserts.
+  // Which characters each pose applies to ("applies to"): form state only; it shapes the text a pose chip inserts.
   // undefined: every character in the form, also ones added later.
   const [posePeople, setPosePeople] = useState<Record<string, string[] | undefined>>({})
   const posesInForm = [
@@ -484,7 +484,7 @@ export default function ParamsForm({
     })
   }, [posesInForm])
 
-  // Which character holds each product ("hålls av"): form state only, like "gäller"; it shapes the text a product
+  // Which character holds each product ("held by"): form state only, like "applies to"; it shapes the text a product
   // chip inserts. Missing or null: nobody holds it (the default).
   const [productHolders, setProductHolders] = useState<Record<string, string | null>>({})
   const productsInForm = [
@@ -508,7 +508,7 @@ export default function ParamsForm({
   }, [productsInForm])
   const naming: NamingChoices = { posePeople, productHolders }
 
-  /** "Byt kläder": the new outfit takes the old one's place and is worn by the character (the choice goes with it). */
+  /** "Change outfit": the new outfit takes the old one's place and is worn by the character (the choice goes with it). */
   const swapOutfitOf = (character: Asset, outfit: Asset | null) => {
     const wearing = outfitsWornBy(character.id, assetRefs, pairings).map((r) => r.asset)
     applyRefs(swapOutfit(refs, wearing, outfit, maxRefs), {
@@ -530,7 +530,7 @@ export default function ParamsForm({
    * same places, so no @ImageN or @AudioN number changes and the prompt keeps every token. Not a removal and an
    * addition through setReferences, which would renumber or drop them: the shared rules (shared/reference-swap)
    * change the pictures, clips, the name in front of the swapped tokens, the description switch, the wearers and – one
-   * character for another – the outfit it wore, in one update, and the form's own "gäller" and "hålls av" choices
+   * character for another – the outfit it wore, in one update, and the form's own "applies to" and "held by" choices
    * follow here. What the swap did, or why nothing changed, is the note under the references.
    */
   const swapReference = (index: number, choice: SwapChoice): void => {
@@ -540,7 +540,7 @@ export default function ParamsForm({
     const target = choice.kind === 'asset' ? assets.find((a) => a.id === choice.assetId) : byPath.get(choice.path)
     const apply = (p: GenerationParams): SwapResult => {
       if (choice.kind === 'image') return swapReferenceImage(p, index, choice.path, assets)
-      if (!from || !target) throw new Error('Biblioteket har ändrats – försök igen.')
+      if (!from || !target) throw new Error('The library has changed – try again.')
       return swapReferenceAsset(p, from, target, assets)
     }
     let result: SwapResult
@@ -557,14 +557,14 @@ export default function ParamsForm({
       if ((p.referenceImages ?? [])[index] !== old) return p
       try {
         const next = apply(p).params
-        // As setReferences does: "bärs av" choices for assets no longer among the pictures are forgotten.
+        // As setReferences does: "worn by" choices for assets no longer among the pictures are forgotten.
         const present = new Set((next.referenceImages ?? []).flatMap((path) => byPath.get(path)?.id ?? []))
         return withOutfitWearers(next, outfitWearersAmong(next.outfitWearers, present))
       } catch {
         return p
       }
     })
-    // The asset left every place it had and another of its kind took them: its "gäller" / "hålls av" go along.
+    // The asset left every place it had and another of its kind took them: its "applies to" / "held by" go along.
     const after = result.params.referenceImages ?? []
     if (
       from &&
@@ -598,7 +598,7 @@ export default function ParamsForm({
   const groups = assetRefs.map((entry) => referenceGroupOf(entry, assetRefs, pairings, sentAudios, naming))
 
   /**
-   * "@" menu → "Lägg till från biblioteket": adds the photos (and a character's voice) and tells the editor how
+   * "@" menu → "Add from the library": adds the photos (and a character's voice) and tells the editor how
    * to name the asset with its new @ImageN (and @AudioN) numbers.
    */
   const addFromLibrary = (asset: Asset): ReferenceGroup | undefined => {
@@ -620,7 +620,7 @@ export default function ParamsForm({
       }
     : undefined
 
-  /** Opens one asset in its library view, e.g. to edit the description the prompt gets ("Ändra beskrivning"). */
+  /** Opens one asset in its library view, e.g. to edit the description the prompt gets ("Edit description"). */
   const openAsset = navigate
     ? (a: Asset) => {
         closePicker()
@@ -628,8 +628,8 @@ export default function ParamsForm({
       }
     : undefined
 
-  // ── Descriptions appended to the prompt ("Läggs till i prompten") ─────────────
-  // Both flags are params, so they travel with the form, a sequence clip's saved params and "Använd igen", and
+  // ── Descriptions appended to the prompt ("Added to the prompt") ─────────────
+  // Both flags are params, so they travel with the form, a sequence clip's saved params and "Use again", and
   // main composes the legend from them at submit. Built on the latest params, like every other setter here.
 
   // What the box shows, and which references the legend that is sent explains (for the prompt checks below).
@@ -655,7 +655,7 @@ export default function ParamsForm({
       className={`${smallButton} ${picker === target ? 'bg-raised text-text' : ''}`}
       title={title}
     >
-      Från biblioteket
+      From library
     </button>
   )
 
@@ -667,13 +667,13 @@ export default function ParamsForm({
       align="end"
       width={340}
       maxHeight={480}
-      label={target === 'start' ? 'Välj startbild' : 'Välj slutbild'}
+      label={target === 'start' ? 'Choose a start image' : 'Choose an end image'}
     >
       <AssetPicker
         assets={assets}
         initialKind={singleImageKind(value)}
-        title={target === 'start' ? 'Startbild från biblioteket' : 'Slutbild från biblioteket'}
-        hint="Klicka på en bild – eller på namnet för omslagsbilden."
+        title={target === 'start' ? 'Start image from the library' : 'End image from the library'}
+        hint="Click an image – or the name for the cover image."
         selectedPaths={value ? [value] : []}
         onPickImage={(path) => {
           set(target === 'start' ? 'startImage' : 'endImage', path)
@@ -688,7 +688,7 @@ export default function ParamsForm({
 
   const promptId = useId()
   const editor = useRef<PromptEditorHandle>(null)
-  // The prompt text this form last wrote itself; anything else came from outside (another segment, "Använd igen").
+  // The prompt text this form last wrote itself; anything else came from outside (another segment, "Use again").
   const ownPrompt = useRef<string | null>(null)
   /** Sets the prompt; negativePrompt null leaves it as is, undefined clears it. */
   const setPrompt = (prompt: string, negativePrompt: string | null | undefined) => {
@@ -699,7 +699,7 @@ export default function ParamsForm({
   /** Inserts at the caret in the prompt, as one step ⌘Z can undo (chip clicks). */
   const insertIntoPrompt = (text: string) => editor.current?.insert(text)
 
-  // The library prompt the current text came from, so "Spara" can offer to update it. Set on an exact
+  // The library prompt the current text came from, so "Save" can offer to update it. Set on an exact
   // match and kept while the text is edited here; text replaced from outside keeps it only if it matches.
   const [linkedPromptId, setLinkedPromptId] = useState<string>()
   useEffect(() => {
@@ -790,7 +790,7 @@ export default function ParamsForm({
       )}
 
       <label className="block">
-        <span className="mb-1.5 block text-muted">Modell</span>
+        <span className="mb-1.5 block text-muted">Model</span>
         {modelsError ? (
           <p className="text-accent">{modelsError}</p>
         ) : (
@@ -804,7 +804,7 @@ export default function ParamsForm({
             {(modelsByKind[kind] ?? []).map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
-                {m.privacy === 'private' ? ' (privat)' : ''}
+                {m.privacy === 'private' ? ' (private)' : ''}
               </option>
             ))}
           </select>
@@ -815,19 +815,19 @@ export default function ParamsForm({
         <>
           {startImageNote ? (
             <div>
-              <span className="mb-1.5 block text-muted">Startbild</span>
+              <span className="mb-1.5 block text-muted">Start image</span>
               <p className="rounded-md border border-dashed border-line px-3 py-2.5 text-muted">{startImageNote}</p>
             </div>
           ) : (
             <>
               <ImageInput
-                label="Startbild"
+                label="Start image"
                 value={params.startImage ? [params.startImage] : []}
                 onChange={(v) => set('startImage', v[0])}
                 caption={caption}
                 library={assets}
                 sequenceId={sequenceId}
-                action={libraryImageButton(startButton, 'start', `Välj startbild bland ${SINGLE_IMAGE_KINDS_TEXT}`)}
+                action={libraryImageButton(startButton, 'start', `Choose a start image from ${SINGLE_IMAGE_KINDS_TEXT}`)}
               />
               {singleImagePicker('start', params.startImage)}
             </>
@@ -836,7 +836,7 @@ export default function ParamsForm({
               visible and removable. */}
           {endImageNote ? (
             <div>
-              <span className="mb-1.5 block text-muted">Slutbild</span>
+              <span className="mb-1.5 block text-muted">End image</span>
               <p className="rounded-md border border-dashed border-line px-3 py-2.5 text-muted">{endImageNote}</p>
             </div>
           ) : (
@@ -844,19 +844,19 @@ export default function ParamsForm({
             (endImagePossible || params.endImage) && (
               <>
                 <ImageInput
-                  label="Slutbild (valfri)"
+                  label="End image (optional)"
                   value={params.endImage ? [params.endImage] : []}
                   onChange={(v) => set('endImage', v[0])}
                   caption={caption}
                   library={assets}
                   sequenceId={sequenceId}
-                  action={libraryImageButton(endButton, 'end', `Välj slutbild bland ${SINGLE_IMAGE_KINDS_TEXT}`)}
+                  action={libraryImageButton(endButton, 'end', `Choose an end image from ${SINGLE_IMAGE_KINDS_TEXT}`)}
                 />
                 {!endImagePossible && (
                   <p className="-mt-2 text-[11px] leading-relaxed text-accent">
                     {endImageRequired
-                      ? 'Den här modellen tar ingen slutbild, så klippet kan inte genereras med den. Ta bort bilden eller välj en modell som klarar både start- och slutbild.'
-                      : 'Den här modellen tar ingen slutbild, så bilden skickas inte. Ta bort den eller välj en modell som klarar både start- och slutbild.'}
+                      ? 'This model takes no end image, so the clip can’t be generated with it. Remove the image or pick a model that takes both a start and an end image.'
+                      : 'This model takes no end image, so the image isn’t sent. Remove it or pick a model that takes both a start and an end image.'}
                   </p>
                 )}
                 {singleImagePicker('end', params.endImage)}
@@ -869,7 +869,7 @@ export default function ParamsForm({
       {kind === 'reference-to-video' && (
         <div>
           <ImageInput
-            label="Referensbilder"
+            label="Reference images"
             multiple
             max={maxRefs}
             showCount={false}
@@ -906,17 +906,17 @@ export default function ParamsForm({
             align="end"
             width={380}
             maxHeight={480}
-            label="Lägg till från biblioteket"
+            label="Add from the library"
           >
             <AssetPicker
               assets={assets}
               initialKind={referenceKind ?? 'character'}
-              title="Lägg till som referens"
+              title="Add as a reference"
               hint={
                 refs.length >= maxRefs
-                  ? `Alla ${maxRefs} platser är upptagna – ta bort en bild först.`
-                  : 'Klicka på namnet för alla bilder eller på en enskild bild. ' +
-                    `${maxRefs - refs.length} av ${maxRefs} platser lediga.`
+                  ? `All ${maxRefs} places are taken – remove an image first.`
+                  : 'Click the name for all images or a single image. ' +
+                    `${maxRefs - refs.length} of ${maxRefs} places free.`
               }
               selectedPaths={refs}
               freeSlots={Math.max(0, maxRefs - refs.length)}
@@ -964,15 +964,15 @@ export default function ParamsForm({
       {kind === 'reference-to-video' && (audioSupported || audios.length > 0) && (
         <div>
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-muted">Röster och ljud</span>
+            <span className="text-muted">Voices & sound</span>
             {audioSupported && (
               <button
                 ref={audioButton}
                 onClick={() => togglePicker('audio')}
                 className={`${smallButton} ${picker === 'audio' ? 'bg-raised text-text' : ''}`}
-                title="Skicka med en röst eller en ljudmiljö från biblioteket"
+                title="Send a voice or a soundscape from the library"
               >
-                ＋ Ljud
+                ＋ Sound
               </button>
             )}
           </div>
@@ -983,7 +983,7 @@ export default function ParamsForm({
             align="end"
             width={360}
             maxHeight={480}
-            label="Lägg till ljud"
+            label="Add sound"
           >
             <AudioPicker
               assets={assets}
@@ -1008,37 +1008,37 @@ export default function ParamsForm({
               />
               <div className="mt-1.5 flex items-start gap-3 text-[11px] text-muted">
                 <span className="min-w-0 flex-1">
-                  Klicka på ett ljud för att infoga det i prompten – ▶ spelar utdraget som skickas.
+                  Click a sound to insert it in the prompt – ▶ plays the excerpt that is sent.
                 </span>
                 <span
                   className={`shrink-0 tabular-nums ${
                     audioSeconds > MAX_REFERENCE_AUDIO_SECONDS || audios.length > maxAudios ? 'text-accent' : ''
                   }`}
                   title={
-                    `${audios.length} av max ${maxAudios} ljudklipp, ${formatClipSeconds(audioSeconds)} av max ` +
-                    `${MAX_REFERENCE_AUDIO_SECONDS} s tillsammans. Venice tar 2–15 s per klipp.`
+                    `${audios.length} of at most ${maxAudios} sound clips, ${formatClipSeconds(audioSeconds)} of at most ` +
+                    `${MAX_REFERENCE_AUDIO_SECONDS} s together. Venice takes 2–15 s per clip.`
                   }
                 >
-                  Ljud {formatClipSeconds(audioSeconds).replace(/ s$/, '')}/{MAX_REFERENCE_AUDIO_SECONDS} s
+                  Sound {formatClipSeconds(audioSeconds).replace(/ s$/, '')}/{MAX_REFERENCE_AUDIO_SECONDS} s
                 </span>
               </div>
             </>
           ) : (
             <p className="rounded-md border border-dashed border-line px-3 py-2 text-[11px] text-muted">
-              Skicka med hur någon låter: en karaktär med röst tar med den när du lägger till karaktären, eller välj
-              under ＋ Ljud. Hänvisa till ljudet med @Audio1 … i prompten.
+              Send how someone sounds: a character with a voice brings it along when you add the character, or pick
+              one under ＋ Sound. Refer to the sound with @Audio1 … in the prompt.
             </p>
           )}
           {!audioSupported && audios.length > 0 && (
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-accent">
-              <span>{model?.name ?? 'Modellen'} tar inte emot ljud – ljudklippen skickas inte.</span>
+              <span>{model?.name ?? 'The model'} doesn’t take sound – the sound clips aren’t sent.</span>
               {switchToAudioModel && audioModel && (
                 <button onClick={switchToAudioModel} className="text-text hover:underline">
-                  Byt till {audioModel.name}
+                  Switch to {audioModel.name}
                 </button>
               )}
               <button onClick={() => removeAudios(audios.map((a) => a.index))} className="text-text hover:underline">
-                Ta bort ljudet
+                Remove the sound
               </button>
             </div>
           )}
@@ -1056,7 +1056,7 @@ export default function ParamsForm({
                 params.prompt.length > model.promptCharacterLimit ? 'text-accent' : 'text-muted'
               }`}
               // The text written here; descriptions appended when it is sent are counted under it.
-              title={`Din prompt: ${params.prompt.length} av högst ${model.promptCharacterLimit} tecken`}
+              title={`Your prompt: ${params.prompt.length} of at most ${model.promptCharacterLimit} characters`}
             >
               {params.prompt.length}/{model.promptCharacterLimit}
             </span>
@@ -1065,17 +1065,17 @@ export default function ParamsForm({
             ref={libraryButton}
             onClick={() => togglePicker('library')}
             className={`${smallButton} ${picker === 'library' ? 'bg-raised text-text' : ''}`}
-            title="Hämta en sparad prompt"
+            title="Load a saved prompt"
           >
-            Bibliotek
+            Library
           </button>
           <button
             onClick={() => setSaveOpen(true)}
             disabled={!params.prompt.trim()}
             className={`${smallButton} ${savedFlash ? 'text-emerald-400 hover:text-emerald-400' : ''}`}
-            title={linkedUnchanged ? 'Ändra titel och taggar för den sparade prompten' : 'Spara prompten i biblioteket'}
+            title={linkedUnchanged ? 'Edit the saved prompt’s title and tags' : 'Save the prompt in the library'}
           >
-            {savedFlash ? '✓ Sparad' : 'Spara'}
+            {savedFlash ? '✓ Saved' : 'Save'}
           </button>
         </div>
         <Popover
@@ -1085,7 +1085,7 @@ export default function ParamsForm({
           align="end"
           width={360}
           maxHeight={480}
-          label="Promptbibliotek"
+          label="Prompt library"
         >
           <PromptLibraryPicker prompts={prompts} onPick={applyPrompt} onManage={managePrompts} />
         </Popover>
@@ -1099,9 +1099,9 @@ export default function ParamsForm({
           placeholder={
             kind === 'reference-to-video'
               ? audioSupported
-                ? 'Beskriv scenen, rörelsen och kameran… Skriv @ för att hänvisa till en referensbild eller ett ljud.'
-                : 'Beskriv scenen, rörelsen och kameran… Skriv @ för att hänvisa till en referensbild.'
-              : 'Beskriv scenen, rörelsen och kameran…'
+                ? 'Describe the scene, the motion and the camera… Type @ to refer to a reference image or a sound.'
+                : 'Describe the scene, the motion and the camera… Type @ to refer to a reference image.'
+              : 'Describe the scene, the motion and the camera…'
           }
           kind={kind}
           checks={checks}
@@ -1122,13 +1122,13 @@ export default function ParamsForm({
               <div className="mt-1 flex items-center gap-2 text-[11px] text-muted">
                 {linkedPrompt && (
                   <span className="min-w-0 truncate" title={linkedPrompt.title}>
-                    {linkedPrompt.favorite ? '★ ' : ''}Från biblioteket: ”{linkedPrompt.title}”
-                    {linkedUnchanged ? '' : ' · ändrad'}
+                    {linkedPrompt.favorite ? '★ ' : ''}From the library: “{linkedPrompt.title}”
+                    {linkedUnchanged ? '' : ' · edited'}
                   </span>
                 )}
                 {canUndo && (
                   <button onClick={undoReplace} className="ml-auto shrink-0 text-text hover:underline">
-                    Ångra
+                    Undo
                   </button>
                 )}
               </div>
@@ -1145,10 +1145,10 @@ export default function ParamsForm({
 
       <details open={negativeOpen} onToggle={(e) => setNegativeOpen(e.currentTarget.open)} className="group">
         <summary className="cursor-pointer text-muted hover:text-text">
-          Negativ prompt
-          {!negativeOpen && negativeHasError && <span className="ml-1.5 text-[11px] text-accent">(har fel)</span>}
+          Negative prompt
+          {!negativeOpen && negativeHasError && <span className="ml-1.5 text-[11px] text-accent">(has errors)</span>}
           {!negativeOpen && !negativeHasError && params.negativePrompt && (
-            <span className="ml-1.5 text-[11px]">(ifylld)</span>
+            <span className="ml-1.5 text-[11px]">(filled in)</span>
           )}
         </summary>
         <div className="mt-2">
@@ -1159,10 +1159,10 @@ export default function ParamsForm({
             context="negative"
             minRows={2}
             maxRows={8}
-            title="Undvik"
-            focusHint="Det modellen ska undvika, gärna på engelska och kommaseparerat. Skriv / för vanliga saker att undvika."
-            placeholder="Det du inte vill se… (skriv / för förslag)"
-            ariaLabel="Negativ prompt"
+            title="Avoid"
+            focusHint="What the model should avoid, ideally in English and comma-separated. Type / for common things to avoid."
+            placeholder="What you don’t want to see… (type / for suggestions)"
+            ariaLabel="Negative prompt"
             ariaDescribedBy={negativeHasError ? negativeIssuesId : undefined}
             invalid={negativeHasError}
           />
@@ -1182,7 +1182,7 @@ export default function ParamsForm({
 
       <div className="grid grid-cols-3 gap-2">
         <label>
-          <span className="mb-1.5 block text-muted">Längd</span>
+          <span className="mb-1.5 block text-muted">Duration</span>
           <select value={params.duration} onChange={(e) => set('duration', e.target.value)} className={select}>
             {(model?.durations ?? [params.duration]).map((d) => (
               <option key={d}>{d}</option>
@@ -1191,7 +1191,7 @@ export default function ParamsForm({
         </label>
         {!!model?.resolutions.length && (
           <label>
-            <span className="mb-1.5 block text-muted">Upplösning</span>
+            <span className="mb-1.5 block text-muted">Resolution</span>
             <select value={params.resolution} onChange={(e) => set('resolution', e.target.value)} className={select}>
               {model.resolutions.map((r) => (
                 <option key={r}>{r}</option>
@@ -1201,7 +1201,7 @@ export default function ParamsForm({
         )}
         {!!model?.aspectRatios.length && (
           <label>
-            <span className="mb-1.5 block text-muted">Format</span>
+            <span className="mb-1.5 block text-muted">Aspect ratio</span>
             <select value={params.aspectRatio} onChange={(e) => set('aspectRatio', e.target.value)} className={select}>
               {model.aspectRatios.map((r) => (
                 <option key={r}>{r}</option>
@@ -1220,7 +1220,7 @@ export default function ParamsForm({
             onChange={(e) => set('audio', e.target.checked)}
             className="accent-accent"
           />
-          <span>Generera ljud</span>
+          <span>Generate audio</span>
         </label>
       )}
 

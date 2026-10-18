@@ -13,9 +13,9 @@ import EditSideList from './EditSideList'
 import { DELETE_EDIT_TEXT, editsContaining, editsFrom } from './editorUtils'
 import EditWorkspace, { type ShowVersionRequest } from './EditWorkspace'
 
-// Redigera: change one finished film — a clip from the feed, a take, an exported film or the user's own — with free
+// The Editor: change one finished film — a clip from the feed, a take, an exported film or the user's own — with free
 // local operations and priced AI ones. Every change is a new version; the original is never touched. The list of
-// edits is always on the left (as in Sekvenser); on the right one edit open (remembered, like the open sequence), or
+// edits is always on the left (as in Sequences); on the right one edit open (remembered, like the open sequence), or
 // with none open the overview of them all.
 
 type Source = { generationId: string } | { exportId: string }
@@ -81,7 +81,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
         // Ignore unavailable storage.
       }
       setConfirmDelete(undefined)
-      setNotice({ tone: 'success', text: `”${edit.name}” är raderad.` })
+      setNotice({ tone: 'success', text: `“${edit.name}” was deleted.` })
     } catch (e) {
       setConfirmDelete(undefined)
       setNotice({ tone: 'error', text: ipcErrorMessage(e) })
@@ -170,7 +170,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
   )
 
   const create = async (source: Source, name?: string): Promise<string | undefined> => {
-    setBusy('exportId' in source ? 'Kopierar in filmen…' : 'Skapar redigeringen…')
+    setBusy('exportId' in source ? 'Copying in the film…' : 'Creating the edit…')
     try {
       const edit = await window.studio.createEdit(source, name)
       void reload()
@@ -184,7 +184,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
   }
 
   /**
-   * Opens a film in Redigera: the edit it is a version of, else (when edits were already made from it) a choice
+   * Opens a film in the Editor: the edit it is a version of, else (when edits were already made from it) a choice
    * between them and a new one, else a new edit.
    */
   const openSource = async (source: Source) => {
@@ -247,7 +247,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
           if (await create({ generationId: id })) made++
         }
         if (made && !outcome.errors.length) {
-          setNotice({ tone: 'success', text: `${made} ${made === 1 ? 'redigering skapades' : 'redigeringar skapades'}.` })
+          setNotice({ tone: 'success', text: `${made} ${made === 1 ? 'edit was created' : 'edits were created'}.` })
         }
       }
     } finally {
@@ -279,7 +279,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
 
   // ── Render ──
 
-  const busyText = busy ?? (imports.inspecting ? 'Läser filen…' : undefined)
+  const busyText = busy ?? (imports.inspecting ? 'Reading the file…' : undefined)
 
   return (
     <div className="flex h-full">
@@ -319,10 +319,10 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
             onOwnFilm={() => void pickOwnFilm()}
             onDropFiles={(paths, other) => {
               if (!paths.length) {
-                setNotice({ tone: 'warning', text: 'Släpp en filmfil (mp4, mov, m4v, webm eller mkv).' })
+                setNotice({ tone: 'warning', text: 'Drop a film file (mp4, mov, m4v, webm or mkv).' })
                 return
               }
-              if (other) setNotice({ tone: 'warning', text: 'Bara filmfilerna öppnas; de andra filerna hoppades över.' })
+              if (other) setNotice({ tone: 'warning', text: 'Only the film files are opened; the other files were skipped.' })
               void importFilms(paths)
             }}
             onFromFeed={() => setPicker('feed')}
@@ -346,7 +346,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
       </div>
       {confirmDelete && (
         <Modal
-          title={`Radera ”${confirmDelete.name}”?`}
+          title={`Delete “${confirmDelete.name}”?`}
           onClose={() => !deleting && setConfirmDelete(undefined)}
           footer={
             <>
@@ -356,7 +356,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
                 onClick={() => setConfirmDelete(undefined)}
                 className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
               >
-                Avbryt
+                Cancel
               </button>
               <button
                 type="button"
@@ -365,7 +365,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
                 onClick={() => void deleteEdit(confirmDelete)}
                 className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
               >
-                {deleting ? 'Raderar…' : 'Radera redigeringen'}
+                {deleting ? 'Deleting…' : 'Delete the edit'}
               </button>
             </>
           }
@@ -376,7 +376,7 @@ export default function EditorView({ intent, onIntentHandled, navigate }: Props)
       {imports.dialog}
       <GenerationPickerDialog
         open={picker === 'feed'}
-        title="Redigera ett klipp"
+        title="Edit a clip"
         onClose={() => setPicker(undefined)}
         onPicked={(g) => {
           setPicker(undefined)

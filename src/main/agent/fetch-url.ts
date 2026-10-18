@@ -20,12 +20,12 @@ const MAX_REDIRECTS = 3
 const CONNECT_TIMEOUT_MS = 10_000
 const IDLE_TIMEOUT_MS = 30_000
 
-export const ONLY_HTTP = 'Bara http- och https-adresser kan hämtas.'
-export const PRIVATE_ADDRESS = 'Adressen pekar på ett privat eller lokalt nätverk, som Studio inte hämtar från.'
-export const TOO_SLOW = 'Hämtningen tog för lång tid.'
-export const TOO_MANY_REDIRECTS = 'För många omdirigeringar.'
+export const ONLY_HTTP = 'Only http and https addresses can be fetched.'
+export const PRIVATE_ADDRESS = "The address points to a private or local network, which Studio doesn't fetch from."
+export const TOO_SLOW = 'The download took too long.'
+export const TOO_MANY_REDIRECTS = 'Too many redirects.'
 
-/** A refusal or failure that carries its Swedish message (and, for the size cap, a code the caller maps). */
+/** A refusal or failure that carries its message (and, for the size cap, a code the caller maps). */
 export class FetchError extends Error {
   constructor(
     message: string,
@@ -150,19 +150,19 @@ export function allowedTarget(address: string, port: number, rules: AddressRules
 
 // ── URLs ─────────────────────────────────────────────────────────────────────
 
-/** Parses and checks a URL an agent gave (scheme, no user info, length); throws the Swedish refusal. */
+/** Parses and checks a URL an agent gave (scheme, no user info, length); throws the refusal. */
 export function checkUrl(raw: string, base?: URL): URL {
-  if (typeof raw !== 'string' || !raw.trim()) throw new FetchError('Ange en adress (url).')
-  if (raw.length > MAX_URL_LENGTH) throw new FetchError(`Adressen är för lång (högst ${MAX_URL_LENGTH} tecken).`)
+  if (typeof raw !== 'string' || !raw.trim()) throw new FetchError('Give an address (url).')
+  if (raw.length > MAX_URL_LENGTH) throw new FetchError(`The address is too long (at most ${MAX_URL_LENGTH} characters).`)
   let url: URL
   try {
     url = new URL(raw.trim(), base)
   } catch {
-    throw new FetchError('Adressen går inte att läsa som en webbadress.')
+    throw new FetchError("The address can't be read as a web address.")
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new FetchError(ONLY_HTTP)
-  if (url.username || url.password) throw new FetchError('Adressen får inte innehålla användarnamn eller lösenord.')
-  if (url.href.length > MAX_URL_LENGTH) throw new FetchError(`Adressen är för lång (högst ${MAX_URL_LENGTH} tecken).`)
+  if (url.username || url.password) throw new FetchError('The address must not contain a user name or password.')
+  if (url.href.length > MAX_URL_LENGTH) throw new FetchError(`The address is too long (at most ${MAX_URL_LENGTH} characters).`)
   return url
 }
 
@@ -213,7 +213,7 @@ function guardedLookup(port: number, rules: AddressRules, resolve: Resolver) {
   ): void => {
     resolve(hostname, (err, addresses) => {
       if (err) {
-        callback(new FetchError(`Kunde inte hitta servern ${hostname}.`), '')
+        callback(new FetchError(`Couldn't find the server ${hostname}.`), '')
         return
       }
       const allowed = addresses.filter((a) => allowedTarget(a.address, port, rules))
@@ -227,15 +227,15 @@ function guardedLookup(port: number, rules: AddressRules, resolve: Resolver) {
   }
 }
 
-/** Says a network error in Swedish. */
+/** Says a network error in words. */
 function networkError(err: unknown, host: string): FetchError {
   if (err instanceof FetchError) return err
   const code = (err as NodeJS.ErrnoException)?.code
-  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return new FetchError(`Kunde inte hitta servern ${host}.`)
-  if (code === 'ECONNREFUSED') return new FetchError(`Servern ${host} tog inte emot anslutningen.`)
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return new FetchError(`Couldn't find the server ${host}.`)
+  if (code === 'ECONNREFUSED') return new FetchError(`The server ${host} refused the connection.`)
   if (code === 'ETIMEDOUT') return new FetchError(TOO_SLOW)
   const message = err instanceof Error ? err.message : String(err)
-  return new FetchError(`Kunde inte hämta filen från ${host}: ${message}`)
+  return new FetchError(`Couldn't fetch the file from ${host}: ${message}`)
 }
 
 interface Response {
@@ -281,7 +281,7 @@ function requestOnce(url: URL, o: FetchOptions, signal: AbortSignal): Promise<Re
 /**
  * Fetches `url` into `dest`: GET only, no cookies or credentials, status 200 only, at most MAX_REDIRECTS redirects
  * (each one checked like the first, never from https down to http), within the byte cap and the time limits.
- * Rejects with a FetchError in Swedish; `dest` is then removed.
+ * Rejects with a FetchError; `dest` is then removed.
  */
 export async function fetchToFile(o: FetchOptions): Promise<FetchResult> {
   let url = checkUrl(o.url)
@@ -296,7 +296,7 @@ export async function fetchToFile(o: FetchOptions): Promise<FetchResult> {
   }, o.totalMs)
   const failed = (err: unknown): FetchError => {
     if (timedOut) return new FetchError(TOO_SLOW)
-    if (o.signal?.aborted) return new FetchError('Hämtningen avbröts.', 'aborted')
+    if (o.signal?.aborted) return new FetchError('The download was stopped.', 'aborted')
     return err instanceof FetchError ? err : networkError(err, host)
   }
   let response: Response | undefined
@@ -311,14 +311,14 @@ export async function fetchToFile(o: FetchOptions): Promise<FetchResult> {
         if (hop >= MAX_REDIRECTS) throw new FetchError(TOO_MANY_REDIRECTS)
         const next = checkUrl(res.headers.location, url)
         if (url.protocol === 'https:' && next.protocol === 'http:') {
-          throw new FetchError('Servern skickade vidare från https till http, och dit följer Studio inte med.')
+          throw new FetchError("The server redirected from https to http, and Studio doesn't follow there.")
         }
         url = next
         continue
       }
       if (status !== 200) {
         res.resume()
-        throw new FetchError(`Servern svarade ${status}.`)
+        throw new FetchError(`The server answered ${status}.`)
       }
       break
     }
@@ -344,7 +344,7 @@ export async function fetchToFile(o: FetchOptions): Promise<FetchResult> {
       }
     })
     await pipeline(res, counter, createWriteStream(o.dest, { flags: 'wx' }), { signal: controller.signal })
-    if (length !== undefined && received !== length) throw new FetchError('Servern skickade inte hela filen.')
+    if (length !== undefined && received !== length) throw new FetchError("The server didn't send the whole file.")
     return { host, bytes: received, sha256: hash.digest('hex') }
   } catch (err) {
     response?.req.destroy()

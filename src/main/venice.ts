@@ -91,7 +91,7 @@ export class NetworkError extends Error {}
 
 /** fetch() rejects with a bare "TypeError: fetch failed" (or "terminated" mid-body) when the network drops. */
 function networkError(err: unknown, what: string): NetworkError {
-  return new NetworkError(`${what} Kontrollera internetanslutningen och försök igen.`, { cause: err })
+  return new NetworkError(`${what} Check your internet connection and try again.`, { cause: err })
 }
 
 async function fetchOrExplain(url: string, init: RequestInit | undefined, what: string): Promise<Response> {
@@ -103,32 +103,32 @@ async function fetchOrExplain(url: string, init: RequestInit | undefined, what: 
 }
 
 /**
- * Fails with a Swedish message before anything is quoted, encoded or sent, e.g. when a character image or
+ * Fails with a plain message before anything is quoted, encoded or sent, e.g. when a character image or
  * voice clip the params still point at was removed (removing it moves the file to the Trash).
  */
 export function ensureImagesExist(params: GenerationParams): void {
   const check = (path: string | undefined, what: string): void => {
     if (path && !existsSync(path)) {
-      throw new Error(`${what} finns inte längre: ${basename(path)}. Ta bort den och välj en ny bild.`)
+      throw new Error(`${what} no longer exists: ${basename(path)}. Remove it and choose a new image.`)
     }
   }
-  check(params.startImage, 'Startbilden')
-  check(params.endImage, 'Slutbilden')
-  for (const path of params.referenceImages ?? []) check(path, 'En referensbild')
+  check(params.startImage, 'The start image')
+  check(params.endImage, 'The end image')
+  for (const path of params.referenceImages ?? []) check(path, 'A reference image')
   params.referenceAudios?.forEach((clip, i) => {
     if (clip?.path && !existsSync(clip.path)) {
       throw new Error(
-        `Ljudklippet ${audioToken(i + 1)} finns inte längre: ${basename(clip.path)}. Ta bort det och välj ett nytt.`
+        `The audio clip ${audioToken(i + 1)} no longer exists: ${basename(clip.path)}. Remove it and choose a new one.`
       )
     }
   })
   const video = (path: string | undefined, what: string): void => {
     if (path && !existsSync(path)) {
-      throw new Error(`${what} finns inte längre: ${basename(path)}. Gör om markeringen och försök igen.`)
+      throw new Error(`${what} no longer exists: ${basename(path)}. Make the selection again and try again.`)
     }
   }
-  video(params.sourceVideo, 'Källvideon')
-  for (const path of params.referenceVideos ?? []) video(path, 'En referensvideo')
+  video(params.sourceVideo, 'The source video')
+  for (const path of params.referenceVideos ?? []) video(path, 'A reference video')
 }
 
 /** The MIME type a video file is sent as in a data URL (the proxies Studio makes are MP4). */
@@ -151,12 +151,12 @@ function videoMime(path: string): string {
  * read, so params that name some other file on disk can't send it anywhere.
  */
 async function videoToDataUrl(path: string): Promise<string> {
-  if (!isInsideRoot(path)) throw new Error(`Videon ${basename(path)} ligger inte i biblioteket och skickas inte.`)
+  if (!isInsideRoot(path)) throw new Error(`The video ${basename(path)} is not in the library and is not sent.`)
   return `data:${videoMime(path)};base64,${(await readFile(path)).toString('base64')}`
 }
 
-/** Swedish refusal when one request would carry more raw media than Venice takes (MAX_REQUEST_MEDIA_BYTES). */
-export const REQUEST_TOO_LARGE = 'Underlaget är för stort för Venice (högst ~22 MB). Välj en kortare markering.'
+/** The refusal when one request would carry more raw media than Venice takes (MAX_REQUEST_MEDIA_BYTES). */
+export const REQUEST_TOO_LARGE = 'The input is too large for Venice (at most ~22 MB). Select a shorter part.'
 
 /** Raw bytes behind a base64 data URL (without decoding it). */
 function dataUrlBytes(url: unknown): number {
@@ -196,7 +196,7 @@ function checkVideoSizes(params: GenerationParams): void {
   if (total > MAX_REQUEST_MEDIA_BYTES) throw new Error(REQUEST_TOO_LARGE)
 }
 
-/** A failure about one clip, named by its token and file: "@Audio2 (röst.m4a): Filen innehåller inget ljud." */
+/** A failure about one clip, named by its token and file: "@Audio2 (voice.m4a): The file has no sound." */
 function clipError(clip: ReferenceAudio, index: number, err: unknown): Error {
   const reason = err instanceof Error ? err.message : String(err)
   return new Error(`${audioToken(index + 1)} (${basename(clip.path)}): ${reason}`, { cause: err })
@@ -208,7 +208,7 @@ const toMs = (seconds: number): number => Math.round(seconds * 1000) / 1000
 /**
  * The reference audio exactly as it will be sent: each file measured with ffprobe and its window filled in
  * (start 0 and min(rest of the file, 10 s) unless chosen, and never past the end of the file), so the 2–15 s
- * and 15 s-in-all checks can run on the real lengths before anything is uploaded. Rejects (Swedish) when a
+ * and 15 s-in-all checks can run on the real lengths before anything is uploaded. Rejects when a
  * file can't be read, has no sound, or its window starts after the end. Params without audio come back as is.
  */
 export async function resolveReferenceAudios(params: GenerationParams): Promise<GenerationParams> {
@@ -224,9 +224,9 @@ export async function resolveReferenceAudios(params: GenerationParams): Promise<
     }
     const window = referenceAudioWindow(clip, duration)
     if (window.length <= 0) {
-      const seconds = String(Math.round(duration * 10) / 10).replace('.', ',')
+      const seconds = String(Math.round(duration * 10) / 10)
       throw new Error(
-        `${audioToken(i + 1)} börjar efter slutet av ${basename(clip.path)}, som bara är ${seconds} s långt – flytta urvalet.`
+        `${audioToken(i + 1)} starts after the end of ${basename(clip.path)}, which is only ${seconds} s long – move the selection.`
       )
     }
     resolved.push({ path: clip.path, start: toMs(window.start), length: toMs(window.length) })
@@ -354,14 +354,14 @@ export async function imageRequestBytes(path: string): Promise<number> {
  * window they have; those without one are measured first (resolveReferenceAudios), which a submit has normally
  * done already. Video-input models get their source video as `video_url` (the file as is: the caller made the
  * proxy) and duration "Auto" (the result follows the source); an upscaler gets only that, its factor and the model.
- * Seedance reference-to-video gets its reference videos and task. Refused (Swedish) when the raw media would pass
+ * Seedance reference-to-video gets its reference videos and task. Refused when the raw media would pass
  * MAX_REQUEST_MEDIA_BYTES.
  */
 export async function buildRequestBody(params: GenerationParams): Promise<Record<string, unknown>> {
   ensureImagesExist(params)
   checkVideoSizes(params)
   if (isVideoInputModel(params.model) && isUpscaleModel(params.model)) {
-    if (!params.sourceVideo) throw new Error('Källvideon saknas.')
+    if (!params.sourceVideo) throw new Error('The source video is missing.')
     // Topaz: no prompt, resolution, aspect or audio (Venice refuses them on the queue).
     const body: Record<string, unknown> = {
       model: params.model,
@@ -376,7 +376,7 @@ export async function buildRequestBody(params: GenerationParams): Promise<Record
     params = await resolveReferenceAudios(params)
   }
   const videoInput = isVideoInputModel(params.model)
-  if (videoInput && !params.sourceVideo) throw new Error('Källvideon saknas.')
+  if (videoInput && !params.sourceVideo) throw new Error('The source video is missing.')
   const body: Record<string, unknown> = {
     model: params.model,
     prompt: params.prompt,
@@ -411,7 +411,7 @@ const VIDEO_QUOTE_TTL_MS = 10 * 60_000
 async function referenceVideoSeconds(paths: readonly string[]): Promise<number> {
   let total = 0
   for (const path of paths) {
-    if (!existsSync(path)) throw new Error(`En referensvideo finns inte längre: ${basename(path)}.`)
+    if (!existsSync(path)) throw new Error(`A reference video no longer exists: ${basename(path)}.`)
     total += (await probe(path)).duration
   }
   return Math.round(total * 1000) / 1000
@@ -430,9 +430,9 @@ export class VeniceClient {
     const headers = new Headers(init.headers)
     const key = this.getKey()
     if (key) headers.set('Authorization', `Bearer ${key}`)
-    else if (requireKey) throw new VeniceError('Ingen API-nyckel är inställd. Lägg till den under Inställningar.', 401)
+    else if (requireKey) throw new VeniceError('No API key is set. Add it in Settings.', 401)
     if (init.body) headers.set('Content-Type', 'application/json')
-    const res = await fetchOrExplain(`${BASE_URL}${path}`, { ...init, headers }, 'Kunde inte nå Venice.')
+    const res = await fetchOrExplain(`${BASE_URL}${path}`, { ...init, headers }, 'Could not reach Venice.')
     if (!res.ok) {
       const text = await res.text()
       let body: unknown = text
@@ -509,8 +509,8 @@ export class VeniceClient {
 
   private async quoteVideoInput(params: GenerationParams): Promise<number> {
     const source = params.sourceVideo
-    if (!source) throw new Error('Källvideon saknas.')
-    if (!existsSync(source)) throw new Error(`Källvideon finns inte längre: ${basename(source)}.`)
+    if (!source) throw new Error('The source video is missing.')
+    if (!existsSync(source)) throw new Error(`The source video no longer exists: ${basename(source)}.`)
     const info = await stat(source)
     if (info.size > MAX_REQUEST_MEDIA_BYTES) throw new Error(REQUEST_TOO_LARGE)
     const upscale = isUpscaleModel(params.model)
@@ -531,7 +531,7 @@ export class VeniceClient {
       body.resolution = params.resolution
     }
     body.video_url = await videoToDataUrl(source)
-    // Topaz's quote answers 403 without a key: say so in Swedish before asking.
+    // Topaz's quote answers 403 without a key: say so in plain words before asking.
     const res = await this.post<{ quote: number }>('/video/quote', body, upscale)
     if (this.videoQuotes.size > 200) this.videoQuotes.clear()
     this.videoQuotes.set(key, { at: Date.now(), price: res.quote })
@@ -552,7 +552,7 @@ export class VeniceClient {
       try {
         return { state: 'video', data: Buffer.from(await res.arrayBuffer()) }
       } catch (err) {
-        throw networkError(err, 'Videon kunde inte hämtas från Venice.')
+        throw networkError(err, 'The video could not be fetched from Venice.')
       }
     }
     const json = (await res.json()) as {
@@ -575,10 +575,10 @@ export class VeniceClient {
 }
 
 export async function download(url: string): Promise<Buffer> {
-  if (!url) throw new Error('Venice skickade ingen nedladdningslänk för videon.')
-  const what = 'Videon kunde inte laddas ner från Venice.'
+  if (!url) throw new Error('Venice sent no download link for the video.')
+  const what = 'The video could not be downloaded from Venice.'
   const res = await fetchOrExplain(url, undefined, what)
-  if (!res.ok) throw new Error(`Nedladdningen misslyckades (${res.status})`)
+  if (!res.ok) throw new Error(`The download failed (${res.status})`)
   try {
     return Buffer.from(await res.arrayBuffer())
   } catch (err) {

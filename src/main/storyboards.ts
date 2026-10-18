@@ -1,12 +1,12 @@
-// Storyboards: a film planned as milestones — one image per board ("ruta"), each with a short note — and the
+// Storyboards: a film planned as milestones — one image per board, each with a short note — and the
 // transitions between them: the clip that goes from one board's image to the next one's (`image_url` →
 // `end_image_url`).
-// It is a workflow of its own next to Sekvenser, but underneath a storyboard is a row of `sequences` of kind
-// 'storyboard' whose segments are its transitions, so takes, folders (Storyboards/<namn>/Övergångar/ and Bilder/),
+// It is a workflow of its own next to Sequences, but underneath a storyboard is a row of `sequences` of kind
+// 'storyboard' whose segments are its transitions, so takes, folders (Storyboards/<name>/Övergångar/ and Bilder/),
 // approvals and the export are the sequence service's. What is its own lives here: the boards, keeping one
-// transition between every two adjacent boards (syncTransitions), the transitions' settings, "Generera saknade"
+// transition between every two adjacent boards (syncTransitions), the transitions' settings, "Generate missing"
 // (each transition is independent, so they are sent one after another without waiting for each to render), the
-// export's dedupe rule and "Gör om till sekvens".
+// export's dedupe rule and "Convert to sequence".
 
 import { randomUUID } from 'node:crypto'
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs'
@@ -80,11 +80,11 @@ const MODELS_TIMEOUT_MS = 5000
 /** Image files a board takes. */
 const IMAGE_FILE = /\.(jpe?g|png|webp)$/i
 
-const STORYBOARD_GONE = 'Storyboarden finns inte längre.'
-const BOARD_GONE = 'Rutan finns inte längre.'
-const TRANSITION_GONE = 'Övergången finns inte längre – rutorna runt den kan ha ändrats.'
+const STORYBOARD_GONE = 'The storyboard no longer exists.'
+const BOARD_GONE = 'The board no longer exists.'
+const TRANSITION_GONE = 'The transition no longer exists – the boards around it may have changed.'
 const NOT_A_TRANSITION =
-  'Det här är ett klipp i en sekvens, inte en övergång i en storyboard. Ändra det under Sekvenser.'
+  'This is a clip in a sequence, not a transition in a storyboard. Change it under Sequences.'
 
 // ── Rows ─────────────────────────────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ function aspectOf(row: store.SequenceRow): string {
 function checkAspectRatio(value: unknown): string {
   const ratio = typeof value === 'string' ? value.trim() : ''
   if (!(STORYBOARD_ASPECT_RATIOS as readonly string[]).includes(ratio)) {
-    throw new Error(`Välj ett bildformat: ${STORYBOARD_ASPECT_RATIOS.join(', ')}.`)
+    throw new Error(`Choose an aspect ratio: ${STORYBOARD_ASPECT_RATIOS.join(', ')}.`)
   }
   return ratio
 }
@@ -263,10 +263,10 @@ function refuseAgentLoss(lost: readonly LostTransition[], caller: Caller): void 
   if (!numbers.length) return
   const which =
     numbers.length === 1
-      ? `övergång ${numbers[0]}`
-      : `övergångarna ${numbers.slice(0, -1).join(', ')} och ${numbers[numbers.length - 1]}`
+      ? `transition ${numbers[0]}`
+      : `transitions ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`
   throw new Error(
-    `Ändringen tar bort ${which} med prompt eller tagningar. Be om lov med request_delete {board_move: …}, eller lägg till rutan sist.`
+    `The change removes ${which} with a prompt or takes. Ask for permission with request_delete {board_move: …}, or add the board last.`
   )
 }
 
@@ -460,14 +460,14 @@ export interface StoryboardDeps {
   stills: StillsAccess
   /** The video model list (cached in main), for a transition's model and its options. */
   models?: () => Promise<VideoModel[]>
-  /** A "Generera saknade" run started or stopped: the status summary (work.ts) reads activeRuns() again. */
+  /** A "Generate missing" run started or stopped: the status summary (work.ts) reads activeRuns() again. */
   workChanged?: () => void
 }
 
 /** A transition a board move would remove (StoryboardService.moveLoss), with what goes with it. */
 export interface LostTransition {
   id: string
-  /** 1-based, as Studio shows it ("Övergång 2"). */
+  /** 1-based, as Studio shows it ("Transition 2"). */
   number: number
   prompt: string
   /** Its negative prompt, when it has one (also lost with it). */
@@ -491,7 +491,7 @@ interface Caller {
   byAgent?: boolean
 }
 
-/** One "Generera saknade" run. A new run gets a new object, so a superseded loop can tell. */
+/** One "Generate missing" run. A new run gets a new object, so a superseded loop can tell. */
 interface Run {
   running: boolean
   stopped: boolean
@@ -505,14 +505,14 @@ interface Run {
   sent: number
 }
 
-/** A transition "Generera saknade" would pay for (also what an agent's approval for it shows). */
+/** A transition "Generate missing" would pay for (also what an agent's approval for it shows). */
 export interface MissingTransition {
   transitionId: string
-  /** 1-based, as Studio shows it ("Övergång 2"). */
+  /** 1-based, as Studio shows it ("Transition 2"). */
   number: number
   /** What its take would be sent with. */
   params: GenerationParams
-  /** Why it can't be generated as it stands (Swedish). */
+  /** Why it can't be generated as it stands. */
   problem?: string
 }
 
@@ -533,7 +533,7 @@ export class StoryboardService {
   }
 
   /**
-   * "Generera saknade" runs going on now, for the status summary (work.ts): `sent` of `total` transitions are at
+   * "Generate missing" runs going on now, for the status summary (work.ts): `sent` of `total` transitions are at
    * Venice. `approved`: started by an agent's request the user approved.
    */
   activeRuns(): { storyboardId: string; startedAt: number; total: number; sent: number; approved?: boolean }[] {
@@ -548,10 +548,10 @@ export class StoryboardService {
       }))
   }
 
-  /** Why the library can't be switched or tidied right now (Swedish), or undefined. */
+  /** Why the library can't be switched or tidied right now, or undefined. */
   isBusy(): string | undefined {
     if (this.loops.size || [...this.runs.values()].some((r) => r.running)) {
-      return '”Generera saknade” pågår för en storyboard.'
+      return '“Generate missing” is running for a storyboard.'
     }
     return undefined
   }
@@ -649,7 +649,7 @@ export class StoryboardService {
 
   // ── Storyboards ────────────────────────────────────────────────────────────
 
-  /** A new storyboard with its folder (Storyboards/<namn>/Övergångar) and two empty boards, so one transition. */
+  /** A new storyboard with its folder (Storyboards/<name>/Övergångar) and two empty boards, so one transition. */
   async create(name: unknown, aspectRatio?: unknown): Promise<Storyboard> {
     const aspect =
       aspectRatio === undefined || aspectRatio === null ? DEFAULT_STORYBOARD_ASPECT_RATIO : checkAspectRatio(aspectRatio)
@@ -816,10 +816,10 @@ export class StoryboardService {
 
   /**
    * The picture for a board: a library photo or a still where it is, a file or a frame as a new still of the
-   * storyboard (in Storyboards/<namn>/Bilder/). Swedish errors.
+   * storyboard (in Storyboards/<name>/Bilder/). Plain errors.
    */
   private async resolveImage(storyboardId: string, source: BoardImageSource): Promise<ResolvedImage> {
-    if (!source || typeof source !== 'object') throw new Error('Okänd sorts bild.')
+    if (!source || typeof source !== 'object') throw new Error('Unknown kind of image.')
     let image: ResolvedImage
     switch (source.kind) {
       case 'asset-image': {
@@ -827,21 +827,21 @@ export class StoryboardService {
         const stored = conn().prepare('SELECT file_path FROM asset_images WHERE id = ?').pluck().get(id) as
           | string
           | undefined
-        if (!stored) throw new Error('Bilden finns inte längre i biblioteket.')
+        if (!stored) throw new Error('The image no longer exists in the library.')
         image = { path: fromStoredPath(stored) }
         break
       }
       case 'still': {
         const still = store.getStillRow(source.stillId)
-        if (!still) throw new Error('Stillbilden finns inte längre.')
+        if (!still) throw new Error('The still image no longer exists.')
         image = { path: fromStoredPath(still.file_path), stillId: still.id }
         break
       }
       case 'file': {
-        if (typeof source.path !== 'string' || !source.path) throw new Error('Välj en bild.')
-        if (!IMAGE_FILE.test(source.path)) throw new Error('Välj en bild i formatet JPG, PNG eller WebP.')
+        if (typeof source.path !== 'string' || !source.path) throw new Error('Choose an image.')
+        if (!IMAGE_FILE.test(source.path)) throw new Error('Choose a JPG, PNG or WebP image.')
         if (!existsSync(source.path) || !statSync(source.path).isFile()) {
-          throw new Error(`Bilden finns inte: ${basename(source.path)}.`)
+          throw new Error(`The image does not exist: ${basename(source.path)}.`)
         }
         const still = await this.deps.stills.importFile(source.path, storyboardId)
         image = { path: still.path, stillId: still.id }
@@ -849,20 +849,20 @@ export class StoryboardService {
       }
       case 'frame': {
         if (typeof source.time !== 'number' || !Number.isFinite(source.time) || source.time < 0) {
-          throw new Error('Ogiltig tidpunkt för bildrutan.')
+          throw new Error('Invalid time for the frame.')
         }
         if (typeof source.generationId !== 'string' || !db.getGeneration(source.generationId)) {
-          throw new Error('Klippet finns inte längre.')
+          throw new Error('The clip no longer exists.')
         }
         const still = await this.deps.stills.saveFrame(source.generationId, source.time, storyboardId)
         image = { path: still.path, stillId: still.id }
         break
       }
       default:
-        throw new Error('Okänd sorts bild.')
+        throw new Error('Unknown kind of image.')
     }
-    if (!IMAGE_FILE.test(image.path)) throw new Error('Bara bilder i JPG, PNG eller WebP kan bli en ruta.')
-    if (!existsSync(image.path)) throw new Error(`Bilden finns inte längre: ${basename(image.path)}.`)
+    if (!IMAGE_FILE.test(image.path)) throw new Error('Only JPG, PNG or WebP images can become a board.')
+    if (!existsSync(image.path)) throw new Error(`The image no longer exists: ${basename(image.path)}.`)
     return image
   }
 
@@ -882,7 +882,7 @@ export class StoryboardService {
       model !== undefined || patch.duration !== undefined || patch.resolution !== undefined || patch.audio !== undefined
     const models = touchesOptions ? await this.modelList() : undefined
     if (model && models && !models.some((m) => m.id === model)) {
-      throw new Error(`Venice har ingen videomodell som heter ${model}. Välj en annan modell.`)
+      throw new Error(`Venice has no video model called ${model}. Choose another model.`)
     }
 
     // Read again after the wait: the boards (and with them this transition) may have changed.
@@ -898,13 +898,13 @@ export class StoryboardService {
     if (model !== undefined) params.model = model
     const info = models?.find((m) => m.id === params.model)
     if (patch.duration !== undefined) {
-      params.duration = checkOption(patch.duration, info?.durations, info?.name, 'längden')
+      params.duration = checkOption(patch.duration, info?.durations, info?.name, 'the length')
     }
     if (patch.resolution !== undefined) {
-      params.resolution = checkOption(patch.resolution, info?.resolutions, info?.name, 'upplösningen')
+      params.resolution = checkOption(patch.resolution, info?.resolutions, info?.name, 'the resolution')
     }
     if (patch.audio !== undefined) {
-      if (typeof patch.audio !== 'boolean') throw new Error('Ljud ska vara på eller av.')
+      if (typeof patch.audio !== 'boolean') throw new Error('Sound must be on or off.')
       params.audio = patch.audio
     }
     if (model !== undefined && model !== current.model) params = fitToModel(params, aspectOf(storyboard), info)
@@ -914,15 +914,15 @@ export class StoryboardService {
     else if (patch.selectedGenerationId !== undefined) {
       const wanted = patch.selectedGenerationId
       const take = typeof wanted === 'string' ? db.getGeneration(wanted) : undefined
-      if (!take) throw new Error('Tagningen finns inte längre.')
+      if (!take) throw new Error('The take no longer exists.')
       // Its own takes, or a generation that belongs to no clip (picked from the feed), as for sequence clips.
       if (take.segmentId && take.segmentId !== row.id) {
-        throw new Error('Tagningen hör till en annan övergång eller ett annat klipp.')
+        throw new Error('The take belongs to another transition or clip.')
       }
-      // A transition goes from one board's picture to the next: an own film or a version from Redigera was made from
+      // A transition goes from one board's picture to the next: an own film or a version from the Editor was made from
       // neither, so it can't stand in for one (sequences take them as clips of their own).
       if (!isVeniceGeneration(take)) {
-        throw new Error('Egna klipp och versioner från Redigera kan inte väljas till en övergång. Lägg dem i en sekvens.')
+        throw new Error('Own clips and versions from the Editor cannot be chosen for a transition. Put them in a sequence.')
       }
       selection = take.id
     }
@@ -951,7 +951,7 @@ export class StoryboardService {
     const problem = this.problemsOf(storyboard.id, row.id)[0]
     if (problem) throw new Error(problem)
     if (this.deps.sequences.isSubmitting(row.id)) {
-      throw new Error('En tagning av övergången skickas redan till Venice. Vänta tills den syns bland tagningarna.')
+      throw new Error('A take of the transition is already being sent to Venice. Wait until it shows among the takes.')
     }
     return this.deps.sequences.generateSegment(row.id, this.transitionGuard(storyboard.id, guard))
   }
@@ -978,7 +978,7 @@ export class StoryboardService {
   }
 
   /**
-   * The transitions "Generera saknade" would pay for if it started now, in order: each without a finished selected
+   * The transitions "Generate missing" would pay for if it started now, in order: each without a finished selected
    * take that isn't already on its way to Venice or rendering, with what it would be sent with and, when it can't be
    * sent as it stands, why not.
    */
@@ -999,14 +999,14 @@ export class StoryboardService {
   }
 
   /**
-   * "Generera saknade": sends every missing transition to Venice, one after another (each waits only until Venice
+   * "Generate missing": sends every missing transition to Venice, one after another (each waits only until Venice
    * has the job: transitions don't depend on each other's takes). Nothing is paid for while any of them can't be
    * sent as it stands. `guard`: for a run the user approved through an agent (see SubmitGuard).
    */
   start(storyboardId: string, guard?: SubmitGuard): void {
     requireStoryboardRow(storyboardId)
     if (this.runs.get(storyboardId)?.running) return
-    // "Övergång 1 av 3" from the first summary on: the transitions missing now (the loop recounts as it goes).
+    // "Transition 1 of 3" from the first summary on: the transitions missing now (the loop recounts as it goes).
     const total = this.missingTransitions(storyboardId).length
     const run: Run = { running: true, stopped: false, guard, startedAt: Date.now(), total, sent: 0 }
     this.runs.set(storyboardId, run)
@@ -1036,7 +1036,7 @@ export class StoryboardService {
       if (!row) return
       db.addUnseen({
         error: runFailureText(run.error, 'storyboard'),
-        label: `Generera saknade i ”${row.name}”`,
+        label: `Generate missing in “${row.name}”`,
         context: { sequenceId: storyboardId, storyboardId, failureOf: 'run' }
       })
     } catch (err) {
@@ -1055,20 +1055,20 @@ export class StoryboardService {
       run.total = missing.length
       const blocked = missing.find((m) => m.problem)
       if (blocked) {
-        run.error = `Övergång ${blocked.number}: ${blocked.problem}`
+        run.error = `Transition ${blocked.number}: ${blocked.problem}`
         return
       }
       // Re-read every step: the user may change boards and transitions while this runs.
       const sent = new Set<string>()
       while (!run.stopped && store.getSequenceRow(storyboardId)) {
         const left = this.missingTransitions(storyboardId).filter((m) => !sent.has(m.transitionId))
-        // "Övergång 2 av 5": sent so far and still missing now (transitions may be added meanwhile).
+        // "Transition 2 of 5": sent so far and still missing now (transitions may be added meanwhile).
         run.total = run.sent + left.length
         const next = left[0]
         if (!next) break
         number = next.number
         if (next.problem) {
-          run.error = `Övergång ${next.number}: ${next.problem}`
+          run.error = `Transition ${next.number}: ${next.problem}`
           break
         }
         sent.add(next.transitionId)
@@ -1081,9 +1081,9 @@ export class StoryboardService {
       }
     } catch (err) {
       if (!isCancelledSubmit(err) && !run.stopped) {
-        // Consent errors stay raw ("Övergång 2: NEEDS_CONSENT:{…}") so the view can ask and start again.
+        // Consent errors stay raw ("Transition 2: NEEDS_CONSENT:{…}") so the view can ask and start again.
         const text = err instanceof Error ? err.message : String(err)
-        run.error = number ? `Övergång ${number}: ${text}` : text
+        run.error = number ? `Transition ${number}: ${text}` : text
       }
     } finally {
       this.loops.delete(run)
@@ -1102,10 +1102,10 @@ export class StoryboardService {
     }
   }
 
-  // ── Export and "Gör om till sekvens" ───────────────────────────────────────
+  // ── Export and "Convert to sequence" ─────────────────────────────────────
 
   /**
-   * Renders the selected takes into Storyboards/<namn>/ (see SequenceService.export, which also records where the
+   * Renders the selected takes into Storyboards/<name>/ (see SequenceService.export, which also records where the
    * transitions meet in the film, its cuts); resolves the film's path. A storyboard has no Exportformat: the film
    * keeps the first transition's size.
    */
@@ -1115,7 +1115,7 @@ export class StoryboardService {
   }
 
   /**
-   * A new sequence "<namn> (sekvens)" with one clip per transition: the transition's params (its two board images as
+   * A new sequence "<name> (sequence)" with one clip per transition: the transition's params (its two board images as
    * the clip's start and end image, prompt, model, duration …), the boards' notes, and a copy of its selected take,
    * selected (copied, so the storyboard keeps its own). Where the storyboard's export drops a transition's first
    * frame (it repeats the board the previous one ended on), the clip starts half a frame in, so the sequence's film
@@ -1126,12 +1126,12 @@ export class StoryboardService {
     await this.deps.sequences.whenFilesSettled()
     const storyboard = this.get(storyboardId)
     if (!storyboard.transitions.length) {
-      throw new Error('Storyboarden har inga övergångar att göra klipp av än. Lägg till minst två rutor.')
+      throw new Error('The storyboard has no transitions to make clips of yet. Add at least two boards.')
     }
     const notes = new Map(storyboard.boards.map((b) => [b.id, b.note.trim()]))
     const clipIds: string[] = []
     const now = Date.now()
-    const sequenceId = await this.deps.sequences.createRow(`${storyboard.name} (sekvens)`, {
+    const sequenceId = await this.deps.sequences.createRow(`${storyboard.name} (sequence)`, {
       kind: 'sequence',
       defaults: store.pickDefaults({ ...DEFAULT_PARAMS, aspectRatio: storyboard.aspectRatio }),
       inTransaction: (id) => {
@@ -1171,14 +1171,14 @@ export class StoryboardService {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   /**
-   * An agent may not change a storyboard's boards or transitions while "Generera saknade" sends them: the run reads
+   * An agent may not change a storyboard's boards or transitions while "Generate missing" sends them: the run reads
    * them as it goes, so a transition changed meanwhile would be paid for without the user having seen it.
    */
   private refuseWhileRunning(storyboardId: string, caller: Caller): void {
     if (!caller.byAgent || !this.runs.get(storyboardId)?.running) return
     throw new Error(
-      '”Generera saknade” pågår för storyboarden. Vänta tills den är klar (eller stoppa den med stop_generation_run) ' +
-        'innan du ändrar rutor eller övergångar.'
+      '“Generate missing” is running for the storyboard. Wait until it is done (or stop it with stop_generation_run) ' +
+        'before you change boards or transitions.'
     )
   }
 
@@ -1214,7 +1214,7 @@ export class StoryboardService {
   }
 }
 
-/** Why a transition can't be generated as it stands (Swedish), in the order they matter. */
+/** Why a transition can't be generated as it stands, in the order they matter. */
 function transitionProblems(
   params: GenerationParams,
   from: Pick<StoryboardBoard, 'position' | 'imagePath'> | undefined,
@@ -1227,16 +1227,16 @@ function transitionProblems(
   for (const board of [from, to]) {
     if (!board) continue
     const number = board.position + 1
-    if (!board.imagePath) note(`Ruta ${number} saknar bild.`)
+    if (!board.imagePath) note(`Board ${number} has no image.`)
     else if (!existsSync(board.imagePath)) {
-      note(`Bilden i ruta ${number} finns inte längre: ${basename(board.imagePath)}.`)
+      note(`The image on board ${number} no longer exists: ${basename(board.imagePath)}.`)
     }
   }
   if (!from || !to) note(TRANSITION_GONE)
-  if (!params.prompt.trim()) note('Skriv vad som händer i övergången.')
+  if (!params.prompt.trim()) note('Write what happens in the transition.')
   if (!supportsEndImage(params.model) || kindOfModelId(params.model) !== 'image-to-video') {
     note(
-      `Modellen ${params.model} kan inte gå från en bild till en annan. Välj en modell som tar både start- och slutbild.`
+      `The model ${params.model} cannot go from one image to another. Choose a model that takes both a start and an end image.`
     )
   }
   note(blockingPromptError(params))
@@ -1246,11 +1246,11 @@ function transitionProblems(
 /** A model for a transition: an image-to-video model that takes an end image. */
 function checkTransitionModel(value: unknown): string {
   const id = typeof value === 'string' ? value.trim() : ''
-  if (!id) throw new Error('Välj en modell.')
+  if (!id) throw new Error('Choose a model.')
   if (!supportsEndImage(id) || kindOfModelId(id) !== 'image-to-video') {
     throw new Error(
-      `${id} kan inte gå från en bild till en annan. Välj en bild-till-video-modell som tar både start- och ` +
-        'slutbild (till exempel Seedance).'
+      `${id} cannot go from one image to another. Choose an image-to-video model that takes both a start and ` +
+        'an end image (Seedance, for example).'
     )
   }
   return id
@@ -1264,9 +1264,9 @@ function checkOption(
   what: string
 ): string {
   const option = typeof value === 'string' ? value.trim() : ''
-  if (!option) throw new Error(`Välj ${what}.`)
+  if (!option) throw new Error(`Choose ${what}.`)
   if (options?.length && !options.includes(option)) {
-    throw new Error(`${model ?? 'Modellen'} har inte ${what} ${option}. Välj en av: ${options.join(', ')}.`)
+    throw new Error(`${model ?? 'The model'} doesn't have ${what} ${option}. Choose one of: ${options.join(', ')}.`)
   }
   return option
 }
@@ -1298,11 +1298,11 @@ function fitAspect(
   return { ...params, aspectRatio: pickOption(info.aspectRatios, aspectRatio, ['adaptive', 'auto']) }
 }
 
-/** A clip's "Vad händer" from the notes of the boards it goes between. */
+/** A clip's "What happens" from the notes of the boards it goes between. */
 function clipNotes(from: string | undefined, to: string | undefined): string {
   const lines: string[] = []
-  if (from) lines.push(`Från: ${from}`)
-  if (to) lines.push(`Till: ${to}`)
+  if (from) lines.push(`From: ${from}`)
+  if (to) lines.push(`To: ${to}`)
   return lines.join('\n')
 }
 
@@ -1336,7 +1336,7 @@ function guardImageFile(e: IpcMainInvokeEvent, image: unknown): void {
 /**
  * Registers the storyboard IPC handlers and returns the service behind them. 'transitions:generate' and
  * 'storyboards:generateAll' take an approval's submit guard as an extra argument (in-process calls only), and
- * 'storyboards:missing' (not part of StudioApi) tells the agent connection what "Generera saknade" would pay for.
+ * 'storyboards:missing' (not part of StudioApi) tells the agent connection what "Generate missing" would pay for.
  */
 export function registerStoryboardIpc(deps: StoryboardDeps): StoryboardService {
   const s = new StoryboardService(deps)

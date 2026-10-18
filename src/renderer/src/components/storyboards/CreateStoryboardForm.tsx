@@ -22,12 +22,12 @@ function rememberAspect(aspect: string): void {
 }
 
 const SHAPE_NAMES: Record<string, string> = {
-  '16:9': 'Liggande',
-  '9:16': 'Stående',
-  '1:1': 'Kvadrat',
-  '4:3': 'Liggande',
-  '3:4': 'Stående',
-  '21:9': 'Bred'
+  '16:9': 'Landscape',
+  '9:16': 'Portrait',
+  '1:1': 'Square',
+  '4:3': 'Landscape',
+  '3:4': 'Portrait',
+  '21:9': 'Wide'
 }
 
 interface Props {
@@ -56,14 +56,14 @@ export default function CreateStoryboardForm({ creating, onCreate, autoFocus = f
   return (
     <form onSubmit={submit} className="space-y-4">
       <label htmlFor={nameId} className="block">
-        <span className="mb-1.5 block text-muted">Namn</span>
+        <span className="mb-1.5 block text-muted">Name</span>
         <input
           id={nameId}
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus={autoFocus}
           spellCheck={false}
-          placeholder="Till exempel ”Morgonen vid havet”"
+          placeholder="For example “Morning by the sea”"
           className="w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted"
         />
       </label>
@@ -103,12 +103,12 @@ export default function CreateStoryboardForm({ creating, onCreate, autoFocus = f
           })}
         </div>
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-          Nya bilder skapas i det här formatet. Du kan ändra det senare.
+          New images are created in this format. You can change it later.
         </p>
       </fieldset>
 
       <button type="submit" disabled={creating} className={`${primaryButton} w-full py-2`}>
-        {creating ? 'Skapar…' : 'Skapa storyboard'}
+        {creating ? 'Creating…' : 'Create storyboard'}
       </button>
     </form>
   )

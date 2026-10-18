@@ -11,7 +11,7 @@ body:
 
         **Security vulnerabilities** must not be reported here. Follow SECURITY.md in the repository root instead (also linked under the repository's *Security* tab).
 
-        The app's UI is in Swedish; quote buttons and messages exactly as they appear.
+        Quote buttons and messages exactly as they appear.
 
   - type: input
     id: version

@@ -14,13 +14,13 @@ interface Props {
   sequence: Sequence
   totalSeconds: number
   readyCount: number
-  /** Segments that will get a new take from "Generera saknade" (not counting ones already generating). */
+  /** Segments that will get a new take from "Generate missing" (not counting ones already generating). */
   toGenerate: number
   /** Segments still waiting on a take that is already generating. */
   generating: number
   runQuote?: number
   stopping: boolean
-  /** Where "Generera saknade" is ("Klipp 2 av 5"), from Pågår och klart. */
+  /** Where "Generate missing" is ("Clip 2 of 5"), from Activity. */
   runDetail?: string
   previewDisabled?: string
   /** 0–1 while the film is exported (also an export started elsewhere); undefined otherwise. */
@@ -33,27 +33,27 @@ interface Props {
   onStop: () => void
   onPreview: () => void
   onExport: () => void
-  /** "Exportformat": 480/720/1080, or null for Automatiskt. */
+  /** "Export format": 480/720/1080, or null for Automatic. */
   onExportHeight: (height: number | null) => void
-  /** "Redigera senaste exporten": opens that film in Redigera. */
+  /** "Edit latest export": opens that film in the Editor. */
   onEditExport: (exportId: string) => void
   /** Problems opening the sequence's folder in Finder. */
   onError: (message: string) => void
-  /** "Radera sekvensen…", after its question. */
+  /** "Delete sequence…", after its question. */
   onDelete: () => void
 }
 
-/** The heights "Exportformat" offers; Automatiskt (null) keeps the first clip's own size. */
+/** The heights "Export format" offers; Automatic (null) keeps the first clip's own size. */
 const EXPORT_FORMATS: { height: number | null; label: string; text: string }[] = [
-  { height: null, label: 'Automatiskt', text: 'Första klippets storlek' },
-  { height: 480, label: '480p', text: 'Liten fil' },
+  { height: null, label: 'Automatic', text: "First clip's size" },
+  { height: 480, label: '480p', text: 'Small file' },
   { height: 720, label: '720p', text: 'HD' },
   { height: 1080, label: '1080p', text: 'Full HD' }
 ]
 
-/** "720p" / "Automatiskt", for the export button's tooltip. */
+/** "720p" / "Automatic", for the export button's tooltip. */
 function exportFormatLabel(height: number | null | undefined): string {
-  return EXPORT_FORMATS.find((f) => f.height === (height ?? null))?.label ?? 'Automatiskt'
+  return EXPORT_FORMATS.find((f) => f.height === (height ?? null))?.label ?? 'Automatic'
 }
 
 const primary =
@@ -98,7 +98,9 @@ export default function SequenceHeader({
       <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted @min-[83rem]/main:inline">
         {formatSeconds(totalSeconds * 1000)}
         <span className="mx-1.5">·</span>
-        {readyCount === count ? `${count} klipp` : `${readyCount} av ${count} klipp klara`}
+        {readyCount === count
+          ? `${count} ${count === 1 ? 'clip' : 'clips'}`
+          : `${readyCount} of ${count} ${count === 1 ? 'clip' : 'clips'} ready`}
       </span>
 
       <div className="no-drag ml-auto flex shrink-0 items-center gap-2">
@@ -106,7 +108,7 @@ export default function SequenceHeader({
           target="sequences"
           id={sequence.id}
           compact
-          title="Visa sekvensens mapp med tagningar och exporter i Finder"
+          title="Show the sequence's folder with takes and exports in Finder"
           onError={onError}
           className="rounded-md px-2 py-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
         />
@@ -114,11 +116,11 @@ export default function SequenceHeader({
           <>
             <span className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-muted" aria-live="polite">
               <Spinner className="text-text" />
-              Genererar saknade…
+              Generating missing…
               {runDetail && <span className="tabular-nums">{runDetail}</span>}
             </span>
-            <button onClick={onStop} disabled={stopping} className={secondary} title="Stoppar efter klippet som genereras nu">
-              {stopping ? 'Stoppar…' : 'Stoppa'}
+            <button onClick={onStop} disabled={stopping} className={secondary} title="Stops after the clip being generated now">
+              {stopping ? 'Stopping…' : 'Stop'}
             </button>
           </>
         ) : (
@@ -128,24 +130,24 @@ export default function SequenceHeader({
             className={exportIsNext || toGenerate === 0 ? secondary : primary}
             title={
               toGenerate > 0
-                ? 'Genererar en tagning för varje klipp som saknar en, i ordning'
+                ? 'Generates a take for every clip that has none, in order'
                 : generating > 0
-                  ? 'Tagningarna som saknas genereras redan'
-                  : 'Alla klipp har en färdig vald tagning'
+                  ? 'The missing takes are already being generated'
+                  : 'Every clip has a finished selected take'
             }
           >
-            Generera saknade{toGenerate > 0 && ` (${toGenerate})`}
+            Generate missing{toGenerate > 0 && ` (${toGenerate})`}
             {toGenerate > 0 && <span className="opacity-75">· {formatUsd(runQuote)}</span>}
           </button>
         )}
 
-        <button onClick={onPreview} disabled={!!previewDisabled} title={previewDisabled ?? 'Spela upp klippen i följd'} className={secondary}>
+        <button onClick={onPreview} disabled={!!previewDisabled} title={previewDisabled ?? 'Play the clips in order'} className={secondary}>
           <PlayIcon size={11} />
-          <span className="hidden @min-[67rem]/main:inline">Förhandsvisa</span>
+          <span className="hidden @min-[67rem]/main:inline">Preview</span>
         </button>
 
         {exporting ? (
-          <div className="flex w-36 items-center gap-2" title="Exporterar med ffmpeg" role="status" aria-label="Exporterar">
+          <div className="flex w-36 items-center gap-2" title="Exporting with ffmpeg" role="status" aria-label="Exporting">
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised">
               <div
                 className="h-full rounded-full bg-accent transition-[width] duration-300"
@@ -153,7 +155,7 @@ export default function SequenceHeader({
               />
             </div>
             <span className="w-9 text-right text-[12px] tabular-nums text-muted">
-              {Math.round(exportProgress * 100)} %
+              {Math.round(exportProgress * 100)}%
             </span>
           </div>
         ) : (
@@ -162,11 +164,11 @@ export default function SequenceHeader({
             disabled={!!exportBlocked}
             title={
               exportBlocked ??
-              `Renderar hela sekvensen till en mp4-fil (Exportformat: ${exportFormatLabel(sequence.exportHeight)})`
+              `Renders the whole sequence to an mp4 file (Export format: ${exportFormatLabel(sequence.exportHeight)})`
             }
             className={exportIsNext ? primary : secondary}
           >
-            Exportera
+            Export
           </button>
         )}
 
@@ -193,9 +195,9 @@ async function latestExport(sequenceId: string): Promise<ExportSummary | undefin
 
 /** What deleting a sequence does, for its question (also asked from the list's ✕). */
 export const DELETE_SEQUENCE_TEXT =
-  'Klippen försvinner ur sekvensen. Tagningarna finns kvar i Mediabanken, och exporterade filmer ligger kvar i mappen. Sekvensens bilder som inget annat använder flyttas till papperskorgen.'
+  "The clips leave the sequence. The takes stay in Media, and exported films stay in the folder. The sequence's images that nothing else uses are moved to the Trash."
 
-/** ⋯: the Exportformat, the latest export into Redigera, marking what is new here as seen, and deleting it. */
+/** ⋯: the Export format, the latest export into the Editor, marking what is new here as seen, and deleting it. */
 function MoreMenu({
   sequence,
   exporting,
@@ -222,7 +224,7 @@ function MoreMenu({
   const [latest, setLatest] = useState<ExportSummary | null>()
   const news = useOwnerWork(sequence.id)
   const newCount = news.unseen + news.failed
-  const newWhat = newCount === 1 ? 'det som är nytt' : `${newCount} saker`
+  const newWhat = newCount === 1 ? "what's new" : `${newCount} things`
 
   // Looked up each time the menu opens: an export may have finished (or its film been deleted) since.
   useEffect(() => {
@@ -252,16 +254,16 @@ function MoreMenu({
         onClick={() => (open ? close() : setOpen(true))}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Fler val"
-        title="Fler val"
+        aria-label="More options"
+        title="More options"
         className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
       >
         <MoreIcon size={14} />
       </button>
-      <Popover anchorRef={anchor} open={open} onClose={close} align="end" width={290} label="Fler val">
+      <Popover anchorRef={anchor} open={open} onClose={close} align="end" width={290} label="More options">
         {confirming ? (
           <div className="p-3">
-            <p className="mb-1 truncate">Radera ”{sequence.name}”?</p>
+            <p className="mb-1 truncate">Delete “{sequence.name}”?</p>
             <p className="mb-3 text-[12px] leading-relaxed text-muted">{DELETE_SEQUENCE_TEXT}</p>
             <div className="flex justify-end gap-1.5">
               <button
@@ -269,7 +271,7 @@ function MoreMenu({
                 onClick={() => setConfirming(false)}
                 className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
               >
-                Avbryt
+                Cancel
               </button>
               <button
                 type="button"
@@ -280,14 +282,14 @@ function MoreMenu({
                 }}
                 className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
               >
-                Radera
+                Delete
               </button>
             </div>
           </div>
         ) : (
-        <div role="menu" aria-label="Fler val" onKeyDown={onMenuKeyDown} className="p-1">
+        <div role="menu" aria-label="More options" onKeyDown={onMenuKeyDown} className="p-1">
           <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
-            Exportformat
+            Export format
           </p>
           {EXPORT_FORMATS.map((f) => (
             <button
@@ -309,7 +311,7 @@ function MoreMenu({
             </button>
           ))}
           <p className="px-2.5 pb-1.5 pt-0.5 text-[11px] leading-snug text-muted">
-            Filmen får första klippets bildformat i den höjden.
+            The film gets the first clip's aspect ratio at that height.
           </p>
           <div className="mx-2 my-1 border-t border-line" />
           <button
@@ -317,7 +319,7 @@ function MoreMenu({
             role="menuitem"
             data-menu-item
             disabled={!latest}
-            title={latest === null ? 'Exportera först' : undefined}
+            title={latest === null ? 'Export first' : undefined}
             onClick={() => {
               if (!latest) return
               setOpen(false)
@@ -327,14 +329,14 @@ function MoreMenu({
           >
             <span className="flex items-center gap-2">
               <ScissorsIcon size={13} className="shrink-0 text-muted" />
-              Redigera senaste exporten
+              Edit latest export
             </span>
             <span className="pl-[21px] text-[11px] leading-snug text-muted">
               {latest === undefined
-                ? 'Letar efter exporten…'
+                ? 'Looking for the export…'
                 : latest === null
-                  ? 'Exportera först.'
-                  : 'Ändra den färdiga filmen med AI i Redigera. Sekvensen rörs inte.'}
+                  ? 'Export first.'
+                  : "Change the finished film with AI in the Editor. The sequence isn't touched."}
             </span>
           </button>
           <div className="mx-2 my-1 border-t border-line" />
@@ -351,12 +353,12 @@ function MoreMenu({
           >
             <span className="flex items-center gap-2">
               <CheckAllIcon size={13} className="shrink-0 text-muted" />
-              Markera alla som sedda
+              Mark all as seen
             </span>
             <span className="pl-[21px] text-[11px] leading-snug text-muted">
               {newCount === 0
-                ? 'Inget nytt att titta på i sekvensen.'
-                : `Tar bort markeringen Ny från ${newWhat} i sekvensen.`}
+                ? 'Nothing new to look at in the sequence.'
+                : `Removes the New mark from ${newWhat} in the sequence.`}
             </span>
           </button>
           <div className="mx-2 my-1 border-t border-line" />
@@ -367,7 +369,7 @@ function MoreMenu({
             onClick={() => setConfirming(true)}
             className={`${menuRow} text-muted hover:text-accent`}
           >
-            Radera sekvensen…
+            Delete sequence…
           </button>
         </div>
         )}
@@ -429,8 +431,8 @@ function NameInput({
         }
       }}
       spellCheck={false}
-      placeholder="Namnlös sekvens"
-      title="Byt namn"
+      placeholder="Untitled sequence"
+      title="Rename"
       className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md @min-[67rem]/main:min-w-28 border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised"
     />
   )

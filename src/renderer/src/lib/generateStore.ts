@@ -23,7 +23,7 @@ function loadRemembered(): GenerationParams {
     const audios = sanitizeReferenceAudios(params.referenceAudios)
     if (audios) params.referenceAudios = audios
     else delete params.referenceAudios
-    // The description switches and "bärs av" choices as the form writes them (defaults left out), never malformed
+    // The description switches and "worn by" choices as the form writes them (defaults left out), never malformed
     // ones from storage.
     const { includeDescriptions: _include, excludedDescriptionAssetIds: _excluded, outfitWearers, ...rest } = params
     const wearers = sanitizeOutfitWearers(outfitWearers)

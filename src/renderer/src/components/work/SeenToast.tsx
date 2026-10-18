@@ -4,9 +4,9 @@ import { dismissSeenToast, useSeenToast } from '../../lib/work'
 import { CloseIcon } from '../sequences/icons'
 
 /**
- * "7 markerade som sedda · Ångra" after Markera alla som sedda, for ten seconds, at the bottom of the work area.
+ * "7 marked as seen · Undo" after Mark all as seen, for ten seconds, at the bottom of the work area.
  * Lifted above the agent's presence pill while an agent works, so the two never cover each other, and beside the
- * Pågår och klart panel while it is open (its own Markera alla starts it), so it never covers the panel's rows.
+ * Activity panel while it is open (its own Mark all starts it), so it never covers the panel's rows.
  */
 export default function SeenToast({
   agentPillHidden,
@@ -42,13 +42,13 @@ export default function SeenToast({
             }}
             className="rounded-full px-2.5 py-1 font-medium text-text transition hover:bg-raised disabled:opacity-60"
           >
-            Ångra
+            Undo
           </button>
         )}
         <button
           onClick={dismissSeenToast}
-          title="Stäng"
-          aria-label="Stäng"
+          title="Close"
+          aria-label="Close"
           className="rounded-full p-1.5 text-muted transition hover:bg-raised hover:text-text"
         >
           <CloseIcon size={11} />

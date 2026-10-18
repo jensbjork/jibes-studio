@@ -10,12 +10,12 @@ export interface TakeOwner {
   kind: 'sequence' | 'storyboard'
   id: string
   name: string
-  /** 1-based: "Klipp 3", "Övergång 2". */
+  /** 1-based: "Clip 3", "Transition 2". */
   number: number
 }
 
 /**
- * The sequence or storyboard Pågår och klart already knows the clip or transition by (main joined the owner for
+ * The sequence or storyboard Activity already knows the clip or transition by (main joined the owner for
  * everything running or new), so only that one is read instead of every sequence and storyboard.
  */
 function ownerFromSummary(
@@ -64,9 +64,9 @@ export async function findTakeOwner(segmentId: string): Promise<TakeOwner | unde
   return undefined
 }
 
-/** "Klipp 3 i ”Namn”" / "Övergång 2 i ”Namn”". */
+/** "Clip 3 in “Name”" / "Transition 2 in “Name”". */
 export function takeOwnerLabel(owner: TakeOwner): string {
-  return `${owner.kind === 'storyboard' ? 'Övergång' : 'Klipp'} ${owner.number} i ”${owner.name}”`
+  return `${owner.kind === 'storyboard' ? 'Transition' : 'Clip'} ${owner.number} in “${owner.name}”`
 }
 
 /**

@@ -14,7 +14,7 @@ import NewPictures from '../work/NewPictures'
 import { NewChip } from '../work/StatusMark'
 import { CountLine, MediaToolbar, NoticeRow, SearchField } from './ui'
 
-// Bilder: every still in the library – made with an image model, uploaded, or a frame saved from a clip – newest
+// Images: every still in the library – made with an image model, uploaded, or a frame saved from a clip – newest
 // first, wherever it belongs: a sequence, a storyboard, or Referensbilder for one with no place. Opened in the
 // picture viewer, which steps through what the filters show.
 
@@ -30,15 +30,15 @@ interface PictureFilters {
 const NO_FILTERS: PictureFilters = { query: '' }
 
 const SOURCE_OPTIONS: { id: SourceChoice; label: string; text: string }[] = [
-  { id: 'generated', label: 'Skapade', text: 'Bilder gjorda med en bildmodell' },
-  { id: 'upload', label: 'Uppladdade', text: 'Dina egna bilder' },
-  { id: 'frame', label: 'Bildrutor', text: 'Bildrutor sparade ur ett klipp' }
+  { id: 'generated', label: 'Created', text: 'Images made with an image model' },
+  { id: 'upload', label: 'Uploaded', text: 'Your own images' },
+  { id: 'frame', label: 'Frames', text: 'Frames saved from a clip' }
 ]
 
 const PLACE_OPTIONS: { id: PlaceChoice; label: string; text: string }[] = [
-  { id: 'sequence', label: 'Sekvenser', text: 'Bilder som hör till en sekvens' },
-  { id: 'storyboard', label: 'Storyboards', text: 'Bilder som hör till en storyboard' },
-  { id: 'loose', label: 'Lösa bilder', text: 'Bilder i Referensbilder, utan sekvens eller storyboard' }
+  { id: 'sequence', label: 'Sequences', text: 'Images that belong to a sequence' },
+  { id: 'storyboard', label: 'Storyboards', text: 'Images that belong to a storyboard' },
+  { id: 'loose', label: 'Loose images', text: 'Images in “Referensbilder”, with no sequence or storyboard' }
 ]
 
 /** Like the clip feed's: kept while Studio runs (switching views keeps them), never across a restart. */
@@ -62,7 +62,7 @@ interface OpenRequest {
 }
 
 interface Props {
-  /** The Mediabank's tabs, at the start of the header. */
+  /** Media's tabs, at the start of the header. */
   tabs: ReactNode
   navigate: Navigate
   /** Open this still in the viewer; `source: 'agent'` doesn't mark it seen by showing it. */
@@ -96,22 +96,22 @@ export default function PicturesTab({ tabs, navigate, openRequest, onOpenRequest
   const filtering = !!(filters.query.trim() || filters.source || filters.place)
 
   const shown = useMemo(() => {
-    const needle = deferred.query.trim().toLocaleLowerCase('sv')
+    const needle = deferred.query.trim().toLocaleLowerCase('en')
     return stills.filter((s) => {
       if (deferred.source && s.source !== deferred.source) return false
       if (deferred.place && placeOf(s)?.kind !== deferred.place) return false
-      return !needle || s.prompt.toLocaleLowerCase('sv').includes(needle)
+      return !needle || s.prompt.toLocaleLowerCase('en').includes(needle)
     })
   }, [stills, deferred, places, placesLoaded])
 
   const sourceCounts = useMemo(() => countBy(stills, (s) => s.source), [stills])
   const placeCounts = useMemo(() => countBy(stills, (s) => placeOf(s)?.kind), [stills, places, placesLoaded])
-  const count = filtering ? `${shown.length} av ${picturesText(stills.length)}` : picturesText(stills.length)
+  const count = filtering ? `${shown.length} of ${picturesText(stills.length)}` : picturesText(stills.length)
 
   const [notice, setNotice] = useState<string>()
   const [opened, setOpened] = useState<{ still: Still; byAgent: boolean }>()
 
-  // Pågår och klart or an agent showing a picture: opened in the viewer, lifting filters that hide it (with a note).
+  // Activity or an agent showing a picture: opened in the viewer, lifting filters that hide it (with a note).
   // One made a moment ago may not be in the list yet, so it is looked up once more before it counts as gone.
   const handled = useRef<OpenRequest>(undefined)
   useEffect(() => {
@@ -120,12 +120,12 @@ export default function PicturesTab({ tabs, navigate, openRequest, onOpenRequest
     const request = openRequest
     const show = (still: Still | undefined) => {
       if (!still) {
-        setNotice('Bilden finns inte längre i biblioteket.')
+        setNotice('The image is no longer in the library.')
         return
       }
       if (filtering && !shown.some((s) => s.id === still.id)) {
         setFilters(NO_FILTERS)
-        setNotice('Filtren dolde bilden, så de är borttagna.')
+        setNotice('The filters hid the image, so they were cleared.')
       }
       setOpened({ still, byAgent: request.source === 'agent' })
     }
@@ -191,20 +191,20 @@ export default function PicturesTab({ tabs, navigate, openRequest, onOpenRequest
         below={
           <>
             <FilterMenu
-              title="Källa"
+              title="Source"
               value={filters.source}
               valueLabel={SOURCE_OPTIONS.find((o) => o.id === filters.source)?.label}
               options={SOURCE_OPTIONS.map((o) => ({ id: o.id, label: o.label, text: o.text, hint: sourceCounts.get(o.id) }))}
               onChange={(source) => set({ source })}
-              allLabel="Alla"
+              allLabel="All"
             />
             <FilterMenu
-              title="Plats"
+              title="Place"
               value={filters.place}
               valueLabel={PLACE_OPTIONS.find((o) => o.id === filters.place)?.label}
               options={PLACE_OPTIONS.map((o) => ({ id: o.id, label: o.label, text: o.text, hint: placeCounts.get(o.id) }))}
               onChange={(place) => set({ place })}
-              allLabel="Alla"
+              allLabel="All"
             />
             {filtering && (
               <button
@@ -212,7 +212,7 @@ export default function PicturesTab({ tabs, navigate, openRequest, onOpenRequest
                 onClick={() => setFilters(NO_FILTERS)}
                 className="no-drag ml-1 rounded px-1.5 py-1 text-[12px] text-muted underline-offset-2 hover:text-text hover:underline"
               >
-                Rensa filter
+                Clear filters
               </button>
             )}
             <CountLine text={loaded ? count : ''} />
@@ -222,7 +222,7 @@ export default function PicturesTab({ tabs, navigate, openRequest, onOpenRequest
         <SearchField
           value={filters.query}
           onChange={(query) => set({ query })}
-          placeholder="Sök i bildernas prompter…"
+          placeholder="Search the images’ prompts…"
           inputRef={searchRef}
           onArrowDown={() => scrollRef.current?.querySelector<HTMLElement>('[role="button"]')?.focus()}
         />
@@ -235,19 +235,19 @@ export default function PicturesTab({ tabs, navigate, openRequest, onOpenRequest
         {!loaded ? null : stills.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted">
             <p className="max-w-sm leading-relaxed">
-              Inga bilder än. Bilder du skapar, laddar upp eller sparar ur ett klipp – i sekvenser, storyboards och
-              Generera – hamnar här.
+              No images yet. Images you create, upload or save from a clip – in sequences, storyboards and Generate –
+              end up here.
             </p>
           </div>
         ) : shown.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-muted">
-            <p>Inga bilder matchar filtren.</p>
+            <p>No images match the filters.</p>
             <button
               type="button"
               onClick={() => setFilters(NO_FILTERS)}
               className="text-text underline-offset-2 hover:underline"
             >
-              Rensa filter
+              Clear filters
             </button>
           </div>
         ) : (
@@ -276,10 +276,10 @@ export default function PicturesTab({ tabs, navigate, openRequest, onOpenRequest
               <button
                 type="button"
                 onClick={() => goTo(place)}
-                title={`Öppna ”${place.name}”`}
+                title={`Open “${place.name}”`}
                 className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text"
               >
-                {place.kind === 'storyboard' ? 'Gå till storyboarden' : 'Gå till sekvensen'}
+                {place.kind === 'storyboard' ? 'Go to the storyboard' : 'Go to the sequence'}
               </button>
             )
           }}
@@ -299,12 +299,12 @@ function countBy<T, K>(items: readonly T[], key: (item: T) => K | undefined): Ma
 }
 
 function picturesText(n: number): string {
-  return n === 1 ? '1 bild' : `${n} bilder`
+  return n === 1 ? '1 image' : `${n} images`
 }
 
 /**
  * One still in the grid: the picture, what it is (the prompt, or what kind of picture) and where it belongs. A new
- * one is marked "Ny" and counts as seen once it has been on screen a moment; the mark stays while the grid is up, so
+ * one is marked "New" and counts as seen once it has been on screen a moment; the mark stays while the grid is up, so
  * it can still be found. Not while the viewer covers the grid (`paused`).
  */
 const PictureTile = memo(function PictureTile({
@@ -333,7 +333,7 @@ const PictureTile = memo(function PictureTile({
       <div ref={ref} className="relative">
         <StillThumb still={still} onOpen={onOpen} className="aspect-video w-full" />
         {(unseen || wasNew) && (
-          <NewChip variant="overlay" title="Ny bild, inte tittad på än" className="pointer-events-none absolute left-1.5 top-1.5" />
+          <NewChip variant="overlay" title="New image, not looked at yet" className="pointer-events-none absolute left-1.5 top-1.5" />
         )}
       </div>
       <figcaption className="mt-1.5 min-w-0 leading-snug">
@@ -354,7 +354,7 @@ const PictureTile = memo(function PictureTile({
 })
 
 function placeTitle(place: Place): string {
-  if (place.kind === 'sequence') return `I sekvensen ”${place.name}”`
-  if (place.kind === 'storyboard') return `I storyboarden ”${place.name}”`
-  return 'I Referensbilder – hör inte till någon sekvens eller storyboard'
+  if (place.kind === 'sequence') return `In the sequence “${place.name}”`
+  if (place.kind === 'storyboard') return `In the storyboard “${place.name}”`
+  return 'In “Referensbilder” – belongs to no sequence or storyboard'
 }

@@ -2,7 +2,7 @@ import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { isAgentCall } from './local-ipc'
 import type { AgentService } from './service'
 
-const USER_ONLY = 'Det här kan bara du göra i Studio.'
+const USER_ONLY = 'Only you can do this in Studio.'
 
 /**
  * The connection's own settings and the user's answers belong to the window. No tool calls these channels; the

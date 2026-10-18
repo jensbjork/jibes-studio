@@ -1,5 +1,5 @@
 // What the building-block menu offers in a prompt field: the ready-made phrases for the field's kind, the
-// prompts saved in Prompter and the learnings, filtered by what the user typed after "/" (or in the search box).
+// prompts saved in Prompts and the learnings, filtered by what the user typed after "/" (or in the search box).
 
 import { useEffect, useState } from 'react'
 import { promptBlockGroups, type PromptBlockContext } from '@shared/prompt-blocks'
@@ -7,7 +7,7 @@ import type { Learning, SavedPrompt } from '@shared/types'
 
 export interface BlockItem {
   key: string
-  /** Swedish: what the user sees. */
+  /** What the user sees. */
   label: string
   /** What goes into the field. */
   text: string
@@ -25,9 +25,9 @@ export interface BlockSection {
 /** How many saved prompts and learnings show without a search; a search shows every match. */
 const LIBRARY_PREVIEW = 6
 
-/** Lower-cased, accents kept apart from base letters, so "närbild" is found by "narbild" too. */
+/** Lower-cased, accents kept apart from base letters, so "café" is found by "cafe" too. */
 function fold(text: string): string {
-  return text.toLocaleLowerCase('sv').normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return text.toLocaleLowerCase('en').normalize('NFD').replace(/[̀-ͯ]/g, '')
 }
 
 function matches(query: string, ...fields: (string | undefined)[]): boolean {
@@ -51,14 +51,14 @@ export interface BlockSources {
   learnings?: readonly Learning[]
 }
 
-/** The menu's sections, in order: the block groups, then Mina prompter and Lärdomar for visual prompts. */
+/** The menu's sections, in order: the block groups, then My prompts and Learnings for visual prompts. */
 export function blockSections({ context, query, group, prompts = [], learnings = [] }: BlockSources): BlockSection[] {
   const q = query.trim()
   const named: BlockSection[] = []
   const sections: BlockSection[] = []
   for (const g of promptBlockGroups(context)) {
     if (group && group !== g.id) continue
-    // A search also finds a group by its name ("/kamera" shows all camera blocks) – and those groups come first.
+    // A search also finds a group by its name ("/camera" shows all camera blocks) – and those groups come first.
     const whole = !!q && matches(q, g.label)
     const items = g.blocks
       .filter((b) => whole || matches(q, b.label, b.text))
@@ -77,7 +77,7 @@ export function blockSections({ context, query, group, prompts = [], learnings =
       text: p.body,
       detail: excerpt(p.body)
     }))
-    if (items.length) sections.push({ key: 'prompts', title: 'Mina prompter', items })
+    if (items.length) sections.push({ key: 'prompts', title: 'My prompts', items })
   }
   if (visual && (!group || group === 'learnings')) {
     const found = learnings
@@ -89,12 +89,12 @@ export function blockSections({ context, query, group, prompts = [], learnings =
       text: l.insight,
       detail: excerpt(l.insight)
     }))
-    if (items.length) sections.push({ key: 'learnings', title: 'Lärdomar', items })
+    if (items.length) sections.push({ key: 'learnings', title: 'Learnings', items })
   }
   return sections
 }
 
-/** The chips under a field: its block groups, then Mina prompter / Lärdomar when there are any. */
+/** The chips under a field: its block groups, then My prompts / Learnings when there are any. */
 export function blockChips(
   context: PromptBlockContext,
   hasPrompts: boolean,
@@ -102,8 +102,8 @@ export function blockChips(
 ): { id: string; label: string }[] {
   const chips = promptBlockGroups(context).map((g) => ({ id: g.id, label: g.label }))
   const visual = context === 'video' || context === 'image'
-  if (visual && hasPrompts) chips.push({ id: 'prompts', label: 'Mina prompter' })
-  if (visual && hasLearnings) chips.push({ id: 'learnings', label: 'Lärdomar' })
+  if (visual && hasPrompts) chips.push({ id: 'prompts', label: 'My prompts' })
+  if (visual && hasLearnings) chips.push({ id: 'learnings', label: 'Learnings' })
   return chips
 }
 

@@ -55,7 +55,7 @@ jobs:
         run: npx electron-vite build
 
       # Ad-hoc signed (no Developer ID): a download by curl carries no quarantine flag and opens directly; a download
-      # in a browser needs "Öppna ändå" once (see the README).
+      # in a browser needs "Open Anyway" once (see the README).
       - name: Package
         run: npx electron-builder --mac zip dmg --arm64 --publish never
 

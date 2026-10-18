@@ -11,7 +11,7 @@ interface Props {
 const base = 'shrink-0 rounded-md border border-line px-3 py-1.5 text-[12px] transition hover:bg-raised disabled:opacity-40'
 
 /** Copies to the clipboard and says so for a moment. */
-export default function CopyButton({ text, label = 'Kopiera', title, className = base }: Props) {
+export default function CopyButton({ text, label = 'Copy', title, className = base }: Props) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [busy, setBusy] = useState(false)
 
@@ -36,7 +36,7 @@ export default function CopyButton({ text, label = 'Kopiera', title, className =
 
   return (
     <button type="button" onClick={() => void copy()} disabled={busy} title={title} className={className}>
-      {state === 'copied' ? 'Kopierat' : state === 'failed' ? 'Gick inte' : label}
+      {state === 'copied' ? 'Copied' : state === 'failed' ? 'Couldn’t copy' : label}
     </button>
   )
 }

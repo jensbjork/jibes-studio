@@ -1,6 +1,6 @@
 import { useMemo, useState, type KeyboardEvent } from 'react'
 import { ASSET_KINDS, type Asset, type AssetKind } from '@shared/types'
-import { ASSET_COPY, swedishList } from '../../lib/assets'
+import { ASSET_COPY, englishList } from '../../lib/assets'
 import { mediaUrl } from '../../lib/media'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
@@ -98,11 +98,12 @@ export default function AssetPicker({
       <div className="border-b border-line px-3 py-2.5">
         <p className="font-medium">{title}</p>
         {hint && <p className="mt-0.5 text-[11px] text-muted">{hint}</p>}
-        {/* Five kinds share the popover's width: icon and count above, the name below, so no name is cut. */}
+        {/* Five kinds share the popover's width: icon and count above, the name below, so no name is cut (the
+            longest, Environments, gets a wider column). */}
         <div
           role="tablist"
           onKeyDown={onTabKeyDown}
-          className="mt-2 grid grid-cols-5 gap-0.5 rounded-md bg-raised p-0.5"
+          className="mt-2 grid grid-cols-[1fr_1.25fr_1fr_1fr_1fr] gap-0.5 rounded-md bg-raised p-0.5"
         >
           {ASSET_KINDS.map((k) => (
             <button
@@ -113,7 +114,7 @@ export default function AssetPicker({
               tabIndex={k === kind ? 0 : -1}
               onClick={() => showTab(k)}
               title={counts[k] ? `${ASSET_COPY[k].plural} (${counts[k]})` : ASSET_COPY[k].plural}
-              className={`flex min-w-0 flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 text-[10.5px] ${
+              className={`flex min-w-0 flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 text-[10px] ${
                 k === kind ? 'bg-line text-text' : 'text-muted hover:text-text'
               } leading-none transition`}
             >
@@ -154,7 +155,7 @@ export default function AssetPicker({
           </div>
         ) : visible.length === 0 ? (
           <p className="px-3 py-6 text-center text-muted">
-            {copy.noMatch} ”{query}”.
+            {copy.noMatch} “{query}”.
           </p>
         ) : (
           visible.map((a) => (
@@ -219,17 +220,17 @@ function AssetRow({
   const all = total > 0 && used === total
 
   const status = !total
-    ? 'Inga bilder än'
+    ? 'No images yet'
     : !reference || !used
       ? imageCount(total)
       : all
         ? total === 1
-          ? 'Bilden är tillagd'
-          : `Alla ${total} bilder tillagda`
-        : `${used} av ${total} bilder tillagda`
+          ? 'The image is added'
+          : `All ${total} images added`
+        : `${used} of ${total} images added`
   const extra = [
-    voice ? 'med röst' : undefined,
-    outfit ? `bär ${outfit.name}` : wornBy?.length ? `standard för ${swedishList(wornBy)}` : undefined
+    voice ? 'with voice' : undefined,
+    outfit ? `wears ${outfit.name}` : wornBy?.length ? `default for ${englishList(wornBy)}` : undefined
   ]
     .filter(Boolean)
     .join(' · ')
@@ -240,10 +241,10 @@ function AssetRow({
       ? undefined
       : pending > freeSlots
         ? freeSlots
-          ? `bara ${freeSlots} får plats`
-          : 'får inte plats'
+          ? `only ${freeSlots} ${freeSlots === 1 ? 'fits' : 'fit'}`
+          : 'doesn’t fit'
         : outfitPending > freeSlots - pending
-          ? 'kläderna får inte plats'
+          ? 'the outfit doesn’t fit'
           : undefined
 
   return (
@@ -255,9 +256,9 @@ function AssetRow({
           !total
             ? PICKER_COPY[a.kind].needsImages
             : reference
-              ? `Lägg till alla bilder${voice ? (outfit ? ', rösten' : ' och rösten') : ''}` +
-                (outfit ? ` och standardklädseln ”${outfit.name}”` : '')
-              : 'Använd omslagsbilden'
+              ? `Add all images${voice ? (outfit ? ', the voice' : ' and the voice') : ''}` +
+                (outfit ? ` and the default outfit “${outfit.name}”` : '')
+              : 'Use the cover image'
         }
         className="flex w-full items-center gap-3 rounded-md text-left disabled:cursor-not-allowed disabled:opacity-50"
       >
@@ -278,7 +279,7 @@ function AssetRow({
             <button
               key={img.id}
               onClick={() => onPickImage(img.path)}
-              title={selected.has(img.path) ? 'Redan vald' : `Bild ${i + 1}`}
+              title={selected.has(img.path) ? 'Already chosen' : `Image ${i + 1}`}
               className={`h-8 w-8 overflow-hidden rounded border transition ${
                 selected.has(img.path) ? 'border-accent' : 'border-transparent hover:border-muted'
               }`}

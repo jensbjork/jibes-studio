@@ -43,7 +43,7 @@ interface Overlaid {
   receivedAt: number
 }
 
-const byName = (a: Asset, b: Asset) => a.name.localeCompare(b.name, 'sv')
+const byName = (a: Asset, b: Asset) => a.name.localeCompare(b.name, 'en')
 
 /**
  * The live list lags a moment behind each mutation, so assets returned by mutations are overlaid until the
@@ -87,19 +87,19 @@ function longClipsNotice(clips: AssetAudio[], section: string): string | undefin
   if (!clips.length) return undefined
   const what =
     clips.length === 1
-      ? `”${clipFileName(clips[0].path)}” är ${formatDuration(clips[0].duration)} lång`
-      : `${clips.length} av ljudfilerna är längre än ${formatDuration(LONG_AUDIO_SECONDS)}`
+      ? `“${clipFileName(clips[0].path)}” is ${formatDuration(clips[0].duration)} long`
+      : `${clips.length} of the audio files are longer than ${formatDuration(LONG_AUDIO_SECONDS)}`
   return (
-    `${what}. Bara ett utdrag på ${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} s skickas till Venice – välj ` +
-    `den bästa delen under ${section}.`
+    `${what}. Only an excerpt of ${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} s is sent to Venice – pick ` +
+    `the best part under ${section}.`
   )
 }
 
 function uniqueNewName(assets: Asset[], base: string): string {
-  const taken = new Set(assets.map((a) => a.name.toLocaleLowerCase('sv')))
-  if (!taken.has(base.toLocaleLowerCase('sv'))) return base
+  const taken = new Set(assets.map((a) => a.name.toLocaleLowerCase('en')))
+  if (!taken.has(base.toLocaleLowerCase('en'))) return base
   let n = 2
-  while (taken.has(`${base} ${n}`.toLocaleLowerCase('sv'))) n++
+  while (taken.has(`${base} ${n}`.toLocaleLowerCase('en'))) n++
   return `${base} ${n}`
 }
 
@@ -111,7 +111,7 @@ interface Props {
 }
 
 /**
- * Karaktärer, Miljöer, Produkter, Kläder or Poser: the list of one kind of asset and an editor for the selected one.
+ * Characters, Environments, Products, Outfits or Poses: the list of one kind of asset and an editor for the selected one.
  */
 export default function AssetsView({ kind, intent, onIntentHandled, navigate }: Props) {
   const copy = ASSET_COPY[kind]
@@ -127,7 +127,7 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
   const [addingImages, setAddingImages] = useState<Adding>({})
   const [addingAudio, setAddingAudio] = useState<Adding>({})
   const [notice, setNotice] = useState<Notice>()
-  // A clip to point out in Röst (a new voice opened from Pågår och klart); a new object each time it is asked for.
+  // A clip to point out in Voice (a new voice opened from Activity); a new object each time it is asked for.
   const [focusAudio, setFocusAudio] = useState<SoundFocus>()
 
   const assets = useMemo(() => mergeAssets(listed, overlay, removed), [listed, overlay, removed])
@@ -172,7 +172,7 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
 
   useEffect(() => saveSelected(kind, selectedId), [kind, selectedId])
 
-  // "Visa klädseln" and similar links from the other library views, Pågår och klart's "Gå dit" (with the new voice's
+  // "Show outfit" and similar links from the other library views, Activity's "Go there" (with the new voice's
   // clip) and an agent's open_in_studio. Opening an asset marks nothing seen, whoever asked: a new voice counts as
   // heard only once it has been played, so an agent's open (source 'agent') needs no different handling here.
   useEffect(() => {
@@ -219,7 +219,7 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
   }
 
   /**
-   * From the editor's Radera or a row's ✕ in the list; the open one gives way to its neighbour (from the list: the row
+   * From the editor's Delete or a row's ✕ in the list; the open one gives way to its neighbour (from the list: the row
    * that took its place among those the search shows). Throws so the editor (which then resumes autosaving) or the
    * row can show the error.
    */
@@ -252,7 +252,7 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
       const asset = await window.studio.addAssetAudio(assetId, paths)
       updated(asset)
       const long = assetAudio(asset).filter((c) => !before.has(c.id) && c.duration > LONG_AUDIO_SECONDS)
-      const advice = longClipsNotice(long, copy.audio?.title ?? 'ljudet')
+      const advice = longClipsNotice(long, copy.audio?.title ?? 'the sound')
       if (advice) notify(advice, 'info')
     } catch (e) {
       notify(ipcErrorMessage(e))
@@ -335,7 +335,7 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
           <button
             onClick={() => setNotice(undefined)}
             className="-mr-1 shrink-0 rounded px-1 text-muted hover:text-text"
-            title="Stäng"
+            title="Close"
           >
             ✕
           </button>

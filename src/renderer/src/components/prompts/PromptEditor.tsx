@@ -27,15 +27,15 @@ function SaveIndicator({ draft, status }: { draft: Draft; status?: SaveStatus })
   if (status?.state === 'error') {
     return (
       <span className="truncate text-accent select-text" title={status.error}>
-        Kunde inte spara: {status.error}
+        Couldn't save: {status.error}
       </span>
     )
   }
   if (status?.state === 'invalid' || (!draft.id && !canSave(draft))) {
-    return <span className="text-muted">{draft.id ? 'En tom prompt sparas inte' : 'Ny prompt – sparas när du börjat skriva'}</span>
+    return <span className="text-muted">{draft.id ? "An empty prompt isn't saved" : 'New prompt – saved once you start writing'}</span>
   }
-  if (status?.state === 'pending' || status?.state === 'saving') return <span className="text-muted">Sparar…</span>
-  if (status?.state === 'saved') return <span className="text-muted">Sparad</span>
+  if (status?.state === 'pending' || status?.state === 'saving') return <span className="text-muted">Saving…</span>
+  if (status?.state === 'saved') return <span className="text-muted">Saved</span>
   return null
 }
 
@@ -72,14 +72,14 @@ export default function PromptEditor({
             type="button"
             onClick={onDuplicate}
             disabled={isNew || !savable}
-            title="Skapa en kopia att variera"
+            title="Make a copy to vary"
             className={secondaryButton}
           >
-            Duplicera
+            Duplicate
           </button>
           {isNew ? (
             <button type="button" onClick={onDelete} className={secondaryButton}>
-              Släng
+              Discard
             </button>
           ) : (
             <ConfirmDeleteButton onConfirm={onDelete} />
@@ -88,10 +88,10 @@ export default function PromptEditor({
             type="button"
             onClick={onUse}
             disabled={!savable}
-            title="Öppna i Generera (⌘ + Enter)"
+            title="Open in Generate (⌘ + Enter)"
             className="ml-1 rounded-md bg-accent px-3.5 py-1.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
           >
-            Använd
+            Use
           </button>
         </div>
       </div>
@@ -109,8 +109,8 @@ export default function PromptEditor({
                   bodyRef.current?.focus()
                 }
               }}
-              placeholder={titleFromBody(draft.body) || 'Titel'}
-              aria-label="Titel"
+              placeholder={titleFromBody(draft.body) || 'Title'}
+              aria-label="Title"
               className="min-w-0 flex-1 bg-transparent text-xl font-semibold outline-none placeholder:text-muted/60"
             />
             <FavoriteButton active={draft.favorite} onToggle={onToggleFavorite} className="text-xl" />
@@ -139,16 +139,16 @@ export default function PromptEditor({
               minRows={10}
               maxRows={24}
               title="Prompt"
-              focusHint="Beskriv scenen, rörelsen och kameran. Skriv / för en byggsten. Allt sparas medan du skriver."
-              placeholder="Beskriv scenen, rörelsen och kameran… (skriv / för byggstenar)"
+              focusHint="Describe the scene, the movement and the camera. Type / for a building block. Everything is saved as you type."
+              placeholder="Describe the scene, the movement and the camera… (type / for building blocks)"
             />
             <span className="mt-1 block text-[11px] text-muted">
-              I referensläget pekar du ut bilderna med @Image1, @Image2 … i den ordning de ligger i formuläret.
+              In reference mode you point to the images with @Image1, @Image2 … in the order they have in the form.
             </span>
           </label>
 
           <label className="block">
-            <span className="mb-1.5 block text-muted">Negativ prompt (valfri)</span>
+            <span className="mb-1.5 block text-muted">Negative prompt (optional)</span>
             <PromptField
               value={draft.negativePrompt}
               onChange={(negativePrompt) => onChange({ negativePrompt })}
@@ -156,17 +156,17 @@ export default function PromptEditor({
               context="negative"
               minRows={2}
               maxRows={8}
-              title="Negativ prompt"
-              focusHint="Det modellen ska undvika, gärna på engelska och kommaseparerat."
-              placeholder="Det du inte vill se…"
+              title="Negative prompt"
+              focusHint="What the model should avoid, preferably in English and comma-separated."
+              placeholder="What you don't want to see…"
             />
           </label>
 
           {stored && (
             <p className="border-t border-line pt-4 text-[11px] text-muted">
-              Skapad {formatWhen(stored.createdAt)} · Ändrad {formatWhen(stored.updatedAt)} ·{' '}
+              Created {formatWhen(stored.createdAt)} · Updated {formatWhen(stored.updatedAt)} ·{' '}
               {formatUses(stored.useCount)}
-              {stored.lastUsedAt ? `, senast ${formatWhen(stored.lastUsedAt)}` : ''}
+              {stored.lastUsedAt ? `, last ${formatWhen(stored.lastUsedAt)}` : ''}
             </p>
           )}
         </div>

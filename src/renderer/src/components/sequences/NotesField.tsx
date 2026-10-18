@@ -16,7 +16,7 @@ interface Props {
 }
 
 /**
- * The clip's "Vad händer": free notes for planning the shot (any language), saved by themselves as the user types.
+ * The clip's "What happens": free notes for planning the shot (any language), saved by themselves as the user types.
  * A notes-only patch, so it can't overwrite the params the editor saves, and a pending change is saved when the
  * field goes away.
  */
@@ -35,10 +35,10 @@ export default function NotesField({ segment, store, flushers, className = '' }:
     <div className={className}>
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <label htmlFor={id} className="text-muted">
-          Vad händer
+          What happens
         </label>
         <span className="text-[10px] text-muted" aria-live="polite">
-          {draft.error ? <span className="text-accent" title={draft.error}>Kunde inte spara</span> : draft.status !== 'idle' ? 'Sparar…' : ''}
+          {draft.error ? <span className="text-accent" title={draft.error}>Couldn't save</span> : draft.status !== 'idle' ? 'Saving…' : ''}
         </span>
       </div>
       <PromptField
@@ -50,9 +50,9 @@ export default function NotesField({ segment, store, flushers, className = '' }:
         bare
         minRows={2}
         maxRows={8}
-        title="Vad händer"
-        focusHint="Vad som ska hända i klippet. Skriv / för en byggsten."
-        placeholder="Vad ska hända i bild? T.ex. ”Hon vänder sig om och ler mot kameran.”"
+        title="What happens"
+        focusHint="What should happen in the clip. Type / for a building block."
+        placeholder="What should happen on screen? E.g. “She turns around and smiles at the camera.”"
       />
     </div>
   )

@@ -1,6 +1,6 @@
 // The descriptions of the library assets a prompt refers to, which are appended to it as a "References" legend
 // when it is sent. The legend itself is written by the shared composePrompt (src/shared/prompt-compose.ts), the
-// same function main sends with, so what the "Läggs till i prompten" box shows is exactly what Venice gets. This
+// same function main sends with, so what the "Added to the prompt" box shows is exactly what Venice gets. This
 // file only asks it the box's questions (which assets, which of them are sent, shortened or left out), keeps the
 // two flags in the params tidy, and splits a sent prompt back into the user's text and the legend for display.
 // Pure: no React.
@@ -131,7 +131,7 @@ export function descriptionsView(
 // sanitizeDescriptionFlags stores them, so params from before the feature, a switch turned off and on again, and
 // a sequence clip's saved params all compare equal.
 
-/** The params with the master switch ("Ta med beskrivningar") set. */
+/** The params with the master switch ("Include descriptions") set. */
 export function withDescriptionsIncluded(params: GenerationParams, on: boolean): GenerationParams {
   if (params.includeDescriptions === (on ? undefined : false)) return params
   const { includeDescriptions: _, ...rest } = params

@@ -41,7 +41,7 @@ export function isAgentCall(event: IpcMainInvokeEvent | undefined): boolean {
 
 function handlerFor(channel: string): Handler {
   const handler = handlers.get(channel)
-  if (!handler) throw new Error(`Studio saknar tjänsten ${channel}.`)
+  if (!handler) throw new Error(`Studio has no service ${channel}.`)
   return handler
 }
 

@@ -12,8 +12,8 @@ import { StatusDot } from '../work/StatusMark'
 import FilmsTab from './FilmsTab'
 import PicturesTab from './PicturesTab'
 
-// Mediabanken: everything made, in three tabs. Videor is the whole clip feed (Generera lists only this session's),
-// Bilder every still wherever it belongs, Filmer every exported film. The tab is remembered (lib/mediaTab.ts) and
+// Media: everything made, in three tabs. Videos is the whole clip feed (Generate lists only this session's),
+// Images every still wherever it belongs, Films every exported film. The tab is remembered (lib/mediaTab.ts) and
 // read by the agents' get_workspace.
 
 interface Props {
@@ -83,8 +83,8 @@ export default function MediaView({ intent, onIntentHandled, navigate }: Props) 
       mode="library"
       leading={tabs}
       onReuse={(g: Generation) => navigate('generate', { type: 'use-generation', generationId: g.id })}
-      reuseTitle="Öppna Generera med klippets inställningar"
-      emptyText="Inga klipp än. Det du genererar i Generera, sekvenser och storyboards hamnar här."
+      reuseTitle="Open Generate with the clip’s settings"
+      emptyText="No clips yet. What you generate in Generate, sequences and storyboards ends up here."
       openRequest={openGeneration}
       onOpenRequestHandled={onIntentHandled}
       trailing={
@@ -96,7 +96,7 @@ export default function MediaView({ intent, onIntentHandled, navigate }: Props) 
           )}
           <OpenFolderButton
             target="generations"
-            title="Öppna mappen Genereringar i Finder"
+            title="Open the folder “Genereringar” in Finder"
             onError={setFolderError}
             compact
             className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
@@ -108,9 +108,9 @@ export default function MediaView({ intent, onIntentHandled, navigate }: Props) 
 }
 
 const TABS: { id: MediaTab; label: string; title: string }[] = [
-  { id: 'videos', label: 'Videor', title: 'Alla klipp: genererade, egna och redigerade' },
-  { id: 'pictures', label: 'Bilder', title: 'Alla bilder: skapade, uppladdade och bildrutor ur klipp' },
-  { id: 'films', label: 'Filmer', title: 'Filmer exporterade från sekvenser och storyboards' }
+  { id: 'videos', label: 'Videos', title: 'Every clip: generated, your own and edited' },
+  { id: 'pictures', label: 'Images', title: 'Every image: created, uploaded and frames from clips' },
+  { id: 'films', label: 'Films', title: 'Films exported from sequences and storyboards' }
 ]
 
 function isNewStill(w: FinishedWork): boolean {
@@ -121,7 +121,7 @@ function isNewFilm(w: FinishedWork): boolean {
   return w.kind === 'export' && w.status === 'completed'
 }
 
-/** Videor, Bilder, Filmer; a tab with something new in it that isn't on screen gets the "new" dot. */
+/** Videos, Images, Films; a tab with something new in it that isn't on screen gets the "new" dot. */
 function MediaTabs({ tab, onTab }: { tab: MediaTab; onTab: (tab: MediaTab) => void }) {
   const fresh: Record<MediaTab, boolean> = {
     videos: useFreshGenerationIds().size > 0,
@@ -129,7 +129,7 @@ function MediaTabs({ tab, onTab }: { tab: MediaTab; onTab: (tab: MediaTab) => vo
     films: useUnseen(isNewFilm).length > 0
   }
   return (
-    <div role="tablist" aria-label="Mediabankens flikar" className="no-drag flex shrink-0 items-center gap-1">
+    <div role="tablist" aria-label="Media tabs" className="no-drag flex shrink-0 items-center gap-1">
       {TABS.map((t) => {
         const dot = fresh[t.id] && tab !== t.id
         return (
@@ -139,7 +139,7 @@ function MediaTabs({ tab, onTab }: { tab: MediaTab; onTab: (tab: MediaTab) => vo
             role="tab"
             aria-selected={tab === t.id}
             onClick={() => onTab(t.id)}
-            title={dot ? `${t.title} – det finns nytt här` : t.title}
+            title={dot ? `${t.title} – there’s something new here` : t.title}
             className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-semibold transition ${
               tab === t.id ? 'text-text' : 'text-muted hover:text-text'
             }`}

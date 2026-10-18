@@ -13,35 +13,35 @@ import { changedSinceText } from './agentText'
 // with a picture or an excerpt, its label and what else happens with it – and, once approved, what became of it.
 // Nothing an agent asks to remove goes without the user's OK, and it is all or nothing: the dialog checks the request
 // again every 2 seconds (and when the window comes back to the front), so a change since the agent asked is said –
-// and blocks "Godkänn och ta bort" – before the click rather than after it.
+// and blocks "Approve and delete" – before the click rather than after it.
 
-/** The order of the groups in the dialog: the library first, then what is made with it. */
+/** The order of the groups in the dialog (main's group names, tools/delete.ts): the library first, then what is made with it. */
 const GROUP_ORDER = [
-  'Karaktärer',
-  'Miljöer',
-  'Produkter',
-  'Kläder',
-  'Poser',
-  'Foton',
-  'Ljudklipp',
-  'Prompter',
-  'Lärdomar',
-  'Omdömen',
-  'Sekvenser',
-  'Klipp',
+  'Characters',
+  'Environments',
+  'Products',
+  'Outfits',
+  'Poses',
+  'Photos',
+  'Sound clips',
+  'Prompts',
+  'Learnings',
+  'Reviews',
+  'Sequences',
+  'Clips',
   'Storyboards',
-  'Rutor',
-  'Flyttar',
-  'Videor',
-  'Tagningar',
-  'Stillbilder',
-  'Redigeringar',
-  'Versioner',
-  'Rensa versioner'
+  'Boards',
+  'Moves',
+  'Videos',
+  'Takes',
+  'Still images',
+  'Edits',
+  'Versions',
+  'Clean up versions'
 ]
 
 const TRASH_NOTE =
-  'Filerna flyttas till papperskorgen – det som används någon annanstans sparas i Referensbilder. Det går inte att ångra i Studio.'
+  'The files go to the Trash – whatever is used elsewhere is kept in “Referensbilder”. It can’t be undone in Studio.'
 
 /** How often the open dialog checks the request again. */
 const CHECK_MS = 2000
@@ -49,7 +49,7 @@ const CHECK_MS = 2000
 export interface DeleteCheck {
   /** Main has answered at least once since the request was shown. */
   checked: boolean
-  /** Why it can't be approved as it stands (Swedish, from main); undefined while it can. */
+  /** Why it can't be approved as it stands (from main); undefined while it can. */
   problem?: string
 }
 
@@ -121,7 +121,7 @@ export function DeleteSummary({
   const groups = useMemo(() => grouped(request.items), [request.items])
   const pending = approval.status === 'pending'
   return (
-    <section className="space-y-4" aria-label="Det här tas bort">
+    <section className="space-y-4" aria-label="What gets deleted">
       {pending && check.problem && (
         <p
           role="alert"
@@ -143,7 +143,7 @@ export function DeleteSummary({
           </ul>
         </div>
       ))}
-      {!request.items.length && <p className="text-accent">Förfrågan saknar uppgifter om vad som ska tas bort.</p>}
+      {!request.items.length && <p className="text-accent">The request doesn’t say what should be deleted.</p>}
       <p className="border-t border-line pt-4 text-[12px] leading-relaxed text-muted">{TRASH_NOTE}</p>
     </section>
   )
@@ -182,7 +182,7 @@ function ItemRow({ item }: { item: ApprovalDeleteItem }) {
         )}
         {item.text && (
           <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-snug text-muted select-text">
-            ”{item.text}”
+            “{item.text}”
           </p>
         )}
         {item.effects.length > 0 && (
@@ -201,9 +201,9 @@ function ItemRow({ item }: { item: ApprovalDeleteItem }) {
 }
 
 const OUTCOME: Record<NonNullable<ApprovalDeleteItem['outcome']>['status'], { text: string; tone: string }> = {
-  deleted: { text: 'Borttaget', tone: 'bg-emerald-500/15 text-emerald-300' },
-  gone: { text: 'Fanns inte längre', tone: 'bg-raised text-muted' },
-  failed: { text: 'Gick inte', tone: 'bg-accent/15 text-[#ffb3b5]' }
+  deleted: { text: 'Deleted', tone: 'bg-emerald-500/15 text-emerald-300' },
+  gone: { text: 'Already gone', tone: 'bg-raised text-muted' },
+  failed: { text: 'Failed', tone: 'bg-accent/15 text-[#ffb3b5]' }
 }
 
 function OutcomeChip({ status }: { status: keyof typeof OUTCOME }) {

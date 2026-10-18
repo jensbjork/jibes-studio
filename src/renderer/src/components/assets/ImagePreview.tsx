@@ -60,17 +60,17 @@ export default function ImagePreview({ images, index, size, onSize, onIndex, onC
         className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line bg-panel px-5 py-3"
       >
         <div className="flex items-center gap-1">
-          <button onClick={() => onIndex(index - 1)} disabled={index === 0} className={arrow} title="Föregående (←)">
+          <button onClick={() => onIndex(index - 1)} disabled={index === 0} className={arrow} title="Previous (←)">
             ‹
           </button>
           <span className="min-w-20 text-center tabular-nums">
-            Bild {index + 1} av {images.length}
+            Image {index + 1} of {images.length}
           </span>
           <button
             onClick={() => onIndex(index + 1)}
             disabled={index === images.length - 1}
             className={arrow}
-            title="Nästa (→)"
+            title="Next (→)"
           >
             ›
           </button>
@@ -80,7 +80,7 @@ export default function ImagePreview({ images, index, size, onSize, onIndex, onC
             {size.width} × {size.height} px
           </span>
         )}
-        {index === 0 && <span className="rounded bg-raised px-1.5 py-0.5 text-[11px]">Omslag</span>}
+        {index === 0 && <span className="rounded bg-raised px-1.5 py-0.5 text-[11px]">Cover</span>}
         {origin && <span className="min-w-0 truncate text-muted">{origin}</span>}
         {issues.map((issue) => (
           <span key={issue.label} className="text-amber-400">
@@ -91,16 +91,16 @@ export default function ImagePreview({ images, index, size, onSize, onIndex, onC
         <div className="ml-auto flex items-center gap-1">
           {index > 0 && (
             <button onClick={onMakeCover} className={button}>
-              Sätt som omslag
+              Make cover
             </button>
           )}
           <button onClick={() => void window.studio.revealFile(image.path)} className={button}>
-            Visa i Finder
+            Show in Finder
           </button>
           <button onClick={onRemove} className={`${base} hover:text-accent`}>
-            Ta bort
+            Remove
           </button>
-          <button onClick={onClose} className={button} title="Stäng (Esc)">
+          <button onClick={onClose} className={button} title="Close (Esc)">
             ✕
           </button>
         </div>

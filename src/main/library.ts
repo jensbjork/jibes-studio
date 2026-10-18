@@ -93,7 +93,7 @@ function findPromptRow(id: string): PromptRow | undefined {
 
 function getPrompt(id: string): SavedPrompt {
   const row = findPromptRow(id)
-  if (!row) throw new Error('Prompten finns inte längre.')
+  if (!row) throw new Error('The prompt no longer exists.')
   return promptFromRow(row)
 }
 
@@ -105,7 +105,7 @@ function listPrompts(): SavedPrompt[] {
 
 function savePrompt(input: PromptInput): SavedPrompt {
   const body = text(input?.body).trim()
-  if (!body) throw new Error('Prompten kan inte vara tom.')
+  if (!body) throw new Error('The prompt cannot be empty.')
   const title = text(input.title).replace(/\s+/g, ' ').trim() || titleFromBody(body)
   const negativePrompt = text(input.negativePrompt).trim() || null
   const tags = JSON.stringify(normalizeTags(input.tags))
@@ -115,7 +115,7 @@ function savePrompt(input: PromptInput): SavedPrompt {
 
   if (input.id) {
     const existing = findPromptRow(input.id)
-    if (!existing) throw new Error('Prompten finns inte längre.')
+    if (!existing) throw new Error('The prompt no longer exists.')
     const unchanged =
       existing.title === title &&
       existing.body === body &&

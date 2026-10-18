@@ -64,14 +64,14 @@ export default function StillThumb({
             }
           : undefined
       }
-      title={missing ? `Filen saknas: ${still.path}` : title}
+      title={missing ? `File missing: ${still.path}` : title}
       className={`group relative shrink-0 overflow-hidden rounded-md bg-raised outline-none ring-offset-2 ring-offset-panel transition focus-visible:ring-2 focus-visible:ring-muted ${
         selected ? 'ring-2 ring-accent' : ''
       } ${onOpen ? 'cursor-pointer hover:brightness-110' : ''} ${draggable ? 'cursor-grab active:cursor-grabbing' : ''} ${className}`}
     >
       {missing ? (
         <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
-          Filen saknas
+          File missing
         </span>
       ) : (
         <img
@@ -87,9 +87,9 @@ export default function StillThumb({
       {still.source === 'frame' && (
         <span
           className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[9px] text-white/90"
-          title="Bildruta ur ett klipp"
+          title="Frame from a clip"
         >
-          Bildruta
+          Frame
         </span>
       )}
       {children && (

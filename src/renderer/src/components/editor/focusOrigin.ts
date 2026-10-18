@@ -1,4 +1,4 @@
-// How the focused element got its focus: with the keyboard (Tab, arrow keys) or by a click. Redigera's keys go to a
+// How the focused element got its focus: with the keyboard (Tab, arrow keys) or by a click. The Editor's keys go to a
 // button only when it was reached with the keyboard; one that has focus because it was clicked leaves Space and the
 // arrow keys to the player. Chromium's :focus-visible can't tell the two apart: any key press turns it on for the
 // element that has focus, so the very Space meant for the player would press the clicked button again.

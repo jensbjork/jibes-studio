@@ -42,7 +42,7 @@ export interface TransitionView {
   to: BoardView
   /** What is sent: the first board's picture as start image, the second's as end image. */
   params: GenerationParams
-  /** Why it can't be generated as it stands (Swedish). */
+  /** Why it can't be generated as it stands. */
   problem?: string
 }
 
@@ -82,7 +82,7 @@ export function storyboardTransitions(
   }
   if (a.kind === 'segment') {
     const id = a.segmentIds?.[0]
-    if (!a.params || !id) return { transitions: [], blocking: 'Förfrågan saknar uppgifter om övergången' }
+    if (!a.params || !id) return { transitions: [], blocking: 'The request doesn’t say which transition' }
     const index = storyboard ? storyboard.transitions.findIndex((t) => t.id === id) : -1
     const live = index >= 0 ? storyboard!.transitions[index] : undefined
     const number = live ? index + 1 : (a.clipNumbers?.[0] ?? 1)
@@ -95,11 +95,11 @@ export function storyboardTransitions(
     }
     let blocking: string | undefined
     let lapsed = true
-    if (storyboard && !live) blocking = 'Övergången finns inte längre – rutorna runt den har ändrats sedan agenten frågade'
+    if (storyboard && !live) blocking = 'The transition is gone – the boards around it have changed since the agent asked'
     else if (live && (!samePath(live.params.startImage, a.params.startImage) || !samePath(live.params.endImage, a.params.endImage))) {
-      blocking = 'En av rutorna har fått en annan bild sedan agenten frågade'
+      blocking = 'One of the boards has a different image since the agent asked'
     } else if (live && settingsKey(live.params) !== settingsKey(a.params)) {
-      blocking = 'Övergången har ändrats sedan agenten frågade'
+      blocking = 'The transition has changed since the agent asked'
     } else if (live?.problems.length) {
       blocking = live.problems[0].replace(/\.$/, '')
       lapsed = false
@@ -118,14 +118,14 @@ export function storyboardTransitions(
     const index = storyboard.transitions.findIndex((t) => t.id === id)
     if (index < 0) {
       if (!blocking) {
-        blocking = `Övergång ${a.clipNumbers?.[i] ?? i + 1} finns inte längre – rutorna runt den har ändrats sedan agenten frågade`
+        blocking = `Transition ${a.clipNumbers?.[i] ?? i + 1} is gone – the boards around it have changed since the agent asked`
         lapsed = true
       }
       continue
     }
     const t = storyboard.transitions[index]
     const problem = t.problems[0]?.replace(/\.$/, '')
-    if (problem) blocking ??= `Övergång ${index + 1}: ${problem}`
+    if (problem) blocking ??= `Transition ${index + 1}: ${problem}`
     transitions.push({
       key: t.id,
       number: index + 1,
@@ -154,13 +154,13 @@ export function boardTargetNow(
 ): BoardTarget | undefined {
   if (!target || !storyboard) return undefined
   const index = storyboard.boards.findIndex((b) => b.id === target.boardId)
-  if (index < 0) return { problem: 'Rutan som bilden skulle bli finns inte längre' }
+  if (index < 0) return { problem: 'The board the image was meant for is gone' }
   const board = storyboard.boards[index]
   const now = { number: index + 1, note: board.note, ...(board.imagePath ? { currentImage: board.imagePath } : {}) }
   if (index + 1 !== target.boardNumber) {
     return {
       ...now,
-      problem: `Rutan har flyttats sedan agenten frågade (det var ruta ${target.boardNumber}, nu ruta ${index + 1})`
+      problem: `The board has moved since the agent asked (it was board ${target.boardNumber}, now board ${index + 1})`
     }
   }
   return now
@@ -181,11 +181,11 @@ function BoardPicture({
 }: {
   path: string | undefined
   board: BoardView
-  role: 'Start' | 'Slut'
+  role: 'Start' | 'End'
   aspectRatio?: string
 }) {
   const [missing, setMissing] = useState(false)
-  const name = board.number ? `Ruta ${board.number}` : 'Ruta'
+  const name = board.number ? `Board ${board.number}` : 'Board'
   const className = `relative block w-full overflow-hidden rounded-md bg-raised ${missing || !path ? 'ring-1 ring-accent' : ''}`
   const style = { aspectRatio: boxRatio(aspectRatio) }
   const content = (
@@ -199,7 +199,7 @@ function BoardPicture({
         />
       ) : (
         <span className="flex h-full w-full items-center justify-center p-2 text-center text-[11px] text-accent">
-          {path ? 'Bilden saknas' : 'Ingen bild'}
+          {path ? 'Image missing' : 'No image'}
         </span>
       )}
       <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 text-[10px]">{role}</span>
@@ -252,16 +252,16 @@ export function TransitionSummary({
     model?.name ?? p.model,
     p.duration,
     p.resolution,
-    p.audio === undefined ? undefined : p.audio ? 'med ljud' : 'utan ljud'
+    p.audio === undefined ? undefined : p.audio ? 'with sound' : 'without sound'
   ].filter(Boolean)
   return (
     <section className={compact ? 'rounded-lg border border-line p-3' : ''}>
       <h3 className="mb-1.5 font-medium">
-        Övergång {view.number}
+        Transition {view.number}
         {view.from.number && view.to.number ? (
           <span className="font-normal text-muted">
             {' '}
-            · ruta {view.from.number} → {view.to.number}
+            · board {view.from.number} → {view.to.number}
           </span>
         ) : null}
       </h3>
@@ -280,12 +280,12 @@ export function TransitionSummary({
         <BoardPicture
           path={p.endImage}
           board={view.to}
-          role="Slut"
+          role="End"
           aspectRatio={aspectRatio}
         />
       </div>
 
-      <p className="mb-1.5 mt-3 text-[11px] text-muted">Vad händer?</p>
+      <p className="mb-1.5 mt-3 text-[11px] text-muted">What happens?</p>
       {p.prompt.trim() ? (
         <p
           className={`overflow-y-auto whitespace-pre-wrap rounded-md border border-line bg-raised px-3 py-2 leading-relaxed select-text ${compact ? 'max-h-24' : 'max-h-48'}`}
@@ -293,11 +293,11 @@ export function TransitionSummary({
           {p.prompt}
         </p>
       ) : (
-        <p className="text-accent">Prompten är tom.</p>
+        <p className="text-accent">The prompt is empty.</p>
       )}
       {p.negativePrompt && (
         <>
-          <p className="mb-1.5 mt-3 text-[11px] text-muted">Negativ prompt</p>
+          <p className="mb-1.5 mt-3 text-[11px] text-muted">Negative prompt</p>
           <p className="whitespace-pre-wrap text-muted select-text">{p.negativePrompt}</p>
         </>
       )}
@@ -308,32 +308,32 @@ export function TransitionSummary({
 
 /** Where an image request's picture goes in a storyboard: the board, its note, and the picture it replaces. */
 export function BoardTargetSummary({ target, storyboardName }: { target: BoardTarget; storyboardName?: string }) {
-  const where = storyboardName ? ` i ”${storyboardName}”` : ''
+  const where = storyboardName ? ` in “${storyboardName}”` : ''
   const current = target.currentImage
   return (
     <div className="mt-3 flex items-start gap-3">
       {current && (
         <PictureHover
           path={current}
-          badge="Ersätts"
-          info={{ name: `Bilden i ruta ${target.number ?? ''}`.trim() }}
+          badge="Replaced"
+          info={{ name: `The image of board ${target.number ?? ''}`.trim() }}
           className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-raised outline-none focus-visible:ring-2 focus-visible:ring-white/70"
         >
           <img src={mediaUrl(current)} alt="" draggable={false} className="h-full w-full object-cover opacity-70" />
-          <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">Ersätts</span>
+          <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">Replaced</span>
         </PictureHover>
       )}
       <p className="text-[12px] leading-relaxed text-muted">
         {target.number
-          ? `Bilden sparas bland storyboardens bilder och blir bilden i ruta ${target.number}${where}.`
-          : `Bilden sparas bland storyboardens bilder${where}.`}
+          ? `The image is saved among the storyboard’s images and becomes the image of board ${target.number}${where}.`
+          : `The image is saved among the storyboard’s images${where}.`}
         {target.note?.trim() && (
           <>
             {' '}
-            Rutan: <span className="text-text select-text">”{target.note.trim()}”</span>
+            The board: <span className="text-text select-text">“{target.note.trim()}”</span>
           </>
         )}
-        {target.currentImage && ' Rutans nuvarande bild finns kvar bland storyboardens bilder.'}
+        {target.currentImage && ' The board’s current image stays among the storyboard’s images.'}
       </p>
     </div>
   )

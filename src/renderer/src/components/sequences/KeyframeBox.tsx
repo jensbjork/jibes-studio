@@ -37,27 +37,26 @@ interface Props {
   /** The model in the editor right now (the draft), which decides whether an end image can be sent. */
   model: string
   ffmpegOk: boolean
-  /** A switch or "Gör om mellan grannarna" is being saved. */
+  /** A switch or "Redo between neighbours" is being saved. */
   busy: boolean
-  /** "Gör om mellan grannarna" just configured this clip: say what to do next. */
+  /** "Redo between neighbours" just configured this clip: say what to do next. */
   justBridged: boolean
   /** How the clip continues from the previous one, as its draft says (sequenceUtils continuationOf). */
   plan?: ContinuationPlan
   onContinue: (on: boolean) => void
-  /** "Med referensbilder" / "Exakt startbild". */
+  /** "With references" / "Exact start frame". */
   onContinueMode: (mode: ContinueMode) => void
   onEndFromNext: (on: boolean) => void
   onBridge: () => void
 }
 
-/** "Annas röst", "Lukas röst", "Hamnens ljud". */
+/** "Anna's voice", "Lukas's voice", "Hamnen's sound". */
 function soundOf(asset: Asset): string {
-  const name = asset.name.trim()
-  return `${name}${/[sxz]$/i.test(name) ? '' : 's'} ${asset.kind === 'character' ? 'röst' : 'ljud'}`
+  return `${asset.name.trim()}'s ${asset.kind === 'character' ? 'voice' : 'sound'}`
 }
 
 /**
- * "Skickar med: Anna, Strandpromenad, Annas röst + sista bildrutan (@Image4)" – what a continuation in reference mode
+ * "Sends along: Anna, Strandpromenad, Anna's voice + the last frame (@Image4)" – what a continuation in reference mode
  * sends, by asset (pictures that belong to none are counted), and where it carries it from.
  */
 function carriedText(plan: ContinuationPlan, assets: readonly Asset[]): string {
@@ -70,20 +69,21 @@ function carriedText(plan: ContinuationPlan, assets: readonly Asset[]): string {
     if (!asset) loose++
     else if (!parts.includes(asset.name)) parts.push(asset.name)
   }
-  if (loose) parts.push(loose === 1 ? '1 bild' : `${loose} bilder`)
+  if (loose) parts.push(loose === 1 ? '1 image' : `${loose} images`)
   for (const clip of plan.audios) {
     const source = sounds.get(clip.path)
-    const label = source ? soundOf(source.asset) : 'ett ljudklipp'
+    const label = source ? soundOf(source.asset) : 'a sound clip'
     if (!parts.includes(label)) parts.push(label)
   }
-  const from = plan.carried?.inherited ? ` från klipp ${plan.carried.fromClip}` : ''
-  return `Skickar med${from}: ${parts.join(', ')} + sista bildrutan (@Image${plan.frameToken ?? plan.images.length + 1})`
+  const from = plan.carried?.inherited ? ` from clip ${plan.carried.fromClip}` : ''
+  return `Sends along${from}: ${parts.join(', ')} + the last frame (@Image${plan.frameToken ?? plan.images.length + 1})`
 }
 
 /**
- * The segment editor's start and end frames from the neighbours: "Startbild från föregående klipp" and
- * "Slutbild från nästa klipp", each with a live preview of the exact frame main will send (previewSegmentFrames),
- * what stands in the way, and "Gör om mellan grannarna", which sets both and picks a model that takes an end image.
+ * The segment editor's start and end frames from the neighbours: "Start on the previous clip's last frame" and
+ * "End on the next clip's first frame", each with a live preview of the exact frame main will send
+ * (previewSegmentFrames), what stands in the way, and "Redo between neighbours", which sets both and picks a model
+ * that takes an end image.
  */
 export default function KeyframeBox({
   sequence,
@@ -111,36 +111,36 @@ export default function KeyframeBox({
   const bridged = (startOn || !previous) && (endOn || !next)
 
   const modelName = (id: string) => models.find((m) => m.id === id)?.name ?? id
-  // Turning "Slutbild från nästa klipp" on makes main switch to a model that takes an end image; say which.
+  // Turning "End on the next clip's first frame" on makes main switch to a model that takes an end image; say which.
   const endModel = supportsEndImage(model) ? undefined : endImageVariant(model, models.map((m) => m.id))
   // …and drops the clip's references (image-to-video can't send them), their @ tokens with them.
   const hasReferences = !!(segment.params.referenceImages?.length || segment.params.referenceAudios?.length)
-  const dropsReferences = hasReferences ? ' Referenserna tas bort, eftersom bild-till-video inte kan skicka dem.' : ''
+  const dropsReferences = hasReferences ? " The references are removed, since image-to-video can't send them." : ''
 
   const references = startOn && plan?.mode === 'references'
   const assets = useAssets()
   const carried = useMemo(() => (references && plan ? carriedText(plan, assets) : undefined), [references, plan, assets])
   const dropped = references ? droppedImagesNote(plan) : undefined
-  const trimmed = previous && previous.trimEnd > 0 ? ' (efter trim)' : ''
+  const trimmed = previous && previous.trimEnd > 0 ? ' (after trim)' : ''
   const startText = !previous
-    ? 'Det första klippet startar från din prompt och dina egna bilder.'
+    ? 'The first clip starts from your prompt and your own images.'
     : !ffmpegOk && !startOn
-      ? 'Kräver ffmpeg (brew install ffmpeg).'
+      ? 'Needs ffmpeg (brew install ffmpeg).'
       : startOn
         ? references
-          ? `Sista bildrutan i klipp ${index}${trimmed} skickas med som referensbild efter klippets referenser, och klippet börjar på den – nära, men inte alltid exakt samma bild.`
-          : `Startbilden hämtas från slutet av klipp ${index}${trimmed} när tagningen genereras, så övergången blir sömlös.`
-        : `Använd sista bildrutan i klipp ${index} som startbild för en sömlös övergång.`
+          ? `The last frame of clip ${index}${trimmed} is sent as a reference image after the clip's references, and the clip starts on it – close, but not always exactly the same picture.`
+          : `The start image is taken from the end of clip ${index}${trimmed} when the take is generated, so the transition is seamless.`
+        : `Use the last frame of clip ${index} as the start image for a seamless transition.`
 
   const endText = !next
-    ? 'Det sista klippet har inget nästa klipp att sluta i.'
+    ? 'The last clip has no next clip to end on.'
     : !ffmpegOk && !endOn
-      ? 'Kräver ffmpeg (brew install ffmpeg).'
+      ? 'Needs ffmpeg (brew install ffmpeg).'
       : endOn
-        ? `Slutbilden hämtas från början av klipp ${index + 2}${next.trimStart > 0 ? ' (efter trim)' : ''}, så klippet slutar exakt där nästa börjar.`
+        ? `The end image is taken from the start of clip ${index + 2}${next.trimStart > 0 ? ' (after trim)' : ''}, so the clip ends exactly where the next one starts.`
         : endModel
-          ? `Låt klippet sluta exakt där klipp ${index + 2} börjar. ${modelName(model)} tar ingen slutbild, så modellen byts till ${modelName(endModel)}.${dropsReferences}`
-          : `Låt klippet sluta exakt där klipp ${index + 2} börjar.${dropsReferences}`
+          ? `Let the clip end exactly where clip ${index + 2} starts. ${modelName(model)} can't take an end image, so the model is switched to ${modelName(endModel)}.${dropsReferences}`
+          : `Let the clip end exactly where clip ${index + 2} starts.${dropsReferences}`
 
   const start = preview?.start?.source === 'previous' ? preview.start : undefined
   const end = preview?.end?.source === 'next' ? preview.end : undefined
@@ -161,13 +161,13 @@ export default function KeyframeBox({
   const endChanged = endMismatch(segment, next)
   // A missing neighbour take is already said beside the frame it would give.
   const problems = (preview?.problems ?? []).filter(
-    (p) => !(startOn && !start && p.startsWith(`Klipp ${index} `)) && !(endOn && !end && p.startsWith(`Klipp ${index + 2} `))
+    (p) => !(startOn && !start && p.startsWith(`Clip ${index} `)) && !(endOn && !end && p.startsWith(`Clip ${index + 2} `))
   )
 
   return (
     <div className="mb-5 rounded-lg border border-line bg-panel">
       <ToggleRow
-        label="Startbild från föregående klipp"
+        label="Start on the previous clip's last frame"
         description={startText}
         on={startOn}
         // Turning it off must stay possible without ffmpeg; turning it on needs ffmpeg for the frame grab.
@@ -182,14 +182,14 @@ export default function KeyframeBox({
             caption={
               start
                 ? (fromOwnStart
-                    ? `Fortsätter från sista bildrutan i ditt klipp${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`
-                    : `Startbild: sista bildrutan från klipp ${start.fromClip ?? index}${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`) +
-                  (references ? ` – skickas som @Image${plan?.frameToken ?? 1}` : '')
+                    ? `Continues from the last frame of your clip${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`
+                    : `Start image: the last frame of clip ${start.fromClip ?? index}${start.time !== undefined ? ` (${formatFrameTime(start.time)})` : ''}`) +
+                  (references ? ` – sent as @Image${plan?.frameToken ?? 1}` : '')
                 : previous && !readyTake(previous)
-                  ? `Klipp ${index} behöver en färdig vald tagning innan det här klippet kan genereras.`
+                  ? `Clip ${index} needs a finished selected take before this clip can be generated.`
                   : loading
-                    ? 'Hämtar bildrutan…'
-                    : 'Bildrutan kunde inte tas fram.'
+                    ? 'Getting the frame…'
+                    : "The frame couldn't be extracted."
             }
           />
         )}
@@ -203,7 +203,7 @@ export default function KeyframeBox({
       <div className="border-t border-line" />
 
       <ToggleRow
-        label="Slutbild från nästa klipp"
+        label="End on the next clip's first frame"
         description={endText}
         on={endOn}
         disabled={!next || busy || (!endOn && !ffmpegOk)}
@@ -216,13 +216,13 @@ export default function KeyframeBox({
             caption={
               end
                 ? fromOwnEnd
-                  ? `Slutar på första bildrutan i ditt klipp${end.time ? ` (${formatFrameTime(end.time)})` : ''}`
-                  : `Slutbild: första bildrutan från klipp ${end.fromClip ?? index + 2}${end.time ? ` (${formatFrameTime(end.time)})` : ''}`
+                  ? `Ends on the first frame of your clip${end.time ? ` (${formatFrameTime(end.time)})` : ''}`
+                  : `End image: the first frame of clip ${end.fromClip ?? index + 2}${end.time ? ` (${formatFrameTime(end.time)})` : ''}`
                 : next && !readyTake(next)
-                  ? `Klipp ${index + 2} behöver en färdig vald tagning innan det här klippet kan genereras.`
+                  ? `Clip ${index + 2} needs a finished selected take before this clip can be generated.`
                   : loading
-                    ? 'Hämtar bildrutan…'
-                    : 'Bildrutan kunde inte tas fram.'
+                    ? 'Getting the frame…'
+                    : "The frame couldn't be extracted."
             }
           />
         )}
@@ -231,8 +231,8 @@ export default function KeyframeBox({
       {showPersonNotice && (
         <div className="flex items-start gap-2 border-t border-line p-3">
           <p className="min-w-0 flex-1 text-[11px] leading-snug text-muted">
-            Venice kan vägra bilder och video med riktiga personer i vissa modeller. Nekas fortsättningen, prova en annan
-            modell.
+            Some Venice models may refuse images and video of real people. If the continuation is refused, try another
+            model.
           </p>
           <button
             type="button"
@@ -248,8 +248,8 @@ export default function KeyframeBox({
         <div className="space-y-2 border-t border-line p-3">
           {justBridged && (
             <p className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-[11px] leading-snug text-emerald-200">
-              Klippet görs nu om mellan grannarna. Kontrollera bildrutorna ovan och prompten, och tryck sedan på
-              Generera. Den gamla tagningen finns kvar under Tagningar.
+              The clip is now set to be redone between its neighbours. Check the frames above and the prompt, then press
+              Generate. The old take is kept under Takes.
             </p>
           )}
           {problems.map((p) => (
@@ -257,16 +257,16 @@ export default function KeyframeBox({
               {p}
             </p>
           ))}
-          {error && <p className="text-[11px] leading-snug text-muted">Bildrutorna kunde inte visas: {error}</p>}
+          {error && <p className="text-[11px] leading-snug text-muted">The frames couldn't be shown: {error}</p>}
           {startMismatch && (
             <Warning>
-              Den valda tagningen börjar inte där klipp {index} slutar nu. Generera en ny tagning för en sömlös övergång.
+              The selected take doesn't start where clip {index} now ends. Generate a new take for a seamless transition.
             </Warning>
           )}
           {endChanged && (
             <Warning>
-              Den valda tagningen slutar inte där klipp {index + 2} börjar nu. Generera en ny tagning för en sömlös
-              övergång.
+              The selected take doesn't end where clip {index + 2} now starts. Generate a new take for a seamless
+              transition.
             </Warning>
           )}
           {bridge && !bridged && (
@@ -277,7 +277,7 @@ export default function KeyframeBox({
               className="flex w-full items-center justify-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-[12px] transition hover:bg-raised disabled:opacity-40"
             >
               <BridgeIcon size={13} />
-              Gör om mellan grannarna
+              Redo between neighbours
             </button>
           )}
         </div>
@@ -333,7 +333,7 @@ function ToggleRow({
 }
 
 /**
- * "Med referensbilder – håller karaktärerna (rekommenderas)" / "Exakt startbild – utan referenser": how a clip that
+ * "With references – keeps the characters (recommended)" / "Exact start frame – no references": how a clip that
  * continues from the previous one starts on its last frame. Greyed out, with the reason, where it doesn't apply (the
  * clip also ends on the next clip's first frame, or has an end image of its own).
  */
@@ -349,24 +349,24 @@ function ContinueModeChoice({
   const options: { mode: ContinueMode; label: string; hint: string; title: string }[] = [
     {
       mode: 'references',
-      label: 'Med referensbilder',
-      hint: 'håller karaktärerna (rekommenderas)',
+      label: 'With references',
+      hint: 'keeps the characters (recommended)',
       title:
-        'Skickar med referensbilderna och rösterna – klippets egna, annars dem från klippet före – och sista bildrutan som en referensbild till. Klippet börjar nära bildrutan, och karaktärer som går ur bild kommer tillbaka som sig själva.'
+        "Sends the reference images and voices – the clip's own, otherwise those of the clip before – and the last frame as one more reference image. The clip starts close to the frame, and characters who leave the picture come back as themselves."
     },
     {
       mode: 'exact',
-      label: 'Exakt startbild',
-      hint: 'utan referenser',
+      label: 'Exact start frame',
+      hint: 'no references',
       title:
-        'Bild-till-video från sista bildrutan: klippet börjar exakt på den, men skickar inga referenser. Klippets egna referenser och deras @-hänvisningar tas bort ur prompten.'
+        "Image-to-video from the last frame: the clip starts exactly on it, but sends no references. The clip's own references and their @ mentions are removed from the prompt."
     }
   ]
   return (
     <div className="mt-3 pl-12">
       <div
         role="radiogroup"
-        aria-label="Hur klippet börjar på bildrutan"
+        aria-label="How the clip starts on the frame"
         className={`grid grid-cols-2 gap-1 rounded-lg bg-raised p-1 ${plan.applies ? '' : 'opacity-50'}`}
       >
         {options.map((o) => {

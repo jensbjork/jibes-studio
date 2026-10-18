@@ -11,7 +11,6 @@ files:
   - '!node_modules/better-sqlite3/{deps,src,build}/**'
   - '!node_modules/better-sqlite3/prebuilds/{win32,linux,linuxmusl,darwin-x64}*'
 electronLanguages:
-  - sv
   - en
 # Native modules can't be loaded from inside the asar archive.
 asarUnpack:
@@ -39,8 +38,8 @@ mac:
   hardenedRuntime: false
   gatekeeperAssess: false
   extendInfo:
-    NSDocumentsFolderUsageDescription: Studio sparar ditt bibliotek med videor, karaktärer och sekvenser i den mapp du väljer.
-    NSDesktopFolderUsageDescription: Studio behöver komma åt bilder och mappar du väljer på skrivbordet.
-    NSDownloadsFolderUsageDescription: Studio behöver komma åt bilder du väljer i Hämtade filer.
-    NSRemovableVolumesUsageDescription: Studio kan ha sitt bibliotek på en extern disk.
-    NSNetworkVolumesUsageDescription: Studio kan ha sitt bibliotek på en nätverksdisk.
+    NSDocumentsFolderUsageDescription: Studio keeps your library of videos, characters and sequences in the folder you choose.
+    NSDesktopFolderUsageDescription: Studio needs access to images and folders you choose on the Desktop.
+    NSDownloadsFolderUsageDescription: Studio needs access to images you choose in Downloads.
+    NSRemovableVolumesUsageDescription: Studio can keep its library on an external drive.
+    NSNetworkVolumesUsageDescription: Studio can keep its library on a network drive.

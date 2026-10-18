@@ -73,7 +73,7 @@ registerMediaScheme()
 recordIpcHandlers()
 
 const venice = new VeniceClient(getApiKey)
-/** Venice's speech, music, transcription and voice endpoints (Redigera and voice design). */
+/** Venice's speech, music, transcription and voice endpoints (the Editor and voice design). */
 const audio = new VeniceAudio(getApiKey)
 // Submits read the models' prompt limits (for the descriptions appended to a prompt) from main's cached list.
 const jobs = new JobManager(venice, () => loadVideoModels())
@@ -82,14 +82,14 @@ let modelCache: { at: number; models: VideoModel[] } | undefined
 let sequencesBusy: () => string | undefined = () => undefined
 /** Imports of own clips (Egna klipp); set once their handlers are registered. */
 let importsService: { isBusy(): string | undefined; stop(): void; service: ImportService } | undefined
-/** Redigera: edits, versions and their paid jobs; set once its handlers are registered. */
+/** The Editor: edits, versions and their paid jobs; set once its handlers are registered. */
 let editsService: EditServiceHandle | undefined
 /** Sequences (their clips and takes); set once their handlers are registered. */
 let sequenceService: SequenceService | undefined
 /** Storyboards (their boards, transitions and runs); set once their handlers are registered. */
 let storyboardService: StoryboardService | undefined
 /**
- * "Pågår och klart": what runs and what finished unseen, pushed to the windows. Created once every service it reads
+ * Activity: what runs and what finished unseen, pushed to the windows. Created once every service it reads
  * is registered; until then (and the agent connection, made before it, reads it lazily) nothing is observed.
  */
 let work: WorkStatus | undefined
@@ -97,7 +97,7 @@ let work: WorkStatus | undefined
 let dockBadge = 0
 
 /** Second line of defence behind the agents' tool list: what only the user may do in Studio. */
-const USER_ONLY = 'Det här kan bara du göra i Studio.'
+const USER_ONLY = 'Only you can do this in Studio.'
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -178,14 +178,14 @@ function generationChanged(g: Generation | string): void {
 const agent = new AgentService({ broadcast, workChanged: (kind) => work?.touch(kind) })
 
 /**
- * Why the library folder can't be switched or tidied right now, in Swedish; undefined when idle. Files of
+ * Why the library folder can't be switched or tidied right now; undefined when idle. Files of
  * running jobs, exports and runs would otherwise end up in the wrong place (or the wrong library).
  */
 function libraryBusyReason(): string | undefined {
-  if (jobs.hasActiveJobs()) return 'Det pågår genereringar. Vänta tills de är klara och försök igen.'
+  if (jobs.hasActiveJobs()) return 'Generations are running. Wait until they are done and try again.'
   // An approved request (a batch of deletes, say) works through the library item by item: never across a switch.
   if (agent.approvals.executing().length) {
-    return 'En agents förfrågan genomförs just nu. Vänta tills den är klar och försök igen.'
+    return "An agent's request is being carried out right now. Wait until it is done and try again."
   }
   // An import copying a film in, or an edit job (a half-sent paid job's runner must never be carried into another
   // library), would otherwise write into the wrong folder. An export of the whole library (Export och import) reads
@@ -244,7 +244,7 @@ function broadcastRewrittenStills(): void {
   if (db.isDbOpen() && db.takeRewrittenStills()) broadcast('stills:change')
 }
 
-/** After "Städa upp" files may live elsewhere: views refetch, and moved generations are re-sent to the feed. */
+/** After "Tidy up" files may live elsewhere: views refetch, and moved generations are re-sent to the feed. */
 function broadcastLibraryReorganized(movedGenerationIds: string[]): void {
   broadcast('library:change')
   broadcastAllSequences()
@@ -254,7 +254,7 @@ function broadcastLibraryReorganized(movedGenerationIds: string[]): void {
 }
 
 function registerIpc(): void {
-  // A finished or failed video is news until the user looks at it (Pågår och klart). An edit's AI take isn't: the
+  // A finished or failed video is news until the user looks at it (Activity). An edit's AI take isn't: the
   // version its job makes of it is. Registered before any library opens, so a job settled at resume counts too.
   jobs.on('settled', (g: Generation) => {
     if (!g.editId) db.addUnseen({ generationId: g.id })
@@ -267,7 +267,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:setPromptLanguage', (_e, lang: unknown) => setPromptLanguage(lang))
   ipcMain.handle('settings:setImageSafeMode', (_e, on: unknown) => {
     setImageSafeMode(on)
-    // Inställningar and the image dialogs each show it: the others follow a change made in one of them.
+    // Settings and the image dialogs each show it: the others follow a change made in one of them.
     broadcast('settings:change')
   })
   ipcMain.handle('settings:testApiKey', async () => {
@@ -276,7 +276,7 @@ function registerIpc(): void {
       const summary = Object.entries(balances)
         .map(([k, v]) => `${k}: ${Number(v).toFixed(2)}`)
         .join(' · ')
-      return { ok: true, message: summary ? `Nyckeln fungerar. Saldo: ${summary}` : 'Nyckeln fungerar.' }
+      return { ok: true, message: summary ? `The key works. Balance: ${summary}` : 'The key works.' }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }
     }
@@ -315,13 +315,13 @@ function registerIpc(): void {
     )
   )
   ipcMain.handle('generations:delete', async (_e, id: string, from?: unknown) => {
-    // Not while "Städa upp" or a switch moves files: the video could be moved away from the path trashed here.
+    // Not while "Tidy up" or a switch moves files: the video could be moved away from the path trashed here.
     await libraryOperationSettled()
     const g = db.getGeneration(id)
     if (!g) return
-    // A take list (a sequence clip's or a storyboard transition's): a film Redigera keeps (a version sent as a take, an
+    // A take list (a sequence clip's or a storyboard transition's): a film the Editor keeps (a version sent as a take, an
     // edit's original) is only taken off the clip; deleting it would take it out of its edit (and an edit's original
-    // away from all its versions). So is one the list offered "Ta bort" for (`release`: it showed the take as kept,
+    // away from all its versions). So is one the list offered "Remove" for (`release`: it showed the take as kept,
     // which may have changed since), so the click never does more than the button said.
     const { segmentId, release } = (from && typeof from === 'object' ? from : {}) as {
       segmentId?: unknown
@@ -331,8 +331,8 @@ function registerIpc(): void {
       await sequenceService.releaseTake(segmentId, id)
       return
     }
-    // Redigera's rules hold here too: nothing a running (paid) operation or a stopped one that has paid for parts works
-    // on, no edit's original, no version Redigera itself would refuse to delete. Throws in Swedish; the caller shows it.
+    // The Editor's rules hold here too: nothing a running (paid) operation or a stopped one that has paid for parts works
+    // on, no edit's original, no version the Editor itself would refuse to delete. Throws; the caller shows the message.
     editsService?.beforeGenerationDelete(id)
     // Deleting a take changes the sequence it belongs to (FKs clear segment selections).
     const sequenceIds = db
@@ -380,7 +380,7 @@ function registerIpc(): void {
     const win = BrowserWindow.fromWebContents(e.sender)!
     const res = await dialog.showOpenDialog(win, {
       properties: multiple ? ['openFile', 'multiSelections'] : ['openFile'],
-      filters: [{ name: 'Bilder', extensions: ['jpg', 'jpeg', 'png', 'webp'] }]
+      filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp'] }]
     })
     return res.canceled ? [] : res.filePaths
   })
@@ -388,7 +388,7 @@ function registerIpc(): void {
     const win = BrowserWindow.fromWebContents(e.sender)!
     const res = await dialog.showOpenDialog(win, {
       properties: multiple ? ['openFile', 'multiSelections'] : ['openFile'],
-      filters: [{ name: 'Ljud', extensions: [...AUDIO_FILE_TYPES] }]
+      filters: [{ name: 'Audio', extensions: [...AUDIO_FILE_TYPES] }]
     })
     return res.canceled ? [] : res.filePaths
   })
@@ -398,7 +398,7 @@ function registerIpc(): void {
     const win = BrowserWindow.fromWebContents(e.sender)
     const options: OpenDialogOptions = {
       properties: multiple === true ? ['openFile', 'multiSelections'] : ['openFile'],
-      filters: [{ name: 'Filmer', extensions: [...VIDEO_FILE_TYPES] }]
+      filters: [{ name: 'Videos', extensions: [...VIDEO_FILE_TYPES] }]
     }
     const res = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     return res.canceled ? [] : res.filePaths
@@ -460,7 +460,7 @@ function registerIpc(): void {
     generationChanged,
     notifySequence: (sequenceId: string) => broadcastSequenceChange(sequenceId)
   })
-  // Redigera: edits, their versions and paid jobs, transcripts, audio models, voice design and clone consent.
+  // The Editor: edits, their versions and paid jobs, transcripts, audio models, voice design and clone consent.
   editsService = registerEditIpc({
     jobs,
     venice,
@@ -492,7 +492,7 @@ function registerIpc(): void {
     }
   )
 
-  // Pågår och klart: reads every service above (and the agent connection's requests and uploads).
+  // Activity: reads every service above (and the agent connection's requests and uploads).
   const status = new WorkStatus({
     jobs,
     sequences: () => sequenceService,
@@ -511,7 +511,7 @@ function registerIpc(): void {
     busy: libraryBusyReason,
     onOpened: () => {
       jobs.resume()
-      // Picks up edit jobs: parts already sent are fetched, nothing paid is sent (a job waits for "Fortsätt").
+      // Picks up edit jobs: parts already sent are fetched, nothing paid is sent (a job waits for "Continue").
       try {
         editsService?.resume()
       } catch (err) {
@@ -552,8 +552,8 @@ void app.whenReady().then(async () => {
     console.error('Preparing the library failed:', err)
   }
   createWindow()
-  // Asks the voice separation helper once in the background (free, local), so Inställningar and Redigera's sound
-  // cards know at once whether "Ta bort rösten" and "Behåll bakgrundsljudet" can be offered.
+  // Asks the voice separation helper once in the background (free, local), so Settings and the Editor's sound
+  // cards know at once whether removing the voice and keeping only the background can be offered.
   void separationStatus().catch((err: unknown) => console.warn('Checking voice separation failed:', err))
   // Agents can connect from now on; tools that need the library say so while none is open.
   void agent.startIfEnabled().catch((err: unknown) => console.error('Starting the agent connection failed:', err))
@@ -566,7 +566,7 @@ void app.whenReady().then(async () => {
 app.on('will-quit', () => {
   // No agent may start anything while the app shuts down.
   agent.shutdown()
-  // Imports and edit jobs stop where they are: an interrupted paid job waits for "Fortsätt" at the next start.
+  // Imports and edit jobs stop where they are: an interrupted paid job waits for "Continue" at the next start.
   for (const service of [importsService, editsService]) {
     try {
       service?.stop()

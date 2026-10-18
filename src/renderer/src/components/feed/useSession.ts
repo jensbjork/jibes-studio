@@ -12,8 +12,8 @@ function loadSession(): Promise<GenerateSession> {
   request ??= window.studio.getSession().then(
     (s) => s,
     (e: unknown) => {
-      // Never seen in practice; the window's own start is close enough to keep Generera's list usable.
-      console.warn('Kunde inte läsa när sessionen började', e)
+      // Never seen in practice; the window's own start is close enough to keep Generate's list usable.
+      console.warn('Could not read when the session started', e)
       return { startedAt: Math.round(performance.timeOrigin), carriedOver: [] }
     }
   )

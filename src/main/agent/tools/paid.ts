@@ -78,10 +78,10 @@ import {
 // creates an approval request that the user answers in Studio. Only their OK submits it (see approvals.ts).
 
 const CHANGED =
-  'har ändrats sedan agenten bad om lov, så förfrågan gäller inte längre. Be agenten fråga igen om det fortfarande ska genereras.'
+  'has changed since the agent asked for permission, so the request no longer applies. Ask the agent to ask again if it should still be generated.'
 
 /** A description appended to the prompt (or the prompt language, or which are switched off) changed meanwhile. */
-const SENT_PROMPT_CHANGED = `Prompten som skickas – med beskrivningarna av referenserna – ${CHANGED}`
+const SENT_PROMPT_CHANGED = `The prompt that is sent – with the descriptions of the references – ${CHANGED}`
 
 /**
  * Models without audio. For them a clip stored with "audio: false" (as agents saved clips before) and one with
@@ -279,7 +279,7 @@ function requestApproval(
   epoch: number,
   plan: Omit<ApprovalPlan, 'epoch'>
 ): ReturnType<ToolContext['approvals']['create']> {
-  if (!ctx.connected()) throw new Error('Agentanslutningen är stängd, så förfrågan skickades inte till användaren.')
+  if (!ctx.connected()) throw new Error('The agent connection is closed, so the request wasn\'t sent to the user.')
   return ctx.approvals.create({ ...plan, epoch })
 }
 
@@ -323,8 +323,8 @@ async function imageReferences(input: {
     const what = still.prompt.trim() ? still.prompt.trim().replace(/\s+/g, ' ') : basename(still.path)
     refs.push({
       path: still.path,
-      label: `Stillbild: ${what.length > 60 ? `${what.slice(0, 59)}…` : what}`,
-      name: 'Stillbild',
+      label: `Still image: ${what.length > 60 ? `${what.slice(0, 59)}…` : what}`,
+      name: 'Still image',
       kind: 'still'
     })
   }
@@ -332,7 +332,7 @@ async function imageReferences(input: {
     const photo = assets.requireImage(id)
     refs.push({
       path: photo.path,
-      label: `${photo.asset.name} (foto ${photo.photoNumber})`,
+      label: `${photo.asset.name} (photo ${photo.photoNumber})`,
       name: photo.asset.name,
       kind: photo.asset.kind
     })
@@ -340,8 +340,8 @@ async function imageReferences(input: {
   for (const id of assetIds) {
     const asset = assets.require(id)
     const cover = asset.images[0]
-    if (!cover) throw new Error(`${q(asset.name)} har inga bilder än. Lägg till bilder med add_asset_images först.`)
-    refs.push({ path: cover.path, label: `${asset.name} (foto 1)`, name: asset.name, kind: asset.kind })
+    if (!cover) throw new Error(`${q(asset.name)} has no photos yet. Add photos with add_asset_images first.`)
+    refs.push({ path: cover.path, label: `${asset.name} (photo 1)`, name: asset.name, kind: asset.kind })
   }
   return dedupeReferences(refs)
 }
@@ -373,11 +373,11 @@ function referenceIdentity(paths: readonly string[] | undefined): string {
   return imageIdentity({ model: '', prompt: '', duration: '', referenceImages: paths ? [...paths] : undefined })
 }
 
-const SLOT_WORD: Record<SegmentImageSlot, string> = { start: 'startbild', end: 'slutbild' }
+const SLOT_WORD: Record<SegmentImageSlot, string> = { start: 'start image', end: 'end image' }
 
 // ── Storyboards: transitions and board pictures ──────────────────────────────
 
-/** A path carried along the renames made since `mark` (a storyboard renamed, "Städa upp"). */
+/** A path carried along the renames made since `mark` (a storyboard renamed, "Tidy up"). */
 function followPath(path: string | undefined, mark: number): string | undefined {
   if (!path) return path
   return db.followRewrites({ model: '', prompt: '', duration: '', startImage: path }, mark).startImage
@@ -419,21 +419,21 @@ function pinTransition(storyboard: Storyboard, t: StoryboardTransition, silent: 
 function transitionChanged(pin: PinnedTransition, mark: number, silent: SilentModels): string | undefined {
   const row = store.getSegmentRow(pin.id)
   if (!row || row.sequence_id !== pin.storyboardId) {
-    return 'Övergången finns inte längre (rutorna har flyttats eller tagits bort), så förfrågan gäller inte längre. Be agenten fråga igen om det fortfarande ska genereras.'
+    return 'The transition no longer exists (the boards have been moved or removed), so the request no longer applies. Ask the agent to ask again if it should still be generated.'
   }
   const pair = transitionPair(pin.id)
   if (pair?.from !== pin.fromBoardId || pair?.to !== pin.toBoardId || row.continue_from_previous || row.end_from_next) {
-    return `Övergången går mellan andra rutor nu och ${CHANGED}`
+    return `The transition goes between other boards now and ${CHANGED}`
   }
   const stored = store.parseParams(row.params)
-  if (imageIdentity(stored) !== pin.identity) return `Bilderna i rutorna ${CHANGED}`
-  if (paramsKey(stored, silent) !== paramsKey(db.followRewrites(pin.params, mark), silent)) return `Övergången ${CHANGED}`
+  if (imageIdentity(stored) !== pin.identity) return `The pictures in the boards ${CHANGED}`
+  if (paramsKey(stored, silent) !== paramsKey(db.followRewrites(pin.params, mark), silent)) return `The transition ${CHANGED}`
   if (sentPromptOf(stored).prompt !== pin.sent) return SENT_PROMPT_CHANGED
   return undefined
 }
 
 /**
- * The transitions "Generera saknade" would pay for right now, as the storyboard service itself decides it: no
+ * The transitions "Generate missing" would pay for right now, as the storyboard service itself decides it: no
  * finished selected take, and none rendering or on its way to Venice. The run reads the same list as it goes.
  */
 function transitionsToGenerate(storyboardId: string): Promise<MissingTransition[]> {
@@ -441,7 +441,7 @@ function transitionsToGenerate(storyboardId: string): Promise<MissingTransition[
 }
 
 /**
- * Throws (in Swedish) unless the transition can be generated as it is: both boards have pictures, the storyboard
+ * Throws unless the transition can be generated as it is: both boards have pictures, the storyboard
  * service sees no problem, and the params pass the same checks as every generation.
  */
 function checkTransition(storyboard: Storyboard, index: number): void {
@@ -450,7 +450,7 @@ function checkTransition(storyboard: Storyboard, index: number): void {
   const what = label.charAt(0).toUpperCase() + label.slice(1)
   if (!t.ready) {
     throw new Error(
-      `${what} kan inte genereras än: ${missingImagesText(storyboard, t)}. Lägg in bilderna först (request_image_generation med assign_to: {board_id}, eller update_board med image).`
+      `${what} can't be generated yet: ${missingImagesText(storyboard, t)}. Put the pictures in first (request_image_generation with assign_to: {board_id}, or update_board with image).`
     )
   }
   const problem = transitionProblems(t)[0]
@@ -466,10 +466,10 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request generation (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating the current Generate form (as get_workspace shows it). Nothing is generated or paid for until they approve in Studio. The form is checked first (prompt, start image or references, @ImageN / @AudioN tokens); problems come back as an error and no request is made. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. The form is captured now: later changes to it don't change this request. The prompt is sent with the descriptions of its referenced assets appended (composed_prompt in get_workspace); the user approves exactly that text, and the request lapses if a description (or the prompt language) changes before they answer. Add a short note for the user (Swedish) saying what this generation is for.",
+        "💰 Asks the user to approve generating the current Generate form (as get_workspace shows it). Nothing is generated or paid for until they approve in Studio. The form is checked first (prompt, start image or references, @ImageN / @AudioN tokens); problems come back as an error and no request is made. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. The form is captured now: later changes to it don't change this request. The prompt is sent with the descriptions of its referenced assets appended (composed_prompt in get_workspace); the user approves exactly that text, and the request lapses if a description (or the prompt language) changes before they answer. Add a short note for the user saying what this generation is for.",
       input: { note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.') },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      summary: () => 'vill generera'
+      summary: () => 'wants to generate'
     },
     async ({ note }) => {
       const epoch = ctx.approvals.epoch()
@@ -479,12 +479,12 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const state = await readForm(ctx)
       const asked = paramsForSubmit(canonicalizeParams(state.params))
       const problem = blockingProblem(asked)
-      if (problem) throw new Error(`Formuläret kan inte genereras: ${problem}`)
+      if (problem) throw new Error(`The form can't be generated: ${problem}`)
       ensureImagesExist(asked)
       // Audio clips measured now, as the submit will: a voice that turns out too short, too long or unreadable
       // is refused here instead of after the user has approved.
       const params = await prepareSubmission(asked).catch((err: unknown) => {
-        throw new Error(`Formuläret kan inte genereras: ${errorText(err)}`)
+        throw new Error(`The form can't be generated: ${errorText(err)}`)
       })
       const images = imageIdentity(params)
       // The model list too: main remembers the models' prompt limits from it, which the composed prompt is fitted into.
@@ -506,7 +506,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         verify: () => {
           const now = db.followRewrites(params, mark)
           if (imageIdentity(now) !== images) {
-            throw new Error(`Bilderna eller ljudklippen i förfrågan ${CHANGED}`)
+            throw new Error(`The images or audio clips in the request ${CHANGED}`)
           }
           if (sentPromptOf(now).prompt !== sent.prompt) throw new Error(SENT_PROMPT_CHANGED)
         },
@@ -519,7 +519,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: pendingAnswer(request, reused),
         approvalId: request.id,
-        summary: `vill generera (${usd(price)}) – väntar på ditt OK`
+        summary: `wants to generate (${usd(price)}) – waiting for your OK`
       }
     }
   )
@@ -537,7 +537,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      summary: () => 'vill generera ett klipp'
+      summary: () => 'wants to generate a clip'
     },
     async ({ segment_id, note }) => {
       const epoch = ctx.approvals.epoch()
@@ -552,15 +552,15 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const references = plan?.mode === 'references'
       const generated = asSent(sequence, index)
       const problem = sendProblem(generated, continuing, endFromNext, plan)
-      if (problem) throw new Error(`Klipp ${clip}: ${problem}`)
+      if (problem) throw new Error(`Clip ${clip}: ${problem}`)
       if (continuing && !isUsableTake(selectedTake(sequence.segments[index - 1]))) {
         throw new Error(
-          `Klipp ${clip} fortsätter från klipp ${index}, som behöver en färdig vald tagning först. Använd request_generate_all för att generera klippen i ordning.`
+          `Clip ${clip} continues from clip ${index}, which needs a finished selected take first. Use request_generate_all to generate the clips in order.`
         )
       }
       if (endFromNext && !isUsableTake(selectedTake(sequence.segments[index + 1]))) {
         throw new Error(
-          `Klipp ${clip} slutar på första bildrutan i klipp ${index + 2}, som behöver en färdig vald tagning först. Använd request_generate_all för att generera klippen i rätt ordning.`
+          `Clip ${clip} ends on the first frame of clip ${index + 2}, which needs a finished selected take first. Use request_generate_all to generate the clips in the right order.`
         )
       }
       // The frames from the neighbours are checked the way the take will use them (a model without an end image,
@@ -568,7 +568,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       let startFrame: string | undefined
       if (continuing || endFromNext) {
         const preview = await callService<SegmentFramePreview>('segments:previewFrames', segment.id)
-        if (preview.problems.length) throw new Error(`Klipp ${clip}: ${preview.problems[0]}`)
+        if (preview.problems.length) throw new Error(`Clip ${clip}: ${preview.problems[0]}`)
         startFrame = preview.start?.source === 'previous' ? preview.start.path : undefined
       }
       ensureImagesExist(paramsForSubmit(generated))
@@ -577,7 +577,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       if ((!continuing && !endFromNext) || withFrame) {
         // Its audio clips are measured like the take's submit will, so a bad window is refused before approval.
         await prepareSubmission(withFrame ?? generated).catch((err: unknown) => {
-          throw new Error(`Klipp ${clip}: ${errorText(err)}`)
+          throw new Error(`Clip ${clip}: ${errorText(err)}`)
         })
       }
       const [price, silent] = await Promise.all([quote(generated), silentModels()])
@@ -590,7 +590,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       /** Why the clip as stored now isn't the one the user is shown, or undefined. */
       const changed = (): string | undefined => {
         const now = storedClipKey(segment.id, silent, true)
-        if (!now) return 'Klippet finns inte längre.'
+        if (!now) return 'The clip no longer exists.'
         // What was asked for, with files renamed since followed to where they are (the carried references too).
         const asked = db.followRewrites(generated, mark)
         if (now === clipKey(asked, plan, neighbours, silent)) {
@@ -600,11 +600,11 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         // The clip itself is as it was: a neighbour's other take or trim gives another frame.
         const same = { previousId: neighbours.previousId, nextId: neighbours.nextId }
         if (storedClipKey(segment.id, silent) === clipKey(asked, plan, same, silent)) {
-          return `Bildrutan som klippet tar från ett grannklipp ${CHANGED}`
+          return `The frame the clip takes from a neighbouring clip ${CHANGED}`
         }
-        return `Klippet ${CHANGED}`
+        return `The clip ${CHANGED}`
       }
-      const guard: SubmitGuard = (id) => (id === segment.id ? changed() : 'Fel klipp.')
+      const guard: SubmitGuard = (id) => (id === segment.id ? changed() : 'Wrong clip.')
       // What the dialog shows. In reference mode the frame is the last reference image and the prompt starts with the
       // instruction that names it, as Venice gets them.
       const leadIn = references ? continuationLeadInFor(plan.frameToken) : ''
@@ -637,7 +637,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: { ...pendingAnswer(request, reused), clip_number: clip },
         approvalId: request.id,
-        summary: `vill generera klipp ${clip} i ${q(sequence.name)} (${usd(price)}) – väntar på ditt OK`
+        summary: `wants to generate clip ${clip} in ${q(sequence.name)} (${usd(price)}) – waiting for your OK`
       }
     }
   )
@@ -655,24 +655,24 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      summary: () => 'vill generera saknade klipp'
+      summary: () => 'wants to generate missing clips'
     },
     async ({ sequence_id, note }) => {
       const epoch = ctx.approvals.epoch()
       const mark = db.rewriteMark()
       const sequence = await loadSequence(sequence_id)
-      if (sequence.running) throw new Error('”Generera saknade” pågår redan för sekvensen.')
-      if (!sequence.segments.length) throw new Error('Sekvensen har inga klipp.')
+      if (sequence.running) throw new Error('"Generate missing" is already running for the sequence.')
+      if (!sequence.segments.length) throw new Error('The sequence has no clips.')
       const missing = await clipsToGenerate(sequence.id)
       if (!missing.length) {
-        throw new Error('Alla klipp har redan en färdig vald tagning (eller håller på att genereras) – det finns inget att generera.')
+        throw new Error('Every clip already has a finished selected take (or is being generated) – there is nothing to generate.')
       }
       // The run refuses to start for the same reason, so it is better heard now than after the user's OK.
       const blocked = missing.find((c) => c.problem)
       if (blocked) throw new Error(missingClipProblem(blocked))
       const clips = missing.map(({ segmentId }) => {
         const index = sequence.segments.findIndex((s) => s.id === segmentId)
-        if (index < 0) throw new Error('Sekvensen ändrades just nu. Försök igen.')
+        if (index < 0) throw new Error('The sequence changed just now. Try again.')
         const neighbours = clipNeighbours(sequence, index)
         // As each take will be sent: a continuation in reference mode with the references it carries.
         const plan = continuationOf(sequence, index)
@@ -689,19 +689,19 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           if (!c.generated.referenceAudios?.length) continue
           const measured = await resolveReferenceAudios(paramsForSubmit(canonicalizeParams(c.generated))).catch(
             (err: unknown) => {
-              throw new Error(`Klipp ${c.clip}: ${errorText(err)}`)
+              throw new Error(`Clip ${c.clip}: ${errorText(err)}`)
             }
           )
           const late = blockingPromptError(
             { ...measured, referenceImages: c.plan.carried?.images ?? [] },
             { continuationFrame: true }
           )
-          if (late) throw new Error(`Klipp ${c.clip}: ${late}`)
+          if (late) throw new Error(`Clip ${c.clip}: ${late}`)
           continue
         }
         if (c.neighbours.previousId || c.neighbours.nextId) continue
         await prepareSubmission(c.generated).catch((err: unknown) => {
-          throw new Error(`Klipp ${c.clip}: ${errorText(err)}`)
+          throw new Error(`Clip ${c.clip}: ${errorText(err)}`)
         })
       }
       const [prices, silent] = await Promise.all([Promise.all(clips.map((c) => quote(c.generated))), silentModels()])
@@ -723,13 +723,13 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const guard: SubmitGuard = (segmentId) => {
         const c = approved.get(segmentId)
         if (!c) {
-          return 'Klippet ingick inte i agentens förfrågan som du godkände, så det genererades inte. Granska det och tryck ”Generera saknade” om det ska genereras.'
+          return 'The clip wasn\'t part of the agent\'s request that you approved, so it wasn\'t generated. Check it and press “Generate missing” if it should be generated.'
         }
         if (storedClipKey(segmentId, silent) !== approvedKey(c)) {
-          return 'Klippet ändrades efter att du godkände agentens förfrågan, så det genererades inte. Granska det och tryck ”Generera saknade” om det ska genereras.'
+          return 'The clip changed after you approved the agent\'s request, so it wasn\'t generated. Check it and press “Generate missing” if it should be generated.'
         }
         if (promptChanged(c)) {
-          return 'En beskrivning som läggs till i klippets prompt ändrades efter att du godkände agentens förfrågan, så klippet genererades inte. Granska det och tryck ”Generera saknade” om det ska genereras.'
+          return 'A description added to the clip\'s prompt changed after you approved the agent\'s request, so the clip wasn\'t generated. Check it and press “Generate missing” if it should be generated.'
         }
         return undefined
       }
@@ -750,9 +750,9 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           const ids = (await clipsToGenerate(sequence.id)).map((c) => c.segmentId)
           const then = clips.map((c) => `${c.id}:${approvedKey(c)}`)
           const now = ids.map((id) => `${id}:${storedClipKey(id, silent)}`)
-          if (now.join(';') !== then.join(';')) throw new Error(`Sekvensen ${CHANGED}`)
+          if (now.join(';') !== then.join(';')) throw new Error(`The sequence ${CHANGED}`)
           const edited = clips.find(promptChanged)
-          if (edited) throw new Error(`Klipp ${edited.clip}: ${SENT_PROMPT_CHANGED}`)
+          if (edited) throw new Error(`Clip ${edited.clip}: ${SENT_PROMPT_CHANGED}`)
         },
         execute: async () => {
           await callService('sequences:generateAll', sequence.id, guard)
@@ -762,7 +762,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: { ...pendingAnswer(request, reused), clip_numbers: clipNumbers },
         approvalId: request.id,
-        summary: `vill generera ${clips.length === 1 ? '1 klipp' : `${clips.length} klipp`} i ${q(sequence.name)} (${usd(price)}) – väntar på ditt OK`
+        summary: `wants to generate ${clips.length === 1 ? '1 clip' : `${clips.length} clips`} in ${q(sequence.name)} (${usd(price)}) – waiting for your OK`
       }
     }
   )
@@ -780,7 +780,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      summary: () => 'vill generera en övergång'
+      summary: () => 'wants to generate a transition'
     },
     async ({ transition_id, note }) => {
       const epoch = ctx.approvals.epoch()
@@ -796,7 +796,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       // What the dialog shows: the two board pictures as start and end image, the prompt and the settings.
       const shown = paramsForSubmit(params)
       const label = transitionLabel(storyboard, index)
-      const guard: SubmitGuard = (id) => (id === transition.id ? transitionChanged(pin, mark, silent) : 'Fel övergång.')
+      const guard: SubmitGuard = (id) => (id === transition.id ? transitionChanged(pin, mark, silent) : 'Wrong transition.')
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'segment',
         client: ctx.clientName(),
@@ -823,7 +823,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: { ...pendingAnswer(request, reused), transition_number: index + 1 },
         approvalId: request.id,
-        summary: `vill generera ${label} i ${q(storyboard.name)} (${usd(price)}) – väntar på ditt OK`
+        summary: `wants to generate ${label} in ${q(storyboard.name)} (${usd(price)}) – waiting for your OK`
       }
     }
   )
@@ -835,30 +835,30 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Request generating a storyboard's missing transitions (paid, needs approval)",
       description:
-        "💰 Asks the user to approve generating every transition of a storyboard that has no finished selected take (\"Generera saknade\"). Each transition only needs its two boards' pictures, so they are independent of each other. Every one of them must be ready – both boards with pictures, a prompt – or the request is refused naming the transition (generate the ready ones one by one with request_transition_generation instead). Transitions already rendering are not paid again. price_usd is the sum. Returns immediately with {approval_id, status: \"pending\", price_usd, transition_numbers}; follow it with get_approval, then get_storyboard. If a board's picture or one of the transitions changes before the user approves, the request lapses.",
+        "💰 Asks the user to approve generating every transition of a storyboard that has no finished selected take (\"Generate missing\"). Each transition only needs its two boards' pictures, so they are independent of each other. Every one of them must be ready – both boards with pictures, a prompt – or the request is refused naming the transition (generate the ready ones one by one with request_transition_generation instead). Transitions already rendering are not paid again. price_usd is the sum. Returns immediately with {approval_id, status: \"pending\", price_usd, transition_numbers}; follow it with get_approval, then get_storyboard. If a board's picture or one of the transitions changes before the user approves, the request lapses.",
       input: {
         storyboard_id: z.string(),
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      summary: () => 'vill generera saknade övergångar'
+      summary: () => 'wants to generate missing transitions'
     },
     async ({ storyboard_id, note }) => {
       const epoch = ctx.approvals.epoch()
       const mark = db.rewriteMark()
       const storyboard = await loadStoryboard(storyboard_id)
-      if (storyboard.running) throw new Error('”Generera saknade” pågår redan för storyboarden.')
+      if (storyboard.running) throw new Error('"Generate missing" is already running for the storyboard.')
       if (!storyboard.transitions.length) {
-        throw new Error('Storyboarden har inga övergångar än: den behöver minst två rutor (add_board).')
+        throw new Error('The storyboard has no transitions yet: it needs at least two boards (add_board).')
       }
       const missing = (await transitionsToGenerate(storyboard.id)).map(({ transitionId }) => {
         const index = storyboard.transitions.findIndex((t) => t.id === transitionId)
-        if (index < 0) throw new Error('Storyboarden ändrades just nu. Försök igen.')
+        if (index < 0) throw new Error('The storyboard changed just now. Try again.')
         return { transition: storyboard.transitions[index], index }
       })
       if (!missing.length) {
         throw new Error(
-          'Alla övergångar har redan en färdig vald tagning (eller håller på att genereras) – det finns inget att generera.'
+          'Every transition already has a finished selected take (or is being generated) – there is nothing to generate.'
         )
       }
       // The run refuses to start for the same reasons, so they are better heard now than after the user's OK.
@@ -875,11 +875,11 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const guard: SubmitGuard = (segmentId) => {
         const pin = pins.get(segmentId)
         if (!pin) {
-          return 'Övergången ingick inte i agentens förfrågan som du godkände, så den genererades inte. Granska den och tryck ”Generera saknade” om den ska genereras.'
+          return 'The transition wasn\'t part of the agent\'s request that you approved, so it wasn\'t generated. Check it and press “Generate missing” if it should be generated.'
         }
         const changed = transitionChanged(pin, mark, silent)
         return changed
-          ? `Övergången ändrades efter att du godkände agentens förfrågan, så den genererades inte (${changed.replace(/\.$/, '')}). Granska den och tryck ”Generera saknade” om den ska genereras.`
+          ? `The transition changed after you approved the agent's request, so it wasn't generated (${changed.replace(/\.$/, '')}). Check it and press “Generate missing” if it should be generated.`
           : undefined
       }
       const { request, reused } = requestApproval(ctx, epoch, {
@@ -896,10 +896,10 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         target: `all:${storyboard.id}`,
         verify: async () => {
           const now = await callService<Storyboard>('storyboards:get', storyboard.id)
-          if (now.running) throw new Error('”Generera saknade” pågår redan för storyboarden.')
+          if (now.running) throw new Error('"Generate missing" is already running for the storyboard.')
           const still = (await transitionsToGenerate(storyboard.id)).map((m) => m.transitionId)
           if (still.join(';') !== ids.join(';')) {
-            throw new Error(`Övergångarna som saknar en tagning ${CHANGED}`)
+            throw new Error(`The transitions without a take ${CHANGED}`)
           }
           for (const pin of pins.values()) {
             const problem = transitionChanged(pin, mark, silent)
@@ -914,7 +914,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: { ...pendingAnswer(request, reused), transition_numbers: numbers },
         approvalId: request.id,
-        summary: `vill generera ${numbers.length === 1 ? '1 övergång' : `${numbers.length} övergångar`} i ${q(storyboard.name)} (${usd(price)}) – väntar på ditt OK`
+        summary: `wants to generate ${numbers.length === 1 ? '1 transition' : `${numbers.length} transitions`} in ${q(storyboard.name)} (${usd(price)}) – waiting for your OK`
       }
     }
   )
@@ -926,7 +926,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request an image (paid, needs approval)',
       description:
-        "💰 Asks the user to approve making one still picture with Venice's image models – typically a storyboard board's picture (a milestone of the film) or a sequence clip's start or end image. Cheap (about $0.06 with the default Seedream models) but paid, so nothing is generated until the user approves in Studio. With references it combines them into a new picture (an edit model, at most max_input_images – see list_image_models); without, it makes the picture from the prompt alone (a text-to-image model). References are sent in this order: the previous board's picture (previous_board_as_reference), reference_still_ids, reference_image_ids (library photos), then reference_asset_ids (each asset's cover photo); the first one is the base picture the model edits, so put the picture whose composition should be kept first. Write the prompt in English as one still frame: who and what, composition and framing, place, light, style; refer to references as \"image 1\", \"image 2\" … in that order, never with @ tokens. Left out: the default model for the case, the storyboard's or sequence's aspect ratio (the clip's with assign_to a clip), 1K and the model's default quality. The request is checked first (model, number of references, files, options) and priced; problems come back as an error. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval, which gives the still_id once approved. Every result is saved as a still of its storyboard or sequence (with neither: in Referensbilder). assign_to: {board_id} also makes it that board's picture (replacing the one it has); assign_to: {segment_id, slot} makes it a sequence clip's start or end image (which switches the clip to image-to-video). Not while \"Generera saknade\" runs for that storyboard or sequence; if the board or clip is moved, removed or gets another picture (or the clip's slot starts or stops taking a neighbour's frame) before the user approves, the request lapses.",
+        "💰 Asks the user to approve making one still picture with Venice's image models – typically a storyboard board's picture (a milestone of the film) or a sequence clip's start or end image. Cheap (about $0.06 with the default Seedream models) but paid, so nothing is generated until the user approves in Studio. With references it combines them into a new picture (an edit model, at most max_input_images – see list_image_models); without, it makes the picture from the prompt alone (a text-to-image model). References are sent in this order: the previous board's picture (previous_board_as_reference), reference_still_ids, reference_image_ids (library photos), then reference_asset_ids (each asset's cover photo); the first one is the base picture the model edits, so put the picture whose composition should be kept first. Write the prompt in English as one still frame: who and what, composition and framing, place, light, style; refer to references as \"image 1\", \"image 2\" … in that order, never with @ tokens. Left out: the default model for the case, the storyboard's or sequence's aspect ratio (the clip's with assign_to a clip), 1K and the model's default quality. The request is checked first (model, number of references, files, options) and priced; problems come back as an error. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval, which gives the still_id once approved. Every result is saved as a still of its storyboard or sequence (with neither: in the folder \"Referensbilder\"). assign_to: {board_id} also makes it that board's picture (replacing the one it has); assign_to: {segment_id, slot} makes it a sequence clip's start or end image (which switches the clip to image-to-video). Not while \"Generate missing\" runs for that storyboard or sequence; if the board or clip is moved, removed or gets another picture (or the clip's slot starts or stops taking a neighbour's frame) before the user approves, the request lapses.",
       input: {
         prompt: z.string().min(1).max(4000).describe('English: one still frame – subject and moment, framing, place, light, style.'),
         storyboard_id: z
@@ -978,17 +978,17 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      summary: () => 'vill skapa en bild'
+      summary: () => 'wants to create an image'
     },
     async (input) => {
       const epoch = ctx.approvals.epoch()
       const mark = db.rewriteMark()
       requireLibrary()
-      if (input.storyboard_id && input.sequence_id) throw new Error('Ange storyboard_id eller sequence_id, inte båda.')
+      if (input.storyboard_id && input.sequence_id) throw new Error('Give storyboard_id or sequence_id, not both.')
       const boardAsked = input.assign_to && 'board_id' in input.assign_to ? input.assign_to.board_id : undefined
       const slotAsked = input.assign_to && 'segment_id' in input.assign_to ? input.assign_to : undefined
       if (input.previous_board_as_reference && !boardAsked) {
-        throw new Error('previous_board_as_reference gäller bara tillsammans med assign_to: {board_id}.')
+        throw new Error('previous_board_as_reference only applies together with assign_to: {board_id}.')
       }
       // A storyboard's id given as sequence_id is taken as meant.
       const ownerId = input.storyboard_id ?? input.sequence_id
@@ -996,12 +996,12 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const board = boardAsked ? await loadBoard(boardAsked) : undefined
       const target = slotAsked ? await loadClip(slotAsked.segment_id) : undefined
       if (board && ownerId && ownerId !== board.storyboard.id) {
-        throw new Error('Rutan i assign_to hör till en annan storyboard. Ange rutans egen storyboard, eller ingen.')
+        throw new Error('The board in assign_to belongs to another storyboard. Give the board\'s own storyboard, or none.')
       }
       if (target && ownerId && target.sequence.id !== ownerId) {
-        throw new Error('assign_to hör till en annan sekvens än sequence_id. Ange klippets egen sekvens, eller ingen.')
+        throw new Error('assign_to belongs to another sequence than sequence_id. Give the clip\'s own sequence, or none.')
       }
-      // The picture is put in after it is paid for, which "Generera saknade" would refuse meanwhile.
+      // The picture is put in after it is paid for, which "Generate missing" would refuse meanwhile.
       if (target) assertNotRunning(target.sequence)
       if (board) assertStoryboardIdle(board.storyboard)
       const storyboard =
@@ -1012,19 +1012,19 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       // The previous board's picture first: the base picture the model keeps the composition and look of.
       const previous: ApprovalImageReference[] = []
       if (board && input.previous_board_as_reference) {
-        if (board.index === 0) throw new Error('Ruta 1 har ingen föregående ruta att använda som referens.')
+        if (board.index === 0) throw new Error('Board 1 has no previous board to use as a reference.')
         const before = board.storyboard.boards[board.index - 1]
         if (!before.imagePath) {
           throw new Error(
-            `Ruta ${board.index} har ingen bild än, så den kan inte bli referens. Skapa den först, eller låt bli previous_board_as_reference.`
+            `Board ${board.index} has no picture yet, so it can't be a reference. Create it first, or leave out previous_board_as_reference.`
           )
         }
         const [stills, assets] = await Promise.all([StillIndex.load(), AssetIndex.load()])
         const photo = assets.photo(before.imagePath)
         previous.push({
           path: before.imagePath,
-          label: `Ruta ${board.index} (föregående bild)${before.note.trim() ? `: ${excerptOf(before.note, 50)}` : ''}`,
-          name: `Ruta ${board.index}`,
+          label: `Board ${board.index} (previous picture)${before.note.trim() ? `: ${excerptOf(before.note, 50)}` : ''}`,
+          name: `Board ${board.index}`,
           kind: photo ? photo.asset.kind : stills.atPath(before.imagePath) ? 'still' : undefined
         })
       }
@@ -1051,7 +1051,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           notes.splice(0, notes.length, ...plan.notes)
         } else if (storyboard) {
           notes.push(
-            `${plan.model.name} kan inte göra bildformatet ${wantedRatio}, så bilden blir ${plan.params.aspectRatio ?? 'modellens standardformat'} – ett annat format än storyboardens.`
+            `${plan.model.name} can't make the aspect ratio ${wantedRatio}, so the picture will be ${plan.params.aspectRatio ?? 'the model\'s default format'} – another format than the storyboard\'s.`
           )
         }
       }
@@ -1065,26 +1065,26 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       // A picture replaces an automatic frame from a neighbour; better said now than discovered later.
       if (assignTo?.slot === 'start' && target && continues(target.sequence, target.index)) {
         notes.push(
-          `Klipp ${assignTo.clipNumber} börjar i dag på föregående klipps sista bildruta; bilden ersätter den och klippet slutar fortsätta från klipp ${assignTo.clipNumber - 1}.`
+          `Clip ${assignTo.clipNumber} now starts on the previous clip's last frame; the picture replaces it and the clip stops continuing from clip ${assignTo.clipNumber - 1}.`
         )
       }
       if (assignTo?.slot === 'end' && target && endsOnNext(target.sequence, target.index)) {
         notes.push(
-          `Klipp ${assignTo.clipNumber} slutar i dag på nästa klipps första bildruta; bilden ersätter den.`
+          `Clip ${assignTo.clipNumber} now ends on the next clip's first frame; the picture replaces it.`
         )
       }
       if (target && (target.segment.params.referenceImages?.length || target.segment.params.referenceAudios?.length)) {
         notes.push(
-          `Klipp ${target.index + 1} använder i dag referenser. Med bilden genereras det bild-till-video: referenserna tas bort och prompten behöver beskriva rörelsen utan @-referenser (update_segment).`
+          `Clip ${target.index + 1} uses references now. With the picture it is generated image-to-video: the references are removed and the prompt needs to describe the motion without @ references (update_segment).`
         )
       }
-      // The board as the user is shown it ("ruta N"), and the picture it has now, which the new one replaces.
+      // The board as the user is shown it ("board N"), and the picture it has now, which the new one replaces.
       const boardShown = board
         ? { id: board.board.id, number: board.index + 1, imagePath: board.board.imagePath }
         : undefined
       if (boardShown?.imagePath) {
         notes.push(
-          `Ruta ${boardShown.number} har redan en bild; den nya ersätter den (den gamla finns kvar bland storyboardens bilder).`
+          `Board ${boardShown.number} already has a picture; the new one replaces it (the old one stays among the storyboard's images).`
         )
       }
       const assignToBoard =
@@ -1119,52 +1119,52 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         verify: async () => {
           // A path names a place, not a picture: the references must still be the very files shown.
           if (referenceIdentity(followReferences(params.referenceImages, mark)) !== identity) {
-            throw new Error(`Referensbilderna i förfrågan ${CHANGED}`)
+            throw new Error(`The reference images in the request ${CHANGED}`)
           }
           if (boardShown && storyboard) {
             if (storyboardOfBoard(boardShown.id) !== storyboard.id) {
-              throw new Error('Rutan som bilden skulle bli finns inte längre, så förfrågan gäller inte.')
+              throw new Error('The board the picture was meant for no longer exists, so the request no longer applies.')
             }
-            // The user approves "ruta N" as the dialog names it: the board must still be there, with the picture
+            // The user approves "board N" as the dialog names it: the board must still be there, with the picture
             // it had, so a picture the user put in meanwhile isn't replaced behind their back.
             const index = boardIndex(boardShown.id)
             if (index + 1 !== boardShown.number) {
               throw new Error(
-                `Rutan som bilden skulle bli har flyttats (det var ruta ${boardShown.number}, nu ruta ${index + 1}), så förfrågan gäller inte längre. Be agenten fråga igen om bilden fortfarande ska skapas.`
+                `The board the picture was meant for has moved (it was board ${boardShown.number}, now board ${index + 1}), so the request no longer applies. Ask the agent to ask again if the picture should still be created.`
               )
             }
             const now = await callService<Storyboard>('storyboards:get', storyboard.id)
             const imageNow = now.boards.find((b) => b.id === boardShown.id)?.imagePath
             if ((imageNow ?? '') !== (followPath(boardShown.imagePath, mark) ?? '')) {
-              throw new Error(`Ruta ${boardShown.number} har fått en annan bild sedan agenten frågade, så förfrågan gäller inte längre.`)
+              throw new Error(`Board ${boardShown.number} has got another picture since the agent asked, so the request no longer applies.`)
             }
             if (now.running) {
               throw new Error(
-                '”Generera saknade” pågår för storyboarden, så bilden kan inte sättas in nu och förfrågan gäller inte. Be agenten fråga igen när körningen är klar.'
+                '"Generate missing" is running for the storyboard, so the picture can\'t be put in now and the request no longer applies. Ask the agent to ask again when the run is done.'
               )
             }
             return
           }
           if (!assignTo) return
           const row = store.getSegmentRow(assignTo.segmentId)
-          if (!row) throw new Error('Klippet som bilden skulle sättas i finns inte längre, så förfrågan gäller inte.')
-          // The user approves "klipp N" as the dialog names it: the clip must still be there, as it was.
+          if (!row) throw new Error('The clip the picture was meant for no longer exists, so the request no longer applies.')
+          // The user approves "clip N" as the dialog names it: the clip must still be there, as it was.
           const rows = store.listSegmentRows(row.sequence_id)
           const index = rows.findIndex((r) => r.id === row.id)
           if (index + 1 !== assignTo.clipNumber) {
             throw new Error(
-              `Klippet som bilden skulle sättas i har flyttats (det var klipp ${assignTo.clipNumber}, nu klipp ${index + 1}), så förfrågan gäller inte längre. Be agenten fråga igen om bilden fortfarande ska skapas.`
+              `The clip the picture was meant for has moved (it was clip ${assignTo.clipNumber}, now clip ${index + 1}), so the request no longer applies. Ask the agent to ask again if the picture should still be created.`
             )
           }
           const automatic =
             assignTo.slot === 'start'
               ? index > 0 && !!row.continue_from_previous
               : index < rows.length - 1 && !!row.end_from_next
-          if (automatic !== slotWasAutomatic) throw new Error(`Klipp ${assignTo.clipNumber} ${CHANGED}`)
+          if (automatic !== slotWasAutomatic) throw new Error(`Clip ${assignTo.clipNumber} ${CHANGED}`)
           // Putting the picture into the clip would be refused after Venice was paid.
           if ((await callService<Sequence>('sequences:get', row.sequence_id)).running) {
             throw new Error(
-              '”Generera saknade” pågår för sekvensen, så bilden kan inte sättas i klippet nu och förfrågan gäller inte. Be agenten fråga igen när körningen är klar.'
+              '"Generate missing" is running for the sequence, so the picture can\'t be put into the clip now and the request no longer applies. Ask the agent to ask again when the run is done.'
             )
           }
         },
@@ -1172,7 +1172,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           const still = await callService<Still>('images:generate', {
             ...params,
             referenceImages: followReferences(params.referenceImages, mark),
-            // Where the picture goes, for its label in Pågår och klart while it is made (never sent or stored).
+            // Where the picture goes, for its label in Activity while it is made (never sent or stored).
             ...(stillTarget ? { target: stillTarget } : {})
           })
           if (boardShown) {
@@ -1181,7 +1181,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
             if ((boardImagePath(boardShown.id) ?? '') !== (followPath(boardShown.imagePath, mark) ?? '')) {
               return {
                 stillId: still.id,
-                notice: `Bilden skapades och sparades bland storyboardens bilder, men ruta ${boardShown.number} fick en annan bild medan den skapades, så den nya sattes inte in där.`
+                notice: `The picture was created and saved among the storyboard's images, but board ${boardShown.number} got another picture while it was being made, so the new one wasn't put in there.`
               }
             }
             try {
@@ -1191,7 +1191,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
               // Paid for and saved either way; only putting it into the board didn't work.
               return {
                 stillId: still.id,
-                notice: `Bilden skapades och sparades bland storyboardens bilder, men kunde inte bli bild för ruta ${boardShown.number}: ${errorText(err)}`
+                notice: `The picture was created and saved among the storyboard's images, but couldn't become the picture of board ${boardShown.number}: ${errorText(err)}`
               }
             }
           }
@@ -1206,17 +1206,17 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
             // Paid for and saved either way; only putting it into the clip didn't work.
             return {
               stillId: still.id,
-              notice: `Bilden skapades och sparades bland sekvensens bilder, men kunde inte bli ${SLOT_WORD[assignTo.slot]} för klipp ${assignTo.clipNumber}: ${errorText(err)}`
+              notice: `The picture was created and saved among the sequence's images, but couldn't become the ${SLOT_WORD[assignTo.slot]} of clip ${assignTo.clipNumber}: ${errorText(err)}`
             }
           }
         }
       })
       const where = boardShown
-        ? ` till ruta ${boardShown.number} i ${q(storyboard!.name)}`
+        ? ` for board ${boardShown.number} in ${q(storyboard!.name)}`
         : assignTo
-          ? ` till klipp ${assignTo.clipNumber}${sequence ? ` i ${q(sequence.name)}` : ''}`
+          ? ` for clip ${assignTo.clipNumber}${sequence ? ` in ${q(sequence.name)}` : ''}`
           : owner
-            ? ` i ${q(owner.name)}`
+            ? ` in ${q(owner.name)}`
             : ''
       return {
         data: {
@@ -1225,7 +1225,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
           ...(params.resolution ? { resolution: params.resolution } : {}),
           ...(params.quality ? { quality: params.quality } : {}),
-          // The user's "Säkert läge för bilder": Venice blurs adult content while it is on.
+          // The user's "Safe mode for images": Venice blurs adult content while it is on.
           safe_mode: getImageSafeMode(),
           references: references.map((r, i) => ({
             image: i + 1,
@@ -1239,7 +1239,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           ...(notes.length ? { notes } : {})
         },
         approvalId: request.id,
-        summary: `vill skapa en bild${where} (${usd(plan.priceUsd)}) – väntar på ditt OK`
+        summary: `wants to create an image${where} (${usd(plan.priceUsd)}) – waiting for your OK`
       }
     }
   )
@@ -1251,16 +1251,16 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get approval status',
       description:
-        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence, for generate-storyboard the storyboard with get_storyboard; for an image, the still_id – look at it with get_still – and assigned when it went into its board or clip; for an edit operation, the job's progress and then result_version – review it with review_generation; for a designed voice, the new Röst clip's audio_id once it is made; for request_delete, every item with its outcome – deleted, gone (already removed) or failed with its error – and a notice when some didn't go), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, replaced by a newer request, or – for a removal – something in it changed before the user answered) or failed (the error; a removal where nothing could be removed keeps its items' outcomes). Poll every 15–30 seconds while pending, and while an approved edit or voice job is still running.",
+        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence, for generate-storyboard the storyboard with get_storyboard; for an image, the still_id – look at it with get_still – and assigned when it went into its board or clip; for an edit operation, the job's progress and then result_version – review it with review_generation; for a designed voice, the new Voice clip's audio_id once it is made; for request_delete, every item with its outcome – deleted, gone (already removed) or failed with its error – and a notice when some didn't go), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, replaced by a newer request, or – for a removal – something in it changed before the user answered) or failed (the error; a removal where nothing could be removed keeps its items' outcomes). Poll every 15–30 seconds while pending, and while an approved edit or voice job is still running.",
       input: { approval_id: z.string() },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'kollade svaret på en förfrågan'
+      summary: () => 'checked the answer to a request'
     },
     async ({ approval_id }) => {
       // A removal whose items changed since it was asked for lapses as soon as anyone looks (the dialog, this call).
       if (ctx.approvals.get(approval_id)?.kind === 'delete') await ctx.approvals.check(approval_id)
       const request = ctx.approvals.get(approval_id)
-      if (!request) throw new Error('Förfrågan finns inte. Förfrågningar glöms när Studio startas om.')
+      if (!request) throw new Error('The request doesn\'t exist. Requests are forgotten when Studio restarts.')
       const storyboardId = request.sequenceKind === 'storyboard' ? request.sequenceId : undefined
       // A storyboard's transitions are segments to the approval store; the agent asked for transitions.
       const transitions = !!storyboardId && (request.kind === 'segment' || request.kind === 'generate-all')
@@ -1294,7 +1294,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         ...(request.kind === 'image' && board ? { assign_to: { board_id: board.boardId, board_number: board.boardNumber } } : {}),
         ...(request.stillId ? { still_id: request.stillId } : {}),
         ...(request.notice ? { notice: request.notice } : {}),
-        // Redigera's requests: the edit and version (or the character), the operation, and the job it started.
+        // The Editor's requests: the edit and version (or the character), the operation, and the job it started.
         ...(request.kind === 'edit' || request.kind === 'voice-design' ? await editApprovalInfo(request) : {}),
         // A removal: every item, and once approved what became of each (deleted, gone or failed).
         ...(request.kind === 'delete' ? deleteApprovalInfo(request) : {})

@@ -42,8 +42,8 @@ export function useLearnings(): LearningsState {
 // ── Opening a learning from another view ─────────────────────────────────────
 
 /**
- * A learning the Prompter view should show when it opens (set by the clip drawer's "Lärdomar" links). The
- * view's own Lärdomar tab picks it up once; held here rather than as a navigation intent so the request stays
+ * A learning the Prompts view should show when it opens (set by the clip drawer's learning links). The
+ * view's own Learnings tab picks it up once; held here rather than as a navigation intent so the request stays
  * inside the views that know about learnings.
  */
 let requestedLearning: string | undefined

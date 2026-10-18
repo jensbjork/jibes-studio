@@ -72,10 +72,10 @@ export default function TokenHoverCard({ mark, reference, audio, rect }: Props) 
             <span
               className={`block text-[12px] leading-snug ${mark.tone === 'warning' ? 'text-amber-200' : 'text-red-300'}`}
             >
-              {mark.problem ?? 'Hänvisningen är fel.'}
+              {mark.problem ?? 'The reference is wrong.'}
             </span>
             {mark.tone === 'error' && (
-              <span className="mt-1 block text-[11px] text-muted">Rättningsförslag finns under prompten.</span>
+              <span className="mt-1 block text-[11px] text-muted">Suggested fixes are under the prompt.</span>
             )}
           </span>
         </div>

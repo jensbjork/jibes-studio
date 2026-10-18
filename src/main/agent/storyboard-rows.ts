@@ -42,6 +42,6 @@ export function transitionPair(segmentId: string): { from?: string; to?: string 
 /** Says that a storyboard id was given to a tool for sequences, and which tool to use instead. */
 export function storyboardNotSequence(instead: string): Error {
   return new Error(
-    `Det här är en storyboard, inte en sekvens: storyboards har egna verktyg. Använd ${instead} (list_storyboards visar alla storyboards).`
+    `This is a storyboard, not a sequence: storyboards have their own tools. Use ${instead} (list_storyboards lists every storyboard).`
   )
 }

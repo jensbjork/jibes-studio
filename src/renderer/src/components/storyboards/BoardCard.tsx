@@ -23,7 +23,7 @@ interface Props {
   stills: Still[]
   assets: Asset[]
   busy: boolean
-  /** Its picture is being made (Skapa bild, also after the dialog closed, or an agent's request). */
+  /** Its picture is being made (Create image, also after the dialog closed, or an agent's request). */
   making: boolean
   /** Its picture couldn't be made, not seen yet. */
   failure?: FinishedWork
@@ -111,8 +111,8 @@ export default function BoardCard({
       tabIndex={0}
       onKeyDown={onCardKeyDown}
       role="group"
-      aria-roledescription="ruta"
-      aria-label={`Ruta ${number} av ${count}${board.note ? `: ${board.note}` : ''}`}
+      aria-roledescription="board"
+      aria-label={`Board ${number} of ${count}${board.note ? `: ${board.note}` : ''}`}
       className={`group/card flex shrink-0 flex-col rounded-xl outline-none ring-offset-4 ring-offset-bg transition focus-visible:ring-2 focus-visible:ring-muted ${
         dragging ? 'opacity-40' : ''
       }`}
@@ -127,16 +127,16 @@ export default function BoardCard({
         <div className="flex w-full items-center gap-2 px-0.5" style={{ height: CARD_HEADER_HEIGHT }}>
           <span
             className="text-[12px] font-medium text-muted"
-            title={count > 1 ? 'Dra i bilden för att flytta rutan, eller använd ⌥← och ⌥→' : undefined}
+            title={count > 1 ? 'Drag the image to move the board, or use ⌥← and ⌥→' : undefined}
           >
-            Ruta {number}
+            Board {number}
           </span>
           <span className="ml-auto" />
           <ConfirmButton
-            question="Ta bort rutan?"
-            confirmLabel="Ta bort"
+            question="Remove the board?"
+            confirmLabel="Remove"
             onConfirm={onDelete}
-            title="Ta bort rutan. Övergångarna till och från den tas bort med sina prompter; deras klipp finns kvar i Mediabanken."
+            title="Remove the board. The transitions to and from it go too, with their prompts; their clips stay in Media."
             className="flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition hover:bg-raised hover:text-accent focus-visible:opacity-100 group-hover/card:opacity-100 group-focus-within/card:opacity-100"
           >
             <CloseIcon size={11} />
@@ -171,8 +171,8 @@ interface Note {
 }
 
 /**
- * "Vad visar bilden?": the board's note, saved by itself as the user types (a note-only change, so it never
- * touches the picture), and saved right away when the field goes away. The transition prompts' "Föreslå" builds
+ * "What does the image show?": the board's note, saved by itself as the user types (a note-only change, so it never
+ * touches the picture), and saved right away when the field goes away. The transition prompts' "Suggest" builds
  * on these notes.
  */
 function BoardNote({
@@ -197,21 +197,21 @@ function BoardNote({
   return (
     <div className="mt-2.5 w-full">
       <label htmlFor={id} className="sr-only">
-        Vad visar bilden?
+        What does the image show?
       </label>
       <textarea
         id={id}
         value={draft.value.note}
         onChange={(e) => draft.setValue({ note: e.target.value })}
         onBlur={() => void draft.flush()}
-        placeholder="Vad visar bilden?"
+        placeholder="What does the image show?"
         spellCheck={false}
         rows={2}
         className="block max-h-32 min-h-[3.25rem] w-full resize-none rounded-md border border-transparent bg-transparent px-2 py-1.5 text-[12px] leading-snug outline-none transition [field-sizing:content] placeholder:text-muted/60 hover:border-line focus:border-muted focus:bg-raised"
       />
       {draft.error && (
         <p className="mt-0.5 px-2 text-[11px] text-accent" title={draft.error}>
-          Anteckningen kunde inte sparas
+          The note couldn’t be saved
         </p>
       )}
     </div>

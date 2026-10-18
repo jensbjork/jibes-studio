@@ -90,19 +90,19 @@ function parseList(json: string): string[] {
 /** Trimmed, one line each, without empties, de-duplicated ignoring letter case (the first spelling wins). */
 function cleanTags(tags: unknown): string[] {
   if (tags === undefined || tags === null) return []
-  if (!Array.isArray(tags)) throw new Error('Taggarna ska vara en lista med ord.')
+  if (!Array.isArray(tags)) throw new Error('The tags must be a list of words.')
   const seen = new Set<string>()
   const result: string[] = []
   for (const raw of tags) {
     const tag = oneLine(raw)
     if (!tag || seen.has(fold(tag))) continue
     if (tag.length > MAX_TAG_LENGTH) {
-      throw new Error(`Taggen ”${tag.slice(0, 30)}…” är för lång (högst ${MAX_TAG_LENGTH} tecken).`)
+      throw new Error(`The tag “${tag.slice(0, 30)}…” is too long (at most ${MAX_TAG_LENGTH} characters).`)
     }
     seen.add(fold(tag))
     result.push(tag)
   }
-  if (result.length > MAX_TAGS) throw new Error(`Högst ${MAX_TAGS} taggar.`)
+  if (result.length > MAX_TAGS) throw new Error(`At most ${MAX_TAGS} tags.`)
   return result
 }
 
@@ -111,26 +111,26 @@ function parseRating(value: unknown): RatingValue | null | undefined {
   if (value === undefined) return undefined
   if (value === null) return null
   if (isRatingValue(value)) return value
-  throw new Error('Betyget ska vara -1 (tumme ner) eller 1, 2 eller 3 stjärnor.')
+  throw new Error('The rating must be -1 (thumbs down) or 1, 2 or 3 stars.')
 }
 
 /** Line breaks are kept: a note can be a few paragraphs. */
 function cleanNote(value: unknown): string {
   const note = text(value).normalize('NFC').trim()
-  if (note.length > MAX_NOTE_LENGTH) throw new Error(`Anteckningen är för lång (högst ${MAX_NOTE_LENGTH} tecken).`)
+  if (note.length > MAX_NOTE_LENGTH) throw new Error(`The note is too long (at most ${MAX_NOTE_LENGTH} characters).`)
   return note
 }
 
 /** Distinct, non-empty ids in order. */
 function cleanIds(ids: unknown): string[] {
   if (ids === undefined || ids === null) return []
-  if (!Array.isArray(ids)) throw new Error('Underlaget ska vara en lista med klippens id.')
+  if (!Array.isArray(ids)) throw new Error('The evidence must be a list of clip IDs.')
   return [...new Set(ids.map((id) => oneLine(id)).filter(Boolean))]
 }
 
 function requireId(value: unknown, what: string): string {
   const id = oneLine(value)
-  if (!id) throw new Error(`Ogiltigt id för ${what}.`)
+  if (!id) throw new Error(`Invalid ID for ${what}.`)
   return id
 }
 
@@ -151,9 +151,9 @@ function existingGenerationIds(ids: readonly string[]): Set<string> {
 }
 
 function requireGeneration(generationId: unknown): string {
-  const id = requireId(generationId, 'klippet')
+  const id = requireId(generationId, 'the clip')
   if (!getDb().prepare('SELECT 1 FROM generations WHERE id = ?').get(id)) {
-    throw new Error('Klippet finns inte – det kan ha raderats.')
+    throw new Error('The clip does not exist – it may have been deleted.')
   }
   return id
 }
@@ -296,7 +296,7 @@ export function addReview(generationId: string, agent: string, input: AgentRevie
   const note = cleanNote(fields.note)
   const tags = cleanTags(fields.tags)
   if (rating === null && !note && !tags.length) {
-    throw new Error('Ett omdöme behöver ett betyg, taggar eller en anteckning.')
+    throw new Error('A review needs a rating, tags or a note.')
   }
   const reviewId = randomUUID()
   const now = Date.now()
@@ -318,7 +318,7 @@ export function deleteReview(reviewId: string, opts: { agent?: string } = {}): v
   const row = findReviewRow(oneLine(reviewId))
   if (!row) return
   if (opts.agent !== undefined && !sameAuthor(row.author, agentAuthor(opts.agent))) {
-    throw new Error('Du kan bara ta bort omdömen du själv har skrivit.')
+    throw new Error('You can only delete reviews you wrote yourself.')
   }
   getDb().prepare('DELETE FROM generation_reviews WHERE id = ?').run(row.id)
   reviewChanged(row.generation_id)
@@ -459,14 +459,14 @@ function requireGenerations(ids: readonly string[]): void {
   if (!unknown.length) return
   throw new Error(
     unknown.length === 1
-      ? `Det finns inget klipp med id ${unknown[0]}.`
-      : `Det finns inga klipp med id ${unknown.join(', ')}.`
+      ? `There is no clip with ID ${unknown[0]}.`
+      : `There are no clips with IDs ${unknown.join(', ')}.`
   )
 }
 
 /** Why an agent may not change or delete a learning the user has pinned (pinning is the user's endorsement). */
 const PINNED_BY_USER =
-  'Användaren har fäst lärdomen, så den kan inte ändras eller tas bort av agenter. Spara en ny lärdom om resultaten säger något annat.'
+  'The user has pinned this learning, so agents cannot change or delete it. Save a new learning if the results say something else.'
 
 /**
  * Creates (no id) or updates a learning. A new one is the user's, or with `agent` (its client name) that agent's;
@@ -477,19 +477,19 @@ const PINNED_BY_USER =
  * evidence already recorded stays even if that generation has been deleted since.
  */
 export function saveLearning(input: LearningInput, opts: { agent?: string } = {}): Learning {
-  if (!input || typeof input !== 'object') throw new Error('Ogiltig lärdom.')
+  if (!input || typeof input !== 'object') throw new Error('Invalid learning.')
   const insight = text(input.insight).normalize('NFC').trim()
-  if (!insight) throw new Error('Skriv vad lärdomen går ut på.')
+  if (!insight) throw new Error('Write what the learning is about.')
   if (insight.length > MAX_INSIGHT_LENGTH) {
-    throw new Error(`Lärdomen är för lång (högst ${MAX_INSIGHT_LENGTH} tecken). Korta ner den till det viktigaste.`)
+    throw new Error(`The learning is too long (at most ${MAX_INSIGHT_LENGTH} characters). Cut it down to what matters most.`)
   }
   const title = oneLine(input.title) || titleFromBody(insight)
-  if (title.length > MAX_TITLE_LENGTH) throw new Error(`Rubriken är för lång (högst ${MAX_TITLE_LENGTH} tecken).`)
+  if (title.length > MAX_TITLE_LENGTH) throw new Error(`The title is too long (at most ${MAX_TITLE_LENGTH} characters).`)
   const model = input.model === undefined ? undefined : oneLine(input.model) || null
-  if (model && model.length > MAX_MODEL_LENGTH) throw new Error('Modellnamnet är för långt.')
+  if (model && model.length > MAX_MODEL_LENGTH) throw new Error('The model name is too long.')
   const tags = input.tags === undefined ? undefined : cleanTags(input.tags)
   const evidence = input.evidence === undefined ? undefined : cleanIds(input.evidence)
-  if (evidence && evidence.length > MAX_EVIDENCE) throw new Error(`Högst ${MAX_EVIDENCE} klipp som underlag.`)
+  if (evidence && evidence.length > MAX_EVIDENCE) throw new Error(`At most ${MAX_EVIDENCE} clips as evidence.`)
   const pinned = input.pinned === undefined ? undefined : input.pinned === true
 
   const author = opts.agent === undefined ? USER_AUTHOR : agentAuthor(opts.agent)
@@ -498,9 +498,9 @@ export function saveLearning(input: LearningInput, opts: { agent?: string } = {}
   const id = oneLine(input.id)
   if (id) {
     const existing = findLearningRow(id)
-    if (!existing) throw new Error('Lärdomen finns inte längre.')
+    if (!existing) throw new Error('The learning no longer exists.')
     if (opts.agent !== undefined && !sameAuthor(existing.author, author)) {
-      throw new Error('Du kan bara ändra lärdomar du själv har sparat.')
+      throw new Error('You can only change learnings you saved yourself.')
     }
     if (opts.agent !== undefined && existing.pinned) throw new Error(PINNED_BY_USER)
     const recorded = parseList(existing.evidence)
@@ -563,7 +563,7 @@ export function deleteLearning(id: string, opts: { agent?: string } = {}): void 
   const row = findLearningRow(oneLine(id))
   if (!row) return
   if (opts.agent !== undefined && !sameAuthor(row.author, agentAuthor(opts.agent))) {
-    throw new Error('Du kan bara ta bort lärdomar du själv har sparat.')
+    throw new Error('You can only delete learnings you saved yourself.')
   }
   if (opts.agent !== undefined && row.pinned) throw new Error(PINNED_BY_USER)
   getDb().prepare('DELETE FROM learnings WHERE id = ?').run(row.id)
@@ -697,16 +697,16 @@ export function registerReviewIpc(notify: Broadcast): void {
   })
   ipcMain.handle('reviews:setUser', (e, generationId: unknown, input: unknown) => {
     if (isAgentCall(e)) {
-      throw new Error('Användarens eget betyg sätts bara i Studio. Lägg till ett eget omdöme i stället.')
+      throw new Error("The user's own rating is only set in Studio. Add a review of your own instead.")
     }
-    return setUserReview(requireId(generationId, 'klippet'), input as UserReviewInput)
+    return setUserReview(requireId(generationId, 'the clip'), input as UserReviewInput)
   })
   ipcMain.handle('reviews:add', (e, generationId: unknown, input: unknown, author?: unknown) => {
-    if (!isAgentCall(e)) throw new Error('Ditt eget omdöme sparas med betyget och anteckningen på klippet.')
-    return addReview(requireId(generationId, 'klippet'), text(author), input as AgentReviewInput)
+    if (!isAgentCall(e)) throw new Error('Your own review is saved with the rating and the note on the clip.')
+    return addReview(requireId(generationId, 'the clip'), text(author), input as AgentReviewInput)
   })
   ipcMain.handle('reviews:delete', (e, reviewId: unknown, author?: unknown) =>
-    deleteReview(requireId(reviewId, 'omdömet'), caller(e, author))
+    deleteReview(requireId(reviewId, 'the review'), caller(e, author))
   )
 
   ipcMain.handle('learnings:list', (_e, query?: unknown) =>
@@ -716,7 +716,7 @@ export function registerReviewIpc(notify: Broadcast): void {
     saveLearning(input as LearningInput, caller(e, author))
   )
   ipcMain.handle('learnings:delete', (e, id: unknown, author?: unknown) =>
-    deleteLearning(requireId(id, 'lärdomen'), caller(e, author))
+    deleteLearning(requireId(id, 'the learning'), caller(e, author))
   )
 
   ipcMain.handle('exports:list', () => listExports())

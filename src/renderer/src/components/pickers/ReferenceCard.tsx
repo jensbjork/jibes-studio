@@ -16,7 +16,7 @@ import { audioRole, windowLabel } from './audioRefs'
 /** What @ImageN (or @AudioN; index N-1) points at, for colouring the token and for its card. */
 export interface TokenTarget {
   kind?: AssetKind
-  /** "Anna (foto 2)", "Anna · röst": what it is, in one line. */
+  /** "Anna (photo 2)", "Anna · voice": what it is, in one line. */
   label: string
   /** The picture or clip file; without it the card names it only. */
   path?: string
@@ -26,7 +26,7 @@ export interface TokenTarget {
   number?: number
   count?: number
   /**
-   * Why it isn't sent, e.g. "Skickas inte – modellen tar max 3 bilder": the token is then marked like one that names
+   * Why it isn't sent, e.g. "Not sent – the model takes at most 3 images": the token is then marked like one that names
    * nothing, and the card says so under the picture.
    */
   unsent?: string
@@ -42,7 +42,7 @@ export interface TokenCardContent {
   target?: TokenTarget
   /** Why the token names nothing that is sent (misspelled, out of range); the card then says only that, in red. */
   problem?: string
-  /** A last line on what the picture does, e.g. "Klicka för att byta – dra för att flytta". */
+  /** A last line on what the picture does, e.g. "Click to swap – drag to move". */
   hint?: string
 }
 
@@ -210,19 +210,19 @@ function fileName(path: string): string {
   return path.split('/').pop() ?? path
 }
 
-/** "foto 2 av 3" (nothing for an asset's only photo); "röst", "röst 2" for its second voice clip. */
+/** "photo 2 of 3" (nothing for an asset's only photo); "voice", "voice 2" for its second voice clip. */
 function placeOf(target: TokenTarget, ref: 'image' | 'audio'): string | undefined {
   const several = (target.count ?? 0) > 1 && target.number !== undefined
-  if (ref === 'image') return several ? `foto ${target.number} av ${target.count}` : undefined
+  if (ref === 'image') return several ? `photo ${target.number} of ${target.count}` : undefined
   if (!target.name) return undefined
   return `${audioRole(target.kind)}${several ? ` ${target.number}` : ''}`
 }
 
-/** "0:02–0:10 (8 s)", or "från 0:02" when the length isn't known. */
+/** "0:02–0:10 (8 s)", or "from 0:02" when the length isn't known. */
 function windowText(window: { start: number; length?: number }): string {
   if (window.length !== undefined) return windowLabel({ start: window.start, length: window.length })
   const t = Math.max(0, Math.round(window.start))
-  return `från ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
+  return `from ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
 }
 
 function ReferenceCard({
@@ -250,7 +250,7 @@ function ReferenceCard({
 
   let body: ReactNode
   if (problem || !target) {
-    body = <p className="leading-snug text-red-300">{problem ?? `${token} pekar inte på något som skickas.`}</p>
+    body = <p className="leading-snug text-red-300">{problem ?? `${token} doesn’t point at anything that is sent.`}</p>
   } else if (content.ref === 'audio') {
     const w = target.window
     body = (
@@ -273,7 +273,7 @@ function ReferenceCard({
           <span className="block truncate">
             <span className={`font-medium ${tone}`}>{token}</span>
             <span className="text-muted"> · </span>
-            <span className="font-medium">{target.name ?? 'Eget ljud'}</span>
+            <span className="font-medium">{target.name ?? 'Own sound'}</span>
           </span>
           <span className="block truncate text-[11px] text-muted">
             {[where ?? (target.path ? fileName(target.path) : undefined), w ? windowText(w) : undefined]
@@ -305,7 +305,7 @@ function ReferenceCard({
           )}
         </p>
         {(where || (!target.name && target.path)) && (
-          <p className="text-[11px] text-muted">{where ?? 'egen bild'}</p>
+          <p className="text-[11px] text-muted">{where ?? 'own image'}</p>
         )}
         {target.unsent && <p className="text-[11px] leading-snug text-accent">{target.unsent}</p>}
         {content.hint && <p className="mt-0.5 text-[11px] leading-snug text-muted">{content.hint}</p>}
@@ -340,7 +340,7 @@ function CardPicture({ path, dim, maxHeight }: { path: string; dim: boolean; max
   if (missing) {
     return (
       <span className="flex h-16 items-center justify-center rounded bg-raised px-2 text-center text-[11px] text-accent">
-        Bildfilen finns inte längre
+        The image file no longer exists
       </span>
     )
   }

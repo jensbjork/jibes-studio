@@ -27,7 +27,7 @@ export interface ReorderOptions {
   keys: readonly string[]
   /** Moves the item at `from` to index `to` (0-based). Left out: the items can't be reordered. */
   onMove?: (from: number, to: number) => void
-  /** What a screen reader hears after a move, e.g. "Bilden är nu @Image1, först av 4." */
+  /** What a screen reader hears after a move, e.g. "The image is now @Image1, first of 4." */
   describeMove?: (from: number, to: number) => string
 }
 

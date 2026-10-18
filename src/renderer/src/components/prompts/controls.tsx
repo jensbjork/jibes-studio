@@ -22,7 +22,7 @@ export function FavoriteButton({
         onToggle()
       }}
       aria-pressed={active}
-      title={active ? 'Ta bort från favoriter' : 'Markera som favorit'}
+      title={active ? 'Remove from favourites' : 'Mark as favourite'}
       className={`leading-none transition ${
         active ? 'text-amber-400 hover:text-amber-300' : 'text-muted hover:text-text'
       } ${className}`}
@@ -51,10 +51,10 @@ export function CopyButton({ text, disabled }: { text: string; disabled?: boolea
       type="button"
       onClick={copy}
       disabled={disabled}
-      title="Kopiera prompten till urklipp"
+      title="Copy the prompt to the clipboard"
       className={`${buttonBase} ${copied ? 'text-emerald-400' : 'text-muted hover:text-text'}`}
     >
-      {copied ? 'Kopierad ✓' : 'Kopiera'}
+      {copied ? 'Copied ✓' : 'Copy'}
     </button>
   )
 }
@@ -62,7 +62,7 @@ export function CopyButton({ text, disabled }: { text: string; disabled?: boolea
 /** Two-step delete: the first click arms it, the second deletes. Disarms itself after a few seconds. */
 export function ConfirmDeleteButton({
   onConfirm,
-  confirmLabel = 'Radera prompten'
+  confirmLabel = 'Delete prompt'
 }: {
   onConfirm: () => void
   /** The second step's button. */
@@ -79,14 +79,14 @@ export function ConfirmDeleteButton({
   if (!armed) {
     return (
       <button type="button" onClick={() => setArmed(true)} className={`${buttonBase} text-muted hover:text-accent`}>
-        Radera
+        Delete
       </button>
     )
   }
   return (
     <span className="flex items-center gap-1">
       <button type="button" onClick={() => setArmed(false)} className={secondaryButton}>
-        Avbryt
+        Cancel
       </button>
       <button
         type="button"

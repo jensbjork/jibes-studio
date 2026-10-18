@@ -39,6 +39,7 @@ import {
   orderWithNewBoard,
   parseConsent,
   patchTransitionLocally,
+  clipCountLabel,
   readyTake,
   runKeys,
   runPlan,
@@ -76,12 +77,12 @@ interface PendingChange {
 }
 
 /** Stands in for a board that doesn't exist yet when the order after adding it is worked out. */
-const NEW_BOARD = '(ny ruta)'
+const NEW_BOARD = '(new board)'
 
 /** Below this much room for the boards beside it, the transition editor lies over them instead. */
 const MIN_ROW_WIDTH = 440
 
-const UNSAVED = 'Ändringarna kunde inte sparas. Försök igen.'
+const UNSAVED = 'The changes couldn’t be saved. Try again.'
 
 interface Props {
   intent?: Intent
@@ -90,10 +91,10 @@ interface Props {
 }
 
 /**
- * Storyboards: plan a film as its milestones – one picture per board, made with Skapa bild or taken from the
+ * Storyboards: plan a film as its milestones – one picture per board, made with Create image or taken from the
  * library, a file or a frame of a clip – and generate the clips between them, each going from one board's picture
  * to the next one's. A storyboard can then be previewed, exported as one film, or turned into a sequence to keep
- * editing in Sekvenser.
+ * editing in Sequences.
  */
 export default function StoryboardsView({ intent, onIntentHandled, navigate }: Props) {
   const { models, error: modelsError } = useModels()
@@ -117,7 +118,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   const assets = useAssets()
   const { stills } = useStills(storyboardId)
 
-  // ── Pågår och klart for the open storyboard (also what an agent or an earlier visit started) ──────────────
+  // ── Activity for the open storyboard (also what an agent or an earlier visit started) ───────────────────────
   const exportStatus = useExportStatus(storyboardId)
   const ownerUnseenFilter = useCallback(
     (w: FinishedWork) => !!storyboardId && w.ownerId === storyboardId,
@@ -130,8 +131,8 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   const ownerUnseen = useUnseen(ownerUnseenFilter)
   const ownerRunning = useRunning(ownerRunningFilter)
   const news = useMemo(() => newsBySegment(ownerUnseen), [ownerUnseen])
-  // A "Generera saknade" that stopped on a problem: main keeps its error with the storyboard while the app runs,
-  // and as a failure in Pågår och klart (also after a restart) until it has been seen.
+  // A "Generate missing" that stopped on a problem: main keeps its error with the storyboard while the app runs,
+  // and as a failure in Activity (also after a restart) until it has been seen.
   const runFailure = ownerUnseen
     .filter((w) => w.failureOf === 'run')
     .sort((a, b) => b.finishedAt - a.finishedAt)[0]
@@ -160,7 +161,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   // One of the storyboard's pictures full size, opened from a board's menu: it can be put in that board or deleted.
   const [viewingStill, setViewingStill] = useState<{ still: Still; boardId: string }>()
   const [reveal, setReveal] = useState<string>()
-  // A board pointed out by a link (Pågår och klart: its picture failed or is new): it lights up briefly.
+  // A board pointed out by a link (Activity: its picture failed or is new): it lights up briefly.
   const [flash, setFlash] = useState<{ boardId: string; n: number }>()
   const flashCount = useRef(0)
   const [pendingChange, setPendingChange] = useState<PendingChange>()
@@ -271,8 +272,8 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   }
 
   /**
-   * The list's ✕ (after its question in the row) and ⋯ → Radera storyboarden; throws, so the row can show the error.
-   * The open one is let go of first (as in Sekvenser) and gives way to its neighbour in the list.
+   * The list's ✕ (after its question in the row) and ⋯ → Delete storyboard…; throws, so the row can show the error.
+   * The open one is let go of first (as in Sequences) and gives way to its neighbour in the list.
    */
   const removeStoryboard = async (id: string, nextId?: string) => {
     const wasOpen = id === selectedId
@@ -338,7 +339,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     if (!storyboard) return
     confirmIfLost(
       orderWithNewBoard(storyboard, init, NEW_BOARD),
-      { title: 'Lägga till en ruta här?', confirmLabel: 'Lägg till ändå' },
+      { title: 'Add a board here?', confirmLabel: 'Add anyway' },
       () => void insertBoard(init)
     )
   }
@@ -361,7 +362,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     }
   }
 
-  /** Pictures dropped on "Ny ruta": one new board each, in the order they were dropped. */
+  /** Pictures dropped on "New board": one new board each, in the order they were dropped. */
   const addFiles = async (paths: string[]) => {
     if (!storyboard) return
     const id = storyboard.id
@@ -402,7 +403,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   const moveBoard = (boardId: string, toIndex: number): boolean => {
     if (!storyboard) return false
     const order = moveBoardLocally(storyboard, boardId, toIndex).boards.map((b) => b.id)
-    return confirmIfLost(order, { title: 'Flytta rutan?', confirmLabel: 'Flytta ändå' }, () => {
+    return confirmIfLost(order, { title: 'Move the board?', confirmLabel: 'Move anyway' }, () => {
       store.update((s) => moveBoardLocally(s, boardId, toIndex))
       // An edit waiting to be saved may belong to a transition the move removes: saved first, it isn't lost.
       void flushAll()
@@ -466,12 +467,12 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
       return
     }
     // The transition may have changed while the terms were shown (an agent can edit it, a board can get another
-    // picture): then nothing is sent until the user has looked again and pressed Generera, which shows the price.
+    // picture): then nothing is sent until the user has looked again and pressed Generate, which shows the price.
     const t = latest.current?.transitions.find((x) => x.id === transitionId)
     if (!t || transitionKey(t) !== key) {
       setErrors((m) => ({
         ...m,
-        [transitionId]: 'Övergången ändrades medan villkoren visades. Kontrollera den och tryck på Generera igen.'
+        [transitionId]: 'The transition changed while the terms were shown. Check it and press Generate again.'
       }))
       setEditorId(transitionId)
       return
@@ -499,7 +500,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   const deleteTake = async (transitionId: string, take: Generation) => {
     store.update((s) => withoutTake(s, take.id))
     try {
-      // A take Redigera keeps (an edit started from it) is only taken off the transition, as in a sequence's take list.
+      // A take the Editor keeps (an edit started from it) is only taken off the transition, as in a sequence's take list.
       await window.studio.deleteGeneration(take.id, { segmentId: transitionId, release: take.keptByEdit === true })
     } catch (e) {
       setNotice({ text: ipcErrorMessage(e), storyboardId })
@@ -549,8 +550,8 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     if (expected && runKeys(fresh).some((k) => !expected.has(k))) {
       setNotice({
         text:
-          'Övergångarna ändrades medan villkoren visades. Kontrollera dem och tryck på ”Generera saknade” igen – ' +
-          'knappen visar priset.',
+          'The transitions changed while the terms were shown. Check them and press “Generate missing” again – ' +
+          'the button shows the price.',
         storyboardId
       })
       return
@@ -623,8 +624,8 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
 
   const exportBlocked = storyboard ? exportBlockedReason(storyboard, ffmpegOk) : undefined
   const doneCount = storyboard ? storyboard.transitions.filter((t) => readyTake(t)).length : 0
-  const previewDisabled = doneCount === 0 ? 'Inga övergångar har ett färdigt klipp ännu' : undefined
-  // While the app runs, main keeps the run's error with the storyboard; after a restart only Pågår och klart has it.
+  const previewDisabled = doneCount === 0 ? 'No transition has a finished clip yet' : undefined
+  // While the app runs, main keeps the run's error with the storyboard; after a restart only Activity has it.
   const runError = storyboard?.runError ?? runFailure?.error
   const runConsent = parseConsent(runError)
   const runErrorTransition = storyboard && runError ? transitionInMessage(storyboard, runError) : undefined
@@ -675,8 +676,8 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     <>
       {ffmpeg && !ffmpeg.ok && (
         <Banner tone="warning">
-          <span className="font-medium">ffmpeg saknas</span> – export och bildrutor ur klipp är avstängda. Installera med{' '}
-          <code className="rounded bg-black/30 px-1 py-px font-mono">brew install ffmpeg</code> och starta om Studio.
+          <span className="font-medium">ffmpeg is missing</span> – export and frames from clips are turned off. Install it
+          with <code className="rounded bg-black/30 px-1 py-px font-mono">brew install ffmpeg</code> and restart Studio.
         </Banner>
       )}
       {visibleNotice && (
@@ -695,23 +696,23 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
           >
             {runConsent ? (
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                Generera saknade stoppades: modellen kräver att du godkänner leverantörens villkor.
+                Generate missing stopped: the model needs you to accept the provider’s terms.
                 <button
                   onClick={() => storyboard && setRunConsentOpen(new Set(runKeys(storyboard)))}
                   className="rounded bg-accent px-2 py-0.5 font-medium text-white hover:bg-accent-hover"
                 >
-                  Granska och fortsätt
+                  Review and continue
                 </button>
               </span>
             ) : (
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span>Generera saknade stoppades – {runError}</span>
+                <span>Generate missing stopped – {runError}</span>
                 {runErrorTransition && runErrorTransition.id !== editorId && storyboard && (
                   <button
                     onClick={() => showTransition(runErrorTransition.id)}
                     className="rounded border border-accent/40 px-2 py-0.5 font-medium hover:bg-accent/10"
                   >
-                    Visa {transitionLabel(storyboard, runErrorTransition).toLowerCase()}
+                    Show {transitionLabel(storyboard, runErrorTransition).toLowerCase()}
                   </button>
                 )}
               </span>
@@ -722,20 +723,20 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
       {exportStatus.done && (
         <Banner tone="success" onDismiss={exportStatus.dismissDone}>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span title={exportStatus.done.mediaPath}>Filmen är klar</span>
+            <span title={exportStatus.done.mediaPath}>The film is ready</span>
             <button
               onClick={() => void exportStatus.reveal()}
               className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
             >
-              Visa i Finder
+              Show in Finder
             </button>
             {exportStatus.done.exportId && (
               <button
                 onClick={() => exportStatus.edit(navigate)}
-                title="Ändra den färdiga filmen med AI i Redigera. Storyboarden rörs inte."
+                title="Change the finished film with AI in the Editor. The storyboard stays as it is."
                 className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
               >
-                Redigera
+                Edit
               </button>
             )}
           </span>
@@ -799,8 +800,8 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               <div className="flex min-w-0 flex-1 flex-col">
                 {noImages && (
                   <p className="mx-auto mt-5 max-w-xl shrink-0 px-6 text-center text-[12px] leading-relaxed text-muted">
-                    Lägg en bild i varje ruta – filmens viktiga ögonblick, i ordning. Klippen mellan rutorna genereras
-                    sedan från bild till bild.
+                    Add an image to each board – the film’s key moments, in order. The clips between the boards are
+                    then generated from image to image.
                   </p>
                 )}
                 <BoardRow
@@ -880,7 +881,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               <EmptyState creating={creating} onCreate={(name, aspect) => void createStoryboard(name, aspect)} />
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted">
-                {selectedId && !store.error ? 'Laddar storyboard…' : ''}
+                {selectedId && !store.error ? 'Loading storyboard…' : ''}
               </div>
             )}
           </>
@@ -939,7 +940,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
                   }}
                   className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover"
                 >
-                  Använd i ruta {number}
+                  Use on board {number}
                 </button>
               )
             )
@@ -950,7 +951,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
         <ConsentDialog
           request={consent.request}
           cost={`${
-            consentTransition ? transitionLabel(storyboard, consentTransition).toLowerCase() : 'övergången'
+            consentTransition ? transitionLabel(storyboard, consentTransition).toLowerCase() : 'the transition'
           } · ${formatUsd(consentQuote)}`}
           onAccept={() => void acceptConsent()}
           onCancel={() => setConsent(undefined)}
@@ -972,7 +973,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
       {runConsentOpen && runConsent && (
         <ConsentDialog
           request={runConsent}
-          cost={`Generera saknade, ${plan?.toGenerate.length ?? 0} klipp · ${formatUsd(runQuote)}`}
+          cost={`Generate missing, ${clipCountLabel(plan?.toGenerate.length ?? 0)} · ${formatUsd(runQuote)}`}
           onAccept={() => void acceptRunConsent(runConsent, runConsentOpen)}
           onCancel={() => setRunConsentOpen(undefined)}
         />
@@ -1000,10 +1001,10 @@ function EmptyState({
       <div className="w-full max-w-md">
         <div className="mb-6 text-center">
           <StoryboardIcon className="mx-auto mb-4 text-[30px] text-muted" />
-          <h2 className="mb-2 text-base font-semibold">Planera filmen bild för bild</h2>
+          <h2 className="mb-2 text-base font-semibold">Plan the film image by image</h2>
           <p className="leading-relaxed text-muted">
-            Lägg upp filmens viktiga ögonblick som bilder – skapa dem, eller använd bilder du redan har. Studio
-            genererar sedan klippen mellan bilderna, så att filmen går från den ena till den andra.
+            Lay out the film’s key moments as images – create them, or use images you already have. Studio then
+            generates the clips between the images, so the film goes from one to the next.
           </p>
         </div>
         <div className="rounded-xl border border-line bg-panel p-5">

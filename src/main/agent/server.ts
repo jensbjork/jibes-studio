@@ -22,7 +22,7 @@ export const UPLOAD_PATH = /^\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 
 /** What the server needs of the upload store for PUT /uploads/<id> (agent/uploads.ts). */
 export interface UploadReceiver {
-  /** Undefined when a PUT of `length` bytes from `peer` may start, else its status and Swedish reason. */
+  /** Undefined when a PUT of `length` bytes from `peer` may start, else its status and reason. */
   checkPut(id: string, peer: string, length: number): Promise<{ status: number; error: string } | undefined>
   /** Reads the body into the upload and answers with the status and JSON body to send. */
   receive(id: string, req: IncomingMessage): Promise<{ status: number; body: Record<string, unknown> }>
@@ -373,16 +373,16 @@ export class AgentServer {
       this.closeAfter(req, res)
       json(res, status, { error }, { ...headers, Connection: 'close' })
     }
-    if (req.method !== 'PUT') return refuse(405, 'Bara PUT tas emot här.', { Allow: 'PUT' })
+    if (req.method !== 'PUT') return refuse(405, 'Only PUT is accepted here.', { Allow: 'PUT' })
     const uploads = this.opts.uploads
-    if (!uploads) return refuse(404, 'Okänd uppladdning.')
+    if (!uploads) return refuse(404, 'Unknown upload.')
     if (req.headers['transfer-encoding'] !== undefined) {
-      return refuse(411, 'Skicka filen med Content-Length (inte chunked), som curl -T gör.')
+      return refuse(411, 'Send the file with Content-Length (not chunked), as curl -T does.')
     }
     const header = req.headers['content-length']
-    if (header === undefined) return refuse(411, 'Content-Length saknas.')
+    if (header === undefined) return refuse(411, 'Content-Length is missing.')
     const length = Number(header)
-    if (!/^\d+$/.test(header) || !Number.isSafeInteger(length)) return refuse(400, 'Content-Length går inte att läsa.')
+    if (!/^\d+$/.test(header) || !Number.isSafeInteger(length)) return refuse(400, "Content-Length can't be read.")
     const problem = await uploads.checkPut(id, peer, length)
     if (problem) return refuse(problem.status, problem.error)
     // Nothing may wait between the check and receive(), which marks the upload as sending.

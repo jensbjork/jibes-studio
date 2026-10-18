@@ -18,7 +18,7 @@ export interface Photo {
 /** What a picture's hover card says besides its badge: the asset's photo, or a name of its own. */
 export interface PictureInfo {
   photo?: Photo
-  /** What it is when it isn't a library photo: "Ruta 2", "Sista bildrutan från klipp 3". */
+  /** What it is when it isn't a library photo: "Board 2", "Last frame of clip 3". */
   name?: string
   /** Its kind when it isn't a library photo (the colour of its name). */
   kind?: AssetKind
@@ -54,7 +54,7 @@ export function PictureHover({
       ref: 'image',
       target: {
         kind: photo?.asset.kind ?? kind,
-        label: photo ? `${photo.asset.name} (foto ${photo.number})` : (name ?? path.split('/').pop() ?? path),
+        label: photo ? `${photo.asset.name} (photo ${photo.number})` : (name ?? path.split('/').pop() ?? path),
         path,
         name: photo?.asset.name ?? name,
         number: photo?.number,
@@ -63,7 +63,7 @@ export function PictureHover({
     },
     onLight && { highlight: badge, onHighlight: (key) => onLight(key !== undefined) }
   )
-  const what = photo ? `${photo.asset.name}, foto ${photo.number}` : (name ?? path.split('/').pop() ?? path)
+  const what = photo ? `${photo.asset.name}, photo ${photo.number}` : (name ?? path.split('/').pop() ?? path)
   return (
     <>
       <div tabIndex={0} aria-label={`${badge}: ${what}`} {...hover} className={className} style={style}>
@@ -118,7 +118,7 @@ export function ImageTile({
     >
       {missing ? (
         <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
-          Filen saknas
+          File missing
         </span>
       ) : (
         <img

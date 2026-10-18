@@ -85,7 +85,7 @@ function switchesLikeAnId(stem: string): boolean {
  * /d/8f3a9c…), and the name ends up in the library and the activity log, which must never hold a token.
  */
 export function fileNameFromUrl(raw: string, kind: UploadKind): string {
-  const fallback = kind === 'image' ? 'bild' : kind === 'audio' ? 'ljud' : 'film'
+  const fallback = kind === 'image' ? 'image' : kind === 'audio' ? 'sound' : 'film'
   try {
     const name = decodeURIComponent(basename(new URL(raw).pathname)).trim()
     const dot = name.lastIndexOf('.')
@@ -163,8 +163,8 @@ export async function stageFiles(
       const others = entries.filter((e) => e && e.id !== failed.id && e.status !== 'failed').map((e) => e!.id)
       for (const id of others) named.add(id)
       throw new Error(
-        `Hämtningen från ${failed.host ?? 'adressen'} misslyckades: ${failed.error ?? 'okänt fel'}${
-          others.length ? ` (De andra filerna finns som upload_id ${others.join(', ')}.)` : ''
+        `The download from ${failed.host ?? 'the address'} failed: ${failed.error ?? 'unknown error'}${
+          others.length ? ` (The other files are there as upload_id ${others.join(', ')}.)` : ''
         }`
       )
     }
@@ -173,8 +173,8 @@ export async function stageFiles(
       const ready = entries.filter((e) => e?.status === 'ready').map((e) => e!.id)
       for (const id of [...pending, ...ready]) named.add(id)
       throw new Error(
-        `Hämtningen pågår fortfarande (upload_id ${pending.join(', ')}). Vänta med get_upload och använd sedan {upload_id}.${
-          ready.length ? ` De som redan är klara finns som upload_id ${ready.join(', ')}.` : ''
+        `The download is still in progress (upload_id ${pending.join(', ')}). Wait with get_upload, then use {upload_id}.${
+          ready.length ? ` The ones already done are there as upload_id ${ready.join(', ')}.` : ''
         }`
       )
     }
@@ -192,7 +192,7 @@ export function originOf(ctx: ToolContext, files: readonly { host?: string }[]):
   return { agent: ctx.clientName().slice(0, 60), ...(host ? { host } : {}) }
 }
 
-/** An upload (or a URL) made a still: owned by a sequence or storyboard, or – without one – in Referensbilder. */
+/** An upload (or a URL) made a still: owned by a sequence or storyboard, or – without one – in "Referensbilder". */
 export async function importAsStill(ctx: ToolContext, source: FileSource, ownerId?: string): Promise<Still> {
   const [file] = await stageFiles(ctx, 'image', [source])
   return callService<Still>('stills:import', file.path, ownerId)
@@ -205,7 +205,7 @@ export type ReferenceInput =
   | { upload_id: string }
 
 /**
- * The references with loose pictures resolved to files: a still's picture; an upload made a still in Referensbilder
+ * The references with loose pictures resolved to files: a still's picture; an upload made a still in "Referensbilder"
  * first (`importUploads`), so the form or clip never points into the scratch folder – or, for a check that changes
  * nothing (validate_prompt), the upload's own file.
  */

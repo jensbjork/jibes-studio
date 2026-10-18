@@ -45,14 +45,14 @@ import { promptIssuesOf } from './promptIssues'
 import { openEditInEditor, openInSequenceEditor, openStoryboard } from './workspace'
 
 // The renderer half of the agent connection. Tools that read or fill the Generate form (get_workspace,
-// set_form, set_references, reorder_references, swap_reference) and open_in_studio (Generate or a clip in its drawer, the Mediabank
+// set_form, set_references, reorder_references, swap_reference) and open_in_studio (Generate or a clip in its drawer, Media
 // on a tab or with a clip, picture or film open, a sequence, a storyboard or one of its transitions, an edit or one
-// of its versions in Redigera, an asset, the prompt library) reach main's MCP server as an 'agent:command';
+// of its versions in the Editor, an asset, the prompt library) reach main's MCP server as an 'agent:command';
 // this applies them to the form store with the same rules the form itself uses (mode switching, model options,
 // the reference caps for images and audio, tokens following a reorder, names following a swap) and answers with
 // 'agent:reply'.
-// Everything else the agent does goes straight to main's services. Error messages are Swedish: they are shown
-// to the agent, which talks to the user in Swedish.
+// Everything else the agent does goes straight to main's services. Error messages are shown to the agent, which
+// relays them to the user.
 
 /** An image of the form tied to the library photo it is (asset, photo number), like a reference minus its token. */
 export type FormImage = Omit<AgentFormReference, 'token'>
@@ -64,7 +64,7 @@ export type FormImage = Omit<AgentFormReference, 'token'>
  */
 export interface FormSnapshot extends AgentFormState {
   view: View
-  /** The Mediabank tab on screen (view 'media'). */
+  /** The Media tab on screen (view 'media'). */
   mediaTab?: MediaTab
   /** The start (and end) image in image-to-video mode, tied to its library photo. */
   startImage?: FormImage
@@ -111,16 +111,16 @@ const MODE_ALIASES: Record<string, Kind> = {
   referens: 'reference-to-video'
 }
 
-/** "”Referens” (reference-to-video)": the tab name the user sees and the id the agent uses. */
+/** "“Reference” (reference-to-video)": the tab name the user sees and the id the agent uses. */
 function modeName(kind: Kind): string {
-  return `”${KINDS.find((k) => k.id === kind)?.label ?? kind}” (${kind})`
+  return `“${KINDS.find((k) => k.id === kind)?.label ?? kind}” (${kind})`
 }
 
 function parseMode(value: unknown): Kind {
   const kind = typeof value === 'string' ? MODE_ALIASES[value.trim().toLowerCase()] : undefined
   if (!kind) {
     throw new BridgeError(
-      `Okänt läge ”${String(value)}”. Använd text-to-video, image-to-video (startbild) eller reference-to-video (referensbilder).`
+      `Unknown mode “${String(value)}”. Use text-to-video, image-to-video (start image) or reference-to-video (reference images).`
     )
   }
   return kind
@@ -141,13 +141,13 @@ function snapToModel(params: GenerationParams, model: VideoModel | undefined): G
 /** Notes for the settings a model change adjusted without being asked. */
 function adjustedNotes(before: GenerationParams, after: GenerationParams, explicit: Set<string>): string[] {
   const labels: [keyof GenerationParams, string, string][] = [
-    ['duration', 'duration', 'Längden'],
-    ['resolution', 'resolution', 'Upplösningen'],
-    ['aspectRatio', 'aspect_ratio', 'Formatet']
+    ['duration', 'duration', 'The duration'],
+    ['resolution', 'resolution', 'The resolution'],
+    ['aspectRatio', 'aspect_ratio', 'The aspect ratio']
   ]
   return labels.flatMap(([key, arg, label]) =>
     !explicit.has(arg) && before[key] !== after[key] && after[key] !== undefined
-      ? [`${label} ändrades till ${String(after[key])}, som modellen stöder.`]
+      ? [`${label} changed to ${String(after[key])}, which the model supports.`]
       : []
   )
 }
@@ -225,7 +225,7 @@ export function applySetForm(
   ].some(given)
   if (needsModels && !models.length) {
     throw new BridgeError(
-      `Studio kunde inte hämta modellistan från Venice${modelsError ? ` (${modelsError})` : ''}. Försök igen om en stund.`
+      `Studio couldn't fetch the model list from Venice${modelsError ? ` (${modelsError})` : ''}. Try again in a moment.`
     )
   }
 
@@ -238,10 +238,10 @@ export function applySetForm(
   if (given(modelValue)) {
     const id = typeof modelValue === 'string' ? modelValue.trim() : ''
     const chosen = models.find((m) => m.id === id)
-    if (!chosen) errors.push(`Modellen ”${String(modelValue)}” finns inte. Se list_models för vilka som finns.`)
-    else if (chosen.offline) errors.push(`${chosen.name} är offline just nu – välj en annan modell.`)
+    if (!chosen) errors.push(`The model “${String(modelValue)}” doesn't exist. See list_models for the ones that do.`)
+    else if (chosen.offline) errors.push(`${chosen.name} is offline right now – pick another model.`)
     else if (mode && kindOfModelId(chosen.id) !== mode) {
-      errors.push(`${chosen.name} hör till läget ${modeName(kindOfModelId(chosen.id))}, inte ${modeName(mode)}.`)
+      errors.push(`${chosen.name} belongs to the mode ${modeName(kindOfModelId(chosen.id))}, not ${modeName(mode)}.`)
     } else modelId = chosen.id
   } else {
     const currentKind = kindOfModelId(current.model)
@@ -249,11 +249,11 @@ export function applySetForm(
     const wanted = mode ?? (picture && currentKind !== 'image-to-video' ? 'image-to-video' : undefined)
     if (wanted && wanted !== currentKind) {
       const id = modelForKind([...models], current.model, wanted)
-      if (!id) errors.push(`Det finns ingen tillgänglig modell för läget ${modeName(wanted)} just nu.`)
+      if (!id) errors.push(`There is no model available for the mode ${modeName(wanted)} right now.`)
       else {
         modelId = id
-        const slot = given(startValue) ? 'startbilden' : 'slutbilden'
-        if (!mode) notes.push(`Bytte till läget ${modeName(wanted)} för ${slot}.`)
+        const slot = given(startValue) ? 'the start image' : 'the end image'
+        if (!mode) notes.push(`Switched to the mode ${modeName(wanted)} for ${slot}.`)
       }
     }
   }
@@ -268,29 +268,29 @@ export function applySetForm(
     const audios = current.referenceAudios?.length ?? 0
     if (audios && supportsAudioInput(current.model) && !supportsAudioInput(model ?? modelId)) {
       notes.push(
-        `${modelLabel} tar inte emot ljudreferenser – ljudet (${audios} klipp) ligger kvar i formuläret men skickas inte.`
+        `${modelLabel} doesn't take sound references – the sound (${audios} ${audios === 1 ? 'clip' : 'clips'}) stays in the form but isn't sent.`
       )
     }
   }
 
   const unknownModel = () =>
-    errors.push(`Modellen ${modelLabel} finns inte i Venice modellista längre – välj en annan med model.`)
+    errors.push(`The model ${modelLabel} is no longer in Venice's model list – pick another one with model.`)
 
   if (given(durationValue)) {
     const duration = normalizeDuration(durationValue)
     if (!model) unknownModel()
     else if (!duration || !model.durations.includes(duration)) {
-      errors.push(`Längden ${String(durationValue)} går inte med ${modelLabel}. Välj bland: ${choices(model.durations)}.`)
+      errors.push(`The duration ${String(durationValue)} doesn't work with ${modelLabel}. Choose from: ${choices(model.durations)}.`)
     } else next.duration = duration
   }
 
   if (given(resolutionValue)) {
     const resolution = normalizeResolution(resolutionValue)
     if (!model) unknownModel()
-    else if (!model.resolutions.length) errors.push(`${modelLabel} har ingen valbar upplösning.`)
+    else if (!model.resolutions.length) errors.push(`${modelLabel} has no resolution to choose.`)
     else if (!resolution || !model.resolutions.includes(resolution)) {
       errors.push(
-        `Upplösningen ${String(resolutionValue)} går inte med ${modelLabel}. Välj bland: ${choices(model.resolutions)}.`
+        `The resolution ${String(resolutionValue)} doesn't work with ${modelLabel}. Choose from: ${choices(model.resolutions)}.`
       )
     } else next.resolution = resolution
   }
@@ -298,32 +298,32 @@ export function applySetForm(
   if (given(aspectValue)) {
     const aspect = normalizeAspect(aspectValue)
     if (!model) unknownModel()
-    else if (!model.aspectRatios.length) errors.push(`${modelLabel} har inget valbart format.`)
+    else if (!model.aspectRatios.length) errors.push(`${modelLabel} has no aspect ratio to choose.`)
     else if (!aspect || !model.aspectRatios.includes(aspect)) {
       errors.push(
-        `Formatet ${String(aspectValue)} går inte med ${modelLabel}. Välj bland: ${choices(model.aspectRatios)}.`
+        `The aspect ratio ${String(aspectValue)} doesn't work with ${modelLabel}. Choose from: ${choices(model.aspectRatios)}.`
       )
     } else next.aspectRatio = aspect
   }
 
   if (given(audioValue)) {
-    if (typeof audioValue !== 'boolean') errors.push('audio ska vara true eller false.')
+    if (typeof audioValue !== 'boolean') errors.push('audio must be true or false.')
     else if (!model) unknownModel()
     else if (!model.audio) {
-      if (audioValue) errors.push(`${modelLabel} kan inte generera ljud.`)
-    } else if (!model.audioConfigurable && !audioValue) errors.push(`Ljudet går inte att stänga av för ${modelLabel}.`)
+      if (audioValue) errors.push(`${modelLabel} can't generate audio.`)
+    } else if (!model.audioConfigurable && !audioValue) errors.push(`Audio can't be turned off for ${modelLabel}.`)
     else next.audio = audioValue
   }
 
   if (promptValue !== undefined) {
     if (promptValue === null) next.prompt = ''
-    else if (typeof promptValue !== 'string') errors.push('prompt ska vara text.')
+    else if (typeof promptValue !== 'string') errors.push('prompt must be text.')
     else next.prompt = canonicalizeTokens(promptValue)
   }
 
   if (negativeValue !== undefined) {
     if (negativeValue === null) next.negativePrompt = undefined
-    else if (typeof negativeValue !== 'string') errors.push('negative_prompt ska vara text.')
+    else if (typeof negativeValue !== 'string') errors.push('negative_prompt must be text.')
     else next.negativePrompt = negativeValue.trim() ? negativeValue : undefined
   }
 
@@ -332,9 +332,9 @@ export function applySetForm(
     else {
       const path = typeof startValue === 'string' ? startValue : asArgs(startValue).path
       const kind = kindOfModelId(next.model)
-      if (typeof path !== 'string' || !path.startsWith('/')) errors.push('Startbilden kunde inte hittas i biblioteket.')
+      if (typeof path !== 'string' || !path.startsWith('/')) errors.push("The start image couldn't be found in the library.")
       else if (kind !== 'image-to-video') {
-        errors.push(`En startbild används bara i läget ${modeName('image-to-video')}, inte ${modeName(kind)}.`)
+        errors.push(`A start image is only used in the mode ${modeName('image-to-video')}, not ${modeName(kind)}.`)
       } else next.startImage = path
     }
   }
@@ -345,26 +345,26 @@ export function applySetForm(
     else {
       const path = typeof endValue === 'string' ? endValue : asArgs(endValue).path
       const kind = kindOfModelId(next.model)
-      if (typeof path !== 'string' || !path.startsWith('/')) errors.push('Slutbilden kunde inte hittas i biblioteket.')
+      if (typeof path !== 'string' || !path.startsWith('/')) errors.push("The end image couldn't be found in the library.")
       else if (kind !== 'image-to-video') {
-        errors.push(`En slutbild används bara i läget ${modeName('image-to-video')}, inte ${modeName(kind)}.`)
+        errors.push(`An end image is only used in the mode ${modeName('image-to-video')}, not ${modeName(kind)}.`)
       } else if (!supportsEndImage(next.model)) {
-        errors.push(`${modelLabel} tar ingen slutbild. Välj en bild-till-video-modell som gör det.`)
+        errors.push(`${modelLabel} takes no end image. Pick an image-to-video model that does.`)
       } else next.endImage = path
     }
   }
 
-  // The description switches ("Ta med beskrivningar" and each asset's own), stored as the form's own box stores
+  // The description switches ("Include descriptions" and each asset's own), stored as the form's own box stores
   // them: left out while they have their default, so the form compares equal to one never switched.
   if (includeValue !== undefined) {
     if (includeValue === null || includeValue === true) delete next.includeDescriptions
     else if (includeValue === false) next.includeDescriptions = false
-    else errors.push('include_descriptions ska vara true eller false.')
+    else errors.push('include_descriptions must be true or false.')
   }
   if (excludedValue !== undefined) {
     if (excludedValue === null) delete next.excludedDescriptionAssetIds
     else if (!Array.isArray(excludedValue) || excludedValue.some((id) => typeof id !== 'string' || !id.trim())) {
-      errors.push('excluded_description_asset_ids ska vara en lista med tillgångs-id:n.')
+      errors.push('excluded_description_asset_ids must be a list of asset ids.')
     } else {
       const ids = sanitizeDescriptionFlags({ excludedDescriptionAssetIds: excludedValue.map((id) => id.trim()) })
       if (ids.excludedDescriptionAssetIds) next.excludedDescriptionAssetIds = ids.excludedDescriptionAssetIds
@@ -372,12 +372,12 @@ export function applySetForm(
     }
   }
 
-  // Who wears each outfit ("bärs av"), as the chips store it: main checked the outfits and characters and sends the
+  // Who wears each outfit ("worn by"), as the chips store it: main checked the outfits and characters and sends the
   // whole set of choices (null: none left, every outfit worn by its default).
   if (wearersValue !== undefined) {
     if (wearersValue === null) delete next.outfitWearers
     else if (typeof wearersValue !== 'object' || Array.isArray(wearersValue)) {
-      errors.push('outfit_wearers kunde inte läsas.')
+      errors.push("outfit_wearers couldn't be read.")
     } else {
       const wearers = sanitizeOutfitWearers(wearersValue)
       if (wearers) next.outfitWearers = wearers
@@ -387,10 +387,10 @@ export function applySetForm(
 
   const limit = model?.promptCharacterLimit
   if (limit && next.prompt.length > limit && (promptValue !== undefined || modelChanged)) {
-    errors.push(`Prompten är ${next.prompt.length} tecken – ${modelLabel} tar högst ${limit}. Korta den.`)
+    errors.push(`The prompt is ${next.prompt.length} characters – ${modelLabel} takes at most ${limit}. Shorten it.`)
   }
 
-  if (errors.length) throw new BridgeError(`Inget ändrades. ${errors.join(' ')}`)
+  if (errors.length) throw new BridgeError(`Nothing was changed. ${errors.join(' ')}`)
   return { params: next, notes }
 }
 
@@ -403,7 +403,7 @@ function seconds(value: unknown): number | undefined {
 /** set_references' `audios`: reference audio clips (main resolved the agent's audio ids and windows). */
 function parseAudios(value: unknown): ReferenceAudio[] | undefined {
   if (value === undefined || value === null) return undefined
-  const unreadable = 'Ljudreferenserna kunde inte läsas (audios ska vara en lista med ljudfiler och deras utdrag).'
+  const unreadable = "The sound references couldn't be read (audios must be a list of audio files and their excerpts)."
   if (!Array.isArray(value)) throw new BridgeError(unreadable)
   return value.map((item): ReferenceAudio => {
     const a = typeof item === 'string' ? { path: item } : asArgs(item)
@@ -437,10 +437,10 @@ export function applySetReferences(
   const args = asArgs(rawArgs)
   const paths = args.paths
   if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string' || !p.startsWith('/'))) {
-    throw new BridgeError('Referensbilderna kunde inte läsas (paths ska vara en lista med bildsökvägar).')
+    throw new BridgeError("The reference images couldn't be read (paths must be a list of image paths).")
   }
   const mode = args.mode ?? 'replace'
-  if (mode !== 'replace' && mode !== 'append') throw new BridgeError('mode ska vara ”replace” eller ”append”.')
+  if (mode !== 'replace' && mode !== 'append') throw new BridgeError('mode must be “replace” or “append”.')
   const wantedAudios = parseAudios(field(args, 'audios'))
 
   const notes: string[] = []
@@ -449,7 +449,7 @@ export function applySetReferences(
     const id = modelForKind([...models], current.model, 'reference-to-video') ?? DEFAULT_MODEL['reference-to-video']
     const model = models.find((m) => m.id === id)
     next = snapToModel({ ...next, model: id }, model)
-    notes.push(`Bytte till läget ${modeName('reference-to-video')} med ${model?.name ?? id}.`)
+    notes.push(`Switched to the mode ${modeName('reference-to-video')} with ${model?.name ?? id}.`)
   }
 
   const max = maxReferenceImages(next.model)
@@ -465,8 +465,8 @@ export function applySetReferences(
     const model = models.find((m) => m.id === next.model)
     if (!supportsAudioInput(model ?? next.model)) {
       notes.push(
-        `${model?.name ?? next.model} tar inte emot ljudreferenser, så ljudet lades inte till. Välj en ` +
-          'referensmodell som tar emot ljud för att skicka med röster.'
+        `${model?.name ?? next.model} doesn't take sound references, so the sound wasn't added. Pick a ` +
+          'reference model that takes audio to send voices.'
       )
     } else {
       const change = addAudios(base, wantedAudios, audioSourcesByPath(assets), maxReferenceAudios(next.model))
@@ -475,7 +475,7 @@ export function applySetReferences(
     }
   }
   next.referenceAudios = audios.length ? audios : undefined
-  // "bärs av" choices for outfits (or characters) no longer among the pictures are forgotten, as the form does it.
+  // "worn by" choices for outfits (or characters) no longer among the pictures are forgotten, as the form does it.
   const owners = new Map(assets.flatMap((a) => a.images.map((img) => [pathKey(img.path), a.id] as const)))
   const present = new Set(refs.flatMap((path) => owners.get(pathKey(path)) ?? []))
   const wearers = outfitWearersAmong(next.outfitWearers, present)
@@ -483,10 +483,10 @@ export function applySetReferences(
   else delete next.outfitWearers
 
   if (mode === 'replace' && findImageTokens(next.prompt).length && !sameList(before, refs)) {
-    notes.push('Prompten ändrades inte – se till att varje @ImageN i den pekar på rätt bild i den nya listan.')
+    notes.push("The prompt wasn't changed – make sure every @ImageN in it points at the right image in the new list.")
   }
   if (mode === 'replace' && findAudioTokens(next.prompt).length && !sameAudios(audiosBefore, audios)) {
-    notes.push('Prompten ändrades inte – se till att varje @AudioN i den pekar på rätt ljud i den nya listan.')
+    notes.push("The prompt wasn't changed – make sure every @AudioN in it points at the right sound in the new list.")
   }
   return { params: next, notes }
 }
@@ -505,7 +505,7 @@ export interface ReorderChange extends FormChange {
 
 const pathKey = (path: string): string => path.normalize('NFC')
 
-/** "Image3", "image 3", "@Bild3", "@Ljud2": a reference written loosely, as the token it means ("@Image3"). */
+/** "Image3", "image 3", "@Bild3", "@Ljud2" (Swedish spellings too): a reference written loosely, as the token it means ("@Image3"). */
 function looseToken(entry: string): string | undefined {
   const bare = /^[@＠]?\s*(image|audio)\s*0*([1-9][0-9]*)$/i.exec(entry)
   if (bare) return `@${bare[1].toLowerCase() === 'audio' ? 'Audio' : 'Image'}${bare[2]}`
@@ -530,7 +530,7 @@ function orderEntries(
   const word = kind === 'image' ? 'Image' : 'Audio'
   const list = kind === 'image' ? 'images' : 'audios'
   if (!Array.isArray(value)) {
-    throw new BridgeError(`${list} ska vara en lista med referenser (@${word}1 …) i den nya ordningen.`)
+    throw new BridgeError(`${list} must be a list of references (@${word}1 …) in the new order.`)
   }
   const keys = paths.map(pathKey)
   /** The form's own spelling of a path, so the shared reorder finds it whatever its Unicode normalization. */
@@ -538,15 +538,15 @@ function orderEntries(
     const i = keys.indexOf(pathKey(path))
     return i === -1 ? undefined : paths[i]
   }
-  const where = kind === 'image' ? 'referensbilderna' : 'ljudreferenserna'
+  const where = kind === 'image' ? 'the reference images' : 'the sound references'
   return value.flatMap((item): string[] => {
     if (typeof item === 'number') {
-      if (!Number.isInteger(item) || item < 1) throw new BridgeError(`${item} är inget giltigt @${word}-nummer.`)
+      if (!Number.isInteger(item) || item < 1) throw new BridgeError(`${item} isn't a valid @${word} number.`)
       return [`@${word}${item}`]
     }
     const raw = typeof item === 'string' ? item : asArgs(item).path
     if (typeof raw !== 'string' || !raw.trim()) {
-      throw new BridgeError(`${list} innehåller en tom eller oläslig post.`)
+      throw new BridgeError(`${list} contains an empty or unreadable entry.`)
     }
     const entry = raw.trim()
     if (entry.startsWith('/')) return [formPath(entry) ?? entry]
@@ -555,7 +555,7 @@ function orderEntries(
         const photo = asset.images.findIndex((img) => img.id === entry)
         if (photo !== -1) {
           const path = formPath(asset.images[photo].path)
-          if (!path) throw new BridgeError(`Bild ${photo + 1} av ${asset.name} är inte en av ${where} i formuläret.`)
+          if (!path) throw new BridgeError(`Image ${photo + 1} of ${asset.name} isn't one of ${where} in the form.`)
           return [path]
         }
       } else {
@@ -563,7 +563,7 @@ function orderEntries(
         const clip = clips.findIndex((c) => c.id === entry)
         if (clip !== -1) {
           const path = formPath(clips[clip].path)
-          if (!path) throw new BridgeError(`Ljudklipp ${clip + 1} av ${asset.name} är inte en av ${where} i formuläret.`)
+          if (!path) throw new BridgeError(`Sound clip ${clip + 1} of ${asset.name} isn't one of ${where} in the form.`)
           return [path]
         }
       }
@@ -575,7 +575,7 @@ function orderEntries(
       )
       const found = paths.filter((p) => own.includes(pathKey(p)))
       if (!found.length) {
-        throw new BridgeError(`${asset.name} har ${kind === 'image' ? 'inga bilder' : 'inget ljud'} bland ${where}.`)
+        throw new BridgeError(`${asset.name} has ${kind === 'image' ? 'no images' : 'no sound'} among ${where}.`)
       }
       return found
     }
@@ -601,12 +601,12 @@ export function applyReorderReferences(
   const imageEntries = orderEntries(field(args, 'images') ?? field(args, 'paths'), 'image', images, assets)
   const audioEntries = orderEntries(field(args, 'audios'), 'audio', audios.map((a) => a.path), assets)
   if (!imageEntries && !audioEntries) {
-    throw new BridgeError('Ange images och/eller audios: referenserna i den ordning de ska ha.')
+    throw new BridgeError('Give images and/or audios: the references in the order they should have.')
   }
   if (kindOfModelId(current.model) !== 'reference-to-video') {
     throw new BridgeError(
-      `Formuläret är i läget ${modeName(kindOfModelId(current.model))} – referenser används bara i läget ` +
-        `${modeName('reference-to-video')}. Byt läge med set_form först.`
+      `The form is in the mode ${modeName(kindOfModelId(current.model))} – references are only used in the mode ` +
+        `${modeName('reference-to-video')}. Switch modes with set_form first.`
     )
   }
 
@@ -615,7 +615,7 @@ export function applyReorderReferences(
     if (imageEntries?.length) next = reorderReferences(next, 'image', imageEntries)
     if (audioEntries?.length) next = reorderReferences(next, 'audio', audioEntries)
   } catch (e) {
-    throw new BridgeError(`Inget ändrades. ${e instanceof Error ? e.message : String(e)}`)
+    throw new BridgeError(`Nothing was changed. ${e instanceof Error ? e.message : String(e)}`)
   }
 
   const moved = {
@@ -624,22 +624,22 @@ export function applyReorderReferences(
   }
   const notes: string[] = []
   if (!moved.images.length && !moved.audios.length) {
-    notes.push('Referenserna låg redan i den ordningen – inget ändrades.')
+    notes.push('The references were already in that order – nothing was changed.')
     return { params: current, notes, moved }
   }
   const renumbered = (list: readonly MovedReference[]) => list.map((m) => `${m.from} → ${m.to}`).join(', ')
-  if (moved.images.length) notes.push(`Bilderna har nya nummer: ${renumbered(moved.images)}.`)
-  if (moved.audios.length) notes.push(`Ljuden har nya nummer: ${renumbered(moved.audios)}.`)
+  if (moved.images.length) notes.push(`The images have new numbers: ${renumbered(moved.images)}.`)
+  if (moved.audios.length) notes.push(`The sounds have new numbers: ${renumbered(moved.audios)}.`)
   const promptFollowed = next.prompt !== current.prompt
   const negativeFollowed = (next.negativePrompt ?? '') !== (current.negativePrompt ?? '')
   if (promptFollowed || negativeFollowed) {
     const which =
       promptFollowed && negativeFollowed
-        ? 'Prompten och den negativa prompten'
+        ? 'The prompt and the negative prompt'
         : promptFollowed
-          ? 'Prompten'
-          : 'Den negativa prompten'
-    notes.push(`${which} följde med: varje @-hänvisning pekar på samma bild eller ljud som förut.`)
+          ? 'The prompt'
+          : 'The negative prompt'
+    notes.push(`${which} followed along: every @ reference points at the same image or sound as before.`)
   }
   notes.push(...capNotes(images, next.referenceImages ?? [], maxReferenceImages(current.model), assets))
   return { params: next, notes, moved }
@@ -656,8 +656,8 @@ export function applySwapReference(current: GenerationParams, rawArgs: unknown, 
   const args = asArgs(rawArgs)
   if (kindOfModelId(current.model) !== 'reference-to-video') {
     throw new BridgeError(
-      `Formuläret är i läget ${modeName(kindOfModelId(current.model))} – referenser används bara i läget ` +
-        `${modeName('reference-to-video')}. Byt läge med set_form först.`
+      `The form is in the mode ${modeName(kindOfModelId(current.model))} – references are only used in the mode ` +
+        `${modeName('reference-to-video')}. Switch modes with set_form first.`
     )
   }
   const fromId = field(args, 'from_asset_id')
@@ -666,14 +666,14 @@ export function applySwapReference(current: GenerationParams, rawArgs: unknown, 
     if (given(fromId) || given(toId)) {
       const from = assets.find((a) => a.id === fromId)
       const to = assets.find((a) => a.id === toId)
-      if (!from || !to) throw new BridgeError('Inget ändrades: tillgången finns inte (längre).')
+      if (!from || !to) throw new BridgeError("Nothing was changed: the asset doesn't exist (any more).")
       return swapReferenceAsset(current, from, to, assets)
     }
     const image = field(args, 'image')
     const path = field(args, 'path')
     const hint = field(args, 'index')
     if (typeof image !== 'string' || typeof path !== 'string' || !image.startsWith('/') || !path.startsWith('/')) {
-      throw new BridgeError('Bytet kunde inte läsas (image och path ska vara bildsökvägar).')
+      throw new BridgeError("The swap couldn't be read (image and path must be image paths).")
     }
     const images = current.referenceImages ?? []
     const key = pathKey(image)
@@ -683,13 +683,13 @@ export function applySwapReference(current: GenerationParams, rawArgs: unknown, 
         : images.flatMap((p, i) => (pathKey(p) === key ? [i] : []))
     if (at.length !== 1) {
       throw new BridgeError(
-        'Inget ändrades: bilden du ville byta finns inte längre på sin plats bland referensbilderna (formuläret ändrades kanske samtidigt). Läs formuläret igen med get_workspace.'
+        'Nothing was changed: the image you wanted to swap is no longer in its place among the reference images (the form may have changed meanwhile). Read the form again with get_workspace.'
       )
     }
     return swapReferenceImage(current, at[0], path, assets)
   } catch (e) {
     if (e instanceof BridgeError) throw e
-    throw new BridgeError(`Inget ändrades. ${e instanceof Error ? e.message : String(e)}`)
+    throw new BridgeError(`Nothing was changed. ${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
@@ -699,15 +699,15 @@ function capNotes(before: readonly string[], after: readonly string[], max: numb
   const photos = photoIndex(assets)
   const name = (path: string): string => {
     const photo = photos.get(path)
-    return photo?.assetName ? `${photo.assetName}, bild ${photo.photoNumber}` : (path.split('/').pop() ?? path)
+    return photo?.assetName ? `${photo.assetName}, image ${photo.photoNumber}` : (path.split('/').pop() ?? path)
   }
   const out: string[] = []
   after.forEach((path, i) => {
     const was = before.indexOf(path)
     if (i >= max && was < max) {
-      out.push(`Bilden på plats ${i + 1} (${name(path)}) skickas inte längre – modellen tar max ${max} bilder.`)
+      out.push(`The image in place ${i + 1} (${name(path)}) is no longer sent – the model takes at most ${max} images.`)
     } else if (i < max && was >= max) {
-      out.push(`Bilden som nu är @Image${i + 1} (${name(path)}) skickas nu – den låg förut utanför modellens gräns.`)
+      out.push(`The image that is now @Image${i + 1} (${name(path)}) is sent now – it was outside the model's limit before.`)
     }
   })
   return out
@@ -787,7 +787,7 @@ export interface BridgeContext {
 async function modelList(ms: number): Promise<{ models: VideoModel[]; error?: string }> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('Venice svarar inte med modellistan just nu.')), ms)
+    timer = setTimeout(() => reject(new Error("Venice isn't answering with the model list right now.")), ms)
   })
   try {
     return { models: await Promise.race([loadModels(), timeout]) }
@@ -810,7 +810,7 @@ async function assetsFollowingForm(): Promise<Asset[]> {
   return assets
 }
 
-/** Where the user is: the view, and the sequence and clip, the storyboard, the edit or the Mediabank tab open in it. */
+/** Where the user is: the view, and the sequence and clip, the storyboard, the edit or the Media tab open in it. */
 export interface Where {
   view: View
   sequenceId?: string
@@ -854,7 +854,7 @@ function optionalId(value: unknown): string | undefined {
 const ASSET_VIEWS = new Set<View>(Object.values(ASSET_VIEW))
 
 /**
- * open_in_studio: brings a place to the front – the Generate view (or a clip in its drawer), the Mediabank (on a tab,
+ * open_in_studio: brings a place to the front – the Generate view (or a clip in its drawer), Media (on a tab,
  * or with a clip, picture or film open), a sequence (and clip), a storyboard (or one of its transitions), an edit (or
  * one of its versions), an asset in its library view or the prompt library. Every intent is marked as the agent's
  * (`source: 'agent'`): opening a place for an agent never counts as the user having looked at it.
@@ -881,20 +881,20 @@ export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<A
   if (view === 'editor') return openEditorView(args, ctx)
   if (args.view !== 'sequences' && args.view !== 'sequence') {
     throw new BridgeError(
-      'view ska vara ”generate”, ”media”, ”sequences”, ”storyboards”, ”editor”, ”prompts” eller en biblioteksvy (”characters”, ”environments”, ”products”, ”outfits”, ”poses”).'
+      'view must be “generate”, “media”, “sequences”, “storyboards”, “editor”, “prompts” or a library view (“characters”, “environments”, “products”, “outfits”, “poses”).'
     )
   }
   const segmentId = optionalId(field(args, 'segment_id'))
   const sequenceId = optionalId(field(args, 'sequence_id')) ?? (segmentId && (await findSequenceOfSegment(segmentId)))
-  if (segmentId && !sequenceId) throw new BridgeError('Klippet finns inte (längre).')
+  if (segmentId && !sequenceId) throw new BridgeError("The clip doesn't exist (any more).")
   if (!sequenceId) {
     ctx.show('sequences')
     return { view: 'sequences', ...openInSequenceEditor() }
   }
   const sequence = await window.studio.getSequence(sequenceId).catch(() => undefined)
-  if (!sequence) throw new BridgeError('Sekvensen finns inte (längre).')
+  if (!sequence) throw new BridgeError("The sequence doesn't exist (any more).")
   if (segmentId && !sequence.segments.some((s) => s.id === segmentId)) {
-    throw new BridgeError(`Klippet finns inte i sekvensen ”${sequence.name}”.`)
+    throw new BridgeError(`The clip isn't in the sequence “${sequence.name}”.`)
   }
   ctx.show('sequences', { type: 'open-sequence', sequenceId, segmentId, source: 'agent' })
   // Answer with the clip that is actually on screen once the sequence editor has loaded it.
@@ -908,11 +908,11 @@ export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<A
     sequenceId,
     sequenceName: sequence.name,
     segmentId: onScreen.sequenceId === sequenceId ? onScreen.segmentId : undefined,
-    ...(shown || !segmentId ? {} : { note: 'Sekvensen öppnades, men ett annat klipp än det begärda visas.' })
+    ...(shown || !segmentId ? {} : { note: 'The sequence opened, but a different clip than the one asked for is shown.' })
   }
 }
 
-/** The Mediabank tab each kind of item opens in. */
+/** The Media tab each kind of item opens in. */
 const MEDIA_ITEM_TABS = [
   ['generation_id', 'videos'],
   ['still_id', 'pictures'],
@@ -920,21 +920,21 @@ const MEDIA_ITEM_TABS = [
 ] as const satisfies readonly (readonly [string, MediaTab])[]
 
 /**
- * Shows the Mediabank on a tab – the one an item is in, the one asked for, or the one it last showed – with a clip in
- * Videor's drawer, a picture in Bilder or a film in Filmer (main has checked that it exists). The tab is set before
+ * Shows Media on a tab – the one an item is in, the one asked for, or the one it last showed – with a clip in
+ * the Videos drawer, a picture in Images or a film in Films (main has checked that it exists). The tab is set before
  * the view opens, so it opens on it.
  */
 function openMediaView(args: Args, ctx: BridgeContext): AgentOpenResult {
   const asked = field(args, 'tab')
-  if (given(asked) && !isMediaTab(asked)) throw new BridgeError('tab ska vara ”videos”, ”pictures” eller ”films”.')
+  if (given(asked) && !isMediaTab(asked)) throw new BridgeError('tab must be “videos”, “pictures” or “films”.')
   const items = MEDIA_ITEM_TABS.flatMap(([key, tab]) => {
     const id = optionalId(field(args, key))
     return id ? [{ key, tab, id }] : []
   })
-  if (items.length > 1) throw new BridgeError('Ange bara ett av generation_id, still_id och export_id.')
+  if (items.length > 1) throw new BridgeError('Give only one of generation_id, still_id and export_id.')
   const item = items[0]
   if (item && isMediaTab(asked) && asked !== item.tab) {
-    throw new BridgeError(`${item.key} öppnas i fliken ”${item.tab}”, inte ”${asked}”.`)
+    throw new BridgeError(`${item.key} opens in the tab “${item.tab}”, not “${asked}”.`)
   }
   const tab = item?.tab ?? (isMediaTab(asked) ? asked : getMediaTab())
   const ids = {
@@ -956,7 +956,7 @@ function selectedAsset(kind: AssetKind): string | undefined {
   }
 }
 
-/** Shows an asset in its library view (Karaktärer, Miljöer, Produkter, Kläder or Poser). */
+/** Shows an asset in its library view (Characters, Environments, Products, Outfits or Poses). */
 async function openAssetView(view: View, args: Args, ctx: BridgeContext): Promise<AgentOpenResult> {
   const assetId = optionalId(field(args, 'asset_id'))
   if (!assetId) {
@@ -964,7 +964,7 @@ async function openAssetView(view: View, args: Args, ctx: BridgeContext): Promis
     return { view: view as AgentOpenResult['view'] }
   }
   const asset = (await window.studio.listAssets()).find((a) => a.id === assetId)
-  if (!asset) throw new BridgeError('Tillgången finns inte (längre).')
+  if (!asset) throw new BridgeError("The asset doesn't exist (any more).")
   // An asset is opened in its own kind's view, whichever view was named.
   const target = ASSET_VIEW[asset.kind]
   ctx.show(target, { type: 'open-asset', assetId, source: 'agent' })
@@ -973,7 +973,7 @@ async function openAssetView(view: View, args: Args, ctx: BridgeContext): Promis
     view: target as AgentOpenResult['view'],
     assetId,
     assetName: asset.name,
-    ...(shown ? {} : { note: 'Vyn visas, men tillgången valdes inte i tid – be användaren välja den i listan.' })
+    ...(shown ? {} : { note: "The view is shown, but the asset wasn't selected in time – ask the user to pick it in the list." })
   }
 }
 
@@ -987,9 +987,9 @@ async function openStoryboardView(args: Args, ctx: BridgeContext): Promise<Agent
     return shown ? { view: 'storyboards', storyboardId: shown } : { view: 'storyboards' }
   }
   const storyboard = await window.studio.getStoryboard(storyboardId).catch(() => undefined)
-  if (!storyboard) throw new BridgeError('Storyboarden finns inte (längre).')
+  if (!storyboard) throw new BridgeError("The storyboard doesn't exist (any more).")
   if (transitionId && !storyboard.transitions.some((t) => t.id === transitionId)) {
-    throw new BridgeError(`Övergången finns inte i storyboarden ”${storyboard.name}” (längre).`)
+    throw new BridgeError(`The transition isn't in the storyboard “${storyboard.name}” (any more).`)
   }
   ctx.show('storyboards', {
     type: 'open-storyboard',
@@ -1004,11 +1004,11 @@ async function openStoryboardView(args: Args, ctx: BridgeContext): Promise<Agent
     storyboardId,
     storyboardName: storyboard.name,
     ...(transitionId && shown ? { transitionId } : {}),
-    ...(shown ? {} : { note: 'Storyboards visas, men storyboarden öppnades inte i tid – be användaren välja den i listan.' })
+    ...(shown ? {} : { note: "Storyboards is shown, but the storyboard didn't open in time – ask the user to pick it in the list." })
   }
 }
 
-/** Shows Redigera, with the edit asked for open (or its list of edits), on a version if named. */
+/** Shows the Editor, with the edit asked for open (or its list of edits), on a version if named. */
 async function openEditorView(args: Args, ctx: BridgeContext): Promise<AgentOpenResult> {
   const editId = optionalId(field(args, 'edit_id'))
   const versionId = optionalId(field(args, 'version_id'))
@@ -1018,9 +1018,9 @@ async function openEditorView(args: Args, ctx: BridgeContext): Promise<AgentOpen
     return shown ? { view: 'editor', editId: shown } : { view: 'editor' }
   }
   const edit = await window.studio.getEdit(editId).catch(() => undefined)
-  if (!edit) throw new BridgeError('Redigeringen finns inte (längre).')
+  if (!edit) throw new BridgeError("The edit doesn't exist (any more).")
   if (versionId && !edit.versions.some((v) => v.id === versionId)) {
-    throw new BridgeError(`Versionen hör inte till redigeringen ”${edit.name}”.`)
+    throw new BridgeError(`The version doesn't belong to the edit “${edit.name}”.`)
   }
   ctx.show('editor', { type: 'open-editor', editId, ...(versionId ? { versionId } : {}), source: 'agent' })
   // The view reports the edit (and the version in its player) as soon as it has taken the intent.
@@ -1038,8 +1038,8 @@ async function openEditorView(args: Args, ctx: BridgeContext): Promise<AgentOpen
       ? {}
       : {
           note: versionId
-            ? 'Redigeringen visas, men versionen visades inte i tid – be användaren välja den.'
-            : 'Redigera visas, men redigeringen öppnades inte i tid – be användaren välja den i listan.'
+            ? "The edit is shown, but the version wasn't shown in time – ask the user to pick it."
+            : "The Editor is shown, but the edit didn't open in time – ask the user to pick it in the list."
         })
   }
 }
@@ -1059,8 +1059,8 @@ function expired(cmd: AgentCommand): boolean {
   return cmd.deadline !== undefined && Date.now() > cmd.deadline
 }
 
-const TOO_LATE = 'Studio hann inte svara i tid, så inget ändrades. Försök igen.'
-const SWITCHING_LIBRARY = 'Studios bibliotek är inte öppet just nu – försök igen om en stund.'
+const TOO_LATE = "Studio didn't answer in time, so nothing was changed. Try again."
+const SWITCHING_LIBRARY = "Studio's library isn't open right now – try again in a moment."
 
 async function run(cmd: AgentCommand, ctx: BridgeContext): Promise<unknown> {
   // Queued behind slow commands until main stopped waiting for it.
@@ -1073,7 +1073,7 @@ async function run(cmd: AgentCommand, ctx: BridgeContext): Promise<unknown> {
   const command: string = cmd.command
   if (command === 'open') return applyOpen(cmd.args, ctx)
   if (!['get_form', 'set_form', 'set_references', 'reorder_references', 'swap_reference'].includes(command)) {
-    throw new BridgeError(`Studio känner inte igen kommandot ”${command}”.`)
+    throw new BridgeError(`Studio doesn't recognise the command “${command}”.`)
   }
 
   // Loading the models also registers their modes, which decide the mode of ids that don't name it. Reading

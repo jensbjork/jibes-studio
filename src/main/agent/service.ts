@@ -36,7 +36,7 @@ export interface AgentServiceOptions {
   /** Overrides the hosts to listen on (tests); normally 127.0.0.1 plus the Tailscale addresses. */
   hosts?: () => string[]
   /**
-   * Work that Pågår och klart shows started, moved on or ended without any other broadcast: an upload coming in, an
+   * Work that Activity shows started, moved on or ended without any other broadcast: an upload coming in, an
    * approved request being carried out ('progress': only an upload's bytes moved).
    */
   workChanged?: (kind: 'structure' | 'progress') => void
@@ -46,11 +46,11 @@ function listenError(port: number, failure: ListenResult['failures'][number] | u
   if (!failure) return undefined
   const { host, error } = failure
   if (host !== LOOPBACK) {
-    return `Studio kunde inte lyssna på Tailscale-adressen ${host} (${error.code ?? error.message}). Agenter på andra datorer når inte Studio just nu.`
+    return `Studio couldn't listen on the Tailscale address ${host} (${error.code ?? error.message}). Agents on other computers can't reach Studio right now.`
   }
-  if (error.code === 'EADDRINUSE') return `Port ${port} används redan av ett annat program. Välj en annan port.`
-  if (error.code === 'EACCES') return `Studio fick inte öppna port ${port}. Välj en annan port.`
-  return `Agentanslutningen kunde inte startas: ${error.message}`
+  if (error.code === 'EADDRINUSE') return `Port ${port} is already used by another program. Choose another port.`
+  if (error.code === 'EACCES') return `Studio wasn't allowed to open port ${port}. Choose another port.`
+  return `The agent connection couldn't be started: ${error.message}`
 }
 
 export class AgentService {
@@ -73,7 +73,7 @@ export class AgentService {
 
   constructor(private readonly opts: AgentServiceOptions) {
     this.activity = new ActivityLog((entry) => opts.broadcast('agent:activity', entry))
-    // An approved request being carried out shows in Pågår och klart, which hears of it through workChanged.
+    // An approved request being carried out shows in Activity, which hears of it through workChanged.
     this.approvals = new ApprovalStore(
       (request, created) => this.onApproval(request, created),
       () => opts.workChanged?.('structure')
@@ -84,14 +84,14 @@ export class AgentService {
       userAgent: `Studio/${app.getVersion()}`,
       // A fetch or a PUT ends after its tool call answered: the log says how, naming the host (never the URL).
       onSettled: (entry) => {
-        const what = entry.kind === 'image' ? 'en bild' : entry.kind === 'audio' ? 'ett ljud' : 'en video'
-        const name = `”${entry.fileName}”`
+        const what = entry.kind === 'image' ? 'an image' : entry.kind === 'audio' ? 'a sound' : 'a video'
+        const name = `“${entry.fileName}”`
         const summary =
           entry.status === 'ready'
             ? entry.host
-              ? `hämtade ${what} från ${entry.host} (${name})`
-              : `laddade upp ${name}`
-            : `${entry.host ? `kunde inte hämta ${name} från ${entry.host}` : `kunde inte ta emot ${name}`} – ${entry.error ?? 'okänt fel'}`
+              ? `fetched ${what} from ${entry.host} (${name})`
+              : `uploaded ${name}`
+            : `${entry.host ? `couldn't fetch ${name} from ${entry.host}` : `couldn't receive ${name}`} – ${entry.error ?? 'unknown error'}`
         this.activity.record({ client: entry.client, tool: 'begin_upload', summary, ok: entry.status === 'ready' })
       }
     })
@@ -139,7 +139,7 @@ export class AgentService {
     setAgentEnabledSetting(enabled)
     await this.serialized(async () => {
       if (!enabled) {
-        await this.stop('Agentanslutningen stängdes av.')
+        await this.stop('The agent connection was turned off.')
         this.error = undefined
       } else if (!this.server) {
         this.error = undefined
@@ -163,7 +163,7 @@ export class AgentService {
   }
 
   /**
-   * "Sök igen" / "Försök igen" in Settings: looks for Tailscale again, or starts a server that couldn't start.
+   * "Search again" / "Try again" in Settings: looks for Tailscale again, or starts a server that couldn't start.
    * Unlike switching the connection off and on, pending requests stay (as when the port changes).
    */
   async restart(): Promise<AgentStatus> {
@@ -188,8 +188,8 @@ export class AgentService {
    */
   async regenerateToken(): Promise<string> {
     this.token = regenerateAgentToken()
-    this.approvals.expireAll('Token byttes, så förfrågan gäller inte längre.')
-    this.uploads.expireAll('token byttes')
+    this.approvals.expireAll('The token was changed, so the request no longer applies.')
+    this.uploads.expireAll('the token was changed')
     await this.server?.closeSessions()
     this.pushStatus()
     return this.token
@@ -197,9 +197,9 @@ export class AgentService {
 
   /** A library was opened (at start or after a switch): requests made for the previous one no longer apply. */
   libraryOpened(): void {
-    this.approvals.expireAll('Biblioteket byttes, så förfrågan gäller inte längre.')
+    this.approvals.expireAll('The library was switched, so the request no longer applies.')
     // Their files were in the old library's scratch, which opening clears anyway.
-    this.uploads.expireAll('biblioteket byttes')
+    this.uploads.expireAll('the library was switched')
   }
 
   /**
@@ -207,7 +207,7 @@ export class AgentService {
    * before the folder goes (a PUT or a fetch writing into a folder being moved would leave a half file behind).
    */
   libraryClosing(): void {
-    this.uploads.expireAll('biblioteket byttes eller flyttades')
+    this.uploads.expireAll('the library was switched or moved')
   }
 
   /** On quit. */
@@ -334,7 +334,7 @@ export class AgentService {
     })
     // Sent by the client once it has its answer to initialize; its name is known from then on.
     mcp.server.oninitialized = () => {
-      this.activity.record({ client: session.name, tool: 'connect', summary: 'anslöt till Studio', ok: true })
+      this.activity.record({ client: session.name, tool: 'connect', summary: 'connected to Studio', ok: true })
       this.pushStatus()
     }
     return mcp

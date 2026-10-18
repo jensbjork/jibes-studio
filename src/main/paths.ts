@@ -24,7 +24,7 @@ export const FOLDERS = {
   storyboards: 'Storyboards',
   /** The user's own imported films, by import day (Egna klipp/<YYYY-MM-DD>/). */
   ownClips: 'Egna klipp',
-  /** Redigera: one folder per edit, with its versions, AI takes (Tagningar/), audio (Ljud/) and inputs (Underlag/). */
+  /** The Editor: one folder per edit, with its versions, AI takes (Tagningar/), audio (Ljud/) and inputs (Underlag/). */
   edits: 'Redigeringar',
   appData: '.studio'
 } as const
@@ -78,7 +78,7 @@ export const TRANSITIONS_FOLDER = 'Övergångar'
 /** Inside a storyboard folder: its stills (board images generated, uploaded or saved from takes). */
 export const BOARD_IMAGES_FOLDER = 'Bilder'
 
-/** Inside an edit folder (Redigeringar/<namn>/): the edit's subfolders. */
+/** Inside an edit folder (Redigeringar/<name>/): the edit's subfolders. */
 export const EDIT_FOLDERS = {
   /** AI takes made for picture operations. */
   takes: 'Tagningar',
@@ -104,11 +104,11 @@ export function sequenceKindOf(value: unknown): SequenceKind {
 
 export const DB_FILE_NAME = 'studio.db'
 
-export const LIBRARY_NOT_READY = 'Välj en biblioteksmapp först.'
+export const LIBRARY_NOT_READY = 'Choose a library folder first.'
 export const LIBRARY_LOST =
-  'Biblioteksmappen finns inte längre där den låg. Har den flyttats eller döpts om i Finder, eller kopplats bort?'
+  'The library folder no longer exists where it was. Was it moved or renamed in Finder, or disconnected?'
 export const LIBRARY_OPERATION_RUNNING =
-  'Biblioteket håller redan på att flyttas eller städas. Vänta en stund och försök igen.'
+  'The library is already being moved or tidied. Wait a moment and try again.'
 
 let activeRoot: string | undefined
 /**
@@ -157,7 +157,7 @@ export function withoutLocalPaths(text: string): string {
   return out
 }
 
-/** Absolute base folder; throws Error('Välj en biblioteksmapp först.') when not ready. */
+/** Absolute base folder; throws Error(LIBRARY_NOT_READY) when not ready. */
 export function libraryRoot(): string {
   if (!activeRoot) throw new Error(LIBRARY_NOT_READY)
   return activeRoot
@@ -211,7 +211,7 @@ export function assertRootIntact(): void {
 
 // ── Library-wide operations ──────────────────────────────────────────────────
 
-/** Resolves when the switch, move or "Städa upp" in progress (library-root.ts) has finished. */
+/** Resolves when the switch, move or "Tidy up" in progress (library-root.ts) has finished. */
 let operationDone: Promise<void> | undefined
 
 /** Marks a library-wide operation as running; the returned function ends it. They never overlap. */
@@ -230,7 +230,7 @@ export function beginLibraryOperation(): () => void {
 
 /**
  * Waits until no switch, move or clean-up runs. Asset, sequence and delete work queue behind them:
- * "Städa upp" decides where files go from the folder names it reads, so a rename or delete in between would
+ * "Tidy up" decides where files go from the folder names it reads, so a rename or delete in between would
  * put files into a folder that no longer belongs to anything, or leave a deleted video behind untracked.
  */
 export async function libraryOperationSettled(): Promise<void> {
@@ -441,14 +441,14 @@ function assertDestinationIntact(dest: string): void {
 /** A single folder name from the database must never reach outside its parent. */
 function folderSegment(name: string): string {
   if (typeof name !== 'string' || !name || name === '.' || name === '..' || /[/\\\0]/.test(name)) {
-    throw new Error('Ogiltigt mappnamn.')
+    throw new Error('Invalid folder name.')
   }
   return name
 }
 
 /** Karaktärer, Miljöer, Produkter, Kläder or Poser by kind [/<folder>] */
 export function assetsDir(kind: AssetKind, folder?: string): string {
-  if (!isAssetKind(kind)) throw new Error('Okänd sorts bibliotekspost.')
+  if (!isAssetKind(kind)) throw new Error('Unknown kind of library item.')
   const base = join(libraryRoot(), ASSET_FOLDERS[kind])
   return ensureDir(folder === undefined ? base : join(base, folderSegment(folder)))
 }
@@ -567,7 +567,7 @@ function errorCode(err: unknown): string | undefined {
 }
 
 function alreadyExists(path: string): Error {
-  return Object.assign(new Error(`”${basename(path)}” finns redan i ${dirname(path)}.`), { code: 'EEXIST' })
+  return Object.assign(new Error(`“${basename(path)}” already exists in ${dirname(path)}.`), { code: 'EEXIST' })
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -605,16 +605,16 @@ async function verifyCopy(src: string, dest: string): Promise<void> {
     throw err
   }
   const b = await lstat(dest).catch(() => undefined)
-  if (!b) throw new Error(`Kopian av ${basename(src)} blev ofullständig.`)
+  if (!b) throw new Error(`The copy of ${basename(src)} was incomplete.`)
   if (a.isDirectory()) {
-    if (!b.isDirectory()) throw new Error(`Kopian av ${basename(src)} blev ofullständig.`)
+    if (!b.isDirectory()) throw new Error(`The copy of ${basename(src)} was incomplete.`)
     for (const name of await readdir(src)) {
       if (!FINDER_FILES.has(name)) await verifyCopy(join(src, name), join(dest, name))
     }
   } else if (a.isFile()) {
-    if (!b.isFile() || a.size !== b.size) throw new Error(`Kopian av ${basename(src)} blev ofullständig.`)
+    if (!b.isFile() || a.size !== b.size) throw new Error(`The copy of ${basename(src)} was incomplete.`)
   } else if (a.isSymbolicLink() !== b.isSymbolicLink()) {
-    throw new Error(`Kopian av ${basename(src)} blev ofullständig.`)
+    throw new Error(`The copy of ${basename(src)} was incomplete.`)
   }
 }
 
@@ -642,7 +642,7 @@ export async function copyPathVerified(from: string, to: string, info?: Stats): 
       await copyFile(src, dest, constants.COPYFILE_EXCL)
       await utimes(dest, s.atime, s.mtime).catch(() => {})
     } else {
-      throw new Error(`${basename(src)} kan inte kopieras.`)
+      throw new Error(`${basename(src)} cannot be copied.`)
     }
     await verifyCopy(src, dest)
   } catch (err) {
@@ -702,13 +702,13 @@ export async function renameLibraryFolder(
   const newDir = normalizeAbs(newAbsDir)
   const oldRel = toStoredPath(oldDir)
   const newRel = toStoredPath(newDir)
-  if (isAbsolute(oldRel) || isAbsolute(newRel)) throw new Error('Mappen ligger utanför biblioteket.')
+  if (isAbsolute(oldRel) || isAbsolute(newRel)) throw new Error('The folder is outside the library.')
   const conn = db.getDb()
   if (oldRel === newRel) {
     if (inTransaction) conn.transaction(inTransaction)()
     return
   }
-  if (newRel.startsWith(`${oldRel}/`)) throw new Error('En mapp kan inte flyttas in i sig själv.')
+  if (newRel.startsWith(`${oldRel}/`)) throw new Error('A folder cannot be moved into itself.')
 
   const existed = await pathExists(oldDir)
   if (existed) {

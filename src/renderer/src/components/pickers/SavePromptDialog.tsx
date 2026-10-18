@@ -19,7 +19,7 @@ const input = 'w-full rounded-md border border-line bg-raised px-3 py-2 outline-
 
 function addTag(tags: string[], tag: string): string[] {
   const t = tag.trim()
-  if (!t || tags.some((x) => x.toLocaleLowerCase('sv') === t.toLocaleLowerCase('sv'))) return tags
+  if (!t || tags.some((x) => x.toLocaleLowerCase('en') === t.toLocaleLowerCase('en'))) return tags
   return [...tags, t]
 }
 
@@ -41,10 +41,10 @@ export default function SavePromptDialog({ body, negativePrompt, existing, libra
   const suggestions = useMemo(() => {
     const counts = new Map<string, number>()
     for (const p of library) for (const t of p.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
-    const taken = new Set(tags.map((t) => t.toLocaleLowerCase('sv')))
+    const taken = new Set(tags.map((t) => t.toLocaleLowerCase('en')))
     return [...counts.entries()]
-      .filter(([t]) => !taken.has(t.toLocaleLowerCase('sv')))
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'sv'))
+      .filter(([t]) => !taken.has(t.toLocaleLowerCase('en')))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'en'))
       .slice(0, 10)
       .map(([t]) => t)
   }, [library, tags])
@@ -85,16 +85,16 @@ export default function SavePromptDialog({ body, negativePrompt, existing, libra
     <>
       {error && <p className="mr-auto min-w-0 truncate text-accent" title={error}>{error}</p>}
       <button onClick={onClose} className={`${button} border border-line hover:bg-raised`}>
-        Avbryt
+        Cancel
       </button>
       {existing && !unchanged && (
         <button
           onClick={() => void save(false)}
           disabled={busy}
           className={`${button} max-w-56 truncate border border-line hover:bg-raised`}
-          title={`Skriv över ”${existing.title}” med den nya texten`}
+          title={`Overwrite “${existing.title}” with the new text`}
         >
-          Uppdatera ”{existing.title}”
+          Update “{existing.title}”
         </button>
       )}
       <button
@@ -102,39 +102,39 @@ export default function SavePromptDialog({ body, negativePrompt, existing, libra
         disabled={busy}
         className={`${button} bg-accent font-medium text-white hover:bg-accent-hover`}
       >
-        {busy ? 'Sparar…' : primaryIsUpdate ? 'Spara ändringar' : existing ? 'Spara som ny' : 'Spara'}
+        {busy ? 'Saving…' : primaryIsUpdate ? 'Save changes' : existing ? 'Save as new' : 'Save'}
       </button>
     </>
   )
 
   return (
     <Modal
-      title={primaryIsUpdate ? 'Redigera sparad prompt' : 'Spara prompt'}
+      title={primaryIsUpdate ? 'Edit saved prompt' : 'Save prompt'}
       subtitle={
         primaryIsUpdate
-          ? 'Prompten finns redan i biblioteket – ändra titel, taggar eller favorit.'
+          ? 'The prompt is already in the library – change its title, tags or favourite.'
           : existing
-            ? `Texten kommer från ”${existing.title}” men har ändrats.`
-            : 'Spara prompten i biblioteket så kan du hämta den igen.'
+            ? `The text comes from “${existing.title}” but has been changed.`
+            : 'Save the prompt in the library so you can load it again.'
       }
       onClose={onClose}
       footer={footer}
     >
       <div className="space-y-4">
         <label className="block">
-          <span className="mb-1.5 block text-muted">Titel</span>
+          <span className="mb-1.5 block text-muted">Title</span>
           <input
             autoFocus
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submitPrimary()}
-            placeholder="Lämna tom för att använda början av prompten"
+            placeholder="Leave empty to use the start of the prompt"
             className={input}
           />
         </label>
 
         <div>
-          <span className="mb-1.5 block text-muted">Taggar</span>
+          <span className="mb-1.5 block text-muted">Tags</span>
           <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-line bg-raised px-2 py-1.5 focus-within:border-muted">
             {tags.map((t) => (
               <span key={t} className="flex items-center gap-1 rounded bg-line py-0.5 pl-2 pr-1 text-[12px]">
@@ -142,7 +142,7 @@ export default function SavePromptDialog({ body, negativePrompt, existing, libra
                 <button
                   onClick={() => setTags(tags.filter((x) => x !== t))}
                   className="rounded px-1 text-muted hover:text-text"
-                  title="Ta bort tagg"
+                  title="Remove tag"
                 >
                   ✕
                 </button>
@@ -168,7 +168,7 @@ export default function SavePromptDialog({ body, negativePrompt, existing, libra
                 }
               }}
               onBlur={() => draft.trim() && commitDraft()}
-              placeholder={tags.length ? '' : 't.ex. strand, solnedgång'}
+              placeholder={tags.length ? '' : 'e.g. beach, sunset'}
               className="min-w-24 flex-1 bg-transparent py-0.5 outline-none"
             />
           </div>
@@ -194,15 +194,15 @@ export default function SavePromptDialog({ body, negativePrompt, existing, libra
             onChange={(e) => setFavorite(e.target.checked)}
             className="accent-accent"
           />
-          <span>Favorit</span>
-          <span className="text-[11px] text-muted">– visas först i biblioteket</span>
+          <span>Favourite</span>
+          <span className="text-[11px] text-muted">– shown first in the library</span>
         </label>
 
         <div className="rounded-md border border-line bg-bg/60 p-3">
           <p className="max-h-32 overflow-y-auto whitespace-pre-wrap leading-relaxed select-text">{body.trim()}</p>
           {negativePrompt?.trim() && (
             <p className="mt-2 border-t border-line pt-2 text-[12px] text-muted select-text">
-              <span className="text-text">Negativ:</span> {negativePrompt.trim()}
+              <span className="text-text">Negative:</span> {negativePrompt.trim()}
             </p>
           )}
         </div>

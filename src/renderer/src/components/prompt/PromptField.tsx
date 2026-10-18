@@ -6,7 +6,7 @@ import { ALL, useBlockMenu, type BlockMenuControls } from './useBlockMenu'
 
 /** The text style of every prompt field: larger than the UI's 13 px and airy, so a long prompt reads easily. */
 export const PROMPT_TEXT = 'text-[14.5px] leading-[1.65]'
-/** In fokusläge. */
+/** In focus mode. */
 export const PROMPT_TEXT_LARGE = 'text-[16px] leading-[1.7]'
 
 /** The frame of a prompt field, with a clear focus state. */
@@ -16,14 +16,14 @@ export function promptFrame(invalid?: boolean): string {
     : 'border-white/12 hover:border-white/20 focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/15'
 }
 
-/** ⌘⇧F in a prompt field: fokusläge. */
+/** ⌘⇧F in a prompt field: focus mode. */
 export function isFocusShortcut(e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; code: string }): boolean {
   return (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.code === 'KeyF'
 }
 
 /**
  * Grows a textarea with its text between `minRows` and `maxRows` lines (then it scrolls); `fill` lets it take its
- * container's height instead (fokusläge).
+ * container's height instead (focus mode).
  */
 export function useAutoGrow(
   el: React.RefObject<HTMLTextAreaElement | null>,
@@ -49,7 +49,7 @@ export function useAutoGrow(
   }, [el, value, minRows, maxRows, fill])
 }
 
-/** The chips shown under a field: the first few groups (the scene template and the rest are under "Fler…"). */
+/** The chips shown under a field: the first few groups (the scene template and the rest are under "More…"). */
 const PRIMARY_CHIPS = 4
 
 function primaryChips(chips: { id: string; label: string }[]): { id: string; label: string }[] {
@@ -85,7 +85,7 @@ interface ToolbarProps {
 
 /**
  * The strip under a prompt field: the building-block chips (each opens the menu for its group), the character
- * count and the fokusläge button.
+ * count and the focus mode button.
  */
 export function PromptToolbar({ blocks, count, onExpand, children }: ToolbarProps) {
   const over = count?.limit !== undefined && count.length > count.limit
@@ -94,14 +94,14 @@ export function PromptToolbar({ blocks, count, onExpand, children }: ToolbarProp
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
         {blocks && blocks.chips.length > 0 && (
           <>
-            <span className="mr-0.5 text-[11px] text-muted" title="Skriv / i texten för att söka bland byggstenarna">
-              Byggstenar
+            <span className="mr-0.5 text-[11px] text-muted" title="Type / in the text to search the building blocks">
+              Building blocks
             </span>
             {primaryChips(blocks.chips).map((c) => (
               <Chip key={c.id} id={c.id} label={`＋ ${c.label}`} blocks={blocks} />
             ))}
             {blocks.chips.length > primaryChips(blocks.chips).length && (
-              <Chip id={ALL} label="Fler…" blocks={blocks} title="Alla byggstenar, dina prompter och lärdomar" />
+              <Chip id={ALL} label="More…" blocks={blocks} title="All building blocks, your prompts and learnings" />
             )}
           </>
         )}
@@ -111,19 +111,19 @@ export function PromptToolbar({ blocks, count, onExpand, children }: ToolbarProp
         {count && (count.length > 0 || count.limit !== undefined) && (
           <span
             className={`text-[11px] tabular-nums ${over ? 'text-accent' : 'text-muted'}`}
-            title={count.limit !== undefined ? `${count.length} av högst ${count.limit} tecken` : `${count.length} tecken`}
+            title={count.limit !== undefined ? `${count.length} of at most ${count.limit} characters` : `${count.length} characters`}
           >
-            {count.limit !== undefined ? `${count.length}/${count.limit}` : `${count.length} tecken`}
+            {count.limit !== undefined ? `${count.length}/${count.limit}` : `${count.length} ${count.length === 1 ? 'character' : 'characters'}`}
           </span>
         )}
         {onExpand && (
           <button
             type="button"
             onClick={onExpand}
-            title="Skriv i ett större fönster (⌘⇧F)"
+            title="Write in a larger window (⌘⇧F)"
             className="rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-text"
           >
-            ⤢ Större
+            ⤢ Larger
           </button>
         )}
       </div>
@@ -147,9 +147,9 @@ export interface PromptFieldProps {
   limit?: number
   /** Show the character count (always on with a limit). */
   showCount?: boolean
-  /** Fokusläge's heading, e.g. "Vad händer?"; also the field's accessible name when no label points at it. */
+  /** Focus mode's heading, e.g. "What happens?"; also the field's accessible name when no label points at it. */
   title: string
-  /** Fokusläge's line under the heading. */
+  /** Focus mode's line under the heading. */
   focusHint?: string
   ariaLabel?: string
   ariaDescribedBy?: string
@@ -163,16 +163,16 @@ export interface PromptFieldProps {
   onBlur?: () => void
   /** Shown between the field and its toolbar. */
   belowInput?: ReactNode
-  /** No toolbar: no chips, count or fokusläge button ("/" and ⌘⇧F still work). */
+  /** No toolbar: no chips, count or focus mode button ("/" and ⌘⇧F still work). */
   bare?: boolean
-  /** Inside fokusläge (internal). */
+  /** Inside focus mode (internal). */
   inFocus?: boolean
 }
 
 /**
  * A prompt field: a textarea with larger text that grows with what is written, a clear frame, building blocks
- * ("/" or the chips), the character count and fokusläge (⤢, ⌘⇧F) – the same help in every place a prompt is
- * written. The reference-aware prompt editor (Generera, Sekvenser) has the same look and tools.
+ * ("/" or the chips), the character count and focus mode (⤢, ⌘⇧F) – the same help in every place a prompt is
+ * written. The reference-aware prompt editor (Generate, Sequences) has the same look and tools.
  */
 export default function PromptField(props: PromptFieldProps) {
   const {
@@ -215,7 +215,7 @@ export default function PromptField(props: PromptFieldProps) {
 
   useAutoGrow(textarea, value, minRows, maxRows, inFocus)
 
-  // Fokusläge opens with the caret at the end of the text, ready to go on writing.
+  // Focus mode opens with the caret at the end of the text, ready to go on writing.
   useEffect(() => {
     const el = textarea.current
     if (!inFocus || !el) return

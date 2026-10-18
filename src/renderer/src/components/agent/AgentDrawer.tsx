@@ -46,7 +46,7 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
 
   if (!open) return null
 
-  // Straight to Agentanslutning, not the top of Inställningar.
+  // Straight to Agent connection, not the top of Settings.
   const openSettings = () => {
     onClose()
     showSettingsSection(SETTINGS_SECTION.agent)
@@ -65,7 +65,7 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
           <h2 className="font-semibold">Agent</h2>
           <button
             onClick={onClose}
-            title="Stäng"
+            title="Close"
             className="no-drag ml-auto rounded p-1 text-muted transition hover:bg-raised hover:text-text"
           >
             <CloseIcon size={12} />
@@ -78,7 +78,7 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
           {waiting.length > 0 && (
             <section>
               <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
-                Väntar på ditt OK
+                Waiting for your OK
               </h3>
               <div className="space-y-2">
                 {waiting.map((a) => (
@@ -89,7 +89,7 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
           )}
 
           <section>
-            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Senaste händelser</h3>
+            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Latest events</h3>
             {agent.activity.length ? (
               <ol className="space-y-px">
                 {agent.activity.map((a) => {
@@ -105,7 +105,7 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
                             onClick={() => showApproval(request.id)}
                             className="ml-1.5 text-text underline-offset-2 hover:underline"
                           >
-                            Granska
+                            Review
                           </button>
                         )}
                       </span>
@@ -116,8 +116,8 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
             ) : (
               <p className="text-[12px] leading-relaxed text-muted">
                 {summary.tone === 'off'
-                  ? 'Inget än. Slå på agentanslutningen så syns allt en agent gör här.'
-                  : 'Inget än. När en agent ansluter syns allt den gör här – vad den läser och ändrar, och vad den vill generera eller ta bort.'}
+                  ? 'Nothing yet. Turn on the agent connection and everything an agent does shows up here.'
+                  : 'Nothing yet. When an agent connects, everything it does shows up here – what it reads and changes, and what it wants to generate or delete.'}
               </p>
             )}
           </section>
@@ -125,7 +125,7 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
 
         <div className="border-t border-line px-4 py-3">
           <button onClick={openSettings} className="text-[12px] text-muted transition hover:text-text">
-            Inställningar för agentanslutning →
+            Agent connection settings →
           </button>
         </div>
       </aside>
@@ -163,7 +163,7 @@ function StatusCard({
                     <span className="block truncate">{agentDisplayName(c.name)}</span>
                     <span className="block truncate text-[11px] text-muted select-text">{clientDetail(c)}</span>
                   </span>
-                  <span className="shrink-0 text-muted" title="Senast aktiv">
+                  <span className="shrink-0 text-muted" title="Last active">
                     {formatTime(c.lastSeen)}
                   </span>
                 </li>
@@ -172,7 +172,7 @@ function StatusCard({
           )}
           {!status.tailscaleAddress && (
             <p className="mt-2 text-[12px] leading-relaxed text-amber-300">
-              Tailscale är inte igång – bara agenter på den här Macen kan ansluta.
+              Tailscale isn’t running – only agents on this Mac can connect.
             </p>
           )}
         </>
@@ -183,7 +183,7 @@ function StatusCard({
           onClick={onOpenSettings}
           className="mt-2.5 rounded-md border border-line px-3 py-1.5 text-[12px] transition hover:bg-raised"
         >
-          Slå på i Inställningar
+          Turn on in Settings
         </button>
       )}
     </div>
@@ -209,7 +209,7 @@ function PendingCard({ approval: a, now }: { approval: ApprovalRequest; now: num
           <span className="font-medium tabular-nums">
             {a.priceUsd !== undefined
               ? `${a.edit?.partialPrice ? '≈ ' : ''}${formatUsd(a.priceUsd)}${a.edit?.partialPrice ? ' +' : ''}`
-              : 'Okänt pris'}
+              : 'Unknown price'}
           </span>
         )}
         <span className="min-w-0 flex-1 truncate text-muted">{expiresText(a.createdAt + APPROVAL_TTL_MS, now)}</span>
@@ -217,7 +217,7 @@ function PendingCard({ approval: a, now }: { approval: ApprovalRequest; now: num
           onClick={() => showApproval(a.id)}
           className="shrink-0 rounded-md bg-accent px-2.5 py-1 font-medium text-white transition hover:bg-accent-hover"
         >
-          Granska
+          Review
         </button>
       </div>
     </div>
@@ -225,7 +225,7 @@ function PendingCard({ approval: a, now }: { approval: ApprovalRequest; now: num
 }
 
 function lowerFirst(text: string): string {
-  return text.charAt(0).toLocaleLowerCase('sv') + text.slice(1)
+  return text.charAt(0).toLocaleLowerCase('en') + text.slice(1)
 }
 
 /** The current time, refreshed every `intervalMs` (0: not refreshed). */

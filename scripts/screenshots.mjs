@@ -92,7 +92,7 @@ try {
 
   // A little neutral structure in the throwaway library.
   await run(`
-    const s = await window.studio.createSequence('Kvällsscen')
+    const s = await window.studio.createSequence('Evening scene')
     const seq = await window.studio.getSequence(s.id)
     const prompts = [
       'Wide establishing shot of a quiet harbour at dusk, boats rocking gently, warm lights coming on.',
@@ -105,9 +105,9 @@ try {
       const seg = segs[i] ?? segs[segs.length - 1]
       await window.studio.updateSegment(seg.id, { params: { ...seg.params, prompt: prompts[i] } })
     }
-    const b = await window.studio.createStoryboard('Hamnen', '16:9')
+    const b = await window.studio.createStoryboard('The harbour', '16:9')
     const board = await window.studio.getStoryboard(b.id)
-    const notes = ['Tom hamn i skymningen', 'Kvinna i gul regnjacka på piren', 'Hon ser ut över vattnet']
+    const notes = ['Empty harbour at dusk', 'A woman in a yellow raincoat on the pier', 'She looks out over the water']
     for (let i = 0; i < notes.length; i++) {
       if (board.boards[i]) await window.studio.updateBoard(board.boards[i].id, { note: notes[i] })
       else await window.studio.addBoard(b.id, { note: notes[i] })
@@ -115,9 +115,9 @@ try {
     return true
   `)
 
-  await click('Generera')
+  await click('Generate')
   await run(`
-    const t = [...document.querySelectorAll('textarea')].find((t) => /Beskriv scenen/.test(t.placeholder))
+    const t = [...document.querySelectorAll('textarea')].find((t) => /Describe the scene/.test(t.placeholder))
     t.focus()
     document.execCommand('insertText', false, 'A lighthouse on a rocky cliff at dusk, waves breaking below, ')
     return true
@@ -125,7 +125,7 @@ try {
   await shot('generate')
 
   // The building-block menu at the caret.
-  await run(`document.execCommand('insertText', false, '/kamera'); return true`)
+  await run(`document.execCommand('insertText', false, '/camera'); return true`)
   await shot('prompt-blocks')
   await run(`
     const t = document.activeElement
@@ -135,14 +135,14 @@ try {
     return true
   `)
 
-  await click('Sekvenser')
-  await run(`[...document.querySelectorAll('[role=button],div[tabindex]')].find((e) => /Kvällsscen/.test(e.textContent || ''))?.click(); await new Promise((r) => setTimeout(r, 800)); return true`)
+  await click('Sequences')
+  await run(`[...document.querySelectorAll('[role=button],div[tabindex]')].find((e) => /Evening scene/.test(e.textContent || ''))?.click(); await new Promise((r) => setTimeout(r, 800)); return true`)
   await shot('sequences')
 
   await click('Storyboards')
   await shot('storyboards')
 
-  await click('Redigera')
+  await click('Editor')
   await shot('editor')
 } finally {
   ws.close()

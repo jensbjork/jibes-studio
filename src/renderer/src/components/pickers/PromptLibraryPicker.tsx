@@ -49,7 +49,7 @@ export default function PromptLibraryPicker({ prompts, onPick, onManage }: Props
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Sök titel, text eller tagg…"
+          placeholder="Search title, text or tag…"
           className="w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted"
         />
       </div>
@@ -57,11 +57,11 @@ export default function PromptLibraryPicker({ prompts, onPick, onManage }: Props
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {prompts.length === 0 ? (
           <div className="px-3 py-6 text-center text-muted">
-            <p>Biblioteket är tomt.</p>
-            <p className="mt-1 text-[11px]">Skriv en prompt och klicka på ”Spara” för att lägga den här.</p>
+            <p>The library is empty.</p>
+            <p className="mt-1 text-[11px]">Write a prompt and click “Save” to put it here.</p>
           </div>
         ) : visible.length === 0 ? (
-          <p className="px-3 py-6 text-center text-muted">Inga prompter matchar ”{query}”.</p>
+          <p className="px-3 py-6 text-center text-muted">No prompts match “{query}”.</p>
         ) : (
           visible.map((p, i) => (
             <button
@@ -77,7 +77,7 @@ export default function PromptLibraryPicker({ prompts, onPick, onManage }: Props
                 {p.favorite && <span className="text-accent">★</span>}
                 <span className="min-w-0 flex-1 truncate font-medium">{p.title}</span>
                 {p.useCount > 0 && (
-                  <span className="shrink-0 text-[10px] text-muted" title="Antal gånger använd">
+                  <span className="shrink-0 text-[10px] text-muted" title="Times used">
                     {p.useCount}×
                   </span>
                 )}
@@ -92,7 +92,7 @@ export default function PromptLibraryPicker({ prompts, onPick, onManage }: Props
                   ))}
                   {p.negativePrompt && (
                     <span className="rounded border border-line px-1.5 py-px text-[10px] text-muted">
-                      + negativ prompt
+                      + negative prompt
                     </span>
                   )}
                 </span>
@@ -103,10 +103,10 @@ export default function PromptLibraryPicker({ prompts, onPick, onManage }: Props
       </div>
 
       <div className="flex items-center justify-between border-t border-line px-3 py-2 text-[11px] text-muted">
-        <span>↑↓ välj · Enter använd</span>
+        <span>↑↓ choose · Enter use</span>
         {onManage && (
           <button onClick={onManage} className="hover:text-text">
-            Öppna biblioteket →
+            Open the library →
           </button>
         )}
       </div>

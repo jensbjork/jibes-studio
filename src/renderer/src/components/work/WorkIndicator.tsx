@@ -13,20 +13,20 @@ interface Props {
 }
 
 function runningLine(n: number): string {
-  return `${n} pågår`
+  return `${n} running`
 }
 
 function freshLine(n: number): string {
-  return n === 1 ? '1 klar att titta på' : `${n} klara att titta på`
+  return `${n} ready to look at`
 }
 
 function failedLine(n: number): string {
-  return `${n} misslyckades`
+  return `${n} failed`
 }
 
 /**
- * The sidebar's status row of Pågår och klart. Idle it reads "Pågår och klart" beside the tray; while something runs
- * or waits to be looked at it says so in short – a spinner and "2 pågår · 3 nya" – and a new failure stays visible
+ * The sidebar's status row of Activity. Idle it reads "Activity" beside the tray; while something runs
+ * or waits to be looked at it says so in short – a spinner and "2 running · 3 new" – and a new failure stays visible
  * on the right as a red dot with its count. In the rail it is the tray with the usual badges. The tooltip spells the
  * counts out and names the newest item. A click opens or closes the panel.
  */
@@ -51,13 +51,13 @@ export default function WorkIndicator({ collapsed, active, onClick }: Props) {
     .filter(Boolean)
     .join(' · ')
 
-  // Short enough to fit beside a failure's count in the 208 px sidebar: "2 pågår · 3 nya".
+  // Short enough to fit beside a failure's count in the 208 px sidebar: "2 running · 3 new".
   const text =
     running > 0 || unseen > 0 ? (
       <>
-        {running > 0 && `${running} pågår`}
+        {running > 0 && `${running} running`}
         {running > 0 && unseen > 0 && <span className="text-muted"> · </span>}
-        {unseen > 0 && <span className="text-emerald-300">{unseen === 1 ? '1 ny' : `${unseen} nya`}</span>}
+        {unseen > 0 && <span className="text-emerald-300">{`${unseen} new`}</span>}
       </>
     ) : undefined
 
@@ -70,7 +70,7 @@ export default function WorkIndicator({ collapsed, active, onClick }: Props) {
       // Expanded, the spinner is the icon while something runs; the rail keeps the tray and shows it as a badge.
       icon={running > 0 && !collapsed ? <Spinner size={12} /> : <TrayIcon size={14} />}
       badge={<StatusMark variant="badge" running={running} fresh={unseen} failed={failed} />}
-      label="Pågår och klart"
+      label="Activity"
       text={text}
       lit={running + unseen + failed > 0}
       trailing={
@@ -84,8 +84,8 @@ export default function WorkIndicator({ collapsed, active, onClick }: Props) {
       status={status || undefined}
       title={
         status
-          ? `${status}${newest ? `. Senast: ${newest}` : ''}. Klicka för att se allt.`
-          : 'Det som pågår och det som är klart att titta på'
+          ? `${status}${newest ? `. Latest: ${newest}` : ''}. Click to see everything.`
+          : 'What’s running and what’s ready to look at'
       }
       live={status}
     />

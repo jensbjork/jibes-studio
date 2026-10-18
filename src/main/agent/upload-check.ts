@@ -30,32 +30,32 @@ export const UPLOAD_CAPS: Readonly<Record<UploadKind, { bytes: number; label: st
 export const MAX_IMAGE_SIDE = 16_384
 export const MAX_IMAGE_PIXELS = 80_000_000
 
-/** Below this a file has no sound worth the name (the same floor as Redigera's own audio). */
+/** Below this a file has no sound worth the name (the same floor as the Editor's own audio). */
 const MIN_SOUND_SECONDS = 0.05
 
 const SIPS = '/usr/bin/sips'
 const SIPS_TIMEOUT_MS = 120_000
 
-/** "en bild" / "bilder" … for the Swedish messages. */
+/** "an image" / "images" … for the messages. */
 export const KIND_WORDS: Readonly<Record<UploadKind, { one: string; plural: string }>> = {
-  image: { one: 'en bild', plural: 'bilder' },
-  audio: { one: 'ett ljud', plural: 'ljud' },
-  video: { one: 'en video', plural: 'video' }
+  image: { one: 'an image', plural: 'images' },
+  audio: { one: 'a sound', plural: 'sounds' },
+  video: { one: 'a video', plural: 'videos' }
 }
 
 /** Says that the bytes are not what the agent said they were. */
 export function notOfKind(kind: UploadKind): string {
-  if (kind === 'image') return 'Filen är inte en bild i JPG, PNG, WebP eller HEIC.'
-  if (kind === 'audio') return 'Filen är inte ett ljud i MP3, WAV, AIFF, FLAC, OGG, M4A eller AAC.'
-  return 'Filen är inte en video i MP4, MOV, M4V, WebM eller MKV.'
+  if (kind === 'image') return 'The file is not an image in JPG, PNG, WebP or HEIC.'
+  if (kind === 'audio') return 'The file is not a sound in MP3, WAV, AIFF, FLAC, OGG, M4A or AAC.'
+  return 'The file is not a video in MP4, MOV, M4V, WebM or MKV.'
 }
 
 export function tooLargeMessage(kind: UploadKind): string {
-  return `Filen är större än vad Studio tar emot för ${KIND_WORDS[kind].plural} (högst ${UPLOAD_CAPS[kind].label}).`
+  return `The file is larger than Studio takes for ${KIND_WORDS[kind].plural} (at most ${UPLOAD_CAPS[kind].label}).`
 }
 
-export const IMAGE_TOO_LARGE = 'Bilden är för stor: högst 16 384 pixlar på en sida och 80 megapixlar.'
-export const NO_SOUND = 'Det finns inget ljud i filen.'
+export const IMAGE_TOO_LARGE = 'The image is too large: at most 16,384 pixels on a side and 80 megapixels.'
+export const NO_SOUND = 'There is no sound in the file.'
 
 /** What the first bytes say a file is. */
 export interface Sniffed {
@@ -273,7 +273,7 @@ async function heicToJpeg(path: string): Promise<string> {
     })
   } catch {
     await rm(out, { force: true }).catch(() => {})
-    throw new Error('HEIC-bilden kunde inte göras om till JPEG.')
+    throw new Error("The HEIC image couldn't be converted to JPEG.")
   }
   await rm(path, { force: true }).catch(() => {})
   return out
@@ -294,7 +294,7 @@ export interface CheckedUpload {
 
 /**
  * Checks a staged file that sniffed as `sniffed`: the picture's stated size first (bombs never reach a decoder),
- * HEIC converted, then decoded; a sound probed for sound; a video inspected like an own clip. Throws the Swedish
+ * HEIC converted, then decoded; a sound probed for sound; a video inspected like an own clip. Throws the
  * refusal; the caller removes the file.
  */
 export async function checkUpload(kind: UploadKind, path: string, sniffed: Sniffed): Promise<CheckedUpload> {

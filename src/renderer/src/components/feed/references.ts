@@ -96,10 +96,10 @@ export function assetUseCounts(list: readonly Generation[], index: LibraryIndex)
   return counts
 }
 
-/** "Anna · foto 2", "Egen bild", for a picture's caption. */
+/** "Anna · photo 2", "Own image", for a picture's caption. */
 export function imageCaption(ref: ImageReference): string {
-  if (!ref.asset) return 'Egen bild'
-  return ref.asset.images.length > 1 ? `${ref.asset.name} · foto ${ref.photo ?? 1}` : ref.asset.name
+  if (!ref.asset) return 'Own image'
+  return ref.asset.images.length > 1 ? `${ref.asset.name} · photo ${ref.photo ?? 1}` : ref.asset.name
 }
 
 /** "0:02–0:12": the window of a sound clip that was sent. */
@@ -108,7 +108,7 @@ export function audioWindowText(start: number, length: number | undefined): stri
     const t = Math.max(0, Math.round(s))
     return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
   }
-  return length === undefined ? `från ${clock(start)}` : `${clock(start)}–${clock(start + length)}`
+  return length === undefined ? `from ${clock(start)}` : `${clock(start)}–${clock(start + length)}`
 }
 
 /** A media fragment that makes an <audio> element play only the window that was sent. */

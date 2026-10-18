@@ -12,7 +12,7 @@ const NOTE_DELAY = 700
 const sectionTitle = 'mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted'
 
 /**
- * The user's own verdict on a clip: a grade (tumme ner or one to three stars), a note and optional tags. Agents read
+ * The user's own verdict on a clip: a grade (thumbs down or one to three stars), a note and optional tags. Agents read
  * these (list_reviews) when they look for what works, so even a one-line note helps them write better prompts.
  */
 export function YourReview({
@@ -56,7 +56,7 @@ export function YourReview({
 
   return (
     <section>
-      <h3 className={sectionTitle}>Ditt omdöme</h3>
+      <h3 className={sectionTitle}>Your verdict</h3>
       <div className="rounded-lg border border-line bg-raised/30 p-3">
         <div className="flex items-center gap-3">
           {done ? (
@@ -71,13 +71,13 @@ export function YourReview({
           ) : (
             <span className="text-[12px] text-muted">
               {g.status === 'failed'
-                ? 'Klippet blev aldrig klart, så det finns inget att betygsätta – men en anteckning går bra.'
-                : 'Du kan sätta betyg när klippet är klart.'}
+                ? 'The clip never finished, so there is nothing to rate – but a note is fine.'
+                : 'You can rate the clip once it is done.'}
             </span>
           )}
           {done && (
             <span className="text-[12px] text-muted">
-              {ratingWord(g.rating) ?? 'Hur blev det?'}
+              {ratingWord(g.rating) ?? 'How did it turn out?'}
             </span>
           )}
         </div>
@@ -95,7 +95,7 @@ export function YourReview({
             aria-expanded={tagsOpen}
             className="text-[12px] text-muted transition hover:text-text"
           >
-            {tagsOpen ? '▾' : '▸'} Taggar{shownTags.length ? ` (${shownTags.length})` : ' – valfritt'}
+            {tagsOpen ? '▾' : '▸'} Tags{shownTags.length ? ` (${shownTags.length})` : ' – optional'}
           </button>
           {!tagsOpen && shownTags.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
@@ -209,12 +209,12 @@ function NoteField({
           }
         }}
         rows={2}
-        placeholder="Vad blev bra, vad blev fel? T.ex. ”rösten stämmer, men kavajen blev blå”"
-        aria-label="Din anteckning om klippet"
+        placeholder="What worked, what went wrong? E.g. “the voice is right, but the jacket turned blue”"
+        aria-label="Your note on the clip"
         className="block w-full resize-y rounded-md border border-line bg-raised px-2.5 py-2 text-[12px] leading-relaxed outline-none placeholder:text-muted/60 focus:border-muted"
       />
       <p className="mt-1 h-3.5 text-right text-[11px] text-muted">
-        {state === 'pending' || state === 'saving' ? 'Sparar…' : state === 'saved' ? 'Sparad' : ''}
+        {state === 'pending' || state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : ''}
       </p>
     </div>
   )
@@ -225,7 +225,7 @@ export function AgentReviews({ reviews, onDelete }: { reviews: GenerationReview[
   if (!reviews.length) return null
   return (
     <section>
-      <h3 className={sectionTitle}>Agenternas granskningar</h3>
+      <h3 className={sectionTitle}>The agents’ reviews</h3>
       <ol className="space-y-2">
         {reviews.map((r) => (
           <li key={r.id} className="group rounded-lg border border-line bg-raised/30 p-3">
@@ -234,18 +234,18 @@ export function AgentReviews({ reviews, onDelete }: { reviews: GenerationReview[
                 {authorLabel(r.author)}
               </span>
               {r.rating !== undefined && <RatingControl value={r.rating} size="sm" />}
-              <span className="ml-auto shrink-0 text-[11px] text-muted" title={new Date(r.updatedAt).toLocaleString('sv-SE')}>
+              <span className="ml-auto shrink-0 text-[11px] text-muted" title={new Date(r.updatedAt).toLocaleString('en-GB')}>
                 {formatWhen(r.updatedAt)}
               </span>
               <span className="shrink-0 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
                 <ConfirmButton
-                  question="Ta bort?"
-                  confirmLabel="Ta bort"
+                  question="Delete?"
+                  confirmLabel="Delete"
                   onConfirm={() => onDelete(r)}
-                  title="Ta bort granskningen"
+                  title="Delete the review"
                   className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-accent"
                 >
-                  Ta bort
+                  Delete
                 </ConfirmButton>
               </span>
             </div>

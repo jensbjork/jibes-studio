@@ -1,4 +1,4 @@
-// Pure helpers for the Storyboards view: what a transition's state is, what "Generera saknade" and "Exportera"
+// Pure helpers for the Storyboards view: what a transition's state is, what "Generate missing" and "Export"
 // would do, local copies of main's edits for instant feedback, and the wording around boards and transitions.
 // No React and no window.studio here, so they can be tested on their own.
 
@@ -68,7 +68,7 @@ export function madeFromOtherImages(take: Generation, t: Pick<StoryboardTransiti
   return !samePath(take.params.startImage, t.params.startImage) || !samePath(take.params.endImage, t.params.endImage)
 }
 
-/** 1-based number of a board, as the view shows it ("Ruta 2"). */
+/** 1-based number of a board, as the view shows it ("Board 2"). */
 export function boardNumber(storyboard: Pick<Storyboard, 'boards'>, boardId: string): number {
   return storyboard.boards.findIndex((b) => b.id === boardId) + 1
 }
@@ -93,7 +93,7 @@ export function transitionRange(
 }
 
 /**
- * 1-based number of a transition, as main names it in its messages ("Övergång 2: …"): transition N goes from
+ * 1-based number of a transition, as main names it in its messages ("Transition 2: …"): transition N goes from
  * board N to board N + 1, so it follows the board it starts on (also while a moved board awaits main's answer).
  */
 export function transitionNumber(
@@ -103,12 +103,12 @@ export function transitionNumber(
   return boardNumber(storyboard, t.fromBoardId) || t.position + 1
 }
 
-/** "Övergång 2". */
+/** "Transition 2". */
 export function transitionLabel(
   storyboard: Pick<Storyboard, 'boards'>,
   t: Pick<StoryboardTransition, 'fromBoardId' | 'position'>
 ): string {
-  return `Övergång ${transitionNumber(storyboard, t)}`
+  return `Transition ${transitionNumber(storyboard, t)}`
 }
 
 /** The transitions in cut order (main keeps positions 0..n-2, but a snapshot is never trusted to be sorted). */
@@ -116,24 +116,27 @@ export function orderedTransitions(storyboard: Pick<Storyboard, 'transitions'>):
   return [...storyboard.transitions].sort((a, b) => a.position - b.position)
 }
 
-/** "Övergång 2", "Övergång 1 och 3", "Övergång 1, 2 och 4". */
+/** "Transition 2", "Transitions 1 and 3", "Transitions 1, 2 and 4". */
 export function transitionList(storyboard: Pick<Storyboard, 'boards'>, list: readonly StoryboardTransition[]): string {
   const numbers = list.map((t) => transitionNumber(storyboard, t))
-  if (numbers.length <= 1) return `Övergång ${numbers[0] ?? ''}`.trim()
-  return `Övergång ${numbers.slice(0, -1).join(', ')} och ${numbers[numbers.length - 1]}`
+  if (numbers.length <= 1) return `Transition ${numbers[0] ?? ''}`.trim()
+  return `Transitions ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`
 }
 
-/** The transition a message from main is about ("Övergång 2: …"), if it names one that exists. */
+/**
+ * The transition a message from main is about ("Transition 2: …", or "Övergång 2: …" in failures saved before the app
+ * was in English), if it names one that exists.
+ */
 export function transitionInMessage(
   storyboard: Storyboard,
   message: string | undefined
 ): StoryboardTransition | undefined {
-  const n = Number(/^Övergång (\d+)/.exec(message ?? '')?.[1])
+  const n = Number(/^(?:Transition|Övergång) (\d+)/.exec(message ?? '')?.[1])
   if (!n) return undefined
   return storyboard.transitions.find((t) => transitionNumber(storyboard, t) === n)
 }
 
-// ── "Föreslå": a plain prompt template from the two notes ───────────────────
+// ── "Suggest": a plain prompt template from the two notes ───────────────────
 
 /** A note as a sentence part: whitespace collapsed, trailing full stops dropped (the template adds its own). */
 function clause(note: string): string {
@@ -188,10 +191,10 @@ export function transitionStatus(t: StoryboardTransition): TransitionStatus {
 }
 
 /** main's "write what happens" problem, which typing in the editor may have answered before main has the text. */
-const PROMPT_PROBLEM = /^Skriv vad som händer/
+const PROMPT_PROBLEM = /^Write what happens/
 
 /**
- * Why the transition can't be generated as it stands (Swedish, without full stops, most important first): main's
+ * Why the transition can't be generated as it stands (without full stops, most important first): main's
  * problems (StoryboardTransition.problems), with the prompt judged by what is typed now (`prompt`, default the
  * saved one). Boards without a picture are named from the boards themselves, in main's words, so they show
  * the same also when main's list is older than the boards.
@@ -209,11 +212,11 @@ export function transitionProblems(
   if (!t.ready) {
     for (const id of [t.fromBoardId, t.toBoardId]) {
       const n = boardNumber(storyboard, id)
-      if (n && !storyboard.boards[n - 1].imagePath) add(`Ruta ${n} saknar bild`)
+      if (n && !storyboard.boards[n - 1].imagePath) add(`Board ${n} has no image`)
     }
-    if (!out.length) add('Båda rutorna behöver en bild')
+    if (!out.length) add('Both boards need an image')
   }
-  if (!prompt.trim()) add('Skriv vad som händer')
+  if (!prompt.trim()) add('Write what happens')
   for (const problem of t.problems) if (!PROMPT_PROBLEM.test(problem)) add(problem)
   return out
 }
@@ -227,7 +230,7 @@ export function generateBlocked(
   return transitionProblems(storyboard, t, prompt)[0]
 }
 
-// ── "Generera saknade" and "Exportera" ───────────────────────────────────────
+// ── "Generate missing" and "Export" ──────────────────────────────────────────
 
 /** The transition is not part of the cut until its selected take is finished and on disk. Mirrors main. */
 export function needsTake(t: StoryboardTransition): boolean {
@@ -235,7 +238,7 @@ export function needsTake(t: StoryboardTransition): boolean {
 }
 
 export interface RunPlan {
-  /** Transitions "Generera saknade" would send now, in cut order. */
+  /** Transitions "Generate missing" would send now, in cut order. */
   toGenerate: StoryboardTransition[]
   /** Transitions still missing a take that are already rendering one. */
   generating: number
@@ -284,19 +287,19 @@ export function transitionKey(t: StoryboardTransition): string {
   ])
 }
 
-/** One key per transition "Generera saknade" would pay for (see transitionKey). */
+/** One key per transition "Generate missing" would pay for (see transitionKey). */
 export function runKeys(storyboard: Storyboard): string[] {
   return runPlan(storyboard).toGenerate.map(transitionKey)
 }
 
-/** Why the storyboard can't be exported now (Swedish), or undefined. */
+/** Why the storyboard can't be exported now, or undefined. */
 export function exportBlocked(storyboard: Storyboard, ffmpegOk: boolean): string | undefined {
-  if (!ffmpegOk) return 'ffmpeg saknas – installera med brew install ffmpeg'
+  if (!ffmpegOk) return 'ffmpeg is missing – install it with brew install ffmpeg'
   const transitions = orderedTransitions(storyboard)
-  if (!transitions.length) return 'Lägg till minst två rutor med bilder och generera klippen mellan dem'
+  if (!transitions.length) return 'Add at least two boards with images and generate the clips between them'
   const missing = transitions.filter((t) => !readyTake(t))
   if (!missing.length) return undefined
-  return `${transitionList(storyboard, missing)} saknar ${missing.length === 1 ? 'ett färdigt klipp' : 'färdiga klipp'}`
+  return `${transitionList(storyboard, missing)} ${missing.length === 1 ? 'has no finished clip' : 'have no finished clips'}`
 }
 
 /**
@@ -341,28 +344,28 @@ export function transitionsLost(
   )
 }
 
-/** "en prompt och 3 tagningar". */
+/** "a prompt and 3 takes". */
 function workOf(t: StoryboardTransition): string {
   const parts: string[] = []
-  if (t.params.prompt.trim()) parts.push('en prompt')
-  if (t.takes.length) parts.push(`${t.takes.length} ${t.takes.length === 1 ? 'tagning' : 'tagningar'}`)
-  return parts.join(' och ')
+  if (t.params.prompt.trim()) parts.push('a prompt')
+  if (t.takes.length) parts.push(`${t.takes.length} ${t.takes.length === 1 ? 'take' : 'takes'}`)
+  return parts.join(' and ')
 }
 
 /** What the user is asked before a change that loses these transitions (see transitionsLost). */
 export function lostTransitionsText(storyboard: Pick<Storyboard, 'boards'>, lost: readonly StoryboardTransition[]): string {
-  const items = lost.map((t) => `${transitionLabel(storyboard, t).toLowerCase()} (${workOf(t)})`)
-  const list = items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')} och ${items[items.length - 1]}`
+  const items = lost.map((t) => `${transitionLabel(storyboard, t).toLowerCase()} (with ${workOf(t)})`)
+  const list = items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
   const one = lost.length === 1
   const prompts = lost.filter((t) => t.params.prompt.trim()).length
   const sentences = [
-    `${list.charAt(0).toUpperCase()}${list.slice(1)} tas bort: ${one ? 'dess' : 'deras'} rutor ligger inte längre bredvid varandra.`,
-    `${prompts ? `${prompts === 1 ? 'Prompten' : 'Prompterna'} försvinner, och de` : 'De'} nya övergångarna börjar tomma – också om rutorna sedan läggs tillbaka som de var.`
+    `${list.charAt(0).toUpperCase()}${list.slice(1)} will be removed: ${one ? 'its' : 'their'} boards will no longer be next to each other.`,
+    `${prompts ? `${prompts === 1 ? 'The prompt is' : 'The prompts are'} lost, and the` : 'The'} new transitions start empty – even if the boards are later put back as they were.`
   ]
   const takes = lost.reduce((n, t) => n + t.takes.length, 0)
   if (takes) {
     sentences.push(
-      `${takes === 1 ? 'Tagningen' : 'Tagningarna'} finns kvar i Mediabanken, men hör inte längre till storyboarden.`
+      `${takes === 1 ? 'The take stays in Media but no longer belongs' : 'The takes stay in Media but no longer belong'} to the storyboard.`
     )
   }
   return sentences.join(' ')
@@ -494,10 +497,10 @@ export function fitBox(
   return { width: Math.round(width), height: Math.round(width / ratio) }
 }
 
-/** "16:9 – liggande", "9:16 – stående", "1:1 – kvadrat". */
+/** "16:9 – landscape", "9:16 – portrait", "1:1 – square". */
 export function aspectLabel(aspect: string): string {
   const ratio = aspectValue(aspect)
-  const shape = Math.abs(ratio - 1) < 0.01 ? 'kvadrat' : ratio > 1 ? (ratio > 2 ? 'bred' : 'liggande') : 'stående'
+  const shape = Math.abs(ratio - 1) < 0.01 ? 'square' : ratio > 1 ? (ratio > 2 ? 'wide' : 'landscape') : 'portrait'
   return `${aspect} – ${shape}`
 }
 
@@ -506,7 +509,17 @@ export function durationLabel(duration: string): string {
   return /^\d+(\.\d+)?s$/.test(duration) ? `${duration.slice(0, -1)} s` : duration
 }
 
-/** "3 rutor", "1 ruta". */
+/** "3 boards", "1 board". */
 export function boardCountLabel(n: number): string {
-  return `${n} ${n === 1 ? 'ruta' : 'rutor'}`
+  return `${n} ${n === 1 ? 'board' : 'boards'}`
+}
+
+/** "1 clip", "3 clips". */
+export function clipCountLabel(n: number): string {
+  return `${n} ${n === 1 ? 'clip' : 'clips'}`
+}
+
+/** "3 clips" when every transition has a finished clip, else "2 of 3 clips done". */
+export function clipProgressLabel(done: number, total: number): string {
+  return done === total ? clipCountLabel(total) : `${done} of ${clipCountLabel(total)} done`
 }

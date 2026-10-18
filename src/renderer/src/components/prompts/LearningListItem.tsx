@@ -38,9 +38,9 @@ export default function LearningListItem({ row, selected, unsaved, onSelect, onT
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <div className={`truncate font-medium ${row.title ? '' : 'text-muted'}`}>{row.title || 'Ny lärdom'}</div>
+          <div className={`truncate font-medium ${row.title ? '' : 'text-muted'}`}>{row.title || 'New learning'}</div>
           <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted">
-            {row.insight || (unsaved ? 'Skriv lärdomen till höger…' : '')}
+            {row.insight || (unsaved ? 'Write the learning on the right…' : '')}
           </p>
         </div>
         {!unsaved && (
@@ -51,7 +51,7 @@ export default function LearningListItem({ row, selected, unsaved, onSelect, onT
               onTogglePin()
             }}
             aria-pressed={row.pinned}
-            title={row.pinned ? 'Lossa – sluta visa den överst' : 'Fäst överst – agenterna ser fästa lärdomar först'}
+            title={row.pinned ? 'Unpin – stop showing it at the top' : 'Pin to top – agents see pinned learnings first'}
             className={`mt-0.5 shrink-0 transition ${
               row.pinned
                 ? 'text-amber-400 hover:text-amber-300'
@@ -64,10 +64,10 @@ export default function LearningListItem({ row, selected, unsaved, onSelect, onT
       </div>
       <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted">
         {unsaved ? (
-          <span>Ej sparad</span>
+          <span>Not saved</span>
         ) : (
           <>
-            <span className="min-w-0 truncate">{row.modelName ?? 'Alla modeller'}</span>
+            <span className="min-w-0 truncate">{row.modelName ?? 'All models'}</span>
             <span>·</span>
             <span className="shrink-0">{authorLabel(row.author)}</span>
             {row.evidenceCount > 0 && (

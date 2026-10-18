@@ -5,7 +5,7 @@ import type { SwitchPhase } from './useLibrarySwitch'
 export default function SwitchingOverlay({ phase }: { phase: SwitchPhase }) {
   if (phase.kind === 'idle') return null
   const moving = phase.kind === 'working' && phase.mode === 'move'
-  const title = moving ? 'Flyttar biblioteket…' : 'Byter bibliotek…'
+  const title = moving ? 'Moving the library…' : 'Switching library…'
 
   return createPortal(
     <div
@@ -22,12 +22,12 @@ export default function SwitchingOverlay({ phase }: { phase: SwitchPhase }) {
           <h2 className="text-base font-semibold">{title}</h2>
           <p className="mt-2 leading-relaxed text-muted">
             {phase.kind === 'reloading'
-              ? 'Klart. Studio öppnar biblioteket i den nya mappen.'
+              ? 'Done. Studio is opening the library in the new folder.'
               : phase.kind === 'waiting'
-                ? 'Biblioteket byts eller flyttas just nu. Studio fortsätter när det är klart – stäng inte appen under tiden.'
+                ? "The library is being switched or moved right now. Studio continues when it's done – don't quit the app meanwhile."
                 : moving
-                ? 'Filerna flyttas till den nya mappen. Stäng inte Studio under tiden – med många videor kan det ta en stund.'
-                : 'Ett ögonblick.'}
+                ? "The files are moving to the new folder. Don't quit Studio meanwhile – with many videos it can take a while."
+                : 'One moment.'}
           </p>
         </div>
       </div>

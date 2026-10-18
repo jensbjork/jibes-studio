@@ -11,19 +11,19 @@ import type {
   TranscriptSegment
 } from '@shared/types'
 
-// Pure helpers for Redigera: how times, prices and versions are written in Swedish, the version tree, snapping a
+// Pure helpers for the Editor: how times, prices and versions are written, the version tree, snapping a
 // marked range on the timeline, and what a plan needs before its button may send anything. No DOM, no IPC.
 
 // ── Times and sizes ──────────────────────────────────────────────────────────
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
-/** "0:41,0", "1:04:05,3": the player's and the timeline's times, to a tenth of a second (as plans write them). */
+/** "0:41.0", "1:04:05.3": the player's and the timeline's times, to a tenth of a second (as plans write them). */
 export const formatClock = formatTimecode
 
 /** What deleting an edit does, for its question (in the edit's ⋯ menu and in the list). */
 export const DELETE_EDIT_TEXT =
-  'Versioner som används i sekvenser eller av andra redigeringar, och AI-tagningarna, finns kvar. Resten flyttas till papperskorgen. Filmen du utgick från lämnas orörd.'
+  'Versions used in sequences or by other edits, and the AI takes, are kept. The rest goes to the Trash. The film you started from is left untouched.'
 
 /** "1:04" (whole seconds), for lengths in lists and cards. */
 export function formatLength(seconds: number | undefined): string {
@@ -34,16 +34,16 @@ export function formatLength(seconds: number | undefined): string {
   return h > 0 ? `${h}:${pad2(m)}:${pad2(s % 60)}` : `${m}:${pad2(s % 60)}`
 }
 
-/** "4,0 s", "12,5 s". */
+/** "4.0 s", "12.5 s". */
 export const formatSecondsShort = formatSecondsSv
 
-/** "$0.51", "$0.035": dollars as everywhere else in Studio (Generera, Sekvenser, the agents' approvals). */
+/** "$0.51", "$0.035": dollars as everywhere else in Studio (Generate, Sequences, the agents' approvals). */
 export const formatPrice = formatUsdPrice
 
-/** What a price nobody can give in advance is called, after a "·" on a button or in a list ("Okänt pris" alone). */
-export const UNKNOWN_PRICE = 'okänt pris'
+/** What a price nobody can give in advance is called, after a "·" on a button or in a list ("Unknown price" alone). */
+export const UNKNOWN_PRICE = 'unknown price'
 
-/** "$0.51", "≈ $0.70" (an estimate), "≈ $0.45 +" (a part has no price), "okänt pris". */
+/** "$0.51", "≈ $0.70" (an estimate), "≈ $0.45 +" (a part has no price), "unknown price". */
 export function priceText(priceUsd: number | undefined, o: { partial?: boolean; approximate?: boolean } = {}): string {
   if (priceUsd === undefined) return UNKNOWN_PRICE
   const usd = formatPrice(priceUsd)
@@ -51,25 +51,25 @@ export function priceText(priceUsd: number | undefined, o: { partial?: boolean; 
   return o.approximate ? `≈ ${usd}` : usd
 }
 
-/** "0:41,0–0:45,0 (4,0 s)". */
+/** "0:41.0–0:45.0 (4.0 s)". */
 export function formatRange(range: EditRange): string {
   return `${formatClock(range.start)}–${formatClock(range.end)} (${formatSecondsShort(range.end - range.start)})`
 }
 
-/** "1,2 GB", "340 MB": binary units, as the import dialog counts them. */
+/** "1.2 GB", "340 MB": binary units, as the import dialog counts them. */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB'
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toLocaleString('sv-SE', { maximumFractionDigits: 1 })} GB`
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toLocaleString('en-GB', { maximumFractionDigits: 1 })} GB`
   return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`
 }
 
-const relative = new Intl.RelativeTimeFormat('sv', { numeric: 'auto', style: 'short' })
-const dateFormat = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short' })
+const relative = new Intl.RelativeTimeFormat('en-GB', { numeric: 'auto', style: 'short' })
+const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
 
-/** "för 2 min sedan", "för 3 tim sedan", "i går", "7 okt". */
+/** "2 min ago", "3 hr ago", "yesterday", "7 Oct". */
 export function relativeTime(at: number, now: number = Date.now()): string {
   const seconds = Math.round((at - now) / 1000)
-  if (Math.abs(seconds) < 45) return 'nyss'
+  if (Math.abs(seconds) < 45) return 'just now'
   const minutes = Math.round(seconds / 60)
   if (Math.abs(minutes) < 60) return relative.format(minutes, 'minute')
   const hours = Math.round(minutes / 60)
@@ -81,25 +81,25 @@ export function relativeTime(at: number, now: number = Date.now()): string {
 
 // ── Where an edit came from ─────────────────────────────────────────────────
 
-/** The source badge: "Klipp från Mediabanken", "Tagning av klipp 3 i ”X”", "Export av ”X”", "Egen film". */
+/** The source badge: "Clip from Media", "Take of clip 3 in “X”", "Export of “X”", "Own film". */
 export function originLabel(origin: EditOrigin): string {
   switch (origin.kind) {
     case 'take':
       return origin.clipNumber && origin.sequenceName
-        ? `Tagning av klipp ${origin.clipNumber} i ”${origin.sequenceName}”`
+        ? `Take of clip ${origin.clipNumber} in “${origin.sequenceName}”`
         : origin.sequenceName
-          ? `Tagning i ”${origin.sequenceName}”`
-          : 'Tagning av ett klipp'
+          ? `Take in “${origin.sequenceName}”`
+          : 'Take of a clip'
     case 'export':
-      return origin.sequenceName ? `Export av ”${origin.sequenceName}”` : 'Exporterad film'
+      return origin.sequenceName ? `Export of “${origin.sequenceName}”` : 'Exported film'
     case 'import':
-      return 'Egen film'
+      return 'Own film'
     default:
-      return 'Klipp från Mediabanken'
+      return 'Clip from Media'
   }
 }
 
-/** The edits made from this clip or export (its v1), for "Öppna redigeringen" / "Ny redigering". */
+/** The edits made from this clip or export (its v1), for "Open the edit" / "New edit". */
 export function editsFrom(
   edits: readonly EditSummary[],
   source: { generationId: string } | { exportId: string }
@@ -117,9 +117,9 @@ export function editsContaining(edits: readonly EditSummary[], generationId: str
   return edits.filter((e) => e.origin.generationId !== generationId && e.generationIds.includes(generationId))
 }
 
-/** "4 versioner · 1:04 · $2.13", "Original · 0:31". */
+/** "4 versions · 1:04 · $2.13", "Original · 0:31". */
 export function summaryLine(e: Pick<EditSummary, 'versionCount' | 'duration' | 'totalCostUsd'>): string {
-  const parts = [e.versionCount > 1 ? `${e.versionCount} versioner` : 'Original']
+  const parts = [e.versionCount > 1 ? `${e.versionCount} versions` : 'Original']
   if (e.duration !== undefined) parts.push(formatLength(e.duration))
   if (e.totalCostUsd > 0) parts.push(formatPrice(e.totalCostUsd))
   return parts.join(' · ')
@@ -163,7 +163,7 @@ export function versionTree(versions: readonly EditVersion[]): TreeRow[] {
   return rows
 }
 
-/** ⌘⇧Z "Gör om": the newest child of the version (highest number), if it has one. */
+/** ⌘⇧Z "Redo": the newest child of the version (highest number), if it has one. */
 export function newestChild(versions: readonly EditVersion[], id: string): EditVersion | undefined {
   return versions.filter((v) => v.parentId === id).sort((a, b) => b.number - a.number)[0]
 }
@@ -173,32 +173,32 @@ export function nextVersionNumber(versions: readonly EditVersion[]): number {
   return versions.reduce((n, v) => Math.max(n, v.number), 0) + 1
 }
 
-/** "v4 Musik: lugnt piano", "v1 Original". */
+/** "v4 Music: calm piano", "v1 Original". */
 export function versionName(v: Pick<EditVersion, 'number' | 'label'>): string {
   return `v${v.number} ${v.label || (v.number === 1 ? 'Original' : '')}`.trim()
 }
 
 /**
- * Why a version can't be deleted (Swedish), or undefined. Main refuses the same; saying it up front keeps a
+ * Why a version can't be deleted, or undefined. Main refuses the same; saying it up front keeps a
  * click from turning into an error.
  */
 export function deleteVersionBlocked(v: EditVersion): string | undefined {
-  if (v.number === 1 || v.op === 'original' || v.op === 'import') return 'Originalet kan inte raderas.'
+  if (v.number === 1 || v.op === 'original' || v.op === 'import') return 'The original can’t be deleted.'
   const use = v.usedBy[0]
-  if (use) return `Versionen används i ”${use.sequenceName}” (klipp ${use.clipNumber}).`
+  if (use) return `The version is used in “${use.sequenceName}” (clip ${use.clipNumber}).`
   return undefined
 }
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────
 
 /**
- * Operations whose job is one AI take put into the film: their "Fortsätt" puts the paid take in again (free), and the
+ * Operations whose job is one AI take put into the film: their "Continue" puts the paid take in again (free), and the
  * take stays among the edit's takes whatever happens to the job.
  */
 export const PICTURE_JOB_OPS: ReadonlySet<string> = new Set<string>(['regenerate', 'prompt-edit', 'extend', 'upscale'])
 
 /**
- * The jobs worth showing at the top of Versioner: running ones, failed audio jobs that can go on (their sent parts
+ * The jobs worth showing at the top of Versions: running ones, failed audio jobs that can go on (their sent parts
  * are paid for and live only in the job), and other failed or cancelled ones until the user hides them – a picture job
  * too, even one that could be finished again, since its paid take stays either way. Finished jobs show as their
  * version.
@@ -212,16 +212,16 @@ export function visibleJobs(jobs: readonly EditJob[], dismissed: ReadonlySet<str
   })
 }
 
-/** "del 2 av 3", from the job's own words when it has them. */
+/** "part 2 of 3", from the job's own words when it has them. */
 export function jobProgressText(job: EditJob): string | undefined {
   if (job.currentStep) return job.currentStep
-  if (job.stepsTotal > 1) return `del ${Math.min(job.stepsDone + 1, job.stepsTotal)} av ${job.stepsTotal}`
+  if (job.stepsTotal > 1) return `part ${Math.min(job.stepsDone + 1, job.stepsTotal)} of ${job.stepsTotal}`
   return undefined
 }
 
 // ── Prices: what a click may send ────────────────────────────────────────────
 
-/** D5: above this, a click asks once more ("Det här kostar $7.20. Fortsätt?"). */
+/** D5: above this, a click asks once more ("This costs $7.20. Continue?"). */
 export const CONFIRM_ABOVE_USD = 5
 
 export interface PriceCheck {
@@ -294,7 +294,7 @@ export function clampRange(range: EditRange | undefined, duration: number): Edit
 }
 
 /**
- * Markera in at t (I): the marking's start moves there; an in-point alone (or after the marking) marks to the end,
+ * Mark in at t (I): the marking's start moves there; an in-point alone (or after the marking) marks to the end,
  * as in an editing program. Undefined when nothing would be left.
  */
 export function markedIn(t: number, selection: EditRange | undefined, duration: number): EditRange | undefined {
@@ -302,7 +302,7 @@ export function markedIn(t: number, selection: EditRange | undefined, duration: 
   return end > t ? { start: t, end } : undefined
 }
 
-/** Markera ut at t (O): the marking's end moves there; an out-point alone (or before the marking) marks from the start. */
+/** Mark out at t (O): the marking's end moves there; an out-point alone (or before the marking) marks from the start. */
 export function markedOut(t: number, selection: EditRange | undefined): EditRange | undefined {
   const start = selection && selection.start < t ? selection.start : 0
   return t > start ? { start, end: t } : undefined
@@ -326,7 +326,7 @@ export function rulerStep(duration: number, widthPx: number, minPx = 64): number
 }
 
 /**
- * Rows for the Lager lane: each layer goes in the first row where it doesn't overlap the one before it, so bars
+ * Rows for the Layers lane: each layer goes in the first row where it doesn't overlap the one before it, so bars
  * never cover each other.
  */
 export function layerRows<T extends { id: string; start: number; end: number }>(
@@ -375,7 +375,7 @@ export function segmentsInRange(segments: readonly TranscriptSegment[], range: E
 }
 
 /**
- * "Föreslå" for Gör om avsnittet: a plain template (no AI), with what is said in the range when it is known.
+ * "Suggest" for Regenerate section: a plain template (no AI), with what is said in the range when it is known.
  */
 export function suggestRegeneratePrompt(segments: readonly TranscriptSegment[], range: EditRange | undefined): string {
   const base = 'Continuous shot. Same people, place and light as the start image.'

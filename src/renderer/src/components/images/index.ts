@@ -2,7 +2,7 @@
 //   <CreateImageDialog open sequenceId?={sequence or storyboard id} initialPrompt? previousImagePath?
 //                      assign?={{ boardId } | { segmentId, slot }} onClose onCreated?(still) onBoardAssigned? />
 //     With { boardId } every new image is put on the board (updateBoard) unless the board got another image
-//     meanwhile; previousImagePath adds "Använd föregående bild som referens" (on, first reference).
+//     meanwhile; previousImagePath adds "Use the previous image as a reference" (on, first reference).
 //   <FramePickerDialog open sequenceId? anyGeneration? generationId? segment? at? onClose onPicked(still) />
 //     anyGeneration: any finished video in the library, with a search; else the sequence's takes.
 //   <StillThumb still onOpen? draggable />  (drag payload STILL_DRAG_TYPE = still id)

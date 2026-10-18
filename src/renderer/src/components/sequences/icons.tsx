@@ -113,7 +113,7 @@ export function GripIcon(props: IconProps) {
   )
 }
 
-/** "Gör om mellan grannarna": a clip redone between two fixed neighbours. */
+/** "Redo between neighbours": a clip redone between two fixed neighbours. */
 export function BridgeIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -183,7 +183,7 @@ export function ChevronDownIcon(props: IconProps) {
   )
 }
 
-/** Two check marks: "Markera alla som sedda". */
+/** Two check marks: "Mark all as seen". */
 export function CheckAllIcon(props: IconProps) {
   return (
     <Icon {...props}>

@@ -4,8 +4,8 @@ import { mediaUrl } from '../../lib/media'
 import Popover from '../pickers/Popover'
 import { CloseIcon, PlusIcon } from '../sequences/icons'
 
-// The list on the left of Karaktärer, Miljöer, Produkter, Kläder, Poser, Sekvenser, Storyboards and Redigera, the
-// same in all of them: the view's name with "＋ Ny …", a search field, and one row per item – its picture, name, a
+// The list on the left of Characters, Environments, Products, Outfits, Poses, Sequences, Storyboards and Editor, the
+// same in all of them: the view's name with "＋ New …", a search field, and one row per item – its picture, name, a
 // line about it and what runs there or is new. The ✕ on a row asks in the row itself before anything is deleted.
 // ↑ ↓ move between the rows, Enter opens one, ⌘F goes to the search.
 
@@ -26,15 +26,15 @@ export interface SideRowControl {
 interface Props<T extends SideListItem> {
   /** The view's name, at the top. */
   title: string
-  /** "Ny sekvens". */
+  /** "New sequence". */
   createLabel: string
   createTitle?: string
   creating?: boolean
-  /** "＋ Ny …" creates at once … */
+  /** "＋ New …" creates at once … */
   onCreate?: () => void
   /** … or opens this under the button (a form, or a menu of ways to start); close() closes it. */
   createPanel?: { width?: number; label?: string; popup?: 'dialog' | 'menu'; render: (close: () => void) => ReactNode }
-  /** Under the heading, above the search (Markera alla som sedda). */
+  /** Under the heading, above the search (Mark all as seen). */
   headerExtra?: ReactNode
   /** In the view's order; undefined until the first load has arrived. */
   items?: readonly T[]
@@ -46,7 +46,7 @@ interface Props<T extends SideListItem> {
   /** In the list while there is nothing at all. */
   emptyText: ReactNode
   renderRow: (item: T, control: SideRowControl) => ReactNode
-  /** The question; "Radera ”name”?" when left out. */
+  /** The question; "Delete “name”?" when left out. */
   deleteQuestion?: (item: T) => string
   /** One line under the question: what deleting does. */
   deleteNote: (item: T) => ReactNode
@@ -60,7 +60,7 @@ interface Props<T extends SideListItem> {
 // How long an unanswered question stays (not while the pointer is on it, it is deleting, or it shows an error).
 const QUESTION_MS = 8000
 
-const fold = (text: string) => text.toLocaleLowerCase('sv')
+const fold = (text: string) => text.toLocaleLowerCase('en')
 
 const rowSelector = (id: string) => `[data-side-row="${CSS.escape(id)}"]`
 
@@ -295,8 +295,8 @@ export default function SideList<T extends SideListItem>({
                 setQuery('')
                 searchRef.current?.focus()
               }}
-              title="Rensa sökningen"
-              aria-label="Rensa sökningen"
+              title="Clear search"
+              aria-label="Clear search"
               className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted hover:bg-line hover:text-text"
             >
               <CloseIcon size={9} />
@@ -310,7 +310,7 @@ export default function SideList<T extends SideListItem>({
           <p className="px-2 py-2 text-[12px] leading-relaxed text-muted">{emptyText}</p>
         ) : listed && visible.length === 0 ? (
           <div className="px-2 py-2 text-[12px] leading-relaxed text-muted">
-            <p className="break-words">Inga träffar för ”{query.trim()}”.</p>
+            <p className="break-words">No matches for “{query.trim()}”.</p>
             <button
               type="button"
               onClick={() => {
@@ -319,7 +319,7 @@ export default function SideList<T extends SideListItem>({
               }}
               className="mt-1 text-text underline-offset-2 hover:underline"
             >
-              Rensa sökningen
+              Clear search
             </button>
           </div>
         ) : (
@@ -330,7 +330,7 @@ export default function SideList<T extends SideListItem>({
                   <div
                     ref={questionRef}
                     role="group"
-                    aria-label={deleteQuestion?.(item) ?? `Radera ”${item.name}”?`}
+                    aria-label={deleteQuestion?.(item) ?? `Delete “${item.name}”?`}
                     onMouseEnter={() => setHeld(true)}
                     onMouseLeave={() => setHeld(false)}
                     onKeyDown={(e) => {
@@ -341,7 +341,7 @@ export default function SideList<T extends SideListItem>({
                     className="rounded-md border border-accent/40 bg-raised p-2"
                   >
                     <p className="mb-1 line-clamp-2 break-words text-[12px]">
-                      {deleteQuestion?.(item) ?? `Radera ”${item.name}”?`}
+                      {deleteQuestion?.(item) ?? `Delete “${item.name}”?`}
                     </p>
                     <p className="mb-2 text-[11px] leading-snug text-muted">{deleteNote(item)}</p>
                     {error && (
@@ -357,7 +357,7 @@ export default function SideList<T extends SideListItem>({
                         onClick={() => void confirm(item)}
                         className="rounded bg-accent px-2 py-0.5 text-[11px] font-medium text-white hover:bg-accent-hover disabled:opacity-40"
                       >
-                        {busy ? 'Raderar…' : error ? 'Försök igen' : 'Radera'}
+                        {busy ? 'Deleting…' : error ? 'Try again' : 'Delete'}
                       </button>
                       <button
                         type="button"
@@ -365,7 +365,7 @@ export default function SideList<T extends SideListItem>({
                         onClick={() => closeQuestion(true)}
                         className="rounded px-2 py-0.5 text-[11px] text-muted hover:bg-line hover:text-text disabled:opacity-40"
                       >
-                        Avbryt
+                        Cancel
                       </button>
                     </div>
                   </div>
@@ -397,11 +397,11 @@ interface RowProps {
   status?: ReactNode
   /** The row's tooltip. */
   title?: string
-  /** The ✕'s tooltip ("Radera sekvensen"). */
+  /** The ✕'s tooltip ("Delete sequence"). */
   deleteTitle: string
   /** Lit up as a drop target. */
   highlight?: boolean
-  /** Finder files dropped on the row (Karaktärer and the other kinds). */
+  /** Finder files dropped on the row (Characters and the other kinds). */
   dropHandlers?: Pick<HTMLAttributes<HTMLDivElement>, 'onDragEnter' | 'onDragOver' | 'onDragLeave' | 'onDrop'>
 }
 
@@ -445,7 +445,7 @@ export function SideListRow({
         data-side-delete
         onClick={onAskDelete}
         title={deleteTitle}
-        aria-label={`Radera ${name}`}
+        aria-label={`Delete ${name}`}
         className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted opacity-0 transition hover:bg-line hover:text-accent focus:opacity-100 group-hover:opacity-100 group-has-[[data-side-row]:focus-visible]:opacity-100"
       >
         <CloseIcon size={11} />

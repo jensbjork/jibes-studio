@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import type { PromptLanguage } from '@shared/types'
 
-// The "Promptspråk" setting decides the words inserted between references ("wearing" or "i"). It is read
+// The "Prompt language" setting decides the words inserted between references ("wearing" or "i"). It is read
 // from main and shared by every editor; read again whenever an editor mounts or gets focus and when the
 // window comes back to the front, so a change in Settings reaches a form that stayed open.
 

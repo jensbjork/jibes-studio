@@ -1,6 +1,6 @@
 // Own clips ("Egna klipp"): the user's own video files, brought into the library so they can be used like any
 // generation: in the clip feed, as a clip (or a take of a clip) in a sequence that AI clips continue from, and as the
-// starting point of an edit in Redigera. An import is a `generations` row with source 'import', inserted completed
+// starting point of an edit in the Editor. An import is a `generations` row with source 'import', inserted completed
 // (never pending: nothing is generated) with no price, and a file of its own in Egna klipp/<day>/: an APFS clone of
 // the original where the volume allows (instant, no extra space), else a copy. When the original can't be played or
 // continued from as it is (HDR, more than 8 bits, larger than 1080p, a variable frame rate, rotation metadata, ProRes
@@ -42,11 +42,11 @@ const execFileAsync = promisify(execFile)
 /** The file types the file dialog offers for own clips (file:pickVideos) and that drops accept. */
 export const VIDEO_FILE_TYPES = ['mp4', 'mov', 'm4v', 'webm', 'mkv'] as const
 
-/** Said while an import runs (a library switch or "Städa upp" would pull the folder away under it). */
-export const IMPORT_BUSY = 'Det pågår en import av egna klipp. Vänta tills den är klar och försök igen.'
+/** Said while an import runs (a library switch or "Tidy up" would pull the folder away under it). */
+export const IMPORT_BUSY = 'Own clips are being imported. Wait until that is done and try again.'
 
-/** Said for a file the import was stopped before (Avbryt). */
-const CANCELLED = 'Importen avbröts.'
+/** Said for a file the import was stopped before (Cancel). */
+const CANCELLED = 'The import was cancelled.'
 
 /** Above this a copy that can't be a clone is confirmed first (the window asks; see VideoFileInfo.cloneable). */
 export const LARGE_COPY_BYTES = 2 * 1024 ** 3
@@ -154,28 +154,28 @@ function playable(info: Pick<MediaInfo, 'codec' | 'pixFmt'>, ext: string): boole
 }
 
 /**
- * Why the file needs a working copy (Swedish, as the import dialog lists them), or [] when it can be used as it is:
+ * Why the file needs a working copy (as the import dialog lists them), or [] when it can be used as it is:
  * Studio plays it, its last frame makes a normal 8-bit picture to continue from, and the export cuts it like any take.
  */
 export function workingCopyReasons(info: MediaInfo, path: string): string[] {
   const ext = extname(path).toLowerCase()
   const reasons: string[] = []
   if (info.hdr) reasons.push('HDR')
-  if (info.bitDepth > 8) reasons.push(`${info.bitDepth}-bitars färg`)
+  if (info.bitDepth > 8) reasons.push(`${info.bitDepth}-bit colour`)
   if (Math.max(info.width, info.height) > MAX_LONG_SIDE) reasons.push(`${sizeLabel(info.width, info.height)} → 1080p`)
-  if (info.variableFrameRate) reasons.push('variabel bildfrekvens')
-  if (info.rotation && info.rotation % 360 !== 0) reasons.push('roterad')
+  if (info.variableFrameRate) reasons.push('variable frame rate')
+  if (info.rotation && info.rotation % 360 !== 0) reasons.push('rotated')
   if ((info.codec || '').toLowerCase() === 'prores') reasons.push('ProRes')
-  else if (!playable(info, ext)) reasons.push('formatet spelas inte i Studio')
+  else if (!playable(info, ext)) reasons.push("the format doesn't play in Studio")
   // Newer iPhones put a spatial-audio track first, which ffmpeg can't decode; the export and the editor read the first.
-  if (info.audioStreams.length && !info.audioStreams[0].decodable) reasons.push('ljudspåret kan inte läsas')
+  if (info.audioStreams.length && !info.audioStreams[0].decodable) reasons.push('the audio track cannot be read')
   // Anamorphic (HDV, DV, a camera's anamorphic mode): the export and a continuation frame would come out squeezed.
-  if (info.sar !== undefined && info.sar > 0 && Math.abs(info.sar - 1) > 0.01) reasons.push('icke-kvadratiska bildpunkter')
-  // Sound and picture that start apart (a recorder, some phones): the export and Redigera's cuts start each stream at
+  if (info.sar !== undefined && info.sar > 0 && Math.abs(info.sar - 1) > 0.01) reasons.push('non-square pixels')
+  // Sound and picture that start apart (a recorder, some phones): the export and the Editor's cuts start each stream at
   // its own first frame or sample, which would put them out of sync. A single AAC frame of priming (~21 ms) is left.
   const fps = info.fps > 0 ? info.fps : 24
   if (info.audioOffset !== undefined && Math.abs(info.audioOffset) > Math.max(0.5 / fps, AV_OFFSET_TOLERANCE)) {
-    reasons.push('ljud och bild börjar inte samtidigt')
+    reasons.push("sound and picture don't start together")
   }
   return reasons
 }
@@ -327,7 +327,7 @@ interface Inspected {
 /**
  * Everything the import dialog shows before anything is copied (free): whether the file can be imported, what it
  * is, whether a working copy will be made and why, whether it is cloned or copied, and whether it was imported
- * before. Refusals are Swedish and name the file.
+ * before. Refusals name the file.
  */
 async function inspectOne(path: string, device: number | undefined): Promise<Inspected> {
   const name = basename(path)
@@ -338,12 +338,12 @@ async function inspectOne(path: string, device: number | undefined): Promise<Ins
   let fileDevice: number
   try {
     const s = await stat(path)
-    if (s.isDirectory()) return refuse('Det är en mapp, inte en videofil.')
-    if (!s.isFile()) return refuse('Filen kan inte läsas.')
+    if (s.isDirectory()) return refuse('It is a folder, not a video file.')
+    if (!s.isFile()) return refuse('The file cannot be read.')
     bytes = s.size
     fileDevice = s.dev
   } catch (err) {
-    return refuse((err as NodeJS.ErrnoException).code === 'ENOENT' ? 'Filen finns inte.' : 'Filen kan inte läsas.')
+    return refuse((err as NodeJS.ErrnoException).code === 'ENOENT' ? 'The file does not exist.' : 'The file cannot be read.')
   }
   let media: MediaInfo
   try {
@@ -351,10 +351,10 @@ async function inspectOne(path: string, device: number | undefined): Promise<Ins
     media = displayed(await probeMedia(path))
   } catch (err) {
     const message = errorText(err)
-    return refuse(/videospår/i.test(message) ? 'Filen innehåller inget videospår.' : 'Filen kan inte läsas.', bytes)
+    return refuse(/video track/i.test(message) ? 'The file has no video track.' : 'The file cannot be read.', bytes)
   }
-  if (!(media.width > 0 && media.height > 0)) return refuse('Filen innehåller inget videospår.', bytes)
-  if (!(media.duration >= MIN_SECONDS)) return refuse('Filmen är för kort (under en halv sekund).', bytes)
+  if (!(media.width > 0 && media.height > 0)) return refuse('The file has no video track.', bytes)
+  if (!(media.duration >= MIN_SECONDS)) return refuse('The video is too short (under half a second).', bytes)
   const reasons = workingCopyReasons(media, path)
   let duplicateOf: string | undefined
   try {
@@ -406,9 +406,9 @@ function uniquePaths(paths: readonly unknown[]): string[] {
   return out
 }
 
-/** File names in the order a person would sort them ("klipp 2" before "klipp 10"). */
+/** File names in the order a person would sort them ("clip 2" before "clip 10"). */
 export function byName(a: string, b: string): number {
-  return basename(a).localeCompare(basename(b), 'sv', { numeric: true, sensitivity: 'base' })
+  return basename(a).localeCompare(basename(b), 'en', { numeric: true, sensitivity: 'base' })
 }
 
 // ── Import ───────────────────────────────────────────────────────────────────
@@ -424,12 +424,12 @@ export interface ImportDeps {
   notifySequence: (sequenceId: string) => void
 }
 
-/** "1,2 GB" (Swedish decimal comma). */
+/** "1.2 GB". */
 function formatGb(bytes: number): string {
-  return `${(Math.max(0.1, bytes / 1024 ** 3)).toLocaleString('sv-SE', { maximumFractionDigits: 1 })} GB`
+  return `${(Math.max(0.1, bytes / 1024 ** 3)).toLocaleString('en-GB', { maximumFractionDigits: 1 })} GB`
 }
 
-/** Refuses (Swedish) when importing would leave less than MIN_FREE_BYTES on the library's disk. */
+/** Refuses when importing would leave less than MIN_FREE_BYTES on the library's disk. */
 async function checkDiskSpace(needed: number): Promise<void> {
   let free: number
   try {
@@ -441,7 +441,7 @@ async function checkDiskSpace(needed: number): Promise<void> {
   }
   if (free - needed < MIN_FREE_BYTES) {
     throw new Error(
-      `Det finns för lite ledigt utrymme på disken (behöver ~${formatGb(needed)}, och minst 2 GB ska vara kvar).`
+      `There is too little free disk space (needs ~${formatGb(needed)}, and at least 2 GB must be left).`
     )
   }
 }
@@ -486,7 +486,7 @@ async function copyAndHash(
     { signal }
   )
   const copied = await stat(dest)
-  if (copied.size !== bytes) throw new Error('kopian blev ofullständig')
+  if (copied.size !== bytes) throw new Error('the copy was incomplete')
   const sha256 = hash.digest('hex')
   const from = await stat(src).catch(() => undefined)
   if (from) rememberHash(src, from.size, from.mtimeMs, sha256)
@@ -577,7 +577,7 @@ export class ImportService {
 
   constructor(private readonly deps: ImportDeps) {}
 
-  /** Why the library can't be switched or tidied right now (Swedish), or undefined. */
+  /** Why the library can't be switched or tidied right now, or undefined. */
   isBusy(): string | undefined {
     return this.importing > 0 ? IMPORT_BUSY : undefined
   }
@@ -646,7 +646,7 @@ export class ImportService {
 
   private async run(paths: string[], target: ImportTarget, signal: AbortSignal): Promise<ImportResult> {
     const kind = target?.kind
-    if (kind !== 'feed' && kind !== 'sequence' && kind !== 'segment') throw new Error('Okänt mål för importen.')
+    if (kind !== 'feed' && kind !== 'sequence' && kind !== 'segment') throw new Error('Unknown destination for the import.')
     // Checked before anything is looked at: a target that is gone (or a storyboard) takes no files.
     const sequenceId =
       kind === 'sequence'
@@ -656,7 +656,7 @@ export class ImportService {
           : undefined
     const segmentId = kind === 'segment' ? store.requireSegmentRow(target.segmentId).id : undefined
     const fit = kind !== 'feed' && target.fit === 'crop' ? 'crop' : 'pad'
-    // Not while "Städa upp" or a library switch moves folders.
+    // Not while "Tidy up" or a library switch moves folders.
     await libraryOperationSettled()
 
     const result: ImportResult = { generationIds: [], errors: [], ...(sequenceId ? { sequenceId } : {}) }
@@ -682,7 +682,7 @@ export class ImportService {
       const inspected = await inspectOne(path, device)
       if (inspected.info.ok && inspected.media) ok.push(inspected)
       else {
-        const message = inspected.info.error ?? `${basename(path)}: Filen kan inte läsas.`
+        const message = inspected.info.error ?? `${basename(path)}: The file cannot be read.`
         result.errors.push({ path, message })
         report({ path, fraction: 0, done: true, error: message })
       }
@@ -788,7 +788,7 @@ export class ImportService {
 
     const reasons = [...info.workingCopy]
     const working = reasons.length > 0 || crop !== undefined
-    if (crop !== undefined) reasons.push(`beskuren till ${aspectLabel(crop * 1000, 1000)}`)
+    if (crop !== undefined) reasons.push(`cropped to ${aspectLabel(crop * 1000, 1000)}`)
     const longSide = Math.min(MAX_LONG_SIDE, Math.max(media.width, media.height))
     const workingBytes = working
       ? media.duration * (longSide > 1280 ? WORKING_COPY_RATE_1080 : WORKING_COPY_RATE_SMALL)
@@ -817,7 +817,7 @@ export class ImportService {
         progress.at(0, f)
       ).catch((err: unknown) => {
         if (isAbort(err, signal)) throw abortError()
-        throw new Error(`Filen kunde inte kopieras till biblioteket: ${fileErrorReason(err)}.`)
+        throw new Error(`The file could not be copied to the library: ${fileErrorReason(err)}.`)
       })
       if (signal.aborted) throw abortError()
 
@@ -833,7 +833,7 @@ export class ImportService {
           onProgress: (f: number) => progress.at(1, f)
         }).catch((err: unknown) => {
           if (isAbort(err, signal)) throw abortError()
-          throw new Error(`Arbetskopian kunde inte göras: ${errorText(err)}`)
+          throw new Error(`The working copy could not be made: ${errorText(err)}`)
         })
       }
       if (signal.aborted) throw abortError()
@@ -849,7 +849,7 @@ export class ImportService {
       })
       if (signal.aborted) throw abortError()
 
-      // Into Egna klipp/<today>/, by the home rule (the same names "Städa upp" would give them): with a working copy,
+      // Into Egna klipp/<today>/, by the home rule (the same names "Tidy up" would give them): with a working copy,
       // the working copy is "<title> (arbetskopia).mp4" and the original "<title><ext>" beside it. The scratch path
       // only stands for "has an original" here; the row records where the original lands.
       const located = {
@@ -891,7 +891,7 @@ export class ImportService {
         completedAt: now,
         recipe: {
           op: 'import',
-          label: 'Importerad',
+          label: 'Imported',
           timing: 'same',
           mix: { bed: { source: { kind: 'generation', id }, gains: [] }, layers: [] },
           import: { name, bytes: info.bytes, sha256, workingCopy: reasons, fit: crop !== undefined ? 'crop' : 'pad' }

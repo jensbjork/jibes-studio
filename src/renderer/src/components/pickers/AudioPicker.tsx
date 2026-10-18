@@ -32,12 +32,12 @@ interface Props {
 
 /** The kinds that have audio, in the order they are listed, with what their clips are called. */
 const SECTIONS: { kind: AssetKind; title: string }[] = [
-  { kind: 'character', title: 'Röster' },
-  { kind: 'environment', title: 'Ljudmiljöer' }
+  { kind: 'character', title: 'Voices' },
+  { kind: 'environment', title: 'Soundscapes' }
 ]
 
 /**
- * Popover content for "＋ Ljud": the characters' voices and the environments' sounds, each clip with a play
+ * Popover content for "＋ Sound": the characters' voices and the environments' sounds, each clip with a play
  * button for the part that is sent. Clicking a clip adds it as the next @AudioN.
  */
 export default function AudioPicker({ assets, audios, byPath, max, onPick, onManage }: Props) {
@@ -51,19 +51,19 @@ export default function AudioPicker({ assets, audios, byPath, max, onPick, onMan
   return (
     <>
       <div className="border-b border-line px-3 py-2.5">
-        <p className="font-medium">Lägg till ljud</p>
+        <p className="font-medium">Add sound</p>
         <p className="mt-0.5 text-[11px] text-muted">
           {full
-            ? `Alla ${max} platser är upptagna – ta bort ett ljudklipp först.`
-            : `Röster och ljudmiljöer från biblioteket. ${max - audios.length} av ${max} platser och ` +
-              `${formatClipSeconds(left)} av ${MAX_REFERENCE_AUDIO_SECONDS} s kvar.`}
+            ? `All ${max} places are taken – remove a sound clip first.`
+            : `Voices and soundscapes from the library. ${max - audios.length} of ${max} places and ` +
+              `${formatClipSeconds(left)} of ${MAX_REFERENCE_AUDIO_SECONDS} s left.`}
         </p>
         {withAudio.length > 6 && (
           <input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Sök karaktär eller miljö…"
+            placeholder="Search characters or environments…"
             className="mt-2 w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted"
           />
         )}
@@ -72,10 +72,10 @@ export default function AudioPicker({ assets, audios, byPath, max, onPick, onMan
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {withAudio.length === 0 ? (
           <div className="px-3 py-6 text-center text-muted">
-            <p>Inga röster eller ljud än.</p>
+            <p>No voices or sounds yet.</p>
             <p className="mt-1 text-[11px]">
-              Lägg till ett röstklipp på en karaktär eller ett ljudklipp på en miljö, så kan du skicka med hur de
-              låter.
+              Add a voice clip to a character or a sound clip to an environment, and you can send how they
+              sound.
             </p>
             {onManage && (
               <div className="mt-3 flex justify-center gap-2">
@@ -83,19 +83,19 @@ export default function AudioPicker({ assets, audios, byPath, max, onPick, onMan
                   onClick={() => onManage('character')}
                   className="rounded-md border border-line px-3 py-1.5 text-text hover:bg-raised"
                 >
-                  Karaktärer
+                  Characters
                 </button>
                 <button
                   onClick={() => onManage('environment')}
                   className="rounded-md border border-line px-3 py-1.5 text-text hover:bg-raised"
                 >
-                  Miljöer
+                  Environments
                 </button>
               </div>
             )}
           </div>
         ) : visible.length === 0 ? (
-          <p className="px-3 py-6 text-center text-muted">Inget matchar ”{query}”.</p>
+          <p className="px-3 py-6 text-center text-muted">Nothing matches “{query}”.</p>
         ) : (
           SECTIONS.map(({ kind, title }) => {
             const rows = visible.filter((a) => a.kind === kind)
@@ -156,10 +156,10 @@ function AssetClips({ asset, audios, byPath, max, onPick }: AssetClipsProps) {
                 disabled={!fit.fits}
                 title={
                   added
-                    ? 'Redan tillagt'
+                    ? 'Already added'
                     : fit.fits
-                      ? `Lägg till ${possessive(asset.name, 'sv')} ${name} (${window})`
-                      : `Kan inte läggas till: ${fit.reason}`
+                      ? `Add ${possessive(asset.name, 'en')} ${name} (${window})`
+                      : `Can’t be added: ${fit.reason}`
                 }
                 className="flex min-w-0 flex-1 items-center gap-2 rounded px-1.5 py-1 text-left text-[12px] hover:bg-raised/60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               >

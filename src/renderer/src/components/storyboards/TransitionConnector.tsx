@@ -45,7 +45,7 @@ interface Props {
 /**
  * The clip between two boards, as a compact card on an arrow from one picture to the next: what happens (the
  * prompt's start), its state – the take in use, its progress, or what it waits for – its length and price, and
- * Generera when it has nothing yet. A click opens it in the editor beside the boards; the + above it inserts a
+ * Generate when it has nothing yet. A click opens it in the editor beside the boards; the + above it inserts a
  * board between the two.
  */
 export default function TransitionConnector({
@@ -68,10 +68,10 @@ export default function TransitionConnector({
   const blocked = t ? generateBlocked(storyboard, t) : undefined
   // Only priced where it can be generated, so a row of empty boards doesn't ask Venice for prices.
   const quote = useClipQuote(t && !blocked ? t.params : undefined)
-  // Generera where there is nothing usable yet, or the take in use was made from earlier pictures.
+  // Generate where there is nothing usable yet, or the take in use was made from earlier pictures.
   const offerGenerate =
     !!status && (status.kind === 'empty' || status.kind === 'failed' || (status.kind === 'done' && status.stale))
-  // A finished take nobody has looked at yet (chosen or not): "Klart · ny tagning" until it is played or clicked.
+  // A finished take nobody has looked at yet (chosen or not): "Done · new take" until it is played or clicked.
   const fresh = !!news?.fresh.length
   // A failure counts as seen once the card has been on screen a moment (D4); the card keeps saying it failed.
   const cardRef = useRef<HTMLDivElement>(null)
@@ -104,8 +104,8 @@ export default function TransitionConnector({
           type="button"
           onClick={onInsert}
           disabled={adding}
-          title="Lägg till en ruta här – övergången mellan rutorna ersätts då av två nya"
-          aria-label="Lägg till en ruta här"
+          title="Add a board here – the transition between the boards is then replaced by two new ones"
+          aria-label="Add a board here"
           className="absolute -top-9 left-1/2 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-bg text-muted opacity-50 transition hover:border-muted hover:text-text hover:opacity-100 focus-visible:opacity-100 disabled:opacity-20"
         >
           <PlusIcon size={11} />
@@ -119,7 +119,7 @@ export default function TransitionConnector({
             onClick={onOpen}
             onKeyDown={onKeyDown}
             aria-pressed={selected}
-            aria-label={`${transitionLabel(storyboard, t)}, klippet från ruta ${fromNumber} till ruta ${toNumber}`}
+            aria-label={`${transitionLabel(storyboard, t)}, the clip from board ${fromNumber} to board ${toNumber}`}
             className={`flex w-[176px] cursor-pointer flex-col gap-2 rounded-lg border bg-panel p-2 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-muted ${
               selected ? 'border-accent/70 shadow-lg shadow-black/40' : 'border-line hover:border-muted/60'
             }`}
@@ -135,7 +135,7 @@ export default function TransitionConnector({
             </div>
 
             <p className={`line-clamp-2 min-h-[2lh] text-[11px] leading-snug ${t.params.prompt.trim() ? 'text-text/85' : 'italic text-muted/70'}`}>
-              {t.params.prompt.trim() ? excerpt(t.params.prompt, 120) : 'Vad händer? Klicka för att skriva.'}
+              {t.params.prompt.trim() ? excerpt(t.params.prompt, 120) : 'What happens? Click to write.'}
             </p>
 
             <div className="flex items-center gap-1.5 text-[11px] text-muted">
@@ -151,10 +151,10 @@ export default function TransitionConnector({
                     onGenerate()
                   }}
                   disabled={!!blocked || submitting}
-                  title={blocked ?? `Generera klippet (${formatUsd(quote)})`}
+                  title={blocked ?? `Generate the clip (${formatUsd(quote)})`}
                   className="ml-auto rounded-md bg-accent px-2 py-0.5 font-medium text-white transition hover:bg-accent-hover disabled:bg-raised disabled:text-muted"
                 >
-                  {submitting ? 'Skickar…' : status.kind === 'empty' ? 'Generera' : 'Igen'}
+                  {submitting ? 'Sending…' : status.kind === 'empty' ? 'Generate' : 'Again'}
                 </button>
               )}
             </div>
@@ -165,7 +165,7 @@ export default function TransitionConnector({
           </div>
         ) : (
           <div className="flex h-24 w-[176px] items-center justify-center rounded-lg border border-dashed border-line text-[11px] text-muted">
-            <span className="animate-pulse">Uppdaterar…</span>
+            <span className="animate-pulse">Updating…</span>
           </div>
         )}
       </div>
@@ -210,39 +210,39 @@ function StatusLine({ status, fresh }: { status: TransitionStatus; fresh: boolea
     return (
       <p
         className="truncate text-[11px] font-medium text-emerald-300"
-        title="En ny tagning är klar. Öppna övergången och klicka på den för att titta på den."
+        title="A new take is ready. Open the transition and click the take to watch it."
       >
-        {status.kind === 'done' ? 'Klart · ny tagning' : 'Ny tagning'}
+        {status.kind === 'done' ? 'Done · new take' : 'New take'}
       </p>
     )
   }
   switch (status.kind) {
     case 'done':
       return status.stale ? (
-        <p className="truncate text-[11px] text-amber-300" title="Klippet gjordes med en tidigare bild i någon av rutorna">
-          Tidigare bild
+        <p className="truncate text-[11px] text-amber-300" title="The clip was made with an earlier image on one of the boards">
+          Earlier image
         </p>
       ) : (
-        <p className="truncate text-[11px] text-emerald-300/90">Klart</p>
+        <p className="truncate text-[11px] text-emerald-300/90">Done</p>
       )
     case 'generating':
       return (
         <p className="flex items-center gap-1 truncate text-[11px] text-text">
           <Spinner size={10} />
           {status.take.status === 'queued'
-            ? 'I kö…'
-            : `Genererar${status.progress ? ` ${Math.round(status.progress * 100)} %` : '…'}`}
+            ? 'Queued…'
+            : `Generating${status.progress ? ` ${Math.round(status.progress * 100)}%` : '…'}`}
         </p>
       )
     case 'failed':
       return (
         <p className="truncate text-[11px] text-accent" title={status.take.error}>
-          Misslyckades
+          Failed
         </p>
       )
     case 'waiting':
-      return <p className="truncate text-[11px] text-muted">Väntar på bilder</p>
+      return <p className="truncate text-[11px] text-muted">Needs images</p>
     default:
-      return <p className="truncate text-[11px] text-muted">Inte genererat</p>
+      return <p className="truncate text-[11px] text-muted">Not generated</p>
   }
 }

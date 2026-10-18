@@ -50,7 +50,7 @@ export interface UploadEntry {
   path?: string
   mime?: string
   info?: UploadInfo
-  /** Swedish, when it failed. */
+  /** Why, when it failed. */
   error?: string
   /** The host a URL upload comes from (never the URL itself). */
   host?: string
@@ -60,7 +60,7 @@ export interface UploadEntry {
   expiresAt: number
 }
 
-/** What runs, for Pågår och klart (WorkStatus reads it through AgentService.uploads). */
+/** What runs, for Activity (WorkStatus reads it through AgentService.uploads). */
 export interface UploadWork {
   id: string
   client: string
@@ -96,7 +96,7 @@ export interface UploadStoreOptions {
   notify?: (kind: 'structure' | 'progress') => void
   /**
    * A fetched or PUT upload became ready or failed after the tool call that began it had answered: the activity log
-   * says so ("hämtade en bild från example.com"). Inline uploads are told by their own call.
+   * says so ("fetched an image from example.com"). Inline uploads are told by their own call.
    */
   onSettled?: (entry: UploadEntry) => void
   userAgent: string
@@ -148,9 +148,9 @@ const DISK_CHECK_MS = 1000
 /** …and after this many bytes, whichever comes first. */
 const DISK_CHECK_BYTES = 64 * 1024 ** 2
 
-const DISK_FULL = 'Det finns för lite ledigt utrymme på disken.'
+const DISK_FULL = 'There is too little free space on the disk.'
 
-const FALLBACK_NAME: Record<UploadKind, string> = { image: 'Bild', audio: 'Ljud', video: 'Film' }
+const FALLBACK_NAME: Record<UploadKind, string> = { image: 'Image', audio: 'Sound', video: 'Film' }
 
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
@@ -191,7 +191,7 @@ export class UploadStore {
   // ── Beginning ──────────────────────────────────────────────────────────────
 
   /**
-   * Starts an upload. Inline data is checked at once (resolves ready, or rejects with the Swedish refusal and
+   * Starts an upload. Inline data is checked at once (resolves ready, or rejects with the refusal and
    * keeps nothing); a URL is fetched in the background (resolves downloading); a PUT waits for its bytes
    * (resolves receiving). Refused without a library, past the limits or with too little disk.
    */
@@ -204,17 +204,17 @@ export class UploadStore {
     let declared = 0
     let url: URL | undefined
     if ('data' in source) {
-      if (!source.data.length) throw new Error('Filen är tom.')
+      if (!source.data.length) throw new Error('The file is empty.')
       if (source.data.length > MAX_INLINE_BYTES) {
         throw new Error(
-          `data_base64 tar högst ${MAX_INLINE_BYTES.toLocaleString('sv-SE')} byte. Skicka större filer med bytes (PUT) eller url.`
+          `data_base64 takes at most ${MAX_INLINE_BYTES.toLocaleString('en-GB')} bytes. Send larger files with bytes (PUT) or url.`
         )
       }
       if (source.data.length > cap) throw new Error(tooLargeMessage(input.kind))
       declared = source.data.length
     } else if ('bytes' in source) {
       if (!Number.isSafeInteger(source.bytes) || source.bytes < 1) {
-        throw new Error('bytes ska vara filens storlek i byte.')
+        throw new Error("bytes must be the file's size in bytes.")
       }
       if (source.bytes > cap) throw new Error(tooLargeMessage(input.kind))
       declared = source.bytes
@@ -287,7 +287,7 @@ export class UploadStore {
 
   /**
    * Whether a PUT of `length` bytes from `peer` may go to this upload, checked before a byte is read (and before
-   * "100 Continue"): undefined when it may, else the HTTP status and the Swedish reason. The free-disk floor is
+   * "100 Continue"): undefined when it may, else the HTTP status and the reason. The free-disk floor is
    * checked again here: a PUT's size is only reserved while it can come soon (see outstanding).
    */
   async checkPut(id: string, peer: string, length: number): Promise<{ status: number; error: string } | undefined> {
@@ -310,15 +310,15 @@ export class UploadStore {
     this.sweep()
     const entry = this.entries.get(id)
     if (!entry) return { status: 404, error: this.goneMessage(id) }
-    if (entry.peer !== peer) return { status: 403, error: 'Uppladdningen började från en annan dator.' }
+    if (entry.peer !== peer) return { status: 403, error: 'The upload was started from another computer.' }
     if (entry.status !== 'receiving' || entry.request) {
       return {
         status: 409,
-        error: `Uppladdningen tar inte emot någon fil just nu (${entry.request ? 'receiving' : entry.status}).`
+        error: `The upload isn't taking a file right now (${entry.request ? 'receiving' : entry.status}).`
       }
     }
     if (length !== entry.bytes) {
-      return { status: 400, error: `Content-Length är ${length}, men begin_upload angav bytes = ${entry.bytes}.` }
+      return { status: 400, error: `Content-Length is ${length}, but begin_upload gave bytes = ${entry.bytes}.` }
     }
     return undefined
   }
@@ -332,7 +332,7 @@ export class UploadStore {
   async receive(id: string, req: IncomingMessage): Promise<{ status: number; body: Record<string, unknown> }> {
     const entry = this.entries.get(id)
     if (!entry || entry.status !== 'receiving' || entry.request) {
-      return { status: 409, body: { error: 'Uppladdningen tar inte emot någon fil just nu.' } }
+      return { status: 409, body: { error: "The upload isn't taking a file right now." } }
     }
     entry.request = req
     entry.putTried = true
@@ -390,16 +390,16 @@ export class UploadStore {
       await rm(part, { force: true }).catch(() => {})
       if (!live) return { status: 410, body: { error: this.goneMessage(id) } }
       if (overflow) {
-        await this.fail(entry, `Filen är större än de ${limit} byte som begin_upload angav.`)
+        await this.fail(entry, `The file is larger than the ${limit} bytes begin_upload gave.`)
         return { status: 413, body: { error: entry.error } }
       }
       // A broken connection or a stalled one: nothing is kept and the agent can send the file again.
       const error =
         timedOut === 'idle'
-          ? `Inget kom fram på ${spokenTime(this.limits.putIdleMs)}, så överföringen avbröts. Skicka filen igen.`
+          ? `Nothing arrived for ${spokenTime(this.limits.putIdleMs)}, so the transfer was stopped. Send the file again.`
           : timedOut === 'total'
-            ? `Överföringen tog längre än ${spokenTime(this.limits.putTotalMs)} och avbröts. Skicka filen igen över en snabbare förbindelse, eller släng den här uppladdningen (discard_upload) och låt Studio hämta filen (url).`
-            : 'Överföringen avbröts. Skicka filen igen.'
+            ? `The transfer took longer than ${spokenTime(this.limits.putTotalMs)} and was stopped. Send the file again over a faster connection, or discard this upload (discard_upload) and let Studio fetch the file (url).`
+            : 'The transfer was interrupted. Send the file again.'
       entry.received = 0
       entry.error = error
       this.changed()
@@ -418,7 +418,7 @@ export class UploadStore {
     }
     if (received !== limit) {
       await rm(part, { force: true }).catch(() => {})
-      const error = `Bara ${received} av ${limit} byte kom fram. Skicka filen igen.`
+      const error = `Only ${received} of ${limit} bytes arrived. Send the file again.`
       entry.received = 0
       entry.error = error
       this.changed()
@@ -448,7 +448,7 @@ export class UploadStore {
     // Waiting for a slot wasn't idling: the 30 minutes without a byte count from now.
     entry.lastActivity = Date.now()
     const controller = new AbortController()
-    /** Why this upload was stopped here (a limit), rather than the abort's own "Hämtningen avbröts.". */
+    /** Why this upload was stopped here (a limit), rather than the abort's own "The download was stopped.". */
     let refused: string | undefined
     try {
       // Thrown away, or ended otherwise, while it waited: nothing is fetched.
@@ -547,7 +547,7 @@ export class UploadStore {
     this.changed()
     try {
       if (entry.expectedSha && entry.sha256 !== entry.expectedSha)
-        throw new Error('Kontrollsumman stämmer inte (sha256).')
+        throw new Error("The checksum doesn't match (sha256).")
       const sniffed = sniff(entry.kind, await readHead(part, HEAD_BYTES))
       if (!sniffed) throw new Error(notOfKind(entry.kind))
       const stem = safeName(basename(entry.fileName, extname(entry.fileName)), { fallback: FALLBACK_NAME[entry.kind] })
@@ -597,7 +597,7 @@ export class UploadStore {
   }
 
   /**
-   * Marks the upload failed with its Swedish reason (local folders left out: it is told to the agent); its files go
+   * Marks the upload failed with its reason (local folders left out: it is told to the agent); its files go
    * (resolves once they are gone).
    */
   private fail(entry: Live, message: string): Promise<void> {
@@ -623,7 +623,7 @@ export class UploadStore {
     return entry ? this.view(entry) : undefined
   }
 
-  /** The upload, or the Swedish reason there is none. */
+  /** The upload, or the reason there is none. */
   require(id: string): UploadEntry {
     const entry = this.get(id)
     if (!entry) throw new Error(this.goneMessage(id))
@@ -636,13 +636,13 @@ export class UploadStore {
    */
   resolve(id: string, kind?: UploadKind): UploadEntry & { path: string } {
     const entry = this.require(id)
-    if (entry.status === 'failed') throw new Error(`Uppladdningen ${id} misslyckades: ${entry.error ?? 'okänt fel'}`)
-    if (entry.status !== 'ready' || !entry.path) throw new Error(`Uppladdningen är inte klar än (${entry.status}).`)
+    if (entry.status === 'failed') throw new Error(`The upload ${id} failed: ${entry.error ?? 'unknown error'}`)
+    if (entry.status !== 'ready' || !entry.path) throw new Error(`The upload isn't ready yet (${entry.status}).`)
     if (kind && entry.kind !== kind) {
-      throw new Error(`Uppladdningen är ${KIND_WORDS[entry.kind].one}, inte ${KIND_WORDS[kind].one}.`)
+      throw new Error(`The upload is ${KIND_WORDS[entry.kind].one}, not ${KIND_WORDS[kind].one}.`)
     }
     if (!existsSync(entry.path)) {
-      this.drop(id, 'filen finns inte längre')
+      this.drop(id, 'the file no longer exists')
       throw new Error(this.goneMessage(id))
     }
     return entry as UploadEntry & { path: string }
@@ -667,7 +667,7 @@ export class UploadStore {
     return this.get(id)
   }
 
-  /** Uploads that are still coming in or being checked (Pågår och klart). */
+  /** Uploads that are still coming in or being checked (Activity). */
   active(): UploadWork[] {
     return [...this.entries.values()]
       .filter((e) => PENDING.has(e.status))
@@ -689,7 +689,7 @@ export class UploadStore {
   /** Throws the upload away (a transfer in progress is stopped). Scratch only: nothing in the library changes. */
   discard(id: string): boolean {
     const known = this.entries.has(id)
-    if (known) this.drop(id, 'den slängdes med discard_upload')
+    if (known) this.drop(id, 'it was discarded with discard_upload')
     return known
   }
 
@@ -705,7 +705,7 @@ export class UploadStore {
 
   dispose(): void {
     clearInterval(this.sweeper)
-    this.expireAll('Studio avslutades.')
+    this.expireAll('Studio quit.')
   }
 
   // ── Bookkeeping ────────────────────────────────────────────────────────────
@@ -730,16 +730,16 @@ export class UploadStore {
     let changed = false
     for (const entry of [...this.entries.values()]) {
       if (entry.status === 'ready' && now > entry.expiresAt) {
-        this.drop(entry.id, 'den gällde i två timmar', false)
+        this.drop(entry.id, 'it was valid for two hours', false)
         changed = true
       } else if (
         (entry.status === 'receiving' || (entry.status === 'downloading' && !entry.queued)) &&
         now - entry.lastActivity > this.limits.idleMs
       ) {
-        void this.fail(entry, 'Inget kom fram på 30 minuter, så uppladdningen avbröts.')
+        void this.fail(entry, 'Nothing arrived for 30 minutes, so the upload was stopped.')
       } else if (entry.status === 'failed' && now > entry.expiresAt) {
         this.entries.delete(entry.id)
-        this.goneReasons.set(entry.id, `den misslyckades: ${entry.error ?? 'okänt fel'}`)
+        this.goneReasons.set(entry.id, `it failed: ${entry.error ?? 'unknown error'}`)
         changed = true
       }
     }
@@ -757,10 +757,10 @@ export class UploadStore {
     const own = live.filter((e) => e.client === client).map((e) => e.id)
     const head =
       count === 1
-        ? `Det finns redan ${this.limits.live} uppladdningar.`
-        : `Det finns redan ${live.length === 1 ? '1 uppladdning' : `${live.length} uppladdningar`} och högst ${this.limits.live} får finnas samtidigt, så ${count} till får inte plats.`
+        ? `There are already ${this.limits.live} uploads.`
+        : `There ${live.length === 1 ? 'is already 1 upload' : `are already ${live.length} uploads`} and at most ${this.limits.live} may exist at once, so ${count} more don't fit.`
     throw new Error(
-      `${head} Använd eller släng några (discard_upload) först.${own.length ? ` Dina: ${own.join(', ')}.` : ''}`
+      `${head} Use or discard some (discard_upload) first.${own.length ? ` Yours: ${own.join(', ')}.` : ''}`
     )
   }
 
@@ -804,19 +804,19 @@ export class UploadStore {
       .filter((e) => e !== except && e.client === client && this.reserves(e, now) && (e.bytes ?? 0) > e.received)
       .map((e) => e.id)
     return own.length
-      ? `${DISK_FULL} Plats hålls för dina uppladdningar som inte har kommit in än: ${own.join(', ')}. Släng de du inte längre skickar (discard_upload) först.`
+      ? `${DISK_FULL} Room is held for your uploads that haven't arrived yet: ${own.join(', ')}. Discard the ones you are no longer sending (discard_upload) first.`
       : DISK_FULL
   }
 
   private stagedFull(): string {
-    return `Det väntar redan för mycket uppladdat i Studio (högst ${Math.round(this.limits.stagedBytes / GB)} GB tillsammans). Använd eller släng uppladdningar (discard_upload) först.`
+    return `Too much uploaded is already waiting in Studio (at most ${Math.round(this.limits.stagedBytes / GB)} GB together). Use or discard uploads (discard_upload) first.`
   }
 
   private goneMessage(id: string): string {
     const reason = this.goneReasons.get(id)
     return reason
-      ? `Uppladdningen ${id} finns inte längre (${reason.replace(/\.$/, '')}). Ladda upp filen igen.`
-      : `Uppladdningen ${id} finns inte längre (den gäller i två timmar). Ladda upp filen igen.`
+      ? `The upload ${id} no longer exists (${reason.replace(/\.$/, '')}). Upload the file again.`
+      : `The upload ${id} no longer exists (an upload is valid for two hours). Upload the file again.`
   }
 
   private isLive(entry: Live): boolean {
@@ -866,9 +866,14 @@ export class UploadStore {
   }
 }
 
-/** "60 sekunder", "30 minuter". */
+/** "60 seconds", "30 minutes". */
 function spokenTime(ms: number): string {
-  return ms >= 60_000 ? `${Math.round(ms / 60_000)} minuter` : `${Math.round(ms / 1000)} sekunder`
+  if (ms >= 60_000) {
+    const m = Math.round(ms / 60_000)
+    return m === 1 ? '1 minute' : `${m} minutes`
+  }
+  const s = Math.round(ms / 1000)
+  return s === 1 ? '1 second' : `${s} seconds`
 }
 
 /** Free bytes on the volume of `dir`; Infinity when it can't be told (the copy itself then fails clearly). */

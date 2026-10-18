@@ -7,7 +7,7 @@ import { ownerStatusText } from '../takes/takeText'
 import { StatusMark } from '../work/StatusMark'
 import CreateStoryboardForm from './CreateStoryboardForm'
 import { StoryboardIcon } from './icons'
-import { boardCountLabel } from './storyboardUtils'
+import { boardCountLabel, clipProgressLabel } from './storyboardUtils'
 
 interface Props {
   storyboards?: StoryboardSummary[]
@@ -19,12 +19,10 @@ interface Props {
   onDelete: (id: string, nextId: string | undefined) => Promise<void>
 }
 
-/** "2 av 3 klipp klara", "3 klipp", or nothing while there are no transitions. */
+/** "2 of 3 clips done", "3 clips", or nothing while there are no transitions. */
 function progressLabel(s: StoryboardSummary): string | undefined {
   if (!s.transitionCount) return undefined
-  return s.doneCount === s.transitionCount
-    ? `${s.transitionCount} klipp`
-    : `${s.doneCount} av ${s.transitionCount} klipp klara`
+  return clipProgressLabel(s.doneCount, s.transitionCount)
 }
 
 // Module-level, so the store's selectors keep one identity (and re-render only on a real change).
@@ -45,7 +43,7 @@ function useStoryboardsWork(): { running: Map<string, RunningWork[]>; unseen: Ma
 }
 
 /**
- * The storyboards, newest change first, in the shared side list, with "Ny storyboard" (name and format). Every row
+ * The storyboards, newest change first, in the shared side list, with "New storyboard" (name and format). Every row
  * shows what is being made there and what is new, not only the open storyboard's.
  */
 export default function StoryboardList({ storyboards, selectedId, creating, onSelect, onCreate, onDelete }: Props) {
@@ -56,8 +54,8 @@ export default function StoryboardList({ storyboards, selectedId, creating, onSe
   return (
     <SideList
       title="Storyboards"
-      createLabel="Ny storyboard"
-      createTitle="Skapa en ny storyboard"
+      createLabel="New storyboard"
+      createTitle="Create a new storyboard"
       creating={creating}
       createPanel={{
         width: 300,
@@ -79,10 +77,10 @@ export default function StoryboardList({ storyboards, selectedId, creating, onSe
       items={storyboards}
       selectedId={selectedId}
       onSelect={onSelect}
-      searchPlaceholder="Sök storyboards"
-      emptyText="Inga storyboards ännu. Lägg upp filmens viktiga ögonblick som bilder och generera klippen mellan dem."
+      searchPlaceholder="Search storyboards"
+      emptyText="No storyboards yet. Lay out a film’s key moments as images and generate the clips between them."
       deleteNote={() =>
-        'Klippen och exporterade filmer finns kvar; storyboardens bilder som inget annat använder flyttas till papperskorgen.'
+        'The clips and exported films stay; the storyboard’s images that nothing else uses are moved to the Trash.'
       }
       onDelete={(s, next) => onDelete(s.id, next?.id)}
       renderRow={(s, control) => (
@@ -116,7 +114,7 @@ function StoryboardRow({
       meta={`${boardCountLabel(s.boardCount)}${progress ? ` · ${progress}` : ''}`}
       status={<StatusMark variant="inline" running={counts.running} fresh={counts.unseen} failed={counts.failed} />}
       title={ownerStatusText('storyboard', running, unseen, counts)}
-      deleteTitle="Radera storyboarden"
+      deleteTitle="Delete storyboard"
     />
   )
 }

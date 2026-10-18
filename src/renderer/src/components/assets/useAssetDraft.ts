@@ -109,7 +109,7 @@ export function useAssetDraft(asset: Asset, onSaved: (a: Asset) => void) {
   const outsideOutfit = asset.defaultOutfitId ?? null
   useEffect(() => reconcile(), [asset.name, asset.description, outsideOutfit, settled, reconcile])
 
-  // "Sparat" is only a brief confirmation.
+  // "Saved" is only a brief confirmation.
   useEffect(() => {
     if (state.kind !== 'saved') return
     const t = setTimeout(() => setState({ kind: 'idle' }), 2000)

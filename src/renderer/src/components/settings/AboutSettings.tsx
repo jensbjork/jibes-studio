@@ -18,7 +18,7 @@ function readVersions(userAgent: string): Versions {
   return { studio, electron, chrome }
 }
 
-/** Inställningar → Om Studio: the version, and which profile this is. */
+/** Settings → About Studio: the version, and which profile this is. */
 export default function AboutSettings({ devProfile }: { devProfile: boolean }) {
   const versions = useMemo(() => readVersions(navigator.userAgent), [])
   const engine = [
@@ -33,12 +33,12 @@ export default function AboutSettings({ devProfile }: { devProfile: boolean }) {
       <p className="select-text">
         <span className="font-medium">Studio</span>
         {versions.studio && <span className="tabular-nums"> {versions.studio}</span>}
-        {devProfile && <span className="text-muted"> · utvecklingsversion (Studio Dev)</span>}
+        {devProfile && <span className="text-muted"> · development version (Studio Dev)</span>}
       </p>
       {engine && <p className="mt-0.5 text-[12px] text-muted select-text tabular-nums">{engine}</p>}
       {devProfile && (
         <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
-          Har egna inställningar och ett eget bibliotek, skilda från Studio.app.
+          Has its own settings and its own library, separate from Studio.app.
         </p>
       )}
     </div>

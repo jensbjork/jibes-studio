@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { agentInSentence } from '@shared/agent-name'
 import { generationTitle } from '@shared/generation-label'
 import type { Generation, VideoModel } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
-import { authorLabel, isPending } from '../feed/feedText'
+import { isPending } from '../feed/feedText'
 import { PinIcon } from '../feed/icons'
 import RatingControl from '../feed/RatingControl'
 import { CloseIcon } from '../sequences/icons'
@@ -35,19 +36,19 @@ function SaveIndicator({ draft, status }: { draft: LearningDraft; status?: Learn
   if (status?.state === 'error') {
     return (
       <span className="truncate text-accent select-text" title={status.error}>
-        Kunde inte spara: {status.error}
+        Couldn't save: {status.error}
       </span>
     )
   }
   if (status?.state === 'invalid' || (!draft.id && !canSaveLearning(draft))) {
     return (
       <span className="text-muted">
-        {draft.id ? 'En tom lärdom sparas inte' : 'Ny lärdom – sparas när du börjat skriva'}
+        {draft.id ? "An empty learning isn't saved" : 'New learning – saved once you start writing'}
       </span>
     )
   }
-  if (status?.state === 'pending' || status?.state === 'saving') return <span className="text-muted">Sparar…</span>
-  if (status?.state === 'saved') return <span className="text-muted">Sparad</span>
+  if (status?.state === 'pending' || status?.state === 'saving') return <span className="text-muted">Saving…</span>
+  if (status?.state === 'saved') return <span className="text-muted">Saved</span>
   return null
 }
 
@@ -93,20 +94,20 @@ export default function LearningEditor({
             aria-pressed={draft.pinned}
             title={
               draft.pinned
-                ? 'Lossa – sluta visa den överst'
-                : 'Fäst överst – agenterna läser fästa lärdomar först när de skriver prompter'
+                ? 'Unpin – stop showing it at the top'
+                : 'Pin to top – agents read pinned learnings first when they write prompts'
             }
             className={`${secondaryButton} flex items-center gap-1.5 ${draft.pinned ? 'text-amber-400 hover:text-amber-300' : ''}`}
           >
             <PinIcon size={13} filled={draft.pinned} />
-            {draft.pinned ? 'Fäst' : 'Fäst överst'}
+            {draft.pinned ? 'Pinned' : 'Pin to top'}
           </button>
           {isNew ? (
             <button type="button" onClick={onDelete} className={secondaryButton}>
-              Släng
+              Discard
             </button>
           ) : (
-            <ConfirmDeleteButton onConfirm={onDelete} confirmLabel="Radera lärdomen" />
+            <ConfirmDeleteButton onConfirm={onDelete} confirmLabel="Delete learning" />
           )}
         </div>
       </div>
@@ -124,14 +125,14 @@ export default function LearningEditor({
               }
             }}
             maxLength={MAX_TITLE_LENGTH}
-            placeholder={titleFromInsight(draft.insight) || 'Rubrik'}
-            aria-label="Rubrik"
+            placeholder={titleFromInsight(draft.insight) || 'Title'}
+            aria-label="Title"
             className="w-full bg-transparent text-xl font-semibold outline-none placeholder:text-muted/60"
           />
 
           <label className="block">
             <span className="mb-1.5 flex justify-between text-muted">
-              <span>Lärdom</span>
+              <span>Learning</span>
               <span className="text-[11px]">{draft.insight.length > 3000 ? `${draft.insight.length} / ${MAX_INSIGHT_LENGTH}` : ''}</span>
             </span>
             <textarea
@@ -141,17 +142,17 @@ export default function LearningEditor({
               onBlur={onBlur}
               maxLength={MAX_INSIGHT_LENGTH}
               rows={6}
-              placeholder="Vad fungerar, och vad gör det inte? T.ex. ”Seedance 2.5: nämn kläderna efter karaktärens bilder, annars byter den kläder.”"
+              placeholder="What works, and what doesn't? E.g. “Seedance 2.5: mention the clothes after the character's images, or it changes them.”"
               className={`${field} min-h-32 resize-y text-[14px] leading-relaxed`}
             />
             <span className="mt-1 block text-[11px] text-muted">
-              Skriv det som en regel du kan följa nästa gång. Agenterna läser lärdomarna innan de skriver nya prompter.
+              Write it as a rule you can follow next time. Agents read the learnings before they write new prompts.
             </span>
           </label>
 
           <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4">
             <label className="block">
-              <span className="mb-1.5 block text-muted">Gäller modell</span>
+              <span className="mb-1.5 block text-muted">Applies to model</span>
               <select
                 value={draft.model ?? ''}
                 onChange={(e) => {
@@ -160,7 +161,7 @@ export default function LearningEditor({
                 }}
                 className={`${field} cursor-pointer py-[7px]`}
               >
-                <option value="">Alla modeller</option>
+                <option value="">All models</option>
                 {modelOptions.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.name}
@@ -169,7 +170,7 @@ export default function LearningEditor({
               </select>
             </label>
             <div>
-              <span className="mb-1.5 block text-muted">Taggar</span>
+              <span className="mb-1.5 block text-muted">Tags</span>
               <TagInput value={draft.tags} onChange={(tags) => onChange({ tags })} suggestions={tagSuggestions} onBlur={onBlur} />
             </div>
           </div>
@@ -187,9 +188,9 @@ export default function LearningEditor({
 
           {draft.id && (
             <p className="border-t border-line pt-4 text-[11px] text-muted">
-              {draft.author === 'user' ? 'Skriven av dig' : `Skriven av ${authorLabel(draft.author)}`}
-              {draft.createdAt ? ` · Skapad ${formatWhen(draft.createdAt)}` : ''}
-              {draft.updatedAt && draft.updatedAt !== draft.createdAt ? ` · Ändrad ${formatWhen(draft.updatedAt)}` : ''}
+              {draft.author === 'user' ? 'Written by you' : `Written by ${agentInSentence(draft.author)}`}
+              {draft.createdAt ? ` · Created ${formatWhen(draft.createdAt)}` : ''}
+              {draft.updatedAt && draft.updatedAt !== draft.createdAt ? ` · Updated ${formatWhen(draft.updatedAt)}` : ''}
             </p>
           )}
         </div>
@@ -214,11 +215,11 @@ function Evidence({
 }) {
   return (
     <section>
-      <span className="mb-1.5 block text-muted">Underlag</span>
+      <span className="mb-1.5 block text-muted">Evidence</span>
       {ids.length === 0 ? (
         <p className="rounded-md border border-dashed border-line px-4 py-4 text-[12px] leading-relaxed text-muted">
-          Inga klipp kopplade. När en agent granskar dina klipp och sparar en lärdom, länkar den klippen den bygger på
-          här – så kan du se själv om slutsatsen håller.
+          No clips linked. When an agent reviews your clips and saves a learning, it links the clips it is based on
+          here – so you can see for yourself whether the conclusion holds.
         </p>
       ) : (
         <ul className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">
@@ -230,7 +231,7 @@ function Evidence({
                 <button
                   type="button"
                   onClick={() => onRemove(id)}
-                  title="Ta bort klippet från underlaget (klippet finns kvar)"
+                  title="Remove the clip from the evidence (the clip itself stays)"
                   className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded bg-black/70 text-text opacity-0 backdrop-blur transition hover:bg-black/90 focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <CloseIcon size={9} />
@@ -259,7 +260,7 @@ function EvidenceThumb({
   if (!g) {
     return (
       <div className="flex aspect-video items-center justify-center rounded-md border border-line bg-raised/40 p-2 text-center text-[11px] text-muted">
-        {loaded ? 'Klippet finns inte längre' : ''}
+        {loaded ? 'The clip no longer exists' : ''}
       </div>
     )
   }
@@ -283,7 +284,7 @@ function EvidenceThumb({
           />
         ) : (
           <span className="flex h-full items-center justify-center text-[11px] text-muted">
-            {isPending(g) ? 'Genereras…' : g.status === 'failed' ? 'Misslyckades' : ''}
+            {isPending(g) ? 'Generating…' : g.status === 'failed' ? 'Failed' : ''}
           </span>
         )}
         {g.rating ? (
@@ -293,7 +294,7 @@ function EvidenceThumb({
         ) : null}
       </span>
       <span className="block truncate px-2 py-1 text-[11px] text-muted">
-        {g.prompt || g.title ? generationTitle(g, 80) : 'Ingen prompt'}
+        {g.prompt || g.title ? generationTitle(g, 80) : 'No prompt'}
       </span>
     </button>
   )

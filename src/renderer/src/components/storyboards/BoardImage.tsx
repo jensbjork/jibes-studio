@@ -31,7 +31,7 @@ export function acceptsImageDrag(e: Pick<DragEvent, 'dataTransfer'>): boolean {
   return isStillDrag(e) || Array.from(e.dataTransfer.types).includes('Files')
 }
 
-export const DROP_ONLY_IMAGES = 'Släpp en bild i JPG-, PNG- eller WebP-format.'
+export const DROP_ONLY_IMAGES = 'Drop an image in JPG, PNG or WebP format.'
 
 interface Props {
   board: StoryboardBoard
@@ -39,12 +39,12 @@ interface Props {
   number: number
   width: number
   height: number
-  /** This storyboard's pictures ("Storyboardbilder"), newest first. */
+  /** This storyboard's pictures ("Storyboard images"), newest first. */
   stills: Still[]
   assets: Asset[]
   /** A change to the picture is being saved (a file copied, a frame cut out). */
   busy: boolean
-  /** A picture for the board is being made (Skapa bild – also after its dialog closed – or an agent's request). */
+  /** A picture for the board is being made (Create image – also after its dialog closed – or an agent's request). */
   making: boolean
   /** A picture for the board couldn't be made, and the user hasn't seen that yet. */
   failure?: FinishedWork
@@ -64,8 +64,8 @@ type MenuView = 'menu' | 'library' | 'stills'
 
 /**
  * A board's one picture, large. Empty, it offers the two ways in (make one, or pick one); filled, the picture is
- * the button that opens the same menu: Skapa bild…, Från biblioteket, Storyboardbilder, Ladda upp, Bildruta ur
- * ett klipp, Ta bort bilden. A picture or a still dropped on it replaces what is there. The storyboard's pictures
+ * the button that opens the same menu: Create image…, From the library, Storyboard images, Upload an image, Frame
+ * from a clip, Remove image. A picture or a still dropped on it replaces what is there. The storyboard's pictures
  * can also be opened full size from there (onViewStill), to be used or deleted.
  */
 export default function BoardImage({
@@ -91,9 +91,9 @@ export default function BoardImage({
   const [over, setOver] = useState(false)
   const [missing, setMissing] = useState<string>()
   const path = board.imagePath
-  const label = `Ruta ${number}`
+  const label = `Board ${number}`
 
-  // A picture made for the board that hasn't been looked at yet: "Ny", until it has been on screen a moment (D4).
+  // A picture made for the board that hasn't been looked at yet: "New", until it has been on screen a moment (D4).
   const stillKey = board.stillId ? workKey.still(board.stillId) : undefined
   const fresh = useIsUnseen(stillKey)
   const frame = useRef<HTMLDivElement>(null)
@@ -164,13 +164,13 @@ export default function BoardImage({
           onClick={toggleMenu}
           aria-haspopup="menu"
           aria-expanded={!!view}
-          aria-label={`Bilden i ${label.toLowerCase()} – byt eller ta bort`}
-          title={board.note ? `${board.note}\n\nKlicka för att byta bild.` : 'Klicka för att byta bild.'}
+          aria-label={`Image on ${label.toLowerCase()} – swap or remove`}
+          title={board.note ? `${board.note}\n\nClick to swap the image.` : 'Click to swap the image.'}
           className="group/image relative block h-full w-full overflow-hidden rounded-lg bg-black outline-none ring-offset-2 ring-offset-bg focus-visible:ring-2 focus-visible:ring-muted"
         >
           {missing === path ? (
             <span className="flex h-full w-full items-center justify-center p-3 text-center text-[12px] text-accent">
-              Bildfilen saknas – välj en ny bild
+              The image file is missing – pick a new image
             </span>
           ) : (
             <img
@@ -183,21 +183,21 @@ export default function BoardImage({
             />
           )}
           <span className="absolute right-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[11px] text-white/90 opacity-0 transition group-hover/image:opacity-100 group-focus-visible/image:opacity-100">
-            Byt bild
+            Swap image
           </span>
           {fresh && (
             <NewChip
               variant="overlay"
-              title="En ny bild som du inte har tittat på än"
+              title="A new image you haven’t looked at yet"
               className="pointer-events-none absolute left-2 top-2"
             />
           )}
           {board.aspectMismatch && (
             <span
-              title="Bildformatet skiljer sig – klippet får bildens format"
+              title="The image’s format differs – the clip gets the image’s format"
               className="absolute bottom-2 left-2 rounded bg-amber-500/90 px-1.5 py-px text-[10px] font-medium text-black"
             >
-              Annat format
+              Different format
             </span>
           )}
         </button>
@@ -212,11 +212,11 @@ export default function BoardImage({
             <button
               type="button"
               onClick={onCreateImage}
-              title="Skapa en ny bild med en bildmodell (kostar lite)"
+              title="Create a new image with an image model (costs a little)"
               className="flex items-center gap-1.5 rounded-md border border-line bg-raised px-2.5 py-1.5 text-[12px] text-text transition hover:border-muted"
             >
               <SparkleIcon size={12} />
-              Skapa bild…
+              Create image…
             </button>
             <button
               ref={anchor}
@@ -224,13 +224,13 @@ export default function BoardImage({
               onClick={toggleMenu}
               aria-haspopup="menu"
               aria-expanded={!!view}
-              title="Från biblioteket, storyboardens bilder, en fil eller en bildruta ur ett klipp"
+              title="From the library, the storyboard’s images, a file or a frame from a clip"
               className="rounded-md border border-line px-2.5 py-1.5 text-[12px] text-muted transition hover:border-muted hover:text-text"
             >
-              Välj bild…
+              Pick image…
             </button>
           </div>
-          <span className="text-[11px] text-muted/70">eller släpp en bild här</span>
+          <span className="text-[11px] text-muted/70">or drop an image here</span>
         </div>
       )}
 
@@ -240,7 +240,7 @@ export default function BoardImage({
       {busy ? (
         <span className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-lg bg-black/60 text-[12px] text-muted">
           <Spinner />
-          Sparar…
+          Saving…
         </span>
       ) : (
         making && (
@@ -249,7 +249,7 @@ export default function BoardImage({
             role="status"
           >
             <Spinner />
-            Skapar bilden…
+            Creating the image…
           </span>
         )
       )}
@@ -260,7 +260,7 @@ export default function BoardImage({
           className="absolute inset-x-2 bottom-2 flex items-start gap-2 rounded-md border border-accent/30 bg-[#2a1416]/95 px-2.5 py-2 text-[11px] leading-snug text-[#ffb3b5]"
         >
           <span className="min-w-0 flex-1 select-text">
-            Bilden kunde inte skapas{shownFailure.error ? `: ${shownFailure.error}` : '.'}
+            The image couldn’t be created{shownFailure.error ? `: ${shownFailure.error}` : '.'}
           </span>
           <button
             type="button"
@@ -268,8 +268,8 @@ export default function BoardImage({
               if (failure) markSeen([failure.key])
               setKeptFailure(undefined)
             }}
-            title="Stäng"
-            aria-label="Stäng"
+            title="Close"
+            aria-label="Close"
             className="mt-px shrink-0 opacity-70 transition hover:opacity-100"
           >
             <CloseIcon size={10} />
@@ -283,15 +283,15 @@ export default function BoardImage({
         onClose={close}
         width={view === 'menu' ? 250 : 340}
         maxHeight={view === 'menu' ? 400 : 480}
-        label={`Bild för ${label.toLowerCase()}`}
+        label={`Image for ${label.toLowerCase()}`}
       >
         {view === 'library' ? (
           <SubView onBack={() => setView('menu')}>
             <AssetPicker
               assets={assets}
               initialKind="environment"
-              title={`Bild för ${label.toLowerCase()}`}
-              hint="Klicka på en bild – eller på namnet för omslagsbilden."
+              title={`Image for ${label.toLowerCase()}`}
+              hint="Click an image – or the name for the cover image."
               selectedPaths={path ? [path] : []}
               onPickImage={(picked, asset) => {
                 const image = asset.images.find((img) => img.path === picked)
@@ -304,7 +304,7 @@ export default function BoardImage({
             />
           </SubView>
         ) : view === 'stills' ? (
-          <SubView title="Storyboardens bilder" onBack={() => setView('menu')}>
+          <SubView title="Storyboard images" onBack={() => setView('menu')}>
             <div className="grid min-h-0 flex-1 grid-cols-3 gap-1.5 overflow-y-auto p-2">
               {stills.map((s) => (
                 <StillThumb
@@ -320,18 +320,18 @@ export default function BoardImage({
                       close()
                       onViewStill(s)
                     }}
-                    title="Visa bilden i full storlek – med hur den gjordes, och Radera"
-                    aria-label="Visa bilden"
+                    title="View the image full size – with how it was made, and Delete"
+                    aria-label="View the image"
                     className="rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90 opacity-0 transition hover:bg-black/90 focus-visible:opacity-100 group-hover:opacity-100"
                   >
-                    Visa
+                    View
                   </button>
                 </StillThumb>
               ))}
             </div>
           </SubView>
         ) : (
-          <div role="menu" aria-label={`Bild för ${label.toLowerCase()}`} onKeyDown={onMenuKeyDown} className="overflow-y-auto p-1">
+          <div role="menu" aria-label={`Image for ${label.toLowerCase()}`} onKeyDown={onMenuKeyDown} className="overflow-y-auto p-1">
             <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-muted">{label}</p>
             <button
               type="button"
@@ -345,10 +345,10 @@ export default function BoardImage({
               className={menuRow}
             >
               <SparkleIcon size={12} className="shrink-0 text-muted" />
-              Skapa bild…
+              Create image…
             </button>
             <button type="button" role="menuitem" data-menu-item onClick={() => setView('library')} className={menuRow}>
-              Från biblioteket…
+              From the library…
             </button>
             <button
               type="button"
@@ -356,14 +356,14 @@ export default function BoardImage({
               data-menu-item
               disabled={!stills.length}
               onClick={() => setView('stills')}
-              title={stills.length ? undefined : 'Storyboarden har inga egna bilder än'}
+              title={stills.length ? undefined : 'The storyboard has no images of its own yet'}
               className={menuRow}
             >
-              Storyboardbilder…
+              Storyboard images…
               {stills.length > 0 && <span className="ml-auto text-[11px] tabular-nums text-muted">{stills.length}</span>}
             </button>
             <button type="button" role="menuitem" data-menu-item onClick={() => void upload()} className={menuRow}>
-              Ladda upp en bild…
+              Upload an image…
             </button>
             <button
               type="button"
@@ -374,12 +374,12 @@ export default function BoardImage({
                 close()
                 onPickFrame()
               }}
-              title={ffmpegOk ? undefined : 'Kräver ffmpeg (brew install ffmpeg)'}
+              title={ffmpegOk ? undefined : 'Needs ffmpeg (brew install ffmpeg)'}
               className={menuRow}
             >
-              Bildruta ur ett klipp…
+              Frame from a clip…
               {/* A disabled row shows no tooltip, so the reason is in the row itself. */}
-              {!ffmpegOk && <span className="ml-auto text-[11px] text-muted">kräver ffmpeg</span>}
+              {!ffmpegOk && <span className="ml-auto text-[11px] text-muted">needs ffmpeg</span>}
             </button>
             {path && (
               <>
@@ -389,10 +389,10 @@ export default function BoardImage({
                   role="menuitem"
                   data-menu-item
                   onClick={() => choose(null)}
-                  title="Rutan blir tom igen. Själva bilden raderas inte."
+                  title="The board becomes empty again. The image itself isn’t deleted."
                   className={`${menuRow} text-muted hover:text-accent`}
                 >
-                  Ta bort bilden
+                  Remove image
                 </button>
               </>
             )}

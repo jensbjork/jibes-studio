@@ -7,8 +7,8 @@ import { formatLength, formatPrice, operationRange } from './editorUtils'
 import { usePlan, usePlans } from './useEditOps'
 import { Check, Choice, Field, GainSlider, OpCard, PlanNotes, RunButton, TimeAt, fieldInput, textArea } from './ui'
 
-// Musik & effekter: new music under the film (or the marked part of it) and sound effects at a point. Each result
-// lands on the Lager lane as a layer, so its volume and place can be changed for free afterwards.
+// Music & effects: new music under the film (or the marked part of it) and sound effects at a point. Each result
+// lands on the Layers lane as a layer, so its volume and place can be changed for free afterwards.
 
 const DEFAULT_MUSIC = 'ace-step-15'
 const DEFAULT_EFFECT = 'elevenlabs-sound-effects-v2'
@@ -28,9 +28,9 @@ interface CardProps {
   onToggle: () => void
 }
 
-/** What a model does with the length: "60–210 s", "väljer längden själv (Lyria)". */
+/** What a model does with the length: "60–210 s", "picks the length itself (Lyria)". */
 function lengthHint(m: AudioGenModel): string {
-  if (!m.durationControl) return 'väljer längden själv'
+  if (!m.durationControl) return 'picks the length itself'
   if (m.durationOptions?.length) {
     const opts = [...m.durationOptions].sort((a, b) => a - b)
     return `${opts[0]}–${opts[opts.length - 1]} s`
@@ -87,14 +87,14 @@ function MusicCard({ open, onToggle }: CardProps) {
   }, [prices, models])
   const tooShort = model && prompt.trim() && prompt.trim().length < model.minPromptLength
   const missing = !prompt.trim()
-    ? 'Beskriv musiken.'
+    ? 'Describe the music.'
     : tooShort
-      ? `Beskriv musiken med minst ${model!.minPromptLength} tecken.`
+      ? `Describe the music in at least ${model!.minPromptLength} characters.`
       : undefined
 
   return (
-    <OpCard title="Skapa musik" summary="Ny musik under filmen eller markeringen, sänkt när någon pratar." open={open} onToggle={onToggle}>
-      <Field label="Beskriv musiken">
+    <OpCard title="Create music" summary="New music under the film or the selection, lowered when someone speaks." open={open} onToggle={onToggle}>
+      <Field label="Describe the music">
         <PromptField
           value={prompt}
           onChange={setPrompt}
@@ -102,36 +102,36 @@ function MusicCard({ open, onToggle }: CardProps) {
           minRows={2}
           maxRows={8}
           limit={model?.promptLimit || undefined}
-          title="Beskriv musiken"
-          focusHint="Instrument, tempo och känsla – gärna på engelska. Skriv / för en byggsten."
+          title="Describe the music"
+          focusHint="Instruments, tempo and mood – in English if you can. Type / for a building block."
           placeholder="Calm piano, slow tempo, warm and hopeful"
         />
       </Field>
       {model?.instrumental && (
         <Check checked={instrumental} onChange={setInstrumental}>
-          Instrumental (utan sång)
+          Instrumental (no vocals)
         </Check>
       )}
-      <Field label="Längd" hint={formatLength(length)}>
+      <Field label="Length" hint={formatLength(length)}>
         <Choice
           value={range ? 'range' : 'film'}
           onChange={setScope}
           inline
-          label="Längd"
+          label="Length"
           options={[
-            { value: 'film', label: 'Hela filmen' },
-            { value: 'range', label: 'Markeringen', disabled: !selection, title: selection ? undefined : 'Markera ett avsnitt först' }
+            { value: 'film', label: 'The whole film' },
+            { value: 'range', label: 'The selection', disabled: !selection, title: selection ? undefined : 'Mark a section first' }
           ]}
         />
       </Field>
-      <Field label="Modell">
+      <Field label="Model">
         {!audio.catalog ? (
-          <p className="text-[12px] text-muted">{audio.error ?? 'Hämtar Venice musikmodeller…'}</p>
+          <p className="text-[12px] text-muted">{audio.error ?? 'Loading Venice’s music models…'}</p>
         ) : (
           <Choice
             value={model?.id ?? ''}
             onChange={setModelChoice}
-            label="Modell"
+            label="Model"
             options={models.map((m, i) => {
               const p = prices[i]
               return {
@@ -139,7 +139,7 @@ function MusicCard({ open, onToggle }: CardProps) {
                 label: (
                   <span className="flex items-baseline gap-2">
                     <span>{m.name}</span>
-                    {cheapest === m.id && <span className="text-[11px] text-emerald-300/80">billigast</span>}
+                    {cheapest === m.id && <span className="text-[11px] text-emerald-300/80">cheapest</span>}
                     <span className="text-[11px] tabular-nums text-muted">
                       {p && !p.problems.length && p.priceUsd !== undefined ? formatPrice(p.priceUsd) : ''}
                     </span>
@@ -152,21 +152,21 @@ function MusicCard({ open, onToggle }: CardProps) {
         )}
       </Field>
       <Check checked={duck} onChange={setDuck}>
-        Sänk under tal
+        Lower under speech
       </Check>
       <GainSlider value={gain} onChange={setGain} />
       <Check checked={fades} onChange={setFades}>
-        Tona in och ut (2 s)
+        Fade in and out (2 s)
       </Check>
       <PlanNotes plan={plan} error={card.error ?? planError} quiet={missing} />
       <RunButton
-        label="Skapa musik"
+        label="Create music"
         plan={plan}
         planning={planning}
         running={card.running}
         disabled={!!missing || !model}
         disabledReason={missing}
-        onClick={() => plan && op && void card.run({ op, plan, label: 'Skapa musik' })}
+        onClick={() => plan && op && void card.run({ op, plan, label: 'Create music' })}
       />
       {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
     </OpCard>
@@ -201,8 +201,8 @@ function EffectCard({ open, onToggle }: CardProps) {
   const card = useCardRun(() => setNonce((n) => n + 1))
 
   return (
-    <OpCard title="Skapa ljudeffekt" summary="En dörr som slår igen, regn, steg – där spelhuvudet står." open={open} onToggle={onToggle}>
-      <Field label="Beskriv ljudet">
+    <OpCard title="Create sound effect" summary="A door slamming, rain, footsteps – where the playhead is." open={open} onToggle={onToggle}>
+      <Field label="Describe the sound">
         <PromptField
           value={prompt}
           onChange={setPrompt}
@@ -210,14 +210,14 @@ function EffectCard({ open, onToggle }: CardProps) {
           minRows={2}
           maxRows={6}
           limit={model?.promptLimit || undefined}
-          title="Beskriv ljudet"
-          focusHint="Vad som hörs och var – gärna på engelska. Skriv / för en byggsten."
+          title="Describe the sound"
+          focusHint="What is heard and where – in English if you can. Type / for a building block."
           placeholder="A wooden door slams shut in a quiet hallway"
         />
-        <p className="mt-1 text-[11px] text-muted">Skriv gärna på engelska.</p>
+        <p className="mt-1 text-[11px] text-muted">Write in English if you can.</p>
       </Field>
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Längd">
+        <Field label="Length">
           <select value={length} onChange={(e) => setSeconds(Number(e.target.value))} className={fieldInput}>
             {Array.from({ length: max - min + 1 }, (_, i) => min + i).map((s) => (
               <option key={s} value={s}>
@@ -227,7 +227,7 @@ function EffectCard({ open, onToggle }: CardProps) {
           </select>
         </Field>
         {models.length > 1 && (
-          <Field label="Modell">
+          <Field label="Model">
             <select value={model?.id} onChange={(e) => setModelChoice(e.target.value)} className={fieldInput}>
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -238,17 +238,17 @@ function EffectCard({ open, onToggle }: CardProps) {
           </Field>
         )}
       </div>
-      <TimeAt label="Börjar vid" value={at} onChange={setAt} player={player} />
+      <TimeAt label="Starts at" value={at} onChange={setAt} player={player} />
       <GainSlider value={gain} onChange={setGain} />
-      <PlanNotes plan={plan} error={card.error ?? planError ?? (audio.catalog ? undefined : audio.error)} quiet="Beskriv ljudet." />
+      <PlanNotes plan={plan} error={card.error ?? planError ?? (audio.catalog ? undefined : audio.error)} quiet="Describe the sound." />
       <RunButton
-        label="Skapa ljudeffekt"
+        label="Create sound effect"
         plan={plan}
         planning={planning}
         running={card.running}
         disabled={!op}
-        disabledReason={!prompt.trim() ? 'Beskriv ljudet.' : undefined}
-        onClick={() => plan && op && void card.run({ op, plan, label: 'Skapa ljudeffekt' })}
+        disabledReason={!prompt.trim() ? 'Describe the sound.' : undefined}
+        onClick={() => plan && op && void card.run({ op, plan, label: 'Create sound effect' })}
       />
       {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
     </OpCard>

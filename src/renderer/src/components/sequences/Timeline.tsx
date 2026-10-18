@@ -33,7 +33,7 @@ import {
 /** Drag payload of a clip being reordered (its id). */
 const SEGMENT_DRAG_TYPE = 'application/x-studio-segment'
 
-/** Where a clip that isn't an empty AI clip comes from: the user's own file, the clip feed, Redigera's versions. */
+/** Where a clip that isn't an empty AI clip comes from: the user's own file, the clip feed, the Editor's versions. */
 export type ClipSource = 'file' | 'feed' | 'edit'
 
 interface Props {
@@ -43,7 +43,7 @@ interface Props {
   onSelect: (segmentId: string) => void
   /** Adds an empty clip (to generate) after the given one, or at the end. */
   onAdd: (afterSegmentId?: string) => void
-  /** "Eget klipp från fil…", "Från klippflödet…", "Från Redigera…": a clip from elsewhere, after the given one. */
+  /** "Own clip from file…", "From Media…", "From the Editor…": a clip from elsewhere, after the given one. */
   onAddFrom: (source: ClipSource, afterSegmentId?: string) => void
   /**
    * Video files dropped on the strip, to become own clips at gap `gap` (before clip `gap`, 0-based; the number of
@@ -52,12 +52,12 @@ interface Props {
   onDropFiles: (paths: string[], gap: number) => void
   /** Own clips on their way into this sequence (shown after the last clip with their progress). */
   importing: ImportCard[]
-  /** What finished in this sequence that the user hasn't looked at yet (Pågår och klart). */
+  /** What finished in this sequence that the user hasn't looked at yet (Activity). */
   unseen: FinishedWork[]
   /** What runs in this sequence now (takes being sent show on their cards). */
   running: RunningWork[]
   onMove: (segmentId: string, toIndex: number) => void
-  /** "Gör om mellan grannarna" on a card. */
+  /** "Redo between neighbours" on a card. */
   onBridge: (segmentId: string) => void
 }
 
@@ -186,22 +186,22 @@ export default function Timeline({
               <PlusIcon size={18} />
               <span>
                 {fileGap !== undefined ? (
-                  <span className="text-text">Släpp för att lägga till som egna klipp</span>
+                  <span className="text-text">Drop to add as own clips</span>
                 ) : (
                   <>
-                    <span className="text-text">Lägg till första klippet</span>
-                    <span className="text-muted"> · eller släpp en egen film här</span>
+                    <span className="text-text">Add the first clip</span>
+                    <span className="text-muted"> · or drop a film of your own here</span>
                   </>
                 )}
               </span>
             </button>
             {fileGap === undefined && (
               <div className="flex items-center gap-1 text-[12px] text-muted">
-                <SourceLink onClick={() => onAddFrom('file')}>Eget klipp från fil…</SourceLink>
+                <SourceLink onClick={() => onAddFrom('file')}>Own clip from file…</SourceLink>
                 <span aria-hidden>·</span>
-                <SourceLink onClick={() => onAddFrom('feed')}>Från klippflödet…</SourceLink>
+                <SourceLink onClick={() => onAddFrom('feed')}>From Media…</SourceLink>
                 <span aria-hidden>·</span>
-                <SourceLink onClick={() => onAddFrom('edit')}>Från Redigera…</SourceLink>
+                <SourceLink onClick={() => onAddFrom('edit')}>From the Editor…</SourceLink>
               </div>
             )}
           </div>
@@ -216,7 +216,7 @@ export default function Timeline({
     <div className="relative shrink-0 border-b border-line">
       {fileGap !== undefined && (
         <span className="pointer-events-none absolute right-4 top-1 z-10 rounded bg-accent px-2 py-0.5 text-[11px] font-medium text-white shadow">
-          Släpp för att lägga till som egna klipp
+          Drop to add as own clips
         </span>
       )}
       <div
@@ -302,7 +302,7 @@ function SourceLink({ onClick, children }: { onClick: () => void; children: stri
   )
 }
 
-/** "Lägg till klipp ▾": the button adds an empty clip to generate; the ▾ part offers the other sources. */
+/** "Add clip ▾": the button adds an empty clip to generate; the ▾ part offers the other sources. */
 function AddSplitButton({
   adding,
   onAdd,
@@ -319,11 +319,11 @@ function AddSplitButton({
       <button
         onClick={onAdd}
         disabled={adding}
-        title="Lägg till ett klipp att generera, sist"
+        title="Add a clip to generate, at the end"
         className="flex flex-1 flex-col items-center justify-center gap-1.5 transition hover:bg-raised/60 hover:text-text disabled:opacity-40"
       >
         <PlusIcon size={16} />
-        Lägg till klipp
+        Add clip
       </button>
       <button
         ref={anchor}
@@ -332,12 +332,12 @@ function AddSplitButton({
         disabled={adding}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Eget klipp, från Mediabanken eller från Redigera"
+        title="Own clip, from Media or from the Editor"
         className={`flex h-7 shrink-0 items-center justify-center gap-1 border-t border-dashed border-line transition hover:bg-raised/60 hover:text-text disabled:opacity-40 ${
           open ? 'bg-raised/60 text-text' : ''
         }`}
       >
-        Fler sätt
+        More ways
         <ChevronDownIcon size={11} />
       </button>
       <AddMenu
@@ -353,7 +353,7 @@ function AddSplitButton({
   )
 }
 
-/** The ways to add a clip besides an empty one: the user's own file, the clip feed, a version from Redigera. */
+/** The ways to add a clip besides an empty one: the user's own file, the clip feed, a version from the Editor. */
 function AddMenu({
   anchorRef,
   open,
@@ -369,8 +369,8 @@ function AddMenu({
   onEmpty?: () => void
 }) {
   return (
-    <Popover anchorRef={anchorRef} open={open} onClose={onClose} align="start" width={270} label="Lägg till klipp">
-      <div role="menu" aria-label="Lägg till klipp" onKeyDown={onMenuKeyDown} className="p-1">
+    <Popover anchorRef={anchorRef} open={open} onClose={onClose} align="start" width={270} label="Add clip">
+      <div role="menu" aria-label="Add clip" onKeyDown={onMenuKeyDown} className="p-1">
         {onEmpty && (
           <button
             type="button"
@@ -380,9 +380,9 @@ function AddMenu({
             onClick={onEmpty}
             className={`${menuRow} flex-col items-start gap-0.5`}
           >
-            <span>Nytt klipp att generera</span>
+            <span>New clip to generate</span>
             <span className="text-[11px] leading-snug text-muted">
-              Ett tomt klipp med föregående klipps inställningar.
+              An empty clip with the previous clip's settings.
             </span>
           </button>
         )}
@@ -394,8 +394,8 @@ function AddMenu({
           onClick={() => onPick('file')}
           className={`${menuRow} flex-col items-start gap-0.5`}
         >
-          <span>Eget klipp från fil…</span>
-          <span className="text-[11px] leading-snug text-muted">En film du har filmat eller gjort själv.</span>
+          <span>Own clip from file…</span>
+          <span className="text-[11px] leading-snug text-muted">A film you shot or made yourself.</span>
         </button>
         <button
           type="button"
@@ -404,8 +404,8 @@ function AddMenu({
           onClick={() => onPick('feed')}
           className={`${menuRow} flex-col items-start gap-0.5`}
         >
-          <span>Från klippflödet…</span>
-          <span className="text-[11px] leading-snug text-muted">Ett klipp du redan har i Mediabanken.</span>
+          <span>From Media…</span>
+          <span className="text-[11px] leading-snug text-muted">A clip you already have in Media.</span>
         </button>
         <button
           type="button"
@@ -414,8 +414,8 @@ function AddMenu({
           onClick={() => onPick('edit')}
           className={`${menuRow} flex-col items-start gap-0.5`}
         >
-          <span>Från Redigera…</span>
-          <span className="text-[11px] leading-snug text-muted">En version av en film du har ändrat i Redigera.</span>
+          <span>From the Editor…</span>
+          <span className="text-[11px] leading-snug text-muted">A version of a film you've changed in the Editor.</span>
         </button>
       </div>
     </Popover>
@@ -457,8 +457,8 @@ function Joint({
   const linked = continues || endsHere
   const mismatch = continuationMismatch(segment, previous) || endMismatch(previous, segment)
   const description = [
-    continues ? `Klipp ${number} fortsätter från sista bildrutan i klipp ${number - 1}.` : '',
-    endsHere ? `Klipp ${number - 1} slutar på första bildrutan i klipp ${number}.` : ''
+    continues ? `Clip ${number} continues from the last frame of clip ${number - 1}.` : '',
+    endsHere ? `Clip ${number - 1} ends on the first frame of clip ${number}.` : ''
   ]
     .filter(Boolean)
     .join(' ')
@@ -471,7 +471,7 @@ function Joint({
             <span
               title={
                 mismatch
-                  ? `${description} Ingen av de valda tagningarna gjordes från den andras bildruta som den ser ut nu – generera en ny tagning för en sömlös övergång.`
+                  ? `${description} Neither selected take was made from the other's frame as it is now – generate a new take for a seamless transition.`
                   : description
               }
               className={`relative flex h-6 w-6 items-center justify-center rounded-full border ${
@@ -489,7 +489,7 @@ function Joint({
         disabled={adding}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        title={`Infoga ett klipp mellan ${number - 1} och ${number}`}
+        title={`Insert a clip between ${number - 1} and ${number}`}
         className={`mt-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-line bg-raised text-muted transition hover:border-muted hover:text-text focus:opacity-100 group-hover/joint:opacity-100 disabled:opacity-0 ${
           menuOpen ? 'border-muted text-text opacity-100' : 'opacity-0'
         }`}
@@ -537,7 +537,7 @@ function SegmentCard({
   news?: SegmentNews
   /** A take of it is being sent to Venice. */
   sending: boolean
-  /** What "Gör om mellan grannarna" does here; undefined for a clip without neighbours. */
+  /** What "Redo between neighbours" does here; undefined for a clip without neighbours. */
   bridgeTitle?: string
   onBridge: () => void
   selected: boolean
@@ -552,7 +552,7 @@ function SegmentCard({
   const length = clipLength(segment)
   const trimmed = segment.trimStart > 0 || segment.trimEnd > 0
   const prompt = segment.params.prompt.trim()
-  // An own film (or a version from Redigera) as the clip's take: named by its title, marked "Egen".
+  // An own film (or a version from the Editor) as the clip's take: named by its title, marked "Own".
   const chosen = selectedTake(segment)
   const badge = chosen ? sourceBadge(chosen) : undefined
   const own = !!chosen && (badge?.kind === 'own' || badge?.kind === 'edited')
@@ -569,7 +569,7 @@ function SegmentCard({
       onKeyDown={onKeyDown}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      title="Klicka för att redigera, dra för att flytta"
+      title="Click to edit, drag to move"
       className={`group/card w-44 shrink-0 cursor-pointer overflow-hidden rounded-lg border bg-panel outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
         selected ? 'border-accent ring-1 ring-accent/30' : 'border-line hover:border-muted/60'
       } ${dragging ? 'opacity-40' : ''}`}
@@ -597,24 +597,24 @@ function SegmentCard({
               onBridge()
             }}
             onKeyDown={(e) => e.stopPropagation()}
-            title={`Gör om mellan grannarna: ${bridgeTitle}`}
-            aria-label="Gör om mellan grannarna"
+            title={`Redo between neighbours: ${bridgeTitle}`}
+            aria-label="Redo between neighbours"
             className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] text-text opacity-0 transition hover:bg-black focus:opacity-100 group-hover/card:opacity-100"
           >
             <BridgeIcon size={11} />
-            Gör om
+            Redo
           </button>
         )}
       </div>
       <div className="px-2 py-1.5">
         <p className={`truncate text-[12px] ${text ? '' : 'italic text-muted'}`} title={text || undefined}>
-          {text || 'Ingen prompt än'}
+          {text || 'No prompt yet'}
         </p>
         <p className="mt-0.5 flex justify-between text-[11px] text-muted">
           <span className="tabular-nums">
             {length !== undefined ? formatLength(length) : `≈ ${segment.params.duration.replace(/s$/, ' s')}`}
           </span>
-          {trimmed && length !== undefined && <span>trimmad</span>}
+          {trimmed && length !== undefined && <span>trimmed</span>}
         </p>
       </div>
     </div>
@@ -641,9 +641,9 @@ function CardChip({
   const showsPicture = !!readyTake(segment)
   if ((pending || sending) && showsPicture) {
     return (
-      <span className={`${chip} bg-black/75 text-text`} title="En ny tagning genereras">
+      <span className={`${chip} bg-black/75 text-text`} title="A new take is being generated">
         <Spinner size={10} />
-        {pending ? pendingPhase(pending) : 'Skickas'}
+        {pending ? pendingPhase(pending) : 'Sending'}
       </span>
     )
   }
@@ -653,7 +653,7 @@ function CardChip({
       <NewChip
         variant="overlay"
         label={freshTakesLabel(news.fresh.length)}
-        title="En ny tagning är klar. Öppna klippet och klicka på den för att använda den."
+        title="A new take is ready. Open the clip and click it to use it."
         className="absolute right-1.5 top-1.5"
       />
     )
@@ -661,13 +661,13 @@ function CardChip({
   if (!takes) return null
   return (
     <span className={`${chip} bg-black/75 text-muted`}>
-      {takes} {takes === 1 ? 'tagning' : 'tagningar'}
+      {takes} {takes === 1 ? 'take' : 'takes'}
     </span>
   )
 }
 
 /**
- * "Misslyckades" on a clip's card: the failure counts as seen once it has been on screen a moment (D4), as on a
+ * "Failed" on a clip's card: the failure counts as seen once it has been on screen a moment (D4), as on a
  * storyboard's transition card; the clip's take strip still says why.
  */
 function FailedChip({ className, failedKey }: { className: string; failedKey: string }) {
@@ -677,9 +677,9 @@ function FailedChip({ className, failedKey }: { className: string; failedKey: st
     <span
       ref={ref}
       className={`${className} bg-black/75 font-medium text-accent`}
-      title="En tagning misslyckades. Öppna klippet för att se varför."
+      title="A take failed. Open the clip to see why."
     >
-      Misslyckades
+      Failed
     </span>
   )
 }
@@ -723,22 +723,22 @@ function CardPreview({ segment, sending }: { segment: Segment; sending: boolean 
     return (
       <div className="flex h-full items-center justify-center gap-1.5 text-[11px] text-muted">
         <Spinner size={11} />
-        Skickas till Venice
+        Sending to Venice
       </div>
     )
   }
 
   if (selected?.fileMissing) {
-    return <div className="flex h-full items-center justify-center text-[11px] text-muted">Filen saknas</div>
+    return <div className="flex h-full items-center justify-center text-[11px] text-muted">File missing</div>
   }
 
   if (selected?.status === 'failed' || latest?.status === 'failed') {
-    return <div className="flex h-full items-center justify-center text-[11px] text-accent">Misslyckades</div>
+    return <div className="flex h-full items-center justify-center text-[11px] text-accent">Failed</div>
   }
 
   return (
     <div className="flex h-full items-center justify-center text-[11px] text-muted">
-      {latest ? 'Ingen vald tagning' : 'Ingen tagning'}
+      {latest ? 'No selected take' : 'No take'}
     </div>
   )
 }

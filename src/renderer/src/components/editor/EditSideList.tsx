@@ -9,8 +9,8 @@ import { useEditStatus } from './EditList'
 import { originLabel, summaryLine } from './editorUtils'
 import { CameraIcon } from './icons'
 
-// Redigera's list on the left, always there: the edits, newest change first, in the shared side list. A click opens
-// one on the right (with none open the right side is the overview, EditList); "＋ Ny redigering" offers the three
+// The Editor's list on the left, always there: the edits, newest change first, in the shared side list. A click opens
+// one on the right (with none open the right side is the overview, EditList); "＋ New edit" offers the three
 // ways to start one.
 
 interface Props {
@@ -42,20 +42,20 @@ export default function EditSideList({
 
   return (
     <SideList
-      title="Redigeringar"
-      createLabel="Ny redigering"
-      createTitle="Redigera en egen film, ett klipp eller en export"
+      title="Edits"
+      createLabel="New edit"
+      createTitle="Edit your own film, a clip or an export"
       creating={busy}
       createPanel={{
         width: 240,
         popup: 'menu',
         render: (close) => (
-          <div role="menu" aria-label="Ny redigering" onKeyDown={onMenuKeyDown} className="p-1">
+          <div role="menu" aria-label="New edit" onKeyDown={onMenuKeyDown} className="p-1">
             {(
               [
-                ['Öppna en egen film…', onOwnFilm],
-                ['Från klippflödet…', onFromFeed],
-                ['Från en export…', onFromExport]
+                ['Open your own film…', onOwnFilm],
+                ['From the clip feed…', onFromFeed],
+                ['From an export…', onFromExport]
               ] as const
             ).map(([label, action], i) => (
               <button
@@ -80,11 +80,11 @@ export default function EditSideList({
       items={edits}
       selectedId={selectedId}
       onSelect={onSelect}
-      searchPlaceholder="Sök namn eller ursprung"
+      searchPlaceholder="Search name or origin"
       searchText={(e) => originLabel(e.origin)}
-      emptyText="Inga redigeringar ännu. En redigering ändrar en färdig film – varje ändring blir en ny version, och originalet lämnas orört."
+      emptyText="No edits yet. An edit changes a finished film – every change becomes a new version, and the original is left untouched."
       deleteNote={() =>
-        'Originalet, AI-tagningarna och versioner som används på andra ställen finns kvar; resten flyttas till papperskorgen.'
+        'The original, the AI takes and versions used elsewhere are kept; the rest goes to the Trash.'
       }
       onDelete={onDelete}
       renderRow={(e, control) => <EditRow edit={e} control={control} />}
@@ -95,7 +95,7 @@ export default function EditSideList({
 /** One edit: its poster, name, versions and length (and spent), what runs there and what is new. */
 function EditRow({ edit, control }: { edit: EditSummary; control: SideRowControl }) {
   const { counts, runningCount, title } = useEditStatus(edit)
-  const origin = `${originLabel(edit.origin)}${edit.origin.missing ? ' (borta)' : ''}`
+  const origin = `${originLabel(edit.origin)}${edit.origin.missing ? ' (gone)' : ''}`
   return (
     <SideListRow
       control={control}
@@ -115,7 +115,7 @@ function EditRow({ edit, control }: { edit: EditSummary; control: SideRowControl
       meta={summaryLine(edit)}
       status={<StatusMark variant="inline" running={runningCount} fresh={counts.unseen} failed={counts.failed} />}
       title={title ? `${origin} · ${title}` : origin}
-      deleteTitle="Radera redigeringen"
+      deleteTitle="Delete the edit"
     />
   )
 }

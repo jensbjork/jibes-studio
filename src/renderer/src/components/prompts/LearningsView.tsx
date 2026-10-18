@@ -25,9 +25,9 @@ import { useLearnings } from './useLearnings'
 
 interface Props {
   navigate: Navigate
-  /** The Prompter / Lärdomar switch, shown in the list's header. */
+  /** The Prompts / Learnings switch, shown in the list's header. */
   tabs: ReactNode
-  /** A learning to open first (from a clip's "Lärdomar från klippet"). */
+  /** A learning to open first (from a clip's "Learnings from this clip"). */
   initialId?: string
 }
 
@@ -39,7 +39,7 @@ const chip = (active: boolean) =>
 const COLLAPSED_TAGS = 8
 
 /**
- * Lärdomar: short insights about writing prompts that work, distilled from how clips actually turned out —
+ * Learnings: short insights about writing prompts that work, distilled from how clips actually turned out —
  * mostly by agents reviewing the clips over MCP, but the user can write and edit them too. Each can be pinned
  * (agents see pinned ones first), tied to a model, and backed by the clips it is based on.
  */
@@ -77,7 +77,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
         else counts.set(key, { key, label: t.trim(), count: 1 })
       }
     }
-    return [...counts.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'sv'))
+    return [...counts.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'en'))
   }, [learnings])
   const visibleTags = tagsExpanded ? tags : tags.filter((t, i) => i < COLLAPSED_TAGS || filters.tags.includes(t.key))
   const usedModels = useMemo(
@@ -159,7 +159,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
             onClick={() => editor.create({ model: filters.model, pinned: filters.pinnedOnly })}
             className="no-drag rounded-md px-2.5 py-1 text-muted transition hover:bg-raised hover:text-text"
           >
-            ＋ Ny lärdom
+            ＋ New learning
           </button>
         </div>
 
@@ -180,7 +180,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
                     if (!visible.some((l) => l.id === draft?.id)) step(1)
                   }
                 }}
-                placeholder="Sök i lärdomarna…"
+                placeholder="Search learnings…"
                 className="w-full rounded-md border border-line bg-raised py-1.5 pl-3 pr-8 outline-none focus:border-muted"
               />
               {filters.query && (
@@ -190,7 +190,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
                     set({ query: '' })
                     searchRef.current?.focus()
                   }}
-                  title="Rensa sökningen"
+                  title="Clear the search"
                   className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted hover:bg-line hover:text-text"
                 >
                   <CloseIcon size={9} />
@@ -200,7 +200,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
 
             <div className="flex flex-wrap gap-1.5">
               <button type="button" onClick={() => set({ pinnedOnly: !filters.pinnedOnly })} className={chip(filters.pinnedOnly)}>
-                <PinIcon size={11} filled={filters.pinnedOnly} className="-mt-px mr-0.5 inline text-amber-400" /> Fästa
+                <PinIcon size={11} filled={filters.pinnedOnly} className="-mt-px mr-0.5 inline text-amber-400" /> Pinned
               </button>
               {(['user', 'agents'] as AuthorFilter[]).map((a) => (
                 <button
@@ -209,7 +209,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
                   onClick={() => set({ author: filters.author === a ? undefined : a })}
                   className={chip(filters.author === a)}
                 >
-                  {a === 'user' ? 'Dina' : 'Agenternas'}
+                  {a === 'user' ? 'Yours' : "Agents'"}
                 </button>
               ))}
               {visibleTags.map((t) => (
@@ -224,7 +224,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
                   onClick={() => setTagsExpanded(!tagsExpanded)}
                   className="px-1 text-[12px] text-muted hover:text-text"
                 >
-                  {tagsExpanded ? 'Visa färre' : `+${tags.length - visibleTags.length} till`}
+                  {tagsExpanded ? 'Show fewer' : `+${tags.length - visibleTags.length} more`}
                 </button>
               )}
             </div>
@@ -232,17 +232,17 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
             <div className="flex items-center justify-between gap-2 pt-0.5 text-[11px] text-muted">
               <span>
                 {visible.length === learnings.length
-                  ? `${learnings.length} ${learnings.length === 1 ? 'lärdom' : 'lärdomar'}`
-                  : `${visible.length} av ${learnings.length}`}
+                  ? `${learnings.length} ${learnings.length === 1 ? 'learning' : 'learnings'}`
+                  : `${visible.length} of ${learnings.length}`}
               </span>
               {usedModels.length > 0 && (
                 <select
                   value={filters.model ?? ''}
                   onChange={(e) => set({ model: e.target.value || undefined })}
-                  aria-label="Modell"
+                  aria-label="Model"
                   className="min-w-0 max-w-44 cursor-pointer truncate rounded bg-transparent py-0.5 text-right text-muted outline-none hover:text-text"
                 >
-                  <option value="">Alla modeller</option>
+                  <option value="">All models</option>
                   {usedModels.map((id) => (
                     <option key={id} value={id}>
                       {modelName(id)}
@@ -257,7 +257,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
         <div
           ref={listRef}
           role="listbox"
-          aria-label="Lärdomar"
+          aria-label="Learnings"
           tabIndex={0}
           onKeyDown={onListKey}
           className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-3 outline-none"
@@ -286,18 +286,18 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
 
           {learnings.length > 0 && visible.length === 0 && filtering && (
             <div className="px-3 py-8 text-center text-muted">
-              <p>Inga lärdomar matchar.</p>
+              <p>No learnings match.</p>
               <button
                 type="button"
                 onClick={() => setFilters(NO_LEARNING_FILTERS)}
                 className="mt-2 text-text underline-offset-2 hover:underline"
               >
-                Rensa sökning och filter
+                Clear search and filters
               </button>
             </div>
           )}
           {loaded && learnings.length === 0 && !draft && (
-            <p className="px-3 py-8 text-center text-muted">Inga lärdomar ännu.</p>
+            <p className="px-3 py-8 text-center text-muted">No learnings yet.</p>
           )}
         </div>
 
@@ -308,7 +308,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
               <button
                 type="button"
                 onClick={editor.error ? editor.clearError : feed.clearError}
-                title="Stäng"
+                title="Close"
                 className="text-muted hover:text-text"
               >
                 ✕
@@ -354,7 +354,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
           onNext={clipIndex >= 0 && clipIndex < evidence.length - 1 ? () => openClip(evidence[clipIndex + 1]) : undefined}
           onClose={() => openClip(undefined)}
           onReuse={reuse}
-          reuseTitle="Öppna Generera med klippets inställningar"
+          reuseTitle="Open Generate with the clip's settings"
           onDelete={(g) => {
             void feed.remove(g).then((removed) => removed && openClip(undefined))
           }}
@@ -400,27 +400,27 @@ function EmptyLearnings({ hasLearnings, onNew }: { hasLearnings: boolean; onNew:
       <div className="flex flex-1 items-center justify-center px-8 pb-12">
         {hasLearnings ? (
           <div className="text-center text-muted">
-            <p>Välj en lärdom i listan, eller skriv en ny.</p>
-            <p className="mt-1 text-[11px]">⌘ F söker · ↑ ↓ bläddrar</p>
+            <p>Pick a learning in the list, or write a new one.</p>
+            <p className="mt-1 text-[11px]">⌘ F to search · ↑ ↓ to browse</p>
           </div>
         ) : (
           <div className="max-w-md text-center">
             <BulbIcon size={34} className="mx-auto mb-4 text-muted" />
-            <h2 className="mb-2 text-base font-semibold">Lärdomar</h2>
+            <h2 className="mb-2 text-base font-semibold">Learnings</h2>
             <p className="mb-5 leading-relaxed text-muted">
-              Korta insikter om vad som fungerar när du skriver prompter – hur en modell hanterar kläder, röster
-              eller kamerarörelser. En ansluten agent kan titta på dina klipp, jämföra dem med prompten och spara
-              det den lär sig här, och läser lärdomarna innan den skriver nästa prompt. Du kan också skriva egna.
+              Short insights into what works when you write prompts – how a model handles clothes, voices or
+              camera moves. A connected agent can look at your clips, compare them with the prompt and save what
+              it learns here, and reads the learnings before it writes the next prompt. You can write your own too.
             </p>
             <button
               type="button"
               onClick={onNew}
               className="rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover"
             >
-              Skriv första lärdomen
+              Write the first learning
             </button>
             <p className="mt-4 text-[11px] text-muted">
-              Betygsätt klippen i Mediabanken – dina betyg och anteckningar hjälper agenten att dra rätt slutsatser.
+              Rate the clips in Media – your ratings and notes help the agent draw the right conclusions.
             </p>
           </div>
         )}

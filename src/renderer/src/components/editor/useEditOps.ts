@@ -7,7 +7,7 @@ import { needsConfirm, priceCheck, type PriceCheck } from './editorUtils'
 // Planning and running operations from the edit view. A plan is free (main's single check of an operation, with
 // Venice's free quotes), debounced so typing doesn't spam it; running is what may cost money, and only ever starts
 // from a click on a button that shows the plan's price — with one more question when the price is unknown, partly
-// unknown, or above $5 (D5), and Venice's consent dialog when a model asks for it, like Generera.
+// unknown, or above $5 (D5), and Venice's consent dialog when a model asks for it, like Generate.
 
 /** How long a form must stay unchanged before it is planned (and priced) again. */
 export const PLAN_DEBOUNCE_MS = 600
@@ -104,20 +104,20 @@ export interface RunRequest {
   plan?: EditPlan
   /** The version it works on; default the plan's base, else the current version. */
   baseId?: string
-  /** "Gör om avsnittet": what the consent dialog says will be sent. */
+  /** "Regenerate section": what the consent dialog says will be sent. */
   label: string
 }
 
 export interface RunOutcome {
   ok: boolean
   result?: EditRunResult
-  /** Swedish; undefined when the user said no. */
+  /** For the user; undefined when the user said no. */
   error?: string
 }
 
 /** What a paid click costs, for the question asked before it is sent. */
 export interface PriceQuestion {
-  /** "Gör om avsnittet", "Fortsätt: Byter röst". */
+  /** "Regenerate section", "Continue: Changing voice". */
   label: string
   priceUsd?: number
   priceNote?: string
@@ -152,14 +152,14 @@ export interface RunDeps {
 }
 
 const CHANGED_DURING_CONSENT =
-  'Åtgärden ändrades medan villkoren visades. Kontrollera priset och tryck på knappen igen.'
+  'The action changed while the terms were shown. Check the price and press the button again.'
 
 /**
  * One click's run. A plan with problems sends nothing; a paid plan asks about its price when it must (unknown,
  * partly unknown, above $5) and passes the price the user saw, so main refuses if it rose. Venice asking for consent
  * (409 needs_consent) opens the consent dialog; accepting plans again, and only the same work (an equal fingerprint)
- * is sent, still with the price the user confirmed as the ceiling: a price that rose (or appeared, after "okänt
- * pris") meanwhile is refused by main and goes back to the button, which shows the new price and asks again.
+ * is sent, still with the price the user confirmed as the ceiling: a price that rose (or appeared, after "unknown
+ * price") meanwhile is refused by main and goes back to the button, which shows the new price and asks again.
  */
 export async function executeRun(req: RunRequest, deps: RunDeps): Promise<RunOutcome> {
   const plan = req.plan

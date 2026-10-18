@@ -13,7 +13,7 @@ import type { Asset, AssetAudio, GenerationParams, ReferenceAudio } from './type
 
 export interface SwapResult {
   params: GenerationParams
-  /** What the swap left as it was and why (Swedish), e.g. a voice the new asset has no counterpart for. */
+  /** What the swap left as it was and why, e.g. a voice the new asset has no counterpart for. */
   notes: string[]
 }
 
@@ -79,8 +79,8 @@ export function swapReferenceImage(
   assets: readonly Asset[]
 ): SwapResult {
   const images = [...(params.referenceImages ?? [])]
-  if (!Number.isInteger(index) || index < 0 || index >= images.length) throw new Error('Bilden finns inte bland referenserna.')
-  if (!path) throw new Error('Välj en bild.')
+  if (!Number.isInteger(index) || index < 0 || index >= images.length) throw new Error('That image is not among the references.')
+  if (!path) throw new Error('Pick an image.')
   const old = images[index]
   if (pathKey(old) === pathKey(path)) return { params, notes: [] }
   images[index] = path
@@ -137,7 +137,7 @@ function followOutfits(
       const next = swapAsset(result.params, outfit, own)
       result = {
         params: { ...next.params, outfitWearers: withOutfitWearer(next.params.outfitWearers, own.id, to.id) },
-        notes: [...result.notes, ...next.notes, `${outfit.name} byttes mot ${to.name}s kläder, ${own.name}.`]
+        notes: [...result.notes, ...next.notes, `${outfit.name} was swapped for ${to.name}'s outfit, ${own.name}.`]
       }
       return
     }
@@ -146,8 +146,8 @@ function followOutfits(
       notes: [
         ...result.notes,
         own?.id === outfit.id
-          ? `${to.name} har samma förvalda kläder, ${outfit.name}.`
-          : `${to.name} har inga förvalda kläder, så ${outfit.name} ligger kvar och bärs nu av ${to.name}.`
+          ? `${to.name} has the same default outfit, ${outfit.name}.`
+          : `${to.name} has no default outfit, so ${outfit.name} stays and is now worn by ${to.name}.`
       ]
     }
   })
@@ -160,8 +160,8 @@ function swapAsset(params: GenerationParams, from: Asset, to: Asset): SwapResult
   const images = [...(params.referenceImages ?? [])]
   const fromImages = new Set(from.images.map((i) => pathKey(i.path)))
   const places = images.flatMap((p, i) => (fromImages.has(pathKey(p)) ? [i] : []))
-  if (!places.length) throw new Error(`${from.name} finns inte bland referensbilderna.`)
-  if (!to.images.length) throw new Error(`${to.name} har inga foton att byta till.`)
+  if (!places.length) throw new Error(`${from.name} is not among the reference images.`)
+  if (!to.images.length) throw new Error(`${to.name} has no photos to swap to.`)
   places.forEach((at, k) => (images[at] = to.images[k % to.images.length].path))
 
   const notes: string[] = []
@@ -175,16 +175,16 @@ function swapAsset(params: GenerationParams, from: Asset, to: Asset): SwapResult
     swappedAudio = audioPlaces
   } else if (audioPlaces.length) {
     notes.push(
-      `${to.name} har ${from.kind === 'character' ? 'ingen röst' : 'inget ljud'}, så ${from.name}s ${
-        audioPlaces.length === 1 ? `@Audio${audioPlaces[0] + 1} är kvar` : 'ljudklipp är kvar'
-      } – byt eller ta bort ${audioPlaces.length === 1 ? 'det' : 'dem'} om ${to.name} inte ska låta så.`
+      `${to.name} has no ${from.kind === 'character' ? 'voice' : 'sound'}, so ${from.name}'s ${
+        audioPlaces.length === 1 ? `@Audio${audioPlaces[0] + 1} stays` : 'audio clips stay'
+      } – swap or remove ${audioPlaces.length === 1 ? 'it' : 'them'} if ${to.name} shouldn't sound like that.`
     )
   }
   if (places.length > to.images.length) {
     notes.push(
-      `${to.name} har ${to.images.length === 1 ? 'ett foto' : `${to.images.length} foton`} men ${from.name} hade ${
+      `${to.name} has ${to.images.length === 1 ? 'one photo' : `${to.images.length} photos`} but ${from.name} had ${
         places.length
-      } platser – samma foto används på flera platser så att inget nummer ändras.`
+      } places – the same photo is used in several places so that no number changes.`
     )
   }
   const names = renamed(params, from, to, new Set(places.map((i) => i + 1)), new Set(swappedAudio.map((i) => i + 1)))

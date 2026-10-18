@@ -348,6 +348,8 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- The whole interface is now in English (it was Swedish). Library folder names on disk are unchanged; prompts can
+  still be sent in Swedish (Settings → Generation → Prompt language).
 - **One list on the left, the same everywhere, and Redigera has it too**: Karaktärer, Miljöer, Produkter, Kläder,
   Poser, Sekvenser, Storyboards and Redigera share one side list (`SideList`) – the view's name with *＋ Ny …*, a
   search field that is always there (⌘F; names, plus the descriptions in the library kinds and where a film came

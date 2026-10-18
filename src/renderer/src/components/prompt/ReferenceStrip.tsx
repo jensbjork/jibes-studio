@@ -33,7 +33,7 @@ const row = 'flex w-full items-center gap-2 px-2 py-1 text-left text-[11px] tran
 /**
  * The key to the prompt's @ImageN and @AudioN tokens: one row per reference image and per audio clip (with a
  * play button for the part that is sent), with a warning dot on the ones the prompt never mentions and the
- * References legend doesn't explain either ("beskrivs" on those it does). Clicking a row inserts its token at the
+ * References legend doesn't explain either ("described" on those it does). Clicking a row inserts its token at the
  * caret.
  */
 export default function ReferenceStrip({
@@ -52,7 +52,7 @@ export default function ReferenceStrip({
   if (!references.length && !audios.length) return null
   return (
     <ul
-      aria-label="Referenserna i prompten"
+      aria-label="The references in the prompt"
       className="mt-2 divide-y divide-line/60 overflow-hidden rounded-md border border-line"
       onMouseLeave={() => onHighlight(undefined)}
     >
@@ -74,12 +74,12 @@ export default function ReferenceStrip({
               onBlur={() => onHighlight(undefined)}
               title={
                 !r.sent
-                  ? `Skickas inte – modellen tar max ${maxImages} bilder`
+                  ? `Not sent – the model takes at most ${maxImages} images`
                   : unused
-                    ? `Nämns inte i prompten – klicka för att infoga ${token} vid markören`
+                    ? `Not mentioned in the prompt – click to insert ${token} at the cursor`
                     : described
-                      ? `Beskrivs i referenslistan som läggs till i prompten – klicka för att infoga ${token} vid markören`
-                      : `Infoga ${token} vid markören`
+                      ? `Described in the reference list added to the prompt – click to insert ${token} at the cursor`
+                      : `Insert ${token} at the cursor`
               }
               className={`${row} ${highlighted === key ? 'bg-raised' : ''} ${r.sent ? '' : 'opacity-45'}`}
             >
@@ -89,10 +89,10 @@ export default function ReferenceStrip({
                 {r.asset ? (
                   <>
                     {r.asset.name}
-                    <span className="text-muted"> · foto {r.photo ?? 1}</span>
+                    <span className="text-muted"> · photo {r.photo ?? 1}</span>
                   </>
                 ) : (
-                  <span className="text-muted">Egen bild · {fileName(r.path)}</span>
+                  <span className="text-muted">Own image · {fileName(r.path)}</span>
                 )}
               </span>
               <Status sent={r.sent} unused={unused} described={described} />
@@ -119,12 +119,12 @@ export default function ReferenceStrip({
               onBlur={() => onHighlight(undefined)}
               title={
                 !a.sent
-                  ? 'Skickas inte med den här modellen'
+                  ? 'Not sent with this model'
                   : unused
-                    ? `Nämns inte i prompten – klicka för att infoga ${token} vid markören`
+                    ? `Not mentioned in the prompt – click to insert ${token} at the cursor`
                     : described
-                      ? `Beskrivs i referenslistan som läggs till i prompten – klicka för att infoga ${token} vid markören`
-                      : `Infoga ${token} vid markören`
+                      ? `Described in the reference list added to the prompt – click to insert ${token} at the cursor`
+                      : `Insert ${token} at the cursor`
               }
               className={`${row} min-w-0 flex-1 ${highlighted === key ? 'bg-raised' : ''} ${a.sent ? '' : 'opacity-45'}`}
             >
@@ -149,14 +149,14 @@ export default function ReferenceStrip({
 }
 
 function Status({ sent, unused, described }: { sent: boolean; unused: boolean; described: boolean }) {
-  if (!sent) return <span className="shrink-0 text-accent">skickas inte</span>
+  if (!sent) return <span className="shrink-0 text-accent">not sent</span>
   // Not in the prompt's text, but the References legend tells the model what it is.
-  if (described) return <span className="shrink-0 text-muted">beskrivs</span>
+  if (described) return <span className="shrink-0 text-muted">described</span>
   if (!unused) return null
   return (
     <span className="flex shrink-0 items-center gap-1 text-amber-300">
       <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-      nämns inte
+      not mentioned
     </span>
   )
 }

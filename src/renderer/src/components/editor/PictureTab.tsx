@@ -24,29 +24,29 @@ import {
   textArea
 } from './ui'
 
-// Bild: the picture operations. Paid: Gör om avsnittet (image-to-video between the frames around the range), Ändra
-// med prompt (a video-to-video edit of the range), Förläng (image-to-video from the last frame) and Uppskala (Topaz,
-// the whole film). Free: cutting and fading.
+// Picture: the picture operations. Paid: Regenerate section (image-to-video between the frames around the range), Edit
+// with prompt (a video-to-video edit of the range), Extend (image-to-video from the last frame) and Upscale (Topaz,
+// the whole film). Free: trimming and fading.
 
 const DEFAULT_REGENERATE_MODEL = DEFAULT_MODEL['image-to-video']
 const DEFAULT_PROMPT_EDIT_MODEL = DEFAULT_MODEL['reference-to-video']
 
-/** Example changes: Swedish labels that insert English prompts. */
+/** Example changes: short labels that insert full prompts. */
 const EDIT_CHIPS: { label: string; text: string }[] = [
   {
-    label: 'Ta bort personen i bakgrunden',
+    label: 'Remove the person in the background',
     text: 'Remove the person in the background, keeping the rest of the video unchanged.'
   },
   {
-    label: 'Gör det till kväll',
+    label: 'Make it evening',
     text: 'Make it evening with warm, low light, keeping the rest of the video unchanged.'
   },
   {
-    label: 'Byt färg på jackan',
+    label: 'Change the jacket’s colour',
     text: 'Change the colour of the jacket to dark red, keeping the rest of the video unchanged.'
   },
   {
-    label: 'Tecknad stil',
+    label: 'Cartoon style',
     text: 'Turn the video into a hand-drawn cartoon style, keeping the motion and composition unchanged.'
   }
 ]
@@ -69,7 +69,7 @@ interface CardProps {
   onToggle: () => void
 }
 
-/** Image-to-video models that can also end on a picture (Gör om avsnittet needs both frames). */
+/** Image-to-video models that can also end on a picture (Regenerate section needs both frames). */
 function endImageModels(models: VideoModel[]): VideoModel[] {
   return models.filter((m) => m.kind === 'image-to-video' && supportsEndImage(m.id) && !m.offline)
 }
@@ -96,7 +96,7 @@ function ModelSelect({
 }) {
   const { modelsError } = useEditor()
   return (
-    <Field label="Modell" hint={hint}>
+    <Field label="Model" hint={hint}>
       {modelsError ? (
         <p className="text-[12px] text-accent select-text">{modelsError}</p>
       ) : (
@@ -124,9 +124,9 @@ function ResolutionSelect({
 }) {
   const options = model?.resolutions ?? []
   return (
-    <Field label="Upplösning">
+    <Field label="Resolution">
       <select value={value} onChange={(e) => onChange(e.target.value)} className={fieldInput}>
-        <option value="">Som filmen (högst 720p)</option>
+        <option value="">Same as the film (max 720p)</option>
         {options.map((r) => (
           <option key={r} value={r}>
             {r}
@@ -140,28 +140,28 @@ function ResolutionSelect({
 function AudioChoice({
   value,
   onChange,
-  keepLabel = 'Behåll originalljudet'
+  keepLabel = 'Keep the original sound'
 }: {
   value: 'keep' | 'model'
   onChange: (v: 'keep' | 'model') => void
   keepLabel?: string
 }) {
   return (
-    <Field label="Ljud">
+    <Field label="Sound">
       <Choice
         value={value}
         onChange={onChange}
-        label="Ljud"
+        label="Sound"
         options={[
-          { value: 'keep', label: keepLabel, hint: 'Bäst när någon pratar i avsnittet.' },
-          { value: 'model', label: 'Nytt ljud från modellen' }
+          { value: 'keep', label: keepLabel, hint: 'Best when someone speaks in the section.' },
+          { value: 'model', label: 'New sound from the model' }
         ]}
       />
     </Field>
   )
 }
 
-/** Startbild and Slutbild from the plan (free, extracted by main). */
+/** The start image and end image from the plan (free, extracted by main). */
 function Frames({ plan, planning }: { plan?: EditPlan; planning: boolean }) {
   const start = plan?.frames?.start
   const end = plan?.frames?.end
@@ -172,7 +172,7 @@ function Frames({ plan, planning }: { plan?: EditPlan; planning: boolean }) {
         {path ? (
           <img src={mediaUrl(path)} alt={label} draggable={false} className="h-full w-full object-contain" />
         ) : (
-          <span className="px-2 text-center text-[11px] text-muted">{planning ? 'Hämtar…' : missing}</span>
+          <span className="px-2 text-center text-[11px] text-muted">{planning ? 'Loading…' : missing}</span>
         )}
       </div>
       <figcaption className="mt-1 text-[11px] text-muted">{label}</figcaption>
@@ -180,8 +180,8 @@ function Frames({ plan, planning }: { plan?: EditPlan; planning: boolean }) {
   )
   return (
     <div className="flex gap-2">
-      {frame(start, 'Startbild', 'Ingen startbild')}
-      {frame(end, 'Slutbild', 'Ingen – avsnittet går till slutet')}
+      {frame(start, 'Start image', 'No start image')}
+      {frame(end, 'End image', 'None – the section runs to the end')}
     </div>
   )
 }
@@ -205,12 +205,12 @@ function RegenerateCard({ open, onToggle }: CardProps) {
   const range = operationRange(plan?.operation) ?? selection
   useReportRange(open, range)
   const card = useCardRun(() => setNonce((n) => n + 1))
-  const missingPrompt = !prompt.trim() ? 'Skriv vad som händer i avsnittet.' : undefined
+  const missingPrompt = !prompt.trim() ? 'Write what happens in the section.' : undefined
 
   return (
     <OpCard
-      title="Gör om avsnittet"
-      summary="En ny AI-tagning mellan bildrutan före och bildrutan efter markeringen."
+      title="Regenerate section"
+      summary="A new AI take between the frame before and the frame after the selection."
       open={open}
       onToggle={onToggle}
     >
@@ -221,15 +221,15 @@ function RegenerateCard({ open, onToggle }: CardProps) {
           <Target range={range} />
           <Frames plan={plan} planning={planning} />
           <Field
-            label="Vad händer?"
+            label="What happens?"
             hint={
               <button
                 type="button"
                 onClick={() => setPrompt(suggestRegeneratePrompt(transcript?.segments ?? [], range))}
                 className={linkButton}
-                title="Skriv en enkel mall utifrån bilderna och det som sägs i avsnittet"
+                title="Write a simple template from the frames and what is said in the section"
               >
-                Föreslå
+                Suggest
               </button>
             }
           >
@@ -239,16 +239,16 @@ function RegenerateCard({ open, onToggle }: CardProps) {
               context="video"
               minRows={3}
               maxRows={10}
-              title="Vad händer?"
-              focusHint="Vad som händer i avsnittet – gärna på engelska. Skriv / för en byggsten."
+              title="What happens?"
+              focusHint="What happens in the section – in English if you can. Type / for a building block."
               placeholder="She turns towards the window and smiles. Continuous shot."
             />
-            <p className="mt-1 text-[11px] text-muted">Skriv gärna på engelska – modellerna förstår det bäst.</p>
+            <p className="mt-1 text-[11px] text-muted">Write in English if you can – the models understand it best.</p>
           </Field>
           {range && (
             <p className="text-[12px] text-muted">
-              Längd <span className="text-text">{formatSecondsShort(range.end - range.start)}</span> · modellen gör hela
-              sekunder
+              Length <span className="text-text">{formatSecondsShort(range.end - range.start)}</span> · the model makes
+              whole seconds
             </p>
           )}
           <div className="grid grid-cols-2 gap-2">
@@ -258,13 +258,13 @@ function RegenerateCard({ open, onToggle }: CardProps) {
           <AudioChoice value={audio} onChange={setAudio} />
           <PlanNotes plan={plan} error={card.error ?? planError} quiet={missingPrompt} />
           <RunButton
-            label="Gör om avsnittet"
+            label="Regenerate section"
             plan={plan}
             planning={planning}
             running={card.running}
             disabled={!!missingPrompt}
             disabledReason={missingPrompt}
-            onClick={() => plan && void card.run({ op: op!, plan, label: 'Gör om avsnittet' })}
+            onClick={() => plan && void card.run({ op: op!, plan, label: 'Regenerate section' })}
           />
           {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
         </>
@@ -314,14 +314,14 @@ function PromptEditCard({ open, onToggle }: CardProps) {
   const range = operationRange(plan?.operation) ?? selection
   useReportRange(open, range)
   const card = useCardRun(() => setNonce((n) => n + 1))
-  const missingPrompt = !prompt.trim() ? 'Skriv vad som ska ändras.' : undefined
+  const missingPrompt = !prompt.trim() ? 'Write what should change.' : undefined
 
   const addChip = (text: string) => setPrompt((p) => (p.trim() ? `${p.trim()} ${text}` : text))
 
   return (
     <OpCard
-      title="Ändra med prompt"
-      summary="Ändra något i markeringen – ta bort en sak, byt ljus, stil eller färg."
+      title="Edit with prompt"
+      summary="Change something in the selection – remove a thing, change the light, style or colour."
       open={open}
       onToggle={onToggle}
     >
@@ -330,15 +330,15 @@ function PromptEditCard({ open, onToggle }: CardProps) {
       ) : (
         <>
           <Target range={range} />
-          <Field label="Vad ska ändras?">
+          <Field label="What should change?">
             <PromptField
               value={prompt}
               onChange={setPrompt}
               context="video"
               minRows={3}
               maxRows={10}
-              title="Vad ska ändras?"
-              focusHint="En ändring i taget, på engelska. Skriv / för ljus, stil och kamera."
+              title="What should change?"
+              focusHint="One change at a time, in English. Type / for light, style and camera."
               placeholder="Remove the car in the background, keeping the rest of the video unchanged."
             />
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -349,17 +349,17 @@ function PromptEditCard({ open, onToggle }: CardProps) {
               ))}
             </div>
             <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-              En ändring i taget och en så kort markering som möjligt ger bäst resultat. Skriv på engelska.
+              One change at a time and as short a selection as possible give the best result. Write in English.
             </p>
           </Field>
           {takesImages && (
             <ReferencePhotos selected={imageIds} onChange={setImageIds} onInsert={(token) => addChip(token)} />
           )}
-          <Field label="Modell">
+          <Field label="Model">
             <Choice
               value={modelId}
               onChange={setModel}
-              label="Modell"
+              label="Model"
               options={choices.map((id, i) => {
                 const m = PICTURE_EDIT_MODELS[id]
                 const alt = alternatives[i]
@@ -384,13 +384,13 @@ function PromptEditCard({ open, onToggle }: CardProps) {
           <AudioChoice value={audio} onChange={setAudio} />
           <PlanNotes plan={plan} error={card.error ?? planError} quiet={missingPrompt} />
           <RunButton
-            label="Ändra med prompt"
+            label="Edit with prompt"
             plan={plan}
             planning={planning}
             running={card.running}
             disabled={!!missingPrompt}
             disabledReason={missingPrompt}
-            onClick={() => plan && void card.run({ op: op!, plan, label: 'Ändra med prompt' })}
+            onClick={() => plan && void card.run({ op: op!, plan, label: 'Edit with prompt' })}
           />
           {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
         </>
@@ -399,7 +399,7 @@ function PromptEditCard({ open, onToggle }: CardProps) {
   )
 }
 
-/** "Bilder att utgå från": library photos sent with a Seedance edit, @Image1… in the prompt. */
+/** "Images to start from": library photos sent with a Seedance edit, @Image1… in the prompt. */
 function ReferencePhotos({
   selected,
   onChange,
@@ -421,10 +421,10 @@ function ReferencePhotos({
 
   return (
     <Field
-      label="Bilder att utgå från"
+      label="Images to start from"
       hint={
         <button type="button" onClick={() => setBrowsing((b) => !b)} className={linkButton}>
-          {browsing ? 'Klar' : selected.length ? 'Ändra' : 'Välj…'}
+          {browsing ? 'Done' : selected.length ? 'Change' : 'Choose…'}
         </button>
       }
     >
@@ -437,7 +437,7 @@ function ReferencePhotos({
                 key={id}
                 type="button"
                 onClick={() => onInsert(`@Image${i + 1}`)}
-                title={`Skriv @Image${i + 1} i prompten${img ? ` (${img.label})` : ''}`}
+                title={`Type @Image${i + 1} in the prompt${img ? ` (${img.label})` : ''}`}
                 className="w-14 text-center"
               >
                 <span className="block h-14 w-14 overflow-hidden rounded-md border border-line bg-black">
@@ -450,12 +450,12 @@ function ReferencePhotos({
         </div>
       ) : (
         !browsing && (
-          <p className="text-[11px] text-muted">Valfritt: foton från biblioteket, t.ex. en person som ska synas i stället.</p>
+          <p className="text-[11px] text-muted">Optional: photos from the library, e.g. a person who should appear instead.</p>
         )
       )}
       {browsing && (
         <div className="mt-2 grid max-h-48 grid-cols-5 gap-1.5 overflow-y-auto rounded-md border border-line p-1.5">
-          {images.length === 0 && <p className="col-span-5 p-2 text-[11px] text-muted">Biblioteket har inga foton än.</p>}
+          {images.length === 0 && <p className="col-span-5 p-2 text-[11px] text-muted">The library has no photos yet.</p>}
           {images.map((img) => {
             const at = selected.indexOf(img.id)
             return (
@@ -505,31 +505,31 @@ function ExtendCard({ open, onToggle }: CardProps) {
   }
   const { plan, planning, error: planError } = usePlan(edit.id, op, current.id, open, nonce)
   const card = useCardRun(() => setNonce((n) => n + 1))
-  const missingPrompt = !prompt.trim() ? 'Skriv vad som händer sedan.' : undefined
+  const missingPrompt = !prompt.trim() ? 'Write what happens next.' : undefined
 
   return (
-    <OpCard title="Förläng" summary="Fortsätt filmen efter slutet med en AI-tagning från sista bildrutan." open={open} onToggle={onToggle}>
+    <OpCard title="Extend" summary="Continue the film past its end with an AI take from the last frame." open={open} onToggle={onToggle}>
       <p className="text-[12px] text-muted">
-        <span className="text-text">Efter slutet</span> · börjar på filmens sista bildruta
+        <span className="text-text">After the end</span> · starts on the film’s last frame
       </p>
-      <Field label="Vad händer sedan?">
+      <Field label="What happens next?">
         <PromptField
           value={prompt}
           onChange={setPrompt}
           context="video"
           minRows={3}
           maxRows={10}
-          title="Vad händer sedan?"
-          focusHint="Hur filmen fortsätter efter slutet – gärna på engelska. Skriv / för en byggsten."
+          title="What happens next?"
+          focusHint="How the film goes on after the end – in English if you can. Type / for a building block."
           placeholder="The camera slowly pulls back as she walks away down the street."
         />
       </Field>
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Längd">
+        <Field label="Length">
           <select value={seconds} onChange={(e) => setSeconds(Number(e.target.value))} className={fieldInput}>
             {EXTEND_SECONDS.map((s) => (
               <option key={s} value={s}>
-                {s} sekunder
+                {s} seconds
               </option>
             ))}
           </select>
@@ -537,26 +537,26 @@ function ExtendCard({ open, onToggle }: CardProps) {
         <ResolutionSelect value={resolution} onChange={setResolution} model={models.find((m) => m.id === modelId)} />
       </div>
       <ModelSelect value={modelId} onChange={setModel} models={choices} />
-      <Field label="Ljud">
+      <Field label="Sound">
         <Choice
           value={audio}
           onChange={setAudio}
-          label="Ljud"
+          label="Sound"
           options={[
-            { value: 'model', label: 'Nytt ljud från modellen' },
-            { value: 'silence', label: 'Tystnad' }
+            { value: 'model', label: 'New sound from the model' },
+            { value: 'silence', label: 'Silence' }
           ]}
         />
       </Field>
       <PlanNotes plan={plan} error={card.error ?? planError} quiet={missingPrompt} />
       <RunButton
-        label="Förläng"
+        label="Extend"
         plan={plan}
         planning={planning}
         running={card.running}
         disabled={!!missingPrompt}
         disabledReason={missingPrompt}
-        onClick={() => plan && void card.run({ op, plan, label: `Förläng ${seconds} s` })}
+        onClick={() => plan && void card.run({ op, plan, label: `Extend ${seconds} s` })}
       />
       {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
     </OpCard>
@@ -580,12 +580,12 @@ function UpscaleCard({ open, onToggle }: CardProps) {
     timeline ? `${timeline.width * f}×${timeline.height * f}` : undefined
 
   return (
-    <OpCard title="Uppskala" summary="Skärpare bild i högre upplösning, hela filmen på en gång." open={open} onToggle={onToggle}>
+    <OpCard title="Upscale" summary="A sharper picture at a higher resolution, the whole film at once." open={open} onToggle={onToggle}>
       <Target />
       <Choice
         value={chosen}
         onChange={setFactor}
-        label="Förstoring"
+        label="Scale"
         inline
         options={[
           { value: 2, label: '2×', hint: size(2), disabled: !fits(2) },
@@ -594,17 +594,17 @@ function UpscaleCard({ open, onToggle }: CardProps) {
             label: '4×',
             hint: size(4),
             disabled: !fits(4),
-            title: fits(4) ? undefined : `4× går bara när resultatet blir högst ${MAX_UPSCALED_SIDE} pixlar brett.`
+            title: fits(4) ? undefined : `4× only works when the result is at most ${MAX_UPSCALED_SIDE} pixels wide.`
           }
         ]}
       />
       <PlanNotes plan={plan} error={card.error ?? planError} />
       <RunButton
-        label={`Uppskala ${chosen}×`}
+        label={`Upscale ${chosen}×`}
         plan={plan}
         planning={planning}
         running={card.running}
-        onClick={() => plan && void card.run({ op, plan, label: `Uppskala ${chosen}×` })}
+        onClick={() => plan && void card.run({ op, plan, label: `Upscale ${chosen}×` })}
       />
       {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
     </OpCard>
@@ -630,42 +630,42 @@ function CutCard({ open, onToggle }: CardProps) {
 
   return (
     <OpCard
-      title="Klipp och tona"
-      summary="Klipp bort eller behåll markeringen, tona in eller ut."
+      title="Trim & fade"
+      summary="Cut out or keep the selection, fade in or out."
       badge={<CostTag paid={false} />}
       open={open}
       onToggle={onToggle}
     >
       <div>
-        <Target range={selection} whole="Ingen markering" />
+        <Target range={selection} whole="No selection" />
         <div className="mt-2 grid grid-cols-2 gap-2">
           <button
             type="button"
             disabled={!selection || !!busy}
-            onClick={() => selection && void go('cut', { op: 'cut', range: selection }, 'Klipp bort markeringen')}
-            title={selection ? 'Tar bort markeringen ur filmen' : 'Markera ett avsnitt först'}
+            onClick={() => selection && void go('cut', { op: 'cut', range: selection }, 'Cut out the selection')}
+            title={selection ? 'Removes the selection from the film' : 'Mark a section first'}
             className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
           >
-            {busy === 'cut' ? 'Klipper…' : 'Klipp bort markeringen'}
+            {busy === 'cut' ? 'Cutting…' : 'Cut out the selection'}
           </button>
           <button
             type="button"
             disabled={!selection || !!busy}
-            onClick={() => selection && void go('trim', { op: 'trim', keep: selection }, 'Behåll bara markeringen')}
-            title={selection ? 'Allt utanför markeringen tas bort' : 'Markera ett avsnitt först'}
+            onClick={() => selection && void go('trim', { op: 'trim', keep: selection }, 'Keep only the selection')}
+            title={selection ? 'Everything outside the selection is removed' : 'Mark a section first'}
             className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
           >
-            {busy === 'trim' ? 'Klipper…' : 'Behåll bara markeringen'}
+            {busy === 'trim' ? 'Trimming…' : 'Keep only the selection'}
           </button>
         </div>
       </div>
       <div className="border-t border-line pt-3">
         <div className="flex items-center gap-2">
-          <span className="text-muted">Tona</span>
+          <span className="text-muted">Fade</span>
           <select value={fade} onChange={(e) => setFade(Number(e.target.value))} className={`${fieldInput} w-auto`}>
             {FADE_SECONDS.map((s) => (
               <option key={s} value={s}>
-                {String(s).replace('.', ',')} s
+                {s} s
               </option>
             ))}
           </select>
@@ -674,23 +674,23 @@ function CutCard({ open, onToggle }: CardProps) {
           <button
             type="button"
             disabled={!!busy || fadeTooLong}
-            onClick={() => void go('fade-in', { op: 'fade', inSeconds: fade }, 'Tona in från svart')}
+            onClick={() => void go('fade-in', { op: 'fade', inSeconds: fade }, 'Fade in from black')}
             className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
           >
-            {busy === 'fade-in' ? 'Tonar…' : 'Tona in från svart'}
+            {busy === 'fade-in' ? 'Fading…' : 'Fade in from black'}
           </button>
           <button
             type="button"
             disabled={!!busy || fadeTooLong}
-            onClick={() => void go('fade-out', { op: 'fade', outSeconds: fade }, 'Tona ut till svart')}
+            onClick={() => void go('fade-out', { op: 'fade', outSeconds: fade }, 'Fade out to black')}
             className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
           >
-            {busy === 'fade-out' ? 'Tonar…' : 'Tona ut till svart'}
+            {busy === 'fade-out' ? 'Fading…' : 'Fade out to black'}
           </button>
         </div>
-        {fadeTooLong && <p className="mt-1.5 text-[11px] text-muted">Toningen får vara högst halva filmen.</p>}
+        {fadeTooLong && <p className="mt-1.5 text-[11px] text-muted">A fade can be at most half the film.</p>}
       </div>
-      <p className="text-[11px] leading-relaxed text-muted">Gratis. Varje ändring blir en ny version – ⌘Z går tillbaka.</p>
+      <p className="text-[11px] leading-relaxed text-muted">Free. Every change becomes a new version – ⌘Z goes back.</p>
       <PlanNotes error={card.error} />
     </OpCard>
   )

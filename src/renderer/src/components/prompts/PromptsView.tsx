@@ -43,9 +43,9 @@ function rowFromDraft(draft: Draft, useCount: number): PromptRow {
   }
 }
 
-/** Prompter: the prompt library, and (second tab) the learnings about what works in prompts. */
+/** Prompts: the prompt library, and (second tab) the learnings about what works in prompts. */
 export default function PromptsView({ navigate }: { navigate: Navigate }) {
-  // A clip's "Lärdomar från klippet" link opens the Lärdomar tab on that learning.
+  // A clip's "Learnings from this clip" link opens the Learnings tab on that learning.
   const [requested] = useState(takeRequestedLearning)
   const [tab, setTabState] = useState<PromptsTab>(() => (requested ? 'learnings' : loadTab()))
   const setTab = (next: PromptsTab) => {
@@ -182,7 +182,7 @@ function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode
             onClick={newPrompt}
             className="no-drag rounded-md px-2.5 py-1 text-muted transition hover:bg-raised hover:text-text"
           >
-            ＋ Ny prompt
+            ＋ New prompt
           </button>
         </div>
 
@@ -211,7 +211,7 @@ function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode
         <div
           ref={listRef}
           role="listbox"
-          aria-label="Prompter"
+          aria-label="Prompts"
           tabIndex={0}
           onKeyDown={onListKey}
           className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-3 outline-none"
@@ -245,21 +245,21 @@ function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode
 
           {prompts.length > 0 && visible.length === 0 && filtering && (
             <div className="px-3 py-8 text-center text-muted">
-              <p>Inga prompter matchar.</p>
+              <p>No prompts match.</p>
               <button type="button" onClick={clearFilters} className="mt-2 text-text underline-offset-2 hover:underline">
-                Rensa sökning och filter
+                Clear search and filters
               </button>
             </div>
           )}
           {loaded && prompts.length === 0 && !draft && (
-            <p className="px-3 py-8 text-center text-muted">Inga sparade prompter ännu.</p>
+            <p className="px-3 py-8 text-center text-muted">No saved prompts yet.</p>
           )}
         </div>
 
         {editor.error && (
           <div className="flex items-start gap-2 border-t border-line px-4 py-3 text-accent">
             <p className="min-w-0 flex-1 select-text">{editor.error}</p>
-            <button type="button" onClick={editor.clearError} title="Stäng" className="text-muted hover:text-text">
+            <button type="button" onClick={editor.clearError} title="Close" className="text-muted hover:text-text">
               ✕
             </button>
           </div>
@@ -298,26 +298,26 @@ function EmptyEditor({ hasPrompts, onNew }: { hasPrompts: boolean; onNew: () => 
       <div className="flex flex-1 items-center justify-center px-8 pb-12">
         {hasPrompts ? (
           <div className="text-center text-muted">
-            <p>Välj en prompt i listan, eller skapa en ny.</p>
-            <p className="mt-1 text-[11px]">⌘ F söker · ↑ ↓ bläddrar · Enter öppnar i Generera</p>
+            <p>Pick a prompt in the list, or create a new one.</p>
+            <p className="mt-1 text-[11px]">⌘ F to search · ↑ ↓ to browse · Enter to open in Generate</p>
           </div>
         ) : (
           <div className="max-w-md text-center">
             <div className="mb-4 text-4xl text-muted">❝</div>
-            <h2 className="mb-2 text-base font-semibold">Ditt promptbibliotek</h2>
+            <h2 className="mb-2 text-base font-semibold">Your prompt library</h2>
             <p className="mb-5 leading-relaxed text-muted">
-              Spara prompterna som fungerar och återanvänd dem med ett klick. Tagga dem så hittar du rätt, och
-              stjärnmärk favoriterna så hamnar de överst – även i biblioteket i Generera.
+              Save the prompts that work and reuse them with a click. Tag them to find the right one, and star
+              your favourites to keep them on top – in the library in Generate too.
             </p>
             <button
               type="button"
               onClick={onNew}
               className="rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover"
             >
-              Skapa första prompten
+              Create your first prompt
             </button>
             <p className="mt-4 text-[11px] text-muted">
-              Du kan också spara direkt från Generera med Spara-knappen vid prompten.
+              You can also save straight from Generate with the Save button by the prompt.
             </p>
           </div>
         )}

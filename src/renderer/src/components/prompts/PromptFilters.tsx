@@ -68,7 +68,7 @@ export default function PromptFilters({
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           onKeyDown={onSearchKey}
-          placeholder="Sök i titel, text och taggar…"
+          placeholder="Search title, text and tags…"
           className="w-full rounded-md border border-line bg-raised py-1.5 pl-3 pr-8 outline-none focus:border-muted"
         />
         {query && (
@@ -78,7 +78,7 @@ export default function PromptFilters({
               onQuery('')
               searchRef.current?.focus()
             }}
-            title="Rensa sökningen"
+            title="Clear the search"
             className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-[10px] text-muted hover:bg-line hover:text-text"
           >
             ✕
@@ -90,7 +90,7 @@ export default function PromptFilters({
         <div className="flex flex-wrap gap-1.5">
           {(hasFavorites || favoritesOnly) && (
             <button type="button" onClick={() => onFavoritesOnly(!favoritesOnly)} className={chip(favoritesOnly)}>
-              <span className={favoritesOnly ? 'text-amber-400' : ''}>★</span> Favoriter
+              <span className={favoritesOnly ? 'text-amber-400' : ''}>★</span> Favourites
             </button>
           )}
           {visibleTags.map((t) => (
@@ -105,16 +105,16 @@ export default function PromptFilters({
               onClick={() => setExpanded(!expanded)}
               className="px-1 text-[12px] text-muted hover:text-text"
             >
-              {expanded ? 'Visa färre' : `+${hiddenCount} till`}
+              {expanded ? 'Show fewer' : `+${hiddenCount} more`}
             </button>
           )}
         </div>
       )}
 
       <div className="flex items-center justify-between pt-0.5 text-[11px] text-muted">
-        <span>{shown === total ? `${total} ${total === 1 ? 'prompt' : 'prompter'}` : `${shown} av ${total}`}</span>
+        <span>{shown === total ? `${total} ${total === 1 ? 'prompt' : 'prompts'}` : `${shown} of ${total}`}</span>
         <label className="flex items-center gap-1">
-          <span className="sr-only">Sortering</span>
+          <span className="sr-only">Sort order</span>
           <select
             value={sort}
             onChange={(e) => isSortKey(e.target.value) && onSort(e.target.value)}

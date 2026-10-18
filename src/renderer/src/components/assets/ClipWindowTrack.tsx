@@ -162,7 +162,7 @@ export default function ClipWindowTrack({
             () => {}
           )
         }}
-        title="Klicka för att flytta uppspelningen hit"
+        title="Click to move playback here"
         className="relative h-9 cursor-pointer touch-none select-none rounded-md bg-raised"
       >
         <div className="absolute inset-y-0 left-0 rounded-l-md" style={{ width: pct(w.start), backgroundImage: HATCH }} />
@@ -173,7 +173,7 @@ export default function ClipWindowTrack({
         <div
           role="slider"
           tabIndex={0}
-          aria-label="Utdraget som skickas"
+          aria-label="The excerpt that is sent"
           aria-valuemin={0}
           aria-valuemax={Math.max(0, duration - w.length)}
           aria-valuenow={w.start}
@@ -187,7 +187,7 @@ export default function ClipWindowTrack({
               5
             )
           }
-          title={`Utdraget ${range} skickas. Dra för att flytta det.`}
+          title={`The excerpt ${range} is sent. Drag to move it.`}
           className="absolute inset-y-0 cursor-grab rounded-[5px] border-2 border-accent/80 bg-accent/15 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 active:cursor-grabbing"
           style={{ left: pct(w.start), width: `calc(${pct(end)} - ${pct(w.start)})` }}
         />
@@ -202,7 +202,7 @@ export default function ClipWindowTrack({
             key={edge}
             role="slider"
             tabIndex={0}
-            aria-label={edge === 'start' ? 'Utdragets början' : 'Utdragets slut'}
+            aria-label={edge === 'start' ? 'Start of the excerpt' : 'End of the excerpt'}
             aria-valuemin={0}
             aria-valuemax={duration}
             aria-valuenow={edge === 'start' ? w.start : end}
@@ -217,7 +217,7 @@ export default function ClipWindowTrack({
                 1
               )
             }
-            title={edge === 'start' ? 'Dra för att ändra var utdraget börjar' : 'Dra för att ändra var utdraget slutar'}
+            title={edge === 'start' ? 'Drag to change where the excerpt starts' : 'Drag to change where the excerpt ends'}
             // The grip sits just outside the window, so a short window on a long recording can still be
             // dragged by its middle.
             className={`group absolute inset-y-0 z-10 flex w-3 cursor-ew-resize touch-none items-center outline-none ${
@@ -232,7 +232,7 @@ export default function ClipWindowTrack({
       <div className="mt-1 flex justify-between gap-3 text-[11px] tabular-nums text-muted">
         <span>0:00</span>
         <span className="truncate">
-          Skickas {range} · {formatDuration(w.length)}
+          Sends {range} · {formatDuration(w.length)}
         </span>
         <span>{formatPosition(duration)}</span>
       </div>

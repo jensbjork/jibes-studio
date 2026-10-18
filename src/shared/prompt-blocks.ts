@@ -1,4 +1,4 @@
-// Building blocks for writing prompts: ready-made English phrases behind Swedish labels, grouped by what they
+// Building blocks for writing prompts: ready-made English phrases behind short labels, grouped by what they
 // describe (framing, camera, light…). The prompt fields offer them through "/" and the chips under the field;
 // agents read the same list (get_prompt_blocks) so both write in the same vocabulary.
 
@@ -6,7 +6,7 @@
 export type PromptBlockContext = 'video' | 'image' | 'negative' | 'music' | 'sound'
 
 export interface PromptBlock {
-  /** Swedish, what the user picks. */
+  /** What the user picks. */
   label: string
   /** English, what goes into the prompt. */
   text: string
@@ -14,7 +14,7 @@ export interface PromptBlock {
 
 export interface PromptBlockGroup {
   id: string
-  /** Swedish, short: the chip and the menu heading. */
+  /** Short: the chip and the menu heading. */
   label: string
   /** The fields that offer this group. */
   contexts: readonly PromptBlockContext[]
@@ -26,168 +26,168 @@ const VISUAL: readonly PromptBlockContext[] = ['video', 'image']
 export const PROMPT_BLOCK_GROUPS: readonly PromptBlockGroup[] = [
   {
     id: 'scene',
-    label: 'Mall',
+    label: 'Template',
     contexts: VISUAL,
     blocks: [
       {
-        label: 'Scen: motiv, handling, plats, kamera, ljus, stämning',
+        label: 'Scene: subject, action, setting, camera, light, mood',
         text: 'Subject: \nAction: \nSetting: \nCamera: \nLighting: \nMood: '
       },
-      { label: 'Kort scen i en mening', text: '[who] [does what] in [where], [camera], [light], [mood].' },
-      { label: 'Dialog', text: 'She says: "…"' }
+      { label: 'Short scene in one sentence', text: '[who] [does what] in [where], [camera], [light], [mood].' },
+      { label: 'Dialogue', text: 'She says: "…"' }
     ]
   },
   {
     id: 'framing',
-    label: 'Utsnitt',
+    label: 'Framing',
     contexts: VISUAL,
     blocks: [
-      { label: 'Extrem närbild', text: 'extreme close-up' },
-      { label: 'Närbild', text: 'close-up shot' },
-      { label: 'Halvbild', text: 'medium shot' },
-      { label: 'Helbild', text: 'full shot, head to toe' },
-      { label: 'Totalbild', text: 'wide establishing shot' },
-      { label: 'Över axeln', text: 'over-the-shoulder shot' },
-      { label: 'Ovanifrån', text: 'high angle, looking down' },
-      { label: 'Underifrån', text: 'low angle, looking up' },
-      { label: 'Fågelperspektiv', text: "top-down bird's-eye view" },
-      { label: 'Ögonhöjd', text: 'eye-level shot' },
-      { label: 'Profil', text: 'side profile shot' }
+      { label: 'Extreme close-up', text: 'extreme close-up' },
+      { label: 'Close-up', text: 'close-up shot' },
+      { label: 'Medium shot', text: 'medium shot' },
+      { label: 'Full shot', text: 'full shot, head to toe' },
+      { label: 'Wide shot', text: 'wide establishing shot' },
+      { label: 'Over the shoulder', text: 'over-the-shoulder shot' },
+      { label: 'From above', text: 'high angle, looking down' },
+      { label: 'From below', text: 'low angle, looking up' },
+      { label: "Bird's-eye view", text: "top-down bird's-eye view" },
+      { label: 'Eye level', text: 'eye-level shot' },
+      { label: 'Profile', text: 'side profile shot' }
     ]
   },
   {
     id: 'camera',
-    label: 'Kamera',
+    label: 'Camera',
     contexts: ['video'],
     blocks: [
-      { label: 'Stilla kamera', text: 'static locked-off camera' },
-      { label: 'Långsam åkning in', text: 'slow dolly in' },
-      { label: 'Långsam åkning ut', text: 'slow dolly out' },
-      { label: 'Panorera vänster', text: 'slow pan left' },
-      { label: 'Panorera höger', text: 'slow pan right' },
-      { label: 'Tilta upp', text: 'tilt up' },
-      { label: 'Tilta ner', text: 'tilt down' },
-      { label: 'Följer personen', text: 'tracking shot following the subject' },
-      { label: 'Handhållen', text: 'handheld camera with subtle natural shake' },
-      { label: 'Kranåkning uppåt', text: 'crane shot rising up' },
-      { label: 'Kretsar runt', text: 'the camera slowly orbits around the subject' },
-      { label: 'Zoomar in', text: 'slow zoom in' },
-      { label: 'En tagning utan klipp', text: 'one continuous shot, no cuts' }
+      { label: 'Still camera', text: 'static locked-off camera' },
+      { label: 'Slow dolly in', text: 'slow dolly in' },
+      { label: 'Slow dolly out', text: 'slow dolly out' },
+      { label: 'Pan left', text: 'slow pan left' },
+      { label: 'Pan right', text: 'slow pan right' },
+      { label: 'Tilt up', text: 'tilt up' },
+      { label: 'Tilt down', text: 'tilt down' },
+      { label: 'Follows the subject', text: 'tracking shot following the subject' },
+      { label: 'Handheld', text: 'handheld camera with subtle natural shake' },
+      { label: 'Crane up', text: 'crane shot rising up' },
+      { label: 'Orbits around', text: 'the camera slowly orbits around the subject' },
+      { label: 'Zoom in', text: 'slow zoom in' },
+      { label: 'One take, no cuts', text: 'one continuous shot, no cuts' }
     ]
   },
   {
     id: 'light',
-    label: 'Ljus',
+    label: 'Light',
     contexts: VISUAL,
     blocks: [
-      { label: 'Mjukt morgonljus', text: 'soft morning light' },
-      { label: 'Gyllene timmen', text: 'warm golden hour light' },
-      { label: 'Blå timmen', text: 'cool blue hour light' },
-      { label: 'Dämpat nattljus', text: 'dim night lighting' },
-      { label: 'Fönsterljus', text: 'soft natural window light' },
-      { label: 'Hårt sidoljus', text: 'hard side light with deep shadows' },
-      { label: 'Motljus', text: 'backlit, rim light around the subject' },
+      { label: 'Soft morning light', text: 'soft morning light' },
+      { label: 'Golden hour', text: 'warm golden hour light' },
+      { label: 'Blue hour', text: 'cool blue hour light' },
+      { label: 'Dim night light', text: 'dim night lighting' },
+      { label: 'Window light', text: 'soft natural window light' },
+      { label: 'Hard side light', text: 'hard side light with deep shadows' },
+      { label: 'Backlight', text: 'backlit, rim light around the subject' },
       { label: 'Neon', text: 'neon lighting, saturated colours' },
-      { label: 'Levande ljus', text: 'warm flickering candlelight' },
-      { label: 'Mulet dagsljus', text: 'flat overcast daylight' },
-      { label: 'Filmiskt ljus', text: 'cinematic lighting, high contrast' }
+      { label: 'Candlelight', text: 'warm flickering candlelight' },
+      { label: 'Overcast daylight', text: 'flat overcast daylight' },
+      { label: 'Cinematic light', text: 'cinematic lighting, high contrast' }
     ]
   },
   {
     id: 'style',
-    label: 'Stil',
+    label: 'Style',
     contexts: VISUAL,
     blocks: [
-      { label: 'Filmisk', text: 'cinematic, shallow depth of field' },
-      { label: 'Fotorealistisk', text: 'photorealistic, natural skin texture' },
+      { label: 'Cinematic', text: 'cinematic, shallow depth of field' },
+      { label: 'Photorealistic', text: 'photorealistic, natural skin texture' },
       { label: '35 mm film', text: 'shot on 35mm film, natural grain' },
-      { label: 'Dokumentär', text: 'documentary style' },
-      { label: 'Reklamfilm', text: 'polished commercial look' },
-      { label: 'Musikvideo', text: 'music video aesthetic' },
-      { label: 'Drömsk', text: 'dreamy, soft focus' },
-      { label: 'Mörk och dyster', text: 'dark, moody atmosphere' },
-      { label: 'Ljus och luftig', text: 'bright and airy' },
-      { label: 'Spänd', text: 'tense, suspenseful mood' },
-      { label: 'Lugn', text: 'calm, peaceful mood' }
+      { label: 'Documentary', text: 'documentary style' },
+      { label: 'Commercial', text: 'polished commercial look' },
+      { label: 'Music video', text: 'music video aesthetic' },
+      { label: 'Dreamy', text: 'dreamy, soft focus' },
+      { label: 'Dark and moody', text: 'dark, moody atmosphere' },
+      { label: 'Bright and airy', text: 'bright and airy' },
+      { label: 'Tense', text: 'tense, suspenseful mood' },
+      { label: 'Calm', text: 'calm, peaceful mood' }
     ]
   },
   {
     id: 'motion',
-    label: 'Rörelse',
+    label: 'Motion',
     contexts: ['video'],
     blocks: [
       { label: 'Slow motion', text: 'in slow motion' },
-      { label: 'Långsamt och mjukt', text: 'slow, smooth movement' },
-      { label: 'Snabbt och energiskt', text: 'fast, energetic movement' },
-      { label: 'Små naturliga rörelser', text: 'subtle natural movement, breathing, blinking' },
-      { label: 'Vind i håret', text: 'hair moving gently in the wind' },
-      { label: 'Vänder sig mot kameran', text: 'turns to face the camera' },
-      { label: 'Går mot kameran', text: 'walks towards the camera' },
-      { label: 'Går ifrån kameran', text: 'walks away from the camera' }
+      { label: 'Slow and smooth', text: 'slow, smooth movement' },
+      { label: 'Fast and energetic', text: 'fast, energetic movement' },
+      { label: 'Small natural movements', text: 'subtle natural movement, breathing, blinking' },
+      { label: 'Wind in the hair', text: 'hair moving gently in the wind' },
+      { label: 'Turns to the camera', text: 'turns to face the camera' },
+      { label: 'Walks towards the camera', text: 'walks towards the camera' },
+      { label: 'Walks away from the camera', text: 'walks away from the camera' }
     ]
   },
   {
     id: 'sound',
-    label: 'Ljud',
+    label: 'Sound',
     contexts: ['video'],
     blocks: [
-      { label: 'Bara naturliga ljud', text: 'only natural ambient sound, no music' },
-      { label: 'Rumsljud', text: 'quiet room tone' },
-      { label: 'Lugn bakgrundsmusik', text: 'soft background music' },
-      { label: 'Fotsteg', text: 'footsteps on a wooden floor' },
-      { label: 'Stadsljud', text: 'distant city traffic' },
-      { label: 'Regn', text: 'rain against the window' },
-      { label: 'Fåglar', text: 'birdsong outside' },
-      { label: 'Tystnad', text: 'near silence' }
+      { label: 'Only natural sound', text: 'only natural ambient sound, no music' },
+      { label: 'Room tone', text: 'quiet room tone' },
+      { label: 'Soft background music', text: 'soft background music' },
+      { label: 'Footsteps', text: 'footsteps on a wooden floor' },
+      { label: 'City sounds', text: 'distant city traffic' },
+      { label: 'Rain', text: 'rain against the window' },
+      { label: 'Birds', text: 'birdsong outside' },
+      { label: 'Silence', text: 'near silence' }
     ]
   },
   {
     id: 'avoid',
-    label: 'Undvik',
+    label: 'Avoid',
     contexts: ['negative'],
     blocks: [
-      { label: 'Suddigt', text: 'blurry, out of focus' },
-      { label: 'Text och vattenstämplar', text: 'text, captions, watermarks, logos' },
-      { label: 'Förvrängda händer', text: 'distorted hands, extra fingers' },
-      { label: 'Förvrängda ansikten', text: 'distorted faces' },
-      { label: 'Extra kroppsdelar', text: 'extra limbs' },
-      { label: 'Klipp och scenbyten', text: 'cuts, scene changes' },
-      { label: 'Flimmer', text: 'flickering' },
-      { label: 'Tecknad stil', text: 'cartoon, illustration' },
-      { label: 'Låg kvalitet', text: 'low quality, compression artifacts' },
-      { label: 'Musik', text: 'music' }
+      { label: 'Blurry', text: 'blurry, out of focus' },
+      { label: 'Text and watermarks', text: 'text, captions, watermarks, logos' },
+      { label: 'Distorted hands', text: 'distorted hands, extra fingers' },
+      { label: 'Distorted faces', text: 'distorted faces' },
+      { label: 'Extra limbs', text: 'extra limbs' },
+      { label: 'Cuts and scene changes', text: 'cuts, scene changes' },
+      { label: 'Flicker', text: 'flickering' },
+      { label: 'Cartoon style', text: 'cartoon, illustration' },
+      { label: 'Low quality', text: 'low quality, compression artifacts' },
+      { label: 'Music', text: 'music' }
     ]
   },
   {
     id: 'music',
-    label: 'Musik',
+    label: 'Music',
     contexts: ['music'],
     blocks: [
-      { label: 'Lugnt piano', text: 'calm solo piano' },
-      { label: 'Stråkar, spänt', text: 'tense string ensemble' },
-      { label: 'Filmisk orkester', text: 'cinematic orchestral score' },
-      { label: 'Elektroniskt, pulserande', text: 'pulsing electronic beat' },
+      { label: 'Calm piano', text: 'calm solo piano' },
+      { label: 'Strings, tense', text: 'tense string ensemble' },
+      { label: 'Cinematic orchestra', text: 'cinematic orchestral score' },
+      { label: 'Electronic, pulsing', text: 'pulsing electronic beat' },
       { label: 'Lo-fi', text: 'mellow lo-fi hip hop' },
-      { label: 'Akustisk gitarr', text: 'warm acoustic guitar' },
+      { label: 'Acoustic guitar', text: 'warm acoustic guitar' },
       { label: 'Ambient', text: 'slow ambient pads' },
-      { label: 'Instrumentalt', text: 'instrumental, no vocals' },
-      { label: 'Långsamt tempo', text: 'slow tempo' },
-      { label: 'Högt tempo', text: 'high tempo' }
+      { label: 'Instrumental', text: 'instrumental, no vocals' },
+      { label: 'Slow tempo', text: 'slow tempo' },
+      { label: 'High tempo', text: 'high tempo' }
     ]
   },
   {
     id: 'effects',
-    label: 'Ljudeffekter',
+    label: 'Sound effects',
     contexts: ['sound'],
     blocks: [
-      { label: 'Dörr som slår igen', text: 'a door slamming shut' },
-      { label: 'Fotsteg', text: 'footsteps on a wooden floor' },
-      { label: 'Regn', text: 'steady rain' },
-      { label: 'Åska', text: 'distant thunder' },
-      { label: 'Glas som krossas', text: 'glass shattering' },
-      { label: 'Vind', text: 'wind howling' },
-      { label: 'Publik som applåderar', text: 'a crowd applauding' },
-      { label: 'Telefon som ringer', text: 'a phone ringing' }
+      { label: 'Door slamming', text: 'a door slamming shut' },
+      { label: 'Footsteps', text: 'footsteps on a wooden floor' },
+      { label: 'Rain', text: 'steady rain' },
+      { label: 'Thunder', text: 'distant thunder' },
+      { label: 'Glass shattering', text: 'glass shattering' },
+      { label: 'Wind', text: 'wind howling' },
+      { label: 'Crowd applauding', text: 'a crowd applauding' },
+      { label: 'Phone ringing', text: 'a phone ringing' }
     ]
   }
 ]

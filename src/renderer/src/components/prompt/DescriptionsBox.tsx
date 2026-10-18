@@ -11,16 +11,16 @@ interface Props {
    * checks need to know which references the legend explains.
    */
   view: DescriptionsView
-  /** The master switch, "Ta med beskrivningar" (includeDescriptions). */
+  /** The master switch, "Include descriptions" (includeDescriptions). */
   onInclude: (on: boolean) => void
   /** One asset's toggle (excludedDescriptionAssetIds). */
   onToggle: (assetId: string, on: boolean) => void
-  /** "Ändra beskrivning": opens the asset in its library view. */
+  /** "Edit description": opens the asset in its library view. */
   onOpenAsset?: (asset: Asset) => void
 }
 
 /**
- * "Läggs till i prompten": the descriptions of the characters, places, outfits and poses among the references,
+ * "Added to the prompt": the descriptions of the characters, places, outfits and poses among the references,
  * which are appended to the prompt as a References legend when it is sent (composed by main from the library as
  * it is then, so an edited description applies to the next generation), with who wears each outfit. One row per
  * described asset (and per outfit somebody wears) with its tokens and an excerpt, a toggle for each and a master
@@ -40,30 +40,30 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
   const sent = rows.filter((r) => r.sent).length
   const legend = composed.legend.replace(/^\s+/, '')
   const note = !include
-    ? { tone: 'text-muted', text: 'Beskrivningarna skickas inte.' }
+    ? { tone: 'text-muted', text: 'The descriptions aren’t sent.' }
     : dropped
       ? {
           tone: 'text-accent',
           text:
-            `Beskrivningarna får inte plats inom modellens gräns på ${limit} tecken och skickas inte. ` +
-            'Korta prompten eller slå av några av dem.'
+            `The descriptions don’t fit within the model’s limit of ${limit} characters and aren’t sent. ` +
+            'Shorten the prompt or switch some of them off.'
         }
       : !sent
-        ? { tone: 'text-muted', text: 'Inga beskrivningar skickas.' }
+        ? { tone: 'text-muted', text: 'No descriptions are sent.' }
         : blank
-          ? { tone: 'text-muted', text: 'Läggs till efter prompten när du har skrivit den.' }
+          ? { tone: 'text-muted', text: 'Added after the prompt once you have written it.' }
           : truncated
             ? {
                 tone: 'text-amber-300',
-                text: `Beskrivningarna har kortats så att prompten ryms inom modellens gräns på ${limit} tecken.`
+                text: `The descriptions have been shortened so the prompt fits within the model’s limit of ${limit} characters.`
               }
-            : { tone: 'text-muted', text: 'Skickas efter prompten, som en lista över referenserna.' }
+            : { tone: 'text-muted', text: 'Sent after the prompt, as a list of the references.' }
 
   return (
     <section aria-labelledby={titleId} className="mt-3 overflow-hidden rounded-md border border-line">
       <div className="flex items-center gap-2 border-b border-line/60 px-2.5 py-1.5">
         <h4 id={titleId} className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted">
-          Läggs till i prompten
+          Added to the prompt
         </h4>
         <button
           type="button"
@@ -72,12 +72,12 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
           onClick={() => onInclude(!include)}
           title={
             include
-              ? 'Beskrivningarna av referenserna läggs till efter prompten när den skickas'
-              : 'Lägg till beskrivningarna av referenserna efter prompten när den skickas'
+              ? 'The descriptions of the references are added after the prompt when it is sent'
+              : 'Add the descriptions of the references after the prompt when it is sent'
           }
           className="flex shrink-0 items-center gap-1.5 rounded text-[11px] text-muted transition hover:text-text"
         >
-          Ta med beskrivningar
+          Include descriptions
           <Track on={include} />
         </button>
       </div>
@@ -96,7 +96,7 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
 
       {undescribed.length > 0 && (
         <p className="border-t border-line/60 px-2.5 py-1.5 text-[11px] leading-snug text-muted">
-          Utan beskrivning:{' '}
+          Without a description:{' '}
           {undescribed.map((a, i) => (
             <span key={a.id}>
               {i > 0 && ', '}
@@ -104,7 +104,7 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
                 <button
                   type="button"
                   onClick={() => onOpenAsset(a)}
-                  title={`Skriv en beskrivning av ${a.name}`}
+                  title={`Write a description of ${a.name}`}
                   className="text-text hover:underline"
                 >
                   {a.name}
@@ -130,7 +130,7 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
                 aria-controls={textId}
                 className="whitespace-nowrap text-text hover:underline"
               >
-                {showText ? 'Dölj texten' : 'Visa texten'}
+                {showText ? 'Hide the text' : 'Show the text'}
               </button>
             </>
           )}
@@ -141,11 +141,11 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
             className={`shrink-0 tabular-nums ${over ? 'text-accent' : 'text-muted'}`}
             title={
               limit
-                ? `Prompten som skickas, med beskrivningarna: ${length} av högst ${limit} tecken`
-                : `Prompten som skickas, med beskrivningarna: ${length} tecken`
+                ? `The prompt as sent, with the descriptions: ${length} of at most ${limit} characters`
+                : `The prompt as sent, with the descriptions: ${length} characters`
             }
           >
-            {limit ? `${length}/${limit}` : `${length} tecken`}
+            {limit ? `${length}/${limit}` : `${length} characters`}
           </span>
         )}
       </div>
@@ -191,10 +191,10 @@ function Row({
               {token}
             </span>
           ))}
-          {/* Who wears the outfit, as the legend says it ("worn by Anna (@Image1)"); chosen on its chip (bärs av). */}
+          {/* Who wears the outfit, as the legend says it ("worn by Anna (@Image1)"); chosen on its chip (worn by). */}
           {wornBy && (
-            <span className="text-[11px] text-muted" title={`${asset.name} bärs av ${wornBy.asset.name} – det skrivs in i prompten`}>
-              bärs av <span className={KIND_TONE[wornBy.asset.kind].text}>{wornBy.asset.name}</span>
+            <span className="text-[11px] text-muted" title={`${asset.name} is worn by ${wornBy.asset.name} – this is written into the prompt`}>
+              worn by <span className={KIND_TONE[wornBy.asset.kind].text}>{wornBy.asset.name}</span>
               {wornBy.tokens.length > 0 && ` (${wornBy.tokens.join(', ')})`}
             </span>
           )}
@@ -206,7 +206,7 @@ function Row({
             {shortened || description}
           </p>
         ) : (
-          <p className="mt-0.5 text-[11px] leading-snug text-muted">Ingen beskrivning – bara vem som bär den.</p>
+          <p className="mt-0.5 text-[11px] leading-snug text-muted">No description – only who wears it.</p>
         )}
         {(shortened !== undefined || onOpen) && (
           <div className="mt-0.5 flex items-center gap-2 text-[11px]">
@@ -215,21 +215,21 @@ function Row({
                 className="text-amber-300"
                 title={
                   shortened
-                    ? `Kortad för att rymmas inom modellens gräns. Hela beskrivningen: ${description}`
-                    : 'Får inte plats inom modellens gräns – bara namnet och referenserna skickas'
+                    ? `Shortened to fit within the model’s limit. The whole description: ${description}`
+                    : 'Doesn’t fit within the model’s limit – only the name and the references are sent'
                 }
               >
-                {shortened ? 'förkortad' : 'utelämnad'}
+                {shortened ? 'shortened' : 'left out'}
               </span>
             )}
             {onOpen && (
               <button
                 type="button"
                 onClick={onOpen}
-                title={`Öppna ${asset.name} i biblioteket`}
+                title={`Open ${asset.name} in the library`}
                 className="text-muted transition hover:text-text hover:underline"
               >
-                {description ? 'Ändra beskrivning' : 'Skriv en beskrivning'}
+                {description ? 'Edit description' : 'Write a description'}
               </button>
             )}
           </div>
@@ -239,15 +239,15 @@ function Row({
         type="button"
         role="switch"
         aria-checked={on}
-        aria-label={description ? `Ta med beskrivningen av ${asset.name}` : `Ta med vem som bär ${asset.name}`}
+        aria-label={description ? `Include the description of ${asset.name}` : `Include who wears ${asset.name}`}
         disabled={!include}
         onClick={() => onToggle(!on)}
         title={
           !include
-            ? 'Beskrivningarna är avslagna'
+            ? 'The descriptions are switched off'
             : on
-              ? `${description ? `Beskrivningen av ${asset.name}` : `Vem som bär ${asset.name}`} läggs till – klicka för att låta bli`
-              : `Lägg till ${description ? `beskrivningen av ${asset.name}` : `vem som bär ${asset.name}`}`
+              ? `${description ? `The description of ${asset.name}` : `Who wears ${asset.name}`} is added – click to leave it out`
+              : `Add ${description ? `the description of ${asset.name}` : `who wears ${asset.name}`}`
         }
         className="mt-1 shrink-0 rounded-full disabled:opacity-40"
       >

@@ -50,26 +50,26 @@ interface Props {
   models: readonly VideoModel[]
   navigate: Navigate
   /**
-   * library (the Mediabank's Videor): every clip, with search, filters and order. session (Generera): only what was
-   * made in Generera this session (shared/session.ts), newest first, under a short header.
+   * library (Media's Videos): every clip, with search, filters and order. session (Generate): only what was
+   * made in Generate this session (shared/session.ts), newest first, under a short header.
    */
   mode?: FeedMode
-  /** "Använd igen": fill the Generate form with the clip's settings. */
+  /** "Use again": fill the Generate form with the clip's settings. */
   onReuse: (g: Generation) => void
-  /** The drawer's tooltip for "Använd igen", when it also leaves for Generera. */
+  /** The drawer's tooltip for "Use again", when it also leaves for Generate. */
   reuseTitle?: string
   /** Shown while the list has nothing at all (in session mode: nothing made this session). */
   emptyText: ReactNode
-  /** Left end of the toolbar's first row (the Mediabank's tabs). */
+  /** Left end of the toolbar's first row (Media's tabs). */
   leading?: ReactNode
   /** Right end of the toolbar's first row (e.g. the folder button). */
   trailing?: ReactNode
   /**
-   * Open this clip in the drawer (Pågår och klart, an agent's open_in_studio); `source: 'agent'` marks nothing seen.
-   * In session mode a clip from outside the session is shown in the Mediabank instead.
+   * Open this clip in the drawer (Activity, an agent's open_in_studio); `source: 'agent'` marks nothing seen.
+   * In session mode a clip from outside the session is shown in Media instead.
    */
   openRequest?: { generationId: string; source?: 'agent' }
-  /** The request was carried out (or the clip no longer exists, or it went on to the Mediabank). */
+  /** The request was carried out (or the clip no longer exists, or it went on to Media). */
   onOpenRequestHandled?: () => void
 }
 
@@ -80,7 +80,7 @@ const CARD_PAGE = 60
  * The clip feed: every generation as large cards or as a table, with search, filters, sorting, a summary of
  * what is shown and a detail drawer for one clip. Filtering follows the shared rules the agents'
  * list_generations tool uses, so "the 4-star clips with Anna" means the same thing to both. In session mode
- * (Generera) it lists only this session's clips, newest first, with no search, filters or order to choose.
+ * (Generate) it lists only this session's clips, newest first, with no search, filters or order to choose.
  */
 export default function ClipFeed({
   feed,
@@ -99,7 +99,7 @@ export default function ClipFeed({
   const { assets, loaded: assetsLoaded } = useAssetsState()
   const index = useMemo(() => buildLibraryIndex(assets), [assets])
 
-  // Session mode: the clips made in Generera since Studio started (and any on their way from before).
+  // Session mode: the clips made in Generate since Studio started (and any on their way from before).
   const session = mode === 'session'
   const current = useSession()
   const loaded = feedLoaded && (!session || current !== undefined)
@@ -112,7 +112,7 @@ export default function ClipFeed({
   const [view, setViewState] = useState<FeedView>(() => loadView(mode))
   const [sortChoice, setSortState] = useState<SortKey>(loadSort)
   const [filterChoice, setFiltersState] = useState<FeedFilters>(loadSessionFilters)
-  // The session list neither filters nor sorts; the Mediabank's choices stay as they were.
+  // The session list neither filters nor sorts; Media's choices stay as they were.
   const sort: SortKey = session ? 'newest' : sortChoice
   const filters = session ? NO_FILTERS : filterChoice
   const [selectedId, setSelectedId] = useState<string>()
@@ -121,7 +121,7 @@ export default function ClipFeed({
   const [openSource, setOpenSource] = useState<'agent'>()
   const [cardLimit, setCardLimit] = useState(CARD_PAGE)
 
-  // Own films brought into the feed ("Importera egna klipp…", or dropped on it).
+  // Own films brought into the feed ("Import own clips…", or dropped on it).
   const importFlow = useImportFlow()
   const importing = useImportCards().filter((c) => c.target === 'feed')
   const [dropping, setDropping] = useState(false)
@@ -176,10 +176,10 @@ export default function ClipFeed({
   const deferredFilters = useDeferredValue(filters)
   const active = effectiveFilters(deferredFilters, assets, assetsLoaded)
 
-  // Pågår och klart: the finished clips the user hasn't looked at yet ("Nya") – every one, also past the 200 that
+  // Activity: the finished clips the user hasn't looked at yet ("New") – every one, also past the 200 that
   // the panel lists in full.
   const unseenIds = useFreshGenerationIds()
-  // While "Nya" is on, a clip stays listed after it was watched (it would otherwise vanish a second into playing
+  // While "New" is on, a clip stays listed after it was watched (it would otherwise vanish a second into playing
   // it); the list forgets them when the filter goes off. The rule is the shared filter's (unseen), applied here so
   // the cards keep their identity.
   const keptNew = useRef<Set<string>>(new Set())
@@ -202,8 +202,8 @@ export default function ClipFeed({
 
   const summary = useMemo(() => {
     const text = summaryText(summarizeGenerations(shown))
-    if (session) return `Den här sessionen · ${text}`
-    return filtering ? text.replace(/^(\d+) klipp/, `$1 av ${generations.length} klipp`) : text
+    if (session) return `This session · ${text}`
+    return filtering ? text.replace(/^(\d+) clips?/, `$1 of ${generations.length} clips`) : text
   }, [shown, session, filtering, generations.length])
 
   // A generation that starts while filters hide it would look like nothing happened.
@@ -245,7 +245,7 @@ export default function ClipFeed({
   const lastOpenIndex = useRef(0)
   if (openIndex >= 0) lastOpenIndex.current = openIndex
 
-  // Deleted elsewhere (or by its own Radera): close.
+  // Deleted elsewhere (or by its own Delete): close.
   useEffect(() => {
     if (openId && loaded && !openGeneration) setOpenId(undefined)
   }, [openId, loaded, openGeneration])
@@ -256,16 +256,16 @@ export default function ClipFeed({
     setOpenSource(undefined)
   }, [])
 
-  // "Gå dit" from Pågår och klart, or an agent showing the user a clip: open it in the drawer. A filter that hides
+  // "Go there" from Activity, or an agent showing the user a clip: open it in the drawer. A filter that hides
   // it is lifted, with a note, rather than opening a clip the list doesn't show. The session list sends a clip from
-  // outside the session on to the Mediabank, which lists every clip (still on the agent's behalf if it asked).
+  // outside the session on to Media, which lists every clip (still on the agent's behalf if it asked).
   const handledRequest = useRef<typeof openRequest>(undefined)
   useEffect(() => {
     if (!openRequest || !loaded || handledRequest.current === openRequest) return
     handledRequest.current = openRequest
     const g = generations.find((x) => x.id === openRequest.generationId)
     if (!g) {
-      setImportNotice({ text: 'Klippet finns inte längre i biblioteket.', error: false })
+      setImportNotice({ text: 'The clip is no longer in the library.', error: false })
     } else if (session && !pool.some((x) => x.id === g.id)) {
       // Handled first: App keeps the intent the navigation sets, not the cleared one.
       onOpenRequestHandled?.()
@@ -279,7 +279,7 @@ export default function ClipFeed({
     } else {
       if (!shown.some((x) => x.id === g.id) && hasFilters(filters)) {
         setFilters({ query: '' })
-        setImportNotice({ text: 'Filtren dolde klippet, så de är borttagna.', error: false })
+        setImportNotice({ text: 'The filters hid the clip, so they were cleared.', error: false })
       }
       open(g.id)
       if (openRequest.source === 'agent') setOpenSource('agent')
@@ -354,19 +354,19 @@ export default function ClipFeed({
 
   const modelOf = (id: string) => models.find((m) => m.id === id)
 
-  const importLabel = importFlow.inspecting ? 'Läser filerna…' : 'Importera egna klipp…'
+  const importLabel = importFlow.inspecting ? 'Reading the files…' : 'Import own clips…'
   const toolbarTrailing = (
     <>
       <button
         type="button"
         onClick={() => void pickFiles()}
         disabled={importFlow.inspecting}
-        title="Lägg till dina egna filmer (eller dra in dem hit)"
+        title="Add your own films (or drag them in here)"
         aria-label={session ? importLabel : undefined}
         className="no-drag flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
       >
         <ImportIcon size={13} />
-        {/* Beside Generera's form the list is narrow: the label shows once the work area has room for it. */}
+        {/* Beside Generate's form the list is narrow: the label shows once the work area has room for it. */}
         <span className={session ? 'hidden @min-[67rem]/main:inline' : undefined}>{importLabel}</span>
       </button>
       {trailing}
@@ -423,7 +423,7 @@ export default function ClipFeed({
             type="button"
             onClick={() => setImportNotice(undefined)}
             className="shrink-0 hover:text-text"
-            title="Stäng"
+            title="Close"
           >
             ✕
           </button>
@@ -433,7 +433,7 @@ export default function ClipFeed({
       {feed.error && (
         <div className="flex items-start gap-2 border-b border-line/60 bg-accent/10 px-6 py-2 text-[12px] text-accent">
           <span className="min-w-0 flex-1 select-text">{feed.error}</span>
-          <button type="button" onClick={feed.clearError} className="shrink-0 hover:text-text" title="Stäng">
+          <button type="button" onClick={feed.clearError} className="shrink-0 hover:text-text" title="Close">
             ✕
           </button>
         </div>
@@ -442,14 +442,14 @@ export default function ClipFeed({
         <div className="flex items-center gap-2 border-b border-line/60 bg-raised/50 px-6 py-1.5 text-[12px] text-muted">
           <Spinner />
           <span className="min-w-0 flex-1">
-            {hiddenPending === 1 ? 'Ett klipp genereras' : `${hiddenPending} klipp genereras`} men döljs av filtren.
+            {hiddenPending === 1 ? 'A clip is generating' : `${hiddenPending} clips are generating`} but hidden by the filters.
           </span>
           <button
             type="button"
             onClick={() => setFilters({ query: '' })}
             className="shrink-0 text-text underline-offset-2 hover:underline"
           >
-            Rensa filter
+            Clear filters
           </button>
         </div>
       )}
@@ -472,23 +472,23 @@ export default function ClipFeed({
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false)
         }}
       >
-        {dropping && <DropHint text="Släpp för att importera som egna klipp" />}
+        {dropping && <DropHint text="Drop to import as own clips" />}
         {!loaded ? null : pool.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted">
             <p className="max-w-md leading-relaxed text-balance">{emptyText}</p>
             {session && <MediaLink onClick={showAll} className="mb-2" />}
-            <span className="text-[12px]">Har du egna filmer? Dra in dem hit eller välj Importera egna klipp.</span>
+            <span className="text-[12px]">Have your own films? Drag them in here or choose Import own clips.</span>
           </div>
         ) : shown.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-muted">
-            <p>Inga klipp matchar filtren.</p>
+            <p>No clips match the filters.</p>
             <div className="flex max-w-md flex-wrap justify-center gap-1.5">
               {filterChips(filters, models, assets).map((c) => (
                 <button
                   key={c.key}
                   type="button"
                   onClick={() => setFilters(withoutFilter(filters, c.key))}
-                  title="Ta bort filtret"
+                  title="Remove the filter"
                   className="flex items-center gap-1.5 rounded-full border border-accent/50 bg-accent/10 py-0.5 pl-2.5 pr-2 text-[12px] text-text transition hover:bg-accent/20"
                 >
                   {c.label}
@@ -501,7 +501,7 @@ export default function ClipFeed({
               onClick={() => setFilters({ query: '' })}
               className="text-text underline-offset-2 hover:underline"
             >
-              Rensa filter
+              Clear filters
             </button>
           </div>
         ) : view === 'table' ? (

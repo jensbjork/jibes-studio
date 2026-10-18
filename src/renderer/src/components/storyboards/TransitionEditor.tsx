@@ -63,14 +63,14 @@ interface Props {
   flushers: FlushRegistry
   /** A take is being sent to Venice. */
   submitting: boolean
-  /** Why the last Generera failed. */
+  /** Why the last Generate failed. */
   error?: string
   onDismissError: () => void
   onGenerate: () => void
   /** Makes the take the transition's (main's answer applied); rejects with main's refusal. */
   onCommitTake: (transitionId: string, takeId: string) => Promise<void>
   onDeleteTake: (take: Generation) => void
-  /** "Redigera tagningen…": opens the take in Redigera. */
+  /** "Edit take…": opens the take in the Editor. */
   onEditTake?: (take: Generation) => void
   /** A refusal to show above the storyboard (choosing a take failed). */
   onError: (message: string) => void
@@ -80,8 +80,8 @@ interface Props {
 /**
  * One transition in full, beside the boards: the two pictures it goes between, the take in use (or the one
  * being looked at) in a player with every take in a strip right under it – a click makes a take the one in use and
- * plays it –, "Vad händer?" with Föreslå, length, resolution, sound and the model (only those that can end on a
- * picture), the price and Generera. Edits are saved by themselves; Generera saves first, so the take is made from
+ * plays it –, "What happens?" with Suggest, length, resolution, sound and the model (only those that can end on a
+ * picture), the price and Generate. Edits are saved by themselves; Generate saves first, so the take is made from
  * what is on screen.
  */
 export default function TransitionEditor({
@@ -169,11 +169,11 @@ export default function TransitionEditor({
 
   const params = { ...t.params, ...value }
   const problems = transitionProblems(storyboard, t, value.prompt)
-  if (model?.offline) problems.push('Modellen är offline – välj en annan')
+  if (model?.offline) problems.push('The model is offline – choose another')
   const blocked = problems[0]
   const quote = useClipQuote(t.ready ? params : undefined)
 
-  // ── "Föreslå" ──────────────────────────────────────────────────────────────
+  // ── "Suggest" ──────────────────────────────────────────────────────────────
 
   const suggestion = suggestPrompt(from?.note, to?.note)
   const promptId = useId()
@@ -242,7 +242,7 @@ export default function TransitionEditor({
     if (by === 'click') requestPlay(take.id)
   }
 
-  /** "Välj den" (under the player, or in the banner about earlier pictures): choosing on purpose, without replaying. */
+  /** "Use this take" (under the player, or in the banner about earlier pictures): choosing on purpose, without replaying. */
   const chooseShown = (take: Generation) => {
     setPreviewId(undefined)
     markSeen([workKey.generation(take.id)])
@@ -267,15 +267,15 @@ export default function TransitionEditor({
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line pl-4 pr-2">
         <h2 className="font-medium">{transitionLabel(storyboard, t)}</h2>
         <span className="text-[12px] text-muted">
-          ruta {fromNumber} → {toNumber}
+          board {fromNumber} → {toNumber}
         </span>
         <span className="ml-auto text-[11px] text-muted" aria-live="polite">
           {draft.error ? (
             <span className="text-accent" title={draft.error}>
-              Kunde inte spara
+              Couldn’t save
             </span>
           ) : draft.status !== 'idle' ? (
-            'Sparar…'
+            'Saving…'
           ) : (
             ''
           )}
@@ -283,8 +283,8 @@ export default function TransitionEditor({
         <button
           type="button"
           onClick={onClose}
-          title="Stäng (Esc)"
-          aria-label="Stäng"
+          title="Close (Esc)"
+          aria-label="Close"
           className="flex h-7 w-7 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
         >
           <CloseIcon size={12} />
@@ -294,9 +294,9 @@ export default function TransitionEditor({
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
         {/* From one picture to the next. */}
         <div className="flex items-center gap-2">
-          <BoardThumb path={from?.imagePath} label={`Ruta ${fromNumber}`} aspect={aspect} />
+          <BoardThumb path={from?.imagePath} label={`Board ${fromNumber}`} aspect={aspect} />
           <ArrowRightIcon size={14} className="shrink-0 text-muted" />
-          <BoardThumb path={to?.imagePath} label={`Ruta ${toNumber}`} aspect={aspect} />
+          <BoardThumb path={to?.imagePath} label={`Board ${toNumber}`} aspect={aspect} />
         </div>
 
         {/* The take in use, or the one being previewed. */}
@@ -323,25 +323,25 @@ export default function TransitionEditor({
             ) : (
               <div className="flex h-full items-center justify-center px-6 text-center text-[12px] leading-relaxed text-muted">
                 {t.ready
-                  ? 'Inget klipp än. Skriv vad som händer och generera.'
-                  : 'Lägg en bild i båda rutorna, så kan klippet mellan dem genereras.'}
+                  ? 'No clip yet. Write what happens and generate.'
+                  : 'Add an image to both boards, and the clip between them can be generated.'}
               </div>
             )}
           </div>
           {viewing && (
             <p className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-muted">
               {viewing.id === selection.activeId ? (
-                <span>Valt klipp · {formatLength(takeSeconds(viewing))}</span>
+                <span>Selected clip · {formatLength(takeSeconds(viewing))}</span>
               ) : (
                 <>
-                  <span>Tagning från {formatTakeTime(viewing.createdAt)} – inte vald</span>
+                  <span>Take from {formatTakeTime(viewing.createdAt)} – not selected</span>
                   <span aria-hidden>·</span>
                   <button
                     type="button"
                     onClick={() => chooseShown(viewing)}
                     className="rounded px-1 py-0.5 text-text transition hover:bg-raised"
                   >
-                    Välj den
+                    Use this take
                   </button>
                   {preview && ready && (
                     <>
@@ -349,10 +349,10 @@ export default function TransitionEditor({
                       <button
                         type="button"
                         onClick={() => setPreviewId(undefined)}
-                        title="Tillbaka till den valda tagningen (Esc)"
+                        title="Back to the selected take (Esc)"
                         className="rounded px-1 py-0.5 text-text transition hover:bg-raised"
                       >
-                        Visa vald
+                        Show selected
                       </button>
                     </>
                   )}
@@ -362,20 +362,20 @@ export default function TransitionEditor({
           )}
           {t.staleTake && ready && (
             <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-200">
-              Det valda klippet gjordes med en tidigare bild i någon av rutorna.{' '}
+              The selected clip was made with an earlier image on one of the boards.{' '}
               {currentTake ? (
                 <>
-                  Det finns en tagning med bilderna som ligger där nu.{' '}
+                  There is a take with the images that are there now.{' '}
                   <button
                     type="button"
                     onClick={() => chooseShown(currentTake)}
                     className="rounded px-1 font-medium text-amber-100 underline underline-offset-2 hover:text-white"
                   >
-                    Välj den
+                    Use this take
                   </button>
                 </>
               ) : (
-                'Generera igen om klippet ska följa de bilder som ligger där nu – det nya klippet väljs när det är klart.'
+                'Generate again if the clip should follow the images there now – the new clip is selected when it’s done.'
               )}
             </p>
           )}
@@ -418,17 +418,17 @@ export default function TransitionEditor({
         <section>
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <label htmlFor={promptId} className="text-muted">
-              Vad händer?
+              What happens?
             </label>
             {value.prompt.trim() && suggestion && value.prompt.trim() !== suggestion ? (
               <ConfirmButton
-                question="Ersätta texten?"
-                confirmLabel="Ersätt"
+                question="Replace the text?"
+                confirmLabel="Replace"
                 onConfirm={() => set('prompt', suggestion)}
-                title="Skriv en enkel prompt utifrån vad rutorna visar (ersätter texten)"
+                title="Write a simple prompt from what the boards show (replaces the text)"
                 className="rounded px-1.5 py-0.5 text-[12px] text-muted transition hover:bg-raised hover:text-text"
               >
-                Föreslå
+                Suggest
               </ConfirmButton>
             ) : (
               <button
@@ -437,12 +437,12 @@ export default function TransitionEditor({
                 disabled={!suggestion || value.prompt.trim() === suggestion}
                 title={
                   suggestion
-                    ? 'Skriv en enkel prompt utifrån vad rutorna visar'
-                    : 'Skriv först under bilderna vad de visar, så kan en prompt föreslås'
+                    ? 'Write a simple prompt from what the boards show'
+                    : 'First write under the images what they show, and a prompt can be suggested'
                 }
                 className="rounded px-1.5 py-0.5 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40 disabled:hover:bg-transparent"
               >
-                Föreslå
+                Suggest
               </button>
             )}
           </div>
@@ -457,27 +457,27 @@ export default function TransitionEditor({
             context="video"
             minRows={4}
             maxRows={14}
-            title="Vad händer?"
-            focusHint={`Rörelsen från ruta ${fromNumber} till ruta ${toNumber} – gärna på engelska. Skriv / för en byggsten.`}
+            title="What happens?"
+            focusHint={`The motion from board ${fromNumber} to board ${toNumber} – ideally in English. Type / for a building block.`}
             placeholder="The camera slowly pushes in as she turns from the window and walks towards the door."
           />
           <p className="mt-1 text-[11px] leading-relaxed text-muted">
-            Beskriv rörelsen från den första bilden till den andra – skriv gärna på engelska. Klippet börjar exakt på
-            ruta {fromNumber} och slutar exakt på ruta {toNumber}.
+            Describe the motion from the first image to the second – ideally in English. The clip starts exactly on
+            board {fromNumber} and ends exactly on board {toNumber}.
           </p>
           {/* An agent can give a transition a negative prompt (update_transition); it is sent with every take. */}
           {t.params.negativePrompt && (
             <div className="mt-2 flex items-start gap-2 rounded-md border border-line px-3 py-2 text-[12px] leading-relaxed">
-              <p className="min-w-0 flex-1 text-muted select-text" title="Skickas med klippet: det modellen ska undvika">
-                <span className="text-text/80">Undvik:</span> {t.params.negativePrompt}
+              <p className="min-w-0 flex-1 text-muted select-text" title="Sent with the clip: what the model should avoid">
+                <span className="text-text/80">Avoid:</span> {t.params.negativePrompt}
               </p>
               <button
                 type="button"
                 onClick={() => void clearNegative()}
-                title="Ta bort texten, så skickas den inte med nästa tagning"
+                title="Remove the text, so it isn’t sent with the next take"
                 className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-accent"
               >
-                Ta bort
+                Remove
               </button>
             </div>
           )}
@@ -488,7 +488,7 @@ export default function TransitionEditor({
         <section className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <label>
-              <span className="mb-1.5 block text-muted">Längd</span>
+              <span className="mb-1.5 block text-muted">Length</span>
               <select value={value.duration} onChange={(e) => set('duration', e.target.value)} className={select}>
                 {(model?.durations.length ? model.durations : [value.duration]).map((d) => (
                   <option key={d} value={d}>
@@ -499,7 +499,7 @@ export default function TransitionEditor({
             </label>
             {(!!model?.resolutions.length || !!value.resolution) && (
               <label>
-                <span className="mb-1.5 block text-muted">Upplösning</span>
+                <span className="mb-1.5 block text-muted">Resolution</span>
                 <select
                   value={value.resolution ?? ''}
                   onChange={(e) => set('resolution', e.target.value || undefined)}
@@ -523,13 +523,13 @@ export default function TransitionEditor({
                 onChange={(e) => set('audio', e.target.checked)}
                 className="accent-accent"
               />
-              <span>Generera ljud</span>
+              <span>Generate sound</span>
             </label>
           )}
           <label className="block">
             <span className="mb-1.5 flex items-baseline justify-between gap-2 text-muted">
-              Modell
-              <span className="text-[11px]">bara modeller som kan sluta på en bild</span>
+              Model
+              <span className="text-[11px]">only models that can end on an image</span>
             </span>
             {modelsError ? (
               <p className="text-[12px] text-accent select-text">{modelsError}</p>
@@ -564,16 +564,16 @@ export default function TransitionEditor({
             type="button"
             onClick={onGenerate}
             disabled={!!blocked || submitting}
-            title={blocked ?? 'Skickar klippet till Venice (⌘ + Enter i prompten)'}
+            title={blocked ?? 'Sends the clip to Venice (⌘ + Enter in the prompt)'}
             className={`${primaryButton} w-full py-2`}
           >
             {submitting ? (
-              'Skickar…'
+              'Sending…'
             ) : blocked ? (
               blocked
             ) : (
               <>
-                {ready || t.takes.length ? 'Generera igen' : 'Generera'}
+                {ready || t.takes.length ? 'Generate again' : 'Generate'}
                 <span className="opacity-80">· {formatUsd(quote)}</span>
               </>
             )}
@@ -581,7 +581,7 @@ export default function TransitionEditor({
           {error && (
             <p className="flex items-start gap-2 text-[12px] leading-relaxed text-accent select-text">
               <span className="min-w-0 flex-1">{error}</span>
-              <button type="button" onClick={onDismissError} title="Stäng" className="mt-1 shrink-0 opacity-60 hover:opacity-100">
+              <button type="button" onClick={onDismissError} title="Close" className="mt-1 shrink-0 opacity-60 hover:opacity-100">
                 <CloseIcon size={10} />
               </button>
             </p>
@@ -600,7 +600,7 @@ function BoardThumb({ path, label, aspect }: { path?: string; label: string; asp
           <img src={mediaUrl(path)} alt={label} draggable={false} className="h-full w-full object-contain" />
         ) : (
           <div className="flex h-full items-center justify-center border border-dashed border-line text-[11px] text-muted">
-            Ingen bild
+            No image
           </div>
         )}
       </div>
@@ -622,7 +622,7 @@ function PendingView({ take }: { take: Generation }) {
       </div>
       <span className="text-[11px]">
         {formatSeconds(take.executionDuration)}
-        {take.averageExecutionTime ? ` av ~${formatSeconds(take.averageExecutionTime)}` : ''}
+        {take.averageExecutionTime ? ` of ~${formatSeconds(take.averageExecutionTime)}` : ''}
       </span>
     </div>
   )

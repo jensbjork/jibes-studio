@@ -9,7 +9,7 @@ export const LAST_PARAMS_IMAGE_IDS_KEY = 'generate:lastParamsImageIds:v1'
 export const LAST_SEQUENCE_KEY = 'sequences:lastOpen'
 /** The storyboard open in Storyboards. */
 export const LAST_STORYBOARD_KEY = 'storyboards:lastOpen'
-/** The edit open in Redigera (removed when the user goes back to the list of edits). */
+/** The edit open in the Editor (removed when the user goes back to the list of edits). */
 export const LAST_EDIT_KEY = 'editor:lastOpen'
 /** The asset selected in each library view. */
 export const SELECTED_ASSET_KEYS: Record<AssetKind, string> = {
@@ -71,7 +71,7 @@ export function mapParamImages(
 // ── Following asset images ──────────────────────────────────────────────────
 
 // The photos of an asset (a character, environment, product, outfit or pose) move when its folder follows a rename,
-// or when "Städa upp" tidies them. Main rewrites the paths it stores; the Generate form's own copy (state and
+// or when "Tidy up" tidies them. Main rewrites the paths it stores; the Generate form's own copy (state and
 // localStorage) follows by image id.
 
 /** Anything with library images: an Asset, or a list item shaped like one. */

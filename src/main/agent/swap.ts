@@ -51,7 +51,7 @@ export type ReadySwap = Exclude<SwapPlan, { uploadId: string }>
 
 /**
  * The swap an agent asks for, checked against `paths` (the list's pictures, @Image1 first; `where` names it for
- * messages: "formuläret", "klipp 3"). Throws (in Swedish) on a place that isn't there, a whole-asset swap of a loose
+ * messages: "the form", "clip 3"). Throws on a place that isn't there, a whole-asset swap of a loose
  * picture or to anything but an asset, and a new picture that can't be found.
  */
 export async function planSwap(
@@ -64,7 +64,7 @@ export async function planSwap(
   const audio = findAudioTokens(entry)
   if (audio.length === 1 && audio[0].start === 0 && audio[0].end === entry.length) {
     throw new Error(
-      `${entry} är ett ljudklipp. swap_reference byter en bild: ange platsen med dess @ImageN-token eller image_id. En röst följer med sin tillgång när du byter hela tillgången (whole_asset: true).`
+      `${entry} is an audio clip. swap_reference swaps an image: give the place with its @ImageN token or image_id. A voice follows its asset when you swap the whole asset (whole_asset: true).`
     )
   }
   const places = namedPositions('image', [entry], paths, index, where)
@@ -72,7 +72,7 @@ export async function planSwap(
     const name = index.get(entry)?.name ?? entry
     const tokens = places.map((i) => `@Image${i + 1}`).join(', ')
     throw new Error(
-      `${q(name)} har ${places.length} bilder bland referensbilderna i ${where} (${tokens}). Ange vilken plats som ska bytas med dess token eller image_id – eller byt alla med whole_asset: true.`
+      `${q(name)} has ${places.length} images among the reference images in ${where} (${tokens}). Give the place to swap with its token or image_id – or swap them all with whole_asset: true.`
     )
   }
   const place = places[0]
@@ -81,22 +81,22 @@ export async function planSwap(
     const from = index.photo(paths[place])?.asset
     if (!from) {
       throw new Error(
-        `@Image${place + 1} i ${where} är en lös bild, inte ett foto av en karaktär, miljö, produkt, klädsel eller pose, så det finns ingen tillgång att byta helt. Byt bara den platsen (utan whole_asset).`
+        `@Image${place + 1} in ${where} is a loose image, not a photo of a character, environment, product, outfit or pose, so there is no asset to swap whole. Swap just that place (without whole_asset).`
       )
     }
     if (!('asset_id' in replacement)) {
       throw new Error(
-        `whole_asset byter ${q(from.name)} mot en annan tillgång: with ska vara {asset_id}, inte en lös bild. För att byta en enda plats mot en lös bild, utelämna whole_asset.`
+        `whole_asset swaps ${q(from.name)} for another asset: with must be {asset_id}, not a loose image. To swap a single place for a loose image, leave out whole_asset.`
       )
     }
     if (replacement.image_id) {
       throw new Error(
-        `whole_asset ger ${q(from.name)}s platser den nya tillgångens foton i ordning – utelämna image_id, eller byt en plats i taget utan whole_asset.`
+        `whole_asset gives ${q(from.name)}'s places the new asset's photos in order – leave out image_id, or swap one place at a time without whole_asset.`
       )
     }
     const to = index.require(replacement.asset_id)
     if (!to.images.length) {
-      throw new Error(`${q(to.name)} har inga foton att byta till. Lägg till bilder med add_asset_images först.`)
+      throw new Error(`${q(to.name)} has no photos to swap to. Add images with add_asset_images first.`)
     }
     return { whole: true, place, from, to }
   }
@@ -171,27 +171,27 @@ export function swappedInfo(swapped: Swapped): Record<string, unknown> {
   }
 }
 
-const nameOf = (info: PictureInfo | AudioInfo): string => info.asset_name ?? info.file ?? 'en bild'
+const nameOf = (info: PictureInfo | AudioInfo): string => info.asset_name ?? info.file ?? 'an image'
 
 /**
- * The activity log's words for a swap: "bytte @Image2 bland referenserna (Anna → Bo)" or "bytte ”Anna” mot ”Bo”
- * bland referenserna (@Image1, @Image2, @Audio1)"; `where` is put after "referenserna" (" i klipp 3 i ”Sommar”").
+ * The activity log's words for a swap: "swapped @Image2 among the references (Anna → Bo)" or "swapped “Anna” for “Bo”
+ * among the references (@Image1, @Image2, @Audio1)"; `where` is put after "references" (" in clip 3 in “Sommar”").
  */
 export function swapSummary(plan: ReadySwap, swapped: Swapped, where = ''): string {
   const all = [...swapped.images, ...swapped.audios]
   if (plan.whole) {
     const tokens = all.map((s) => s.token)
     const list = tokens.length ? ` (${tokens.slice(0, 6).join(', ')}${tokens.length > 6 ? ' …' : ''})` : ''
-    return `bytte ${q(plan.from.name)} mot ${q(plan.to.name)} bland referenserna${where}${list}`
+    return `swapped ${q(plan.from.name)} for ${q(plan.to.name)} among the references${where}${list}`
   }
   const one = swapped.images[0]
   return one
-    ? `bytte ${one.token} bland referenserna${where} (${nameOf(one.was)} → ${nameOf(one.now)})`
-    : `bytte en referensbild${where}`
+    ? `swapped ${one.token} among the references${where} (${nameOf(one.was)} → ${nameOf(one.now)})`
+    : `swapped a reference image${where}`
 }
 
 /**
- * Notes (Swedish) about what the swap did to the prompt and the list: the name that followed, a prompt that didn't
+ * Notes about what the swap did to the prompt and the list: the name that followed, a prompt that didn't
  * follow where the swapped token is written, and a new picture that now is in the list twice.
  */
 export function swapNotes(
@@ -212,12 +212,12 @@ export function swapNotes(
       const name = nameOf(s.now)
       groups.set(name, [...(groups.get(name) ?? []), s.token])
     }
-    const named = [...groups].map(([name, list]) => `${list.join(', ')} är nu ${q(name)}`)
-    notes.push(`Prompten följde med: namnet framför ${named.join(' och framför ')} – inga nummer ändrades.`)
+    const named = [...groups].map(([name, list]) => `${list.join(', ')} is now ${q(name)}`)
+    notes.push(`The prompt followed: the name in front of ${named.join(' and in front of ')} – no numbers changed.`)
   } else if (followed) {
     const to = swapped.images[0] ? nameOf(swapped.images[0].now) : undefined
     notes.push(
-      `Prompten följde med: namnet framför ${tokens.join(', ')} är nu ${to ? q(to) : 'det nya'} – inga nummer ändrades.`
+      `The prompt followed: the name in front of ${tokens.join(', ')} is now ${to ? q(to) : 'the new one'} – no numbers changed.`
     )
   } else if (!plan.whole && swapped.images.length) {
     // A place of an asset that has more pictures there, or a loose picture: the name in front of it stays.
@@ -227,7 +227,7 @@ export function swapNotes(
     )
     if (mentioned && nameOf(one.was) !== nameOf(one.now)) {
       notes.push(
-        `Prompten ändrades inte (inga nummer ändras vid ett byte): se till att texten kring ${one.token} stämmer med den nya bilden.`
+        `The prompt wasn't changed (no numbers change in a swap): make sure the text around ${one.token} matches the new image.`
       )
     }
   }
@@ -236,7 +236,7 @@ export function swapNotes(
   for (const i of swappedPlaces) {
     const twin = images.findIndex((p, j) => j !== i && !swappedPlaces.has(j) && pathKey(p) === pathKey(images[i]))
     if (twin !== -1) {
-      notes.push(`Bilden på @Image${i + 1} finns också som @Image${twin + 1}, så den skickas två gånger.`)
+      notes.push(`The image at @Image${i + 1} is also @Image${twin + 1}, so it is sent twice.`)
     }
   }
   return notes
@@ -245,6 +245,6 @@ export function swapNotes(
 /** The answer when the swap would change nothing. */
 export function unchangedNote(plan: ReadySwap): string {
   return plan.whole
-    ? `@Image${plan.place + 1} är redan ${q(plan.from.name)} – inget ändrades.`
-    : `@Image${plan.place + 1} visar redan den bilden – inget ändrades.`
+    ? `@Image${plan.place + 1} is already ${q(plan.from.name)} – nothing changed.`
+    : `@Image${plan.place + 1} already shows that image – nothing changed.`
 }

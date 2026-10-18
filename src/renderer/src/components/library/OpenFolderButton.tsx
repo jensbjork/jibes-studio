@@ -24,8 +24,8 @@ interface Props {
 export default function OpenFolderButton({
   target,
   id,
-  label = 'Öppna mapp',
-  title = 'Visa mappen i Finder',
+  label = 'Open folder',
+  title = 'Show the folder in Finder',
   className = '',
   compact,
   onError

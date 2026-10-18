@@ -54,7 +54,7 @@ export default function FilterMenu<T extends string | number>({
   value,
   options,
   onChange,
-  allLabel = 'Alla',
+  allLabel = 'All',
   width = 240,
   header,
   empty,
@@ -106,7 +106,7 @@ export default function FilterMenu<T extends string | number>({
         onClick={() => setOpen(!open)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={active ? `${title}: ${valueLabel ?? ''}` : `Filtrera på ${title.toLocaleLowerCase('sv')}`}
+        title={active ? `${title}: ${valueLabel ?? ''}` : `Filter by ${title.toLocaleLowerCase('en')}`}
         className={`flex h-full max-w-56 items-center gap-1 rounded-full outline-none focus-visible:ring-1 focus-visible:ring-muted ${
           active ? 'pl-2.5 pr-1' : 'px-2.5'
         }`}
@@ -118,7 +118,7 @@ export default function FilterMenu<T extends string | number>({
         <button
           type="button"
           onClick={() => onChange(undefined)}
-          title={`Ta bort filtret ${title.toLocaleLowerCase('sv')}`}
+          title={`Remove the ${title.toLocaleLowerCase('en')} filter`}
           className="mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted hover:bg-black/30 hover:text-text"
         >
           <CloseIcon size={9} />

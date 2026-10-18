@@ -6,7 +6,7 @@ import { callService } from '../local-ipc'
 import { localTime } from '../studio'
 import { READ_ONLY, defineTool, type ToolContext } from './kit'
 
-// What Studio is doing right now and what has finished that the user hasn't looked at yet ("Pågår och klart"), as
+// What Studio is doing right now and what has finished that the user hasn't looked at yet ("Activity"), as
 // the window's status panel shows it. Read-only: an agent can see what the user has seen but never mark anything
 // seen. Ids only – never the absolute paths of thumbnails, videos or an import's files.
 
@@ -107,7 +107,7 @@ export function registerWorkTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get what is running and what is new',
       description:
-        "What Studio is doing right now and what has finished that the user hasn't looked at yet – the window's \"Pågår och klart\". running: videos at Venice (queued or generating, with progress and eta_seconds or usually_takes_seconds), takes being sent, \"Generera saknade\" runs (\"Klipp 2 av 5\"), pictures being made, Redigera jobs and renders, exports, imports of own clips, approved requests being carried out and your uploads – each with its label, phase (detail), when it started, the agent it was done for (via) and the ids to follow it with (generation_id, sequence_id, segment_id, storyboard_id, transition_id, edit_id, job_id, asset_id, upload_id). unseen (include_finished): finished videos, versions, pictures, exports and voices – and failures, with their error – that the user hasn't played or opened yet, newest first. counts: totals and per view (running, unseen, failed). view narrows it to one of Studio's views: \"generate\" is what Generera made this session (its list only shows this session's), \"media\" the Mediabank – pictures that belong to no sequence or storyboard and Generera's clips from an earlier session. Use it after an approval instead of polling every generation. Studio marks things seen when the user plays or opens them; you can read that but never mark anything seen. Free; changes nothing.",
+        "What Studio is doing right now and what has finished that the user hasn't looked at yet – the window's \"Activity\". running: videos at Venice (queued or generating, with progress and eta_seconds or usually_takes_seconds), takes being sent, \"Generate missing\" runs (\"Clip 2 of 5\"), pictures being made, Editor jobs and renders, exports, imports of own clips, approved requests being carried out and your uploads – each with its label, phase (detail), when it started, the agent it was done for (via) and the ids to follow it with (generation_id, sequence_id, segment_id, storyboard_id, transition_id, edit_id, job_id, asset_id, upload_id). unseen (include_finished): finished videos, versions, pictures, exports and voices – and failures, with their error – that the user hasn't played or opened yet, newest first. counts: totals and per view (running, unseen, failed). view narrows it to one of Studio's views: \"generate\" is what Generate made this session (its list only shows this session's), \"media\" Media – pictures that belong to no sequence or storyboard and Generate's clips from an earlier session. Use it after an approval instead of polling every generation. Studio marks things seen when the user plays or opens them; you can read that but never mark anything seen. Free; changes nothing.",
       input: {
         view: z.enum(VIEWS).optional().describe('Only what counts under this view of Studio.'),
         include_finished: z
@@ -116,7 +116,7 @@ export function registerWorkTools(server: McpServer, ctx: ToolContext): void {
           .describe("Also list what finished (or failed) that the user hasn't looked at yet. Default true.")
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'kollade vad som pågår'
+      summary: () => 'checked what is running'
     },
     async ({ view, include_finished }) => {
       // Empty when no library is open; agents may always ask.
@@ -140,8 +140,8 @@ export function registerWorkTools(server: McpServer, ctx: ToolContext): void {
           counts: { total: summary.total, by_view: summary.byView }
         },
         summary: running.length
-          ? `kollade vad som pågår (${running.length} ${running.length === 1 ? 'sak' : 'saker'})`
-          : 'kollade vad som pågår'
+          ? `checked what is running (${running.length} ${running.length === 1 ? 'thing' : 'things'})`
+          : 'checked what is running'
       }
     }
   )

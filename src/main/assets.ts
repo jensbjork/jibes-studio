@@ -36,7 +36,7 @@ import { copyInto, fileErrorReason, placeFile, serialized } from './references'
 
 // Assets: characters (Karaktärer), environments (Miljöer), products (Produkter), outfits (Kläder) and poses
 // (Poser) — each a name, a description and reference photos. Characters and environments can also have audio
-// clips: a voice ("Röst") or a soundscape ("Ljudmiljö"), of which a window of 2–15 s is sent to Venice as
+// clips: a voice ("Voice") or a soundscape ("Soundscape"), of which a window of 2–15 s is sent to Venice as
 // reference audio. Every asset has a folder <kind folder>/<name>/ with copies of its photos and audio (under their
 // original names) and Beskrivning.txt, so an asset keeps working when the originals are moved or deleted, and the
 // folder reads well in Finder. The database is the source of truth; the folder follows renames and deletes. A
@@ -57,20 +57,20 @@ const MIN_AUDIO_FILE_SECONDS = 1
 const DESCRIPTION_FILE = 'Beskrivning.txt'
 /**
  * Folder name for a name with nothing usable in it (e.g. "..."). The same for every kind, and the same as
- * "Städa upp" uses, so the two never disagree about which folder an asset should have.
+ * "Tidy up" uses, so the two never disagree about which folder an asset should have.
  */
 const UNNAMED = 'Namnlös'
-const GONE = 'Den finns inte längre i biblioteket.'
-const AUDIO_GONE = 'Ljudet finns inte längre.'
-const nameCollator = new Intl.Collator('sv')
+const GONE = 'It no longer exists in the library.'
+const AUDIO_GONE = 'The audio no longer exists.'
+const nameCollator = new Intl.Collator('en')
 
-/** The asset in definite form, for messages ("Miljön behöver ett namn."). */
+/** The asset in definite form, for messages ("The environment needs a name."). */
 const THE: Record<AssetKind, string> = {
-  character: 'Karaktären',
-  environment: 'Miljön',
-  product: 'Produkten',
-  outfit: 'Klädseln',
-  pose: 'Posen'
+  character: 'The character',
+  environment: 'The environment',
+  product: 'The product',
+  outfit: 'The outfit',
+  pose: 'The pose'
 }
 
 let notifyChange: () => void = () => {}
@@ -89,7 +89,7 @@ let assetTasks = 0
 
 function assetTask<T>(task: () => Promise<T>): Promise<T> {
   return assetQueue(async () => {
-    // Not while "Städa upp" or a switch moves files: they read the folder names once and move files by them.
+    // Not while "Tidy up" or a switch moves files: they read the folder names once and move files by them.
     // Counted as busy only once it runs, so a task waiting here doesn't make that switch refuse itself.
     await libraryOperationSettled()
     assetTasks++
@@ -101,10 +101,10 @@ function assetTask<T>(task: () => Promise<T>): Promise<T> {
   })
 }
 
-/** Why the library can't be switched or tidied right now (Swedish), or undefined when no asset work runs. */
+/** Why the library can't be switched or tidied right now, or undefined when no asset work runs. */
 export function assetWorkBusy(): string | undefined {
   return assetTasks > 0
-    ? 'Bilder eller ljud till en karaktär, miljö, produkt, klädsel eller pose sparas just nu.'
+    ? 'Images or audio for a character, environment, product, outfit or pose are being saved right now.'
     : undefined
 }
 
@@ -145,7 +145,7 @@ interface AssetAudioRow {
   clip_length: number | null
   created_at: number
   /**
-   * When the user confirmed they may use this voice ("Får klonas för nya repliker"), so Redigera may clone it for new
+   * When the user confirmed they may use this voice ("May be cloned for new lines"), so the Editor may clone it for new
    * lines; NULL: not confirmed. Set only by the user in Studio (schema 11).
    */
   clone_consent_at?: number | null
@@ -162,19 +162,19 @@ function text(value: unknown): string {
 
 /** Ids arrive over IPC; reject anything that isn't one before it reaches a query. */
 function safeId(id: unknown): string {
-  if (typeof id !== 'string' || !/^[\w-]+$/.test(id)) throw new Error('Ogiltigt id.')
+  if (typeof id !== 'string' || !/^[\w-]+$/.test(id)) throw new Error('Invalid ID.')
   return id
 }
 
 function requireKind(value: unknown): AssetKind {
-  if (!isAssetKind(value)) throw new Error('Okänd sorts bibliotekspost.')
+  if (!isAssetKind(value)) throw new Error('Unknown kind of library item.')
   return value
 }
 
 /** Longest agent name kept in an origin (a client's name is free text). */
 const MAX_ORIGIN_AGENT = 60
 /** The name recorded when an agent's call names no agent. */
-const UNNAMED_AGENT = 'en agent'
+const UNNAMED_AGENT = 'an agent'
 /** A host name or an IP address, nothing more: an origin must never carry a URL (it may hold tokens). */
 const HOST_PATTERN = /^(?:[a-z0-9-]+\.)*[a-z0-9-]+$|^\[?[0-9a-f:.]+\]?$/i
 
@@ -236,12 +236,12 @@ export function resolveAudioWindow(
   return { clipStart, clipLength }
 }
 
-/** A reason from elsewhere as the end of a Swedish sentence: "…: ffmpeg hittades inte." */
+/** A reason from elsewhere as the end of a sentence: "…: ffmpeg was not found." */
 function reasonText(err: unknown): string {
   const text = fileErrorReason(err)
-    .replace(/^Kunde inte läsa ljudfilen:\s*/u, '')
+    .replace(/^Could not read the audio file:\s*/u, '')
     .replace(/[.\s]+$/u, '')
-  return text.charAt(0).toLocaleLowerCase('sv') + text.slice(1)
+  return text.charAt(0).toLocaleLowerCase('en') + text.slice(1)
 }
 
 /** Folder names compare the way macOS file systems do: ignoring case and Unicode normalization. */
@@ -361,7 +361,7 @@ async function moveImageInto(image: AssetImageRow, dir: string, base: string): P
     throw err
   }
   // The old per-character folder (e.g. characters/<id>/) goes once it's empty; the base folder and its
-  // top-level folders are left to "Städa upp".
+  // top-level folders are left to "Tidy up".
   const oldDir = toStoredPath(dirname(src))
   if (!isAbsolute(oldDir) && oldDir.includes('/')) await removeIfEmpty(dirname(src))
 }
@@ -369,7 +369,7 @@ async function moveImageInto(image: AssetImageRow, dir: string, base: string): P
 /**
  * The asset's folder name, (re)created on disk if missing. A character from before folders gets one now and
  * its images move into it. The folder is recorded first and each image's path right after its move, so an
- * interruption leaves every row pointing at an existing file ("Städa upp" moves the rest).
+ * interruption leaves every row pointing at an existing file ("Tidy up" moves the rest).
  */
 async function ensureFolder(row: AssetRow): Promise<string> {
   if (isPlainName(row.folder)) {
@@ -464,7 +464,7 @@ async function renameNamedImages(assetId: string, dir: string, oldName: string, 
 /**
  * A photo or audio clip that generations or sequence clips still use (as start, end or reference image, or
  * as reference audio) isn't trashed with its asset: it moves to Referensbilder/<today>/, where submitted
- * pictures from outside the library go, and those rows follow, so "Använd igen" and "Generera alla" keep the
+ * pictures from outside the library go, and those rows follow, so "Use again" and "Generate missing" keep the
  * file and the prompt's @ImageN / @AudioN numbers. Call once the file's asset row is gone, so only other rows
  * count. True when it was kept.
  */
@@ -583,10 +583,10 @@ function findAssetRow(id: string): AssetRow | undefined {
   return row && isAssetKind(row.kind) ? row : undefined
 }
 
-/** The row, or a Swedish error; `kind` (when the caller knows it) names what is gone. */
+/** The row, or a plain error; `kind` (when the caller knows it) names what is gone. */
 function requireAssetRow(id: unknown, kind?: unknown): AssetRow {
   const row = findAssetRow(safeId(id))
-  if (!row) throw new Error(isAssetKind(kind) ? `${THE[kind]} finns inte längre.` : GONE)
+  if (!row) throw new Error(isAssetKind(kind) ? `${THE[kind]} no longer exists.` : GONE)
   return row
 }
 
@@ -632,16 +632,16 @@ function touchAsset(id: string, now = Date.now()): void {
  */
 function defaultOutfitFor(kind: AssetKind, value: unknown): string | null {
   if (value === undefined || value === null || value === '') return null
-  if (kind !== 'character') throw new Error('Bara karaktärer kan ha en standardklädsel.')
+  if (kind !== 'character') throw new Error('Only characters can have a default outfit.')
   const outfit = findAssetRow(safeId(value))
-  if (!outfit) throw new Error('Den valda klädseln finns inte längre.')
-  if (outfit.kind !== 'outfit') throw new Error('Standardklädseln måste vara en klädsel.')
+  if (!outfit) throw new Error('The chosen outfit no longer exists.')
+  if (outfit.kind !== 'outfit') throw new Error('The default outfit must be an outfit.')
   return outfit.id
 }
 
 // ── Operations ───────────────────────────────────────────────────────────────
 
-/** Sorted by name (Swedish order), then by age; every kind when kind is omitted. */
+/** Sorted by name, then by age; every kind when kind is omitted. */
 export function listAssets(kind?: unknown): Asset[] {
   const only = kind === undefined || kind === null ? undefined : requireKind(kind)
   const db = getDb()
@@ -762,13 +762,13 @@ async function save(input: AssetInput): Promise<Asset> {
   const description = text(input?.description).trim()
   if (!input?.id) {
     const kind = requireKind(input?.kind)
-    if (!name) throw new Error(`${THE[kind]} behöver ett namn.`)
+    if (!name) throw new Error(`${THE[kind]} needs a name.`)
     return createAsset(kind, name, description, defaultOutfitFor(kind, input.defaultOutfitId))
   }
 
   // The kind is fixed once created; the one sent along only names what is missing.
   const row = requireAssetRow(input.id, input.kind)
-  if (!name) throw new Error(`${THE[row.kind]} behöver ett namn.`)
+  if (!name) throw new Error(`${THE[row.kind]} needs a name.`)
   // Checked before anything moves on disk, so a refused outfit leaves the folder as it was.
   const outfitId =
     input.defaultOutfitId === undefined ? row.default_outfit_id : defaultOutfitFor(row.kind, input.defaultOutfitId)
@@ -829,7 +829,7 @@ async function addImages(assetId: unknown, paths: unknown, from?: unknown): Prom
   ]
   const images = sources.filter((p) => IMAGE_EXTENSIONS.has(extname(p).toLowerCase()))
   if (!images.length) {
-    if (sources.length) throw new Error('Bara bilder i JPG, PNG eller WebP kan läggas till.')
+    if (sources.length) throw new Error('Only JPG, PNG or WebP images can be added.')
     return getAsset(row.id)
   }
 
@@ -846,7 +846,7 @@ async function addImages(assetId: unknown, paths: unknown, from?: unknown): Prom
       copied.push({ id: randomUUID(), dest })
     } catch (err) {
       await discardCopies()
-      throw new Error(`Kunde inte kopiera ${basename(src)}: ${fileErrorReason(err)}.`)
+      throw new Error(`Could not copy ${basename(src)}: ${fileErrorReason(err)}.`)
     }
   }
 
@@ -876,7 +876,7 @@ async function addImages(assetId: unknown, paths: unknown, from?: unknown): Prom
   }
   if (!inserted) {
     await discardCopies()
-    throw new Error(`${THE[row.kind]} finns inte längre.`)
+    throw new Error(`${THE[row.kind]} no longer exists.`)
   }
 
   notifyChange()
@@ -889,7 +889,7 @@ async function removeImage(imageId: unknown): Promise<Asset> {
   const findImage = (): AssetImageRow | undefined =>
     db.prepare('SELECT * FROM asset_images WHERE id = ?').get(id) as AssetImageRow | undefined
   const found = findImage()
-  if (!found) throw new Error('Bilden finns inte längre.')
+  if (!found) throw new Error('The image no longer exists.')
   const asset = findAssetRow(found.asset_id)
   // A character from before folders gets its folder now; the image may have moved with the others.
   if (asset) await ensureFolder(asset)
@@ -928,27 +928,27 @@ function reorderImages(assetId: unknown, imageIds: unknown): Asset {
 
 /** Why this asset can't have audio, or undefined when it can. */
 function noAudioReason(kind: AssetKind): string | undefined {
-  return AUDIO_KINDS.has(kind) ? undefined : 'Bara karaktärer (röst) och miljöer (ljudmiljö) kan ha ljud.'
+  return AUDIO_KINDS.has(kind) ? undefined : 'Only characters (voice) and environments (soundscape) can have audio.'
 }
 
-/** The length of the sound in an audio file, or a Swedish error naming the file. */
+/** The length of the sound in an audio file, or an error naming the file. */
 async function audioDuration(src: string): Promise<number> {
   const name = basename(src)
   try {
-    if (!(await stat(src)).isFile()) throw Object.assign(new Error('det är en mapp'), { code: 'EISDIR' })
+    if (!(await stat(src)).isFile()) throw Object.assign(new Error('it is a folder'), { code: 'EISDIR' })
   } catch (err) {
-    throw new Error(`Kunde inte läsa ${name}: ${reasonText(err)}.`)
+    throw new Error(`Could not read ${name}: ${reasonText(err)}.`)
   }
   let duration: number
   try {
     ;({ duration } = await probeAudio(src))
   } catch (err) {
     const reason = reasonText(err)
-    if (/inget ljud/u.test(reason)) throw new Error(`Det finns inget ljud i ${name}.`)
-    throw new Error(`Kunde inte läsa ljudet i ${name}: ${reason}.`)
+    if (/no sound/u.test(reason)) throw new Error(`There is no sound in ${name}.`)
+    throw new Error(`Could not read the audio in ${name}: ${reason}.`)
   }
-  if (!Number.isFinite(duration) || duration <= 0) throw new Error(`Det finns inget ljud i ${name}.`)
-  if (duration < MIN_AUDIO_FILE_SECONDS) throw new Error(`${name} är kortare än en sekund. Välj ett längre ljud.`)
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error(`There is no sound in ${name}.`)
+  if (duration < MIN_AUDIO_FILE_SECONDS) throw new Error(`${name} is shorter than a second. Choose a longer sound.`)
   return duration
 }
 
@@ -961,7 +961,7 @@ async function addAudio(assetId: unknown, paths: unknown, from?: unknown): Promi
   ]
   const files = sources.filter((p) => AUDIO_EXTENSIONS.has(extname(p).toLowerCase()))
   if (!files.length) {
-    if (sources.length) throw new Error('Bara ljudfiler i MP3, WAV, M4A, AAC, AIFF, FLAC eller OGG kan läggas till.')
+    if (sources.length) throw new Error('Only audio files in MP3, WAV, M4A, AAC, AIFF, FLAC or OGG can be added.')
     return getAsset(row.id)
   }
 
@@ -983,7 +983,7 @@ async function addAudio(assetId: unknown, paths: unknown, from?: unknown): Promi
       copied.push({ id: randomUUID(), dest, duration })
     } catch (err) {
       await discardCopies()
-      throw new Error(`Kunde inte kopiera ${basename(src)}: ${fileErrorReason(err)}.`)
+      throw new Error(`Could not copy ${basename(src)}: ${fileErrorReason(err)}.`)
     }
   }
 
@@ -1016,7 +1016,7 @@ async function addAudio(assetId: unknown, paths: unknown, from?: unknown): Promi
   }
   if (!inserted) {
     await discardCopies()
-    throw new Error(`${THE[row.kind]} finns inte längre.`)
+    throw new Error(`${THE[row.kind]} no longer exists.`)
   }
 
   notifyChange()
@@ -1041,9 +1041,9 @@ async function removeAudio(audioId: unknown): Promise<Asset> {
   return getAsset(row.asset_id)
 }
 
-/** A time in seconds from IPC: a finite number, or a Swedish error. */
+/** A time in seconds from IPC: a finite number, or a plain error. */
 function seconds(value: unknown, what: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Ogiltig ${what}.`)
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Invalid ${what}.`)
   return value
 }
 
@@ -1052,10 +1052,10 @@ function updateAudio(audioId: unknown, patch: unknown): Asset {
   const row = findAudioRow(safeId(audioId))
   if (!row) throw new Error(AUDIO_GONE)
   const p = (patch && typeof patch === 'object' ? patch : {}) as { clipStart?: unknown; clipLength?: unknown }
-  const start = p.clipStart === undefined ? row.clip_start : seconds(p.clipStart, 'starttid')
+  const start = p.clipStart === undefined ? row.clip_start : seconds(p.clipStart, 'start time')
   // null goes back to the default window (which follows the file's length).
   const length =
-    p.clipLength === undefined ? row.clip_length : p.clipLength === null ? null : seconds(p.clipLength, 'längd')
+    p.clipLength === undefined ? row.clip_length : p.clipLength === null ? null : seconds(p.clipLength, 'length')
   // Stored clamped, so what the library shows is exactly what is sent. A longer window that would run past
   // the end of the file moves its start back.
   const window = resolveAudioWindow(row.duration, start, length)
@@ -1090,7 +1090,7 @@ function reorderAudio(assetId: unknown, audioIds: unknown): Asset {
 }
 
 /**
- * A clip made for the asset rather than picked by the user (a voice designed in Redigera): copied from `file` into
+ * A clip made for the asset rather than picked by the user (a voice designed in the Editor): copied from `file` into
  * the asset's folder as "<baseName>.<ext>" (made unique), appended after its clips with the default window.
  */
 async function addGenerated(assetId: unknown, file: unknown, baseName: unknown): Promise<Asset> {
@@ -1105,7 +1105,7 @@ async function addGenerated(assetId: unknown, file: unknown, baseName: unknown):
   try {
     dest = await copyInto(file, dir, safeName(text(baseName), { fallback: 'Ljud' }), ext)
   } catch (err) {
-    throw new Error(`Kunde inte spara ljudet: ${fileErrorReason(err)}.`)
+    throw new Error(`Could not save the audio: ${fileErrorReason(err)}.`)
   }
   const db = getDb()
   const audioId = randomUUID()
@@ -1130,15 +1130,15 @@ async function addGenerated(assetId: unknown, file: unknown, baseName: unknown):
   }
   if (!inserted) {
     await rm(dest, { force: true }).catch(() => {})
-    throw new Error(`${THE[row.kind]} finns inte längre.`)
+    throw new Error(`${THE[row.kind]} no longer exists.`)
   }
-  // A designed voice is news (Pågår och klart): announced with the change that shows it, in the same tick.
+  // A designed voice is news (Activity): announced with the change that shows it, in the same tick.
   addUnseen({ audioId, context: { assetId: row.id } })
   notifyChange()
   return getAsset(row.id)
 }
 
-/** "Får klonas för nya repliker": records (or withdraws) the user's confirmation that they may use this voice. */
+/** "May be cloned for new lines": records (or withdraws) the user's confirmation that they may use this voice. */
 function setCloneConsent(audioId: unknown, consent: unknown): Asset {
   const db = getDb()
   const row = findAudioRow(safeId(audioId))
@@ -1220,16 +1220,16 @@ export function reorderAssetAudio(assetId: string, audioIds: string[]): Promise<
 }
 
 /**
- * Adds a clip made for the asset (a voice designed with AI in Redigera) under `baseName`, e.g. "Skapad röst
+ * Adds a clip made for the asset (a voice designed with AI in the Editor) under `baseName`, e.g. "Skapad röst
  * 2026-10-07": copied into the asset's folder after its clips, with the default reference window, and announced as
- * new in Pågår och klart (an unseen row). Characters and environments only.
+ * new in Activity (an unseen row). Characters and environments only.
  */
 export function addGeneratedAudio(assetId: string, file: string, baseName: string): Promise<Asset> {
   return assetTask(() => addGenerated(assetId, file, baseName))
 }
 
 /**
- * Records whether the user may let Redigera clone this voice for new lines (D6). The user's own decision: the IPC
+ * Records whether the user may let the Editor clone this voice for new lines (D6). The user's own decision: the IPC
  * handler refuses agents.
  */
 export function setVoiceCloneConsent(audioId: string, consent: boolean): Promise<Asset> {
@@ -1238,7 +1238,7 @@ export function setVoiceCloneConsent(audioId: string, consent: boolean): Promise
 
 /**
  * Absolute path of the asset's folder, created if missing (and filled, for a character from before
- * folders). For "Öppna mapp".
+ * folders). For "Open folder".
  */
 export function assetFolderPath(assetId: string): Promise<string> {
   return assetTask(async () => {

@@ -105,7 +105,7 @@ export function GainSlider({
   onChange,
   min = -24,
   max = 12,
-  label = 'Volym'
+  label = 'Volume'
 }: {
   value: number
   onChange: (db: number) => void
@@ -135,13 +135,13 @@ export function formatDb(db: number): string {
   return `${db > 0 ? '+' : '−'}${Math.abs(db)} dB`
 }
 
-/** What a card works on: "Hela filmen" or "Markeringen 0:41,0–0:45,0 (4,0 s)". */
-export function Target({ range, whole = 'Hela filmen' }: { range?: EditRange; whole?: string }) {
+/** What a card works on: "The whole film" or "Selection 0:41.0–0:45.0 (4.0 s)". */
+export function Target({ range, whole = 'The whole film' }: { range?: EditRange; whole?: string }) {
   return (
     <p className="text-[12px] text-muted">
       {range ? (
         <>
-          <span className="text-text">Markeringen</span> {formatRange(range)}
+          <span className="text-text">Selection</span> {formatRange(range)}
         </>
       ) : (
         <span className="text-text">{whole}</span>
@@ -150,11 +150,11 @@ export function Target({ range, whole = 'Hela filmen' }: { range?: EditRange; wh
   )
 }
 
-/** "Behöver en markering": shown in place of a form that works on a marked range when there is none. */
-export function NeedsSelection({ what = 'avsnittet' }: { what?: string }) {
+/** "Needs a selection": shown in place of a form that works on a marked range when there is none. */
+export function NeedsSelection({ what = 'the section' }: { what?: string }) {
   return (
     <p className="rounded-md border border-dashed border-line px-3 py-2.5 text-[12px] leading-relaxed text-muted">
-      Markera {what} på tidslinjen först – dra över den, eller använd <Kbd>I</Kbd> och <Kbd>O</Kbd> i spelaren.
+      Mark {what} on the timeline first – drag across it, or use <Kbd>I</Kbd> and <Kbd>O</Kbd> in the player.
     </p>
   )
 }
@@ -165,7 +165,7 @@ export function Kbd({ children }: { children: ReactNode }) {
   )
 }
 
-/** A time in the film: typed by the card, set to the playhead with "Här". */
+/** A time in the film: typed by the card, set to the playhead with "Here". */
 export function TimeAt({
   label,
   value,
@@ -184,10 +184,10 @@ export function TimeAt({
       <button
         type="button"
         onClick={() => onChange(Math.round(player.getTime() * 100) / 100)}
-        title="Flytta hit, där spelhuvudet står"
+        title="Move it here, to the playhead"
         className={smallButton}
       >
-        Här
+        Here
       </button>
     </div>
   )
@@ -206,7 +206,7 @@ export function PlanNotes({
   extraNotes?: string[]
   extraWarnings?: string[]
   /**
-   * A problem that only says a field is still empty ("Beskriv musiken."): shown as a quiet hint, not in red, since
+   * A problem that only says a field is still empty ("Describe the music."): shown as a quiet hint, not in red, since
    * the user simply hasn't got there yet.
    */
   quiet?: string
@@ -253,10 +253,10 @@ function dedupe(list: string[]): string[] {
   return out
 }
 
-/** "$0.51", "≈ $0.70", "okänt pris", "≈ $0.45 +" (a part without a price). */
+/** "$0.51", "≈ $0.70", "unknown price", "≈ $0.45 +" (a part without a price). */
 export function priceLabel(plan: EditPlan | undefined, approximate = false): string | undefined {
   if (!plan) return undefined
-  if (!plan.paid) return 'Gratis'
+  if (!plan.paid) return 'Free'
   return priceText(plan.priceUsd, { partial: plan.partialPrice, approximate })
 }
 
@@ -269,7 +269,7 @@ export function RunButton({
   plan,
   planning,
   running,
-  runningLabel = 'Skickar…',
+  runningLabel = 'Sending…',
   disabled,
   disabledReason,
   approximate,
@@ -360,7 +360,7 @@ export function OpCard({
   )
 }
 
-/** A small "gratis" or "betald" tag next to a card's title. */
+/** A small "free" tag next to a card's title (a paid card shows none). */
 export function CostTag({ paid }: { paid: boolean }) {
-  return paid ? null : <span className="rounded bg-raised px-1.5 py-px text-[10px] text-muted">gratis</span>
+  return paid ? null : <span className="rounded bg-raised px-1.5 py-px text-[10px] text-muted">free</span>
 }

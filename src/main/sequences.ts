@@ -2,8 +2,8 @@
 // Each sequence has a folder in Sekvenser/ named after it: its takes live in Tagningar/ inside it, its stills
 // (its keyframes) in Storyboard/ and its exports next to those, so the folder is what the user sees of the sequence
 // in Finder. A storyboard (storyboards.ts) is a row of kind 'storyboard' that this service also runs: its
-// transitions are segments, generated, taken, kept in folders (Storyboards/<namn>/Övergångar/ and Bilder/) and
-// exported here, but the Sekvenser handlers refuse it.
+// transitions are segments, generated, taken, kept in folders (Storyboards/<name>/Övergångar/ and Bilder/) and
+// exported here, but the Sequences handlers refuse it.
 
 import { randomUUID } from 'node:crypto'
 import { constants, existsSync, statSync } from 'node:fs'
@@ -123,7 +123,7 @@ interface Deps {
   /** The stills of a sequence were moved, kept or removed (undefined: possibly any sequence's). */
   stillsChanged?: (sequenceId?: string) => void
   /**
-   * Work this service keeps in memory started or stopped (a take on its way to Venice, a "Generera saknade" run, an
+   * Work this service keeps in memory started or stopped (a take on its way to Venice, a "Generate missing" run, an
    * export): the status summary (work.ts) reads activeWork() again. Nothing else announces a take's upload.
    */
   workChanged?: () => void
@@ -134,7 +134,7 @@ export interface SequenceActiveWork {
   /** Takes on their way to Venice (frames, quote, upload), by clip or transition. */
   sending: { segmentId: string; sequenceId: string; startedAt: number }[]
   /**
-   * "Generera saknade" runs: `total` clips were missing (done ones included), `done` have finished in this run, and
+   * "Generate missing" runs: `total` clips were missing (done ones included), `done` have finished in this run, and
    * `currentSegmentId` is the clip it works on. `approved`: started by an agent's request the user approved.
    */
   runs: {
@@ -150,7 +150,7 @@ export interface SequenceActiveWork {
 }
 
 /** Said when an export is cancelled, which only deleting its sequence does: then there is no failure to report. */
-const EXPORT_CANCELLED = 'Exporten avbröts.'
+const EXPORT_CANCELLED = 'The export was cancelled.'
 
 interface SequencePatch {
   name?: string
@@ -162,7 +162,7 @@ interface SequencePatch {
 /**
  * What a take the user approved through an agent may be: called with the clip right before its take is sent, on the
  * very database state the take is built from, so nothing written afterwards can change what is paid for.
- * Returns why it must not be sent (Swedish), or undefined. Only in-process callers pass one (a window's IPC call
+ * Returns why it must not be sent, or undefined. Only in-process callers pass one (a window's IPC call
  * can't carry a function): the agent connection for an approval, and storyboards for every take of a transition
  * (both of its boards must still have a picture).
  */
@@ -186,7 +186,7 @@ interface Run {
   /** Set for a run the user approved through an agent: it pays only for the clips they were shown. */
   guard?: SubmitGuard
   startedAt: number
-  /** Clips missing a finished take, counting those done in this run ("Klipp 2 av 5"). */
+  /** Clips missing a finished take, counting those done in this run ("Clip 2 of 5"). */
   total: number
   /** Clips this run has finished. */
   done: number
@@ -202,8 +202,8 @@ export function runFailureText(error: string, kind: SequenceKind): string {
   const consent = error.indexOf(NEEDS_CONSENT)
   if (consent < 0) return error
   const where = error.slice(0, consent).replace(/[:\s]+$/u, '')
-  const place = kind === 'storyboard' ? 'storyboarden' : 'sekvensen'
-  const ask = `Venice vill att du godkänner modellens villkor. Öppna ${place} och starta Generera saknade igen.`
+  const place = kind === 'storyboard' ? 'the storyboard' : 'the sequence'
+  const ask = `Venice wants you to accept the model's terms. Open ${place} and start Generate missing again.`
   return where ? `${where}: ${ask}` : ask
 }
 
@@ -233,14 +233,14 @@ async function clonePathVerified(from: string, to: string): Promise<void> {
   const src = resolve(from)
   const dest = resolve(to)
   const info = await lstat(src)
-  if (!info.isFile()) throw new Error(`${basename(src)} kan inte kopieras.`)
+  if (!info.isFile()) throw new Error(`${basename(src)} cannot be copied.`)
   assertRootIntact()
   await mkdir(dirname(dest), { recursive: true })
   try {
     // FICLONE falls back to a plain copy by itself where cloning isn't possible (another volume, not APFS).
     await copyFile(src, dest, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE)
     await utimes(dest, info.atime, info.mtime).catch(() => {})
-    if ((await stat(dest)).size !== info.size) throw new Error(`Kopian av ${basename(src)} blev ofullständig.`)
+    if ((await stat(dest)).size !== info.size) throw new Error(`The copy of ${basename(src)} was incomplete.`)
   } catch (err) {
     // Only what this call made: EEXIST means the destination is somebody else's.
     if ((err as NodeJS.ErrnoException | undefined)?.code !== 'EEXIST') await rm(dest, { force: true }).catch(() => {})
@@ -249,15 +249,15 @@ async function clonePathVerified(from: string, to: string): Promise<void> {
 }
 
 /**
- * Params made for a video input (a video-to-video edit or an upscale in Redigera): the Generate form and a clip's
+ * Params made for a video input (a video-to-video edit or an upscale in the Editor): the Generate form and a clip's
  * template can't use them.
  */
 function usesVideoInput(params: GenerationParams): boolean {
   return !!params.sourceVideo || !!params.referenceVideos?.length
 }
 
-/** The "Skriv en prompt…" refusal of clipProblem, which a clip whose own film is gone replaces (see clipProblemAt). */
-const PROMPT_FIRST = 'Skriv en prompt för klippet först.'
+/** The "Write a prompt…" refusal of clipProblem, which a clip whose own film is gone replaces (see clipProblemAt). */
+const PROMPT_FIRST = 'Write a prompt for the clip first.'
 
 /** movePath refused because the destination exists (or another move is heading there right now). */
 function nameTaken(err: unknown, to: string): boolean {
@@ -362,18 +362,18 @@ function endImageProblem(params: GenerationParams, links: ClipLinks): string | u
   if (supportsEndImage(params.model)) return undefined
   if (links.ending) {
     return (
-      `Modellen ${params.model} kan inte ta en slutbild. Välj en bild-till-video-modell som kan det ` +
-      '(till exempel Seedance), eller slå av ”Slutbild från nästa klipp”.'
+      `The model ${params.model} cannot take an end image. Choose an image-to-video model that can ` +
+      "(Seedance, for example), or turn off “End on the next clip's first frame”."
     )
   }
   if (params.endImage && kindOfModelId(params.model) === 'image-to-video') {
-    return `Modellen ${params.model} kan inte ta en slutbild. Välj en modell som kan det, eller ta bort slutbilden.`
+    return `The model ${params.model} cannot take an end image. Choose a model that can, or remove the end image.`
   }
   return undefined
 }
 
 /**
- * Why a take of the clip can't be sent as it stands (Swedish), or undefined when it can. Checked before
+ * Why a take of the clip can't be sent as it stands, or undefined when it can. Checked before
  * "generate all" pays for anything and again right before each take is sent; JobManager.submit checks the
  * prompt's references once more on what actually goes to Venice, and measures the audio clips (whose windows
  * this checks only as far as the clip states them). Whether the neighbours have the takes its frames come
@@ -391,11 +391,11 @@ function clipProblem(params: GenerationParams, links: ClipLinks, plan?: Continua
   if (kind === 'reference-to-video' && !params.referenceImages?.length) {
     // Venice refuses reference audio without a picture, so a clip with only a voice needs one too.
     return params.referenceAudios?.length && supportsAudioInput(params.model)
-      ? 'Lägg till minst en referensbild för klippet – ljudklipp skickas bara tillsammans med en bild.'
-      : 'Lägg till minst en referensbild för klippet.'
+      ? 'Add at least one reference image for the clip – audio clips are only sent together with an image.'
+      : 'Add at least one reference image for the clip.'
   }
   if (kind === 'image-to-video' && !params.startImage) {
-    return 'Lägg till en startbild för klippet, eller låt det fortsätta från föregående klipp.'
+    return 'Add a start image for the clip, or let it continue from the previous clip.'
   }
   return blockingPromptError(params)
 }
@@ -577,11 +577,11 @@ function isExplicitImage(source: SegmentImageSource | null | undefined): source 
 /**
  * A picture path held across an await, carried along the stored-path rewrites made since `mark` (a sequence folder
  * renamed while the model list was fetched, say), so a clip is never written pointing where the file was. With
- * `slot`, a picture that is gone even so is refused (Swedish) rather than written.
+ * `slot`, a picture that is gone even so is refused rather than written.
  */
 function followImage(path: string, mark: number, slot?: SegmentImageSlot): string {
   const followed = db.followRewrites({ model: '', prompt: '', duration: '', startImage: path }, mark).startImage ?? path
-  if (slot && !existsSync(followed)) throw new Error(`${slotName(slot)} finns inte längre: ${basename(followed)}.`)
+  if (slot && !existsSync(followed)) throw new Error(`${slotName(slot)} no longer exists: ${basename(followed)}.`)
   return followed
 }
 
@@ -591,8 +591,8 @@ const IMAGE_FILE = /\.(jpe?g|png|webp)$/i
 /** How long bridging waits for the model list before it goes by the model ids alone. */
 const MODELS_TIMEOUT_MS = 5000
 
-/** "Startbilden"/"Slutbilden" for messages about a slot. */
-const slotName = (slot: SegmentImageSlot): string => (slot === 'start' ? 'Startbilden' : 'Slutbilden')
+/** "The start image"/"The end image" for messages about a slot. */
+const slotName = (slot: SegmentImageSlot): string => (slot === 'start' ? 'The start image' : 'The end image')
 
 /**
  * The order "generate all" makes the clips that lack a finished selected take: each one after the neighbours
@@ -625,32 +625,32 @@ export function generationOrder(rows: readonly store.SegmentRow[]): { order: num
 }
 
 /**
- * Why the stuck clips (generationOrder) can't be made, in Swedish: the first pair that waits on each other,
+ * Why the stuck clips (generationOrder) can't be made: the first pair that waits on each other,
  * and what can be switched off to break it.
  */
 function waitingMessage(rows: readonly store.SegmentRow[], stuck: readonly number[]): string {
   const pair = stuck.find((i) => stuck.includes(i + 1) && linksOf(rows, i).ending && linksOf(rows, i + 1).continuing)
-  if (pair === undefined) return 'Klippen väntar på varandras tagningar och kan inte genereras i någon ordning.'
+  if (pair === undefined) return "The clips wait for each other's takes and cannot be generated in any order."
   const a = pair + 1
   const b = pair + 2
   return (
-    `Klipp ${a} och ${b} väntar på varandra: klipp ${a} ska sluta på första bildrutan i klipp ${b}, som ska ` +
-    `börja på sista bildrutan i klipp ${a}, och inget av dem har en tagning än. Slå av ` +
-    `”Slutbild från nästa klipp” för klipp ${a} eller ”Fortsätt från föregående klipp” för klipp ${b}.`
+    `Clips ${a} and ${b} wait for each other: clip ${a} should end on the first frame of clip ${b}, which should ` +
+    `start on the last frame of clip ${a}, and neither has a take yet. Turn off ` +
+    `“End on the next clip's first frame” for clip ${a} or “Start on the previous clip's last frame” for clip ${b}.`
   )
 }
 
 /** A clip "generate all" would pay for. */
 export interface MissingClip {
   segmentId: string
-  /** 1-based position in the sequence, as shown to the user ("Klipp 3"). */
+  /** 1-based position in the sequence, as shown to the user ("Clip 3"). */
   clip: number
   /**
    * What its take would be sent with; the start frame of a continuation and the end frame of a clip ending on
    * the next one are only extracted when its turn comes.
    */
   params: GenerationParams
-  /** Why it can't be generated as it stands (Swedish), e.g. a prompt naming a picture that isn't there. */
+  /** Why it can't be generated as it stands, e.g. a prompt naming a picture that isn't there. */
   problem?: string
   /** It and another clip wait on each other's takes (see generationOrder); `problem` names both clips. */
   waiting?: boolean
@@ -669,8 +669,8 @@ export interface MissingClip {
 export function missingClipProblem(clip: MissingClip): string | undefined {
   if (!clip.problem) return undefined
   // A message that names its clip itself (two clips waiting on each other, an own film gone) isn't prefixed again.
-  if (clip.waiting || clip.problem.startsWith(`Klipp ${clip.clip}:s `)) return clip.problem
-  return `Klipp ${clip.clip}: ${clip.problem}`
+  if (clip.waiting || clip.problem.startsWith(`Clip ${clip.clip}'s `)) return clip.problem
+  return `Clip ${clip.clip}: ${clip.problem}`
 }
 
 export class SequenceService {
@@ -716,7 +716,7 @@ export class SequenceService {
   }
 
   /**
-   * What runs here right now: takes on their way to Venice, "Generera saknade" runs (a storyboard's run is its own
+   * What runs here right now: takes on their way to Venice, "Generate missing" runs (a storyboard's run is its own
    * service's, see StoryboardService.activeRuns) and exports. Read by the status summary (work.ts); a library that
    * went away (closed under a take) leaves takes out whose clip can't be read.
    */
@@ -747,12 +747,12 @@ export class SequenceService {
     return { sending, runs, exports }
   }
 
-  /** Why the library can't be switched or tidied up right now (Swedish), or undefined when it can. */
+  /** Why the library can't be switched or tidied up right now, or undefined when it can. */
   isBusy(): string | undefined {
-    if (this.exports.size) return 'En export pågår.'
-    if (this.loops.size || [...this.runs.values()].some((r) => r.running)) return '”Generera saknade” pågår.'
-    if (this.submitting.size) return 'En tagning skickas till Venice.'
-    if (this.fileTasks) return 'Sekvensernas filer flyttas just nu.'
+    if (this.exports.size) return 'An export is running.'
+    if (this.loops.size || [...this.runs.values()].some((r) => r.running)) return '“Generate missing” is running.'
+    if (this.submitting.size) return 'A take is being sent to Venice.'
+    if (this.fileTasks) return "The sequences' files are being moved right now."
     return undefined
   }
 
@@ -796,7 +796,7 @@ export class SequenceService {
         sequenceTakesDir(folder, kind)
       } catch (err) {
         throw new Error(
-          `Kunde inte skapa mappen för ${kind === 'storyboard' ? 'storyboarden' : 'sekvensen'}: ${errorText(err)}`
+          `Could not create the folder for the ${kind === 'storyboard' ? 'storyboard' : 'sequence'}: ${errorText(err)}`
         )
       }
       const { model, duration, resolution, aspectRatio, audio } = DEFAULT_PARAMS
@@ -902,7 +902,7 @@ export class SequenceService {
    * The stills of a deleted sequence: one that a generation, a clip or another still still uses moves to
    * Referensbilder/<today>/ (every row using it follows); the rest go to the Trash with their rows (deleted outright
    * on a volume without one, as stills' own delete does). Best effort per still: what can't be moved stays where
-   * it is, with its row (so "Städa upp" finds it). Resolves whether any still was moved (stored paths rewritten).
+   * it is, with its row (so "Tidy up" finds it). Resolves whether any still was moved (stored paths rewritten).
    * Only in withFiles.
    */
   private async releaseStills(stills: store.StillRow[]): Promise<boolean> {
@@ -971,14 +971,14 @@ export class SequenceService {
   // ── Segments ───────────────────────────────────────────────────────────────
 
   /**
-   * An agent may not change a sequence's clips while "Generera saknade" runs for it: the run reads the clips as
+   * An agent may not change a sequence's clips while "Generate missing" runs for it: the run reads the clips as
    * it goes, so a clip added or rewritten meanwhile would be paid for without the user having seen it. Checked here,
    * right before the write: the tool's own check comes before lookups that can take a while (the model list).
    */
   private refuseWhileRunning(sequenceId: string, caller: Caller): void {
     if (!caller.byAgent || !this.runs.get(sequenceId)?.running) return
     throw new Error(
-      '”Generera saknade” pågår för sekvensen. Vänta tills körningen är klar (eller stoppa den med stop_generation_run) innan du ändrar klippen.'
+      '“Generate missing” is running for the sequence. Wait until the run is done (or stop it with stop_generation_run) before you change the clips.'
     )
   }
 
@@ -987,11 +987,11 @@ export class SequenceService {
   }
 
   /**
-   * addSegment, resolving the new clip's id too (an import of own clips and Redigera's "Skicka till sekvens" go on
+   * addSegment, resolving the new clip's id too (an import of own clips and the Editor's "Send to sequence" go on
    * with it). A clip made from an existing generation (`fromGenerationId`) gets it as its selected take: adopted
    * when it belongs to no clip, selected where it is (shared) when it is another clip's take. Its settings, the
-   * template for an AI take of the clip, come from that generation, except for an own film or a version from Redigera
-   * (or a take made from a video in Redigera): their params are no settings a take could be made with, so the clip
+   * template for an AI take of the clip, come from that generation, except for an own film or a version from the Editor
+   * (or a take made from a video in the Editor): their params are no settings a take could be made with, so the clip
    * gets the previous clip's settings without its prompt and keyframes, or the sequence's defaults, as a clip added
    * by hand does. Either way it doesn't continue from the previous clip unless asked to.
    */
@@ -1020,7 +1020,7 @@ export class SequenceService {
     const previous = index > 0 ? rows[index - 1] : undefined
 
     const source = init.fromGenerationId ? db.getGeneration(init.fromGenerationId) : undefined
-    if (init.fromGenerationId && !source) throw new Error('Tagningen finns inte längre.')
+    if (init.fromGenerationId && !source) throw new Error('The take no longer exists.')
     // An import's or a version's params are placeholders (no model, no prompt), and a take made from a video can't be
     // made again by the clip: neither is a template.
     const seedsFromSource = !!source && !store.isOwnClip(source) && !usesVideoInput(source.params)
@@ -1041,7 +1041,7 @@ export class SequenceService {
     const chosen = params.model
     const hasNext = index < rows.length
     if (init.endFromNext && !hasNext) {
-      throw new Error('Ett klipp sist i sekvensen har inget nästa klipp att ta sin slutbild från.')
+      throw new Error('A clip last in the sequence has no next clip to take its end image from.')
     }
     const ending = hasNext && !!init.endFromNext
     if (ending) {
@@ -1113,11 +1113,11 @@ export class SequenceService {
 
   /**
    * Makes a finished generation a take of the clip, selected when `select` is set (with the trims a newly selected
-   * take keeps, see store.seamTrims): an own film imported into the clip ("Lägg till tagning från fil…"), a version
-   * sent from Redigera ("Som ny tagning av klipp N"). A generation that belongs to no clip is adopted (its file moves
+   * take keeps, see store.seamTrims): an own film imported into the clip ("Add take from file…"), a version
+   * sent from the Editor ("As a new take of clip N"). A generation that belongs to no clip is adopted (its file moves
    * into the sequence's Tagningar, unless it has a home of its own: an import stays in Egna klipp, a version in its
    * edit's folder). One that is already another clip's take is copied, with a file of its own (an APFS clone), as
-   * "Gör om till sekvens" copies a storyboard's takes, so either clip can drop or delete it without the other losing
+   * "Convert to sequence" copies a storyboard's takes, so either clip can drop or delete it without the other losing
    * it. One that is this clip's take already is only selected. Sequence clips only: a storyboard's transitions take
    * nothing but takes made for them.
    */
@@ -1130,8 +1130,8 @@ export class SequenceService {
     const row = store.requirePlainSegment(segmentId)
     this.refuseWhileRunning(row.sequence_id, caller)
     const g = typeof generationId === 'string' ? db.getGeneration(generationId) : undefined
-    if (!g) throw new Error('Tagningen finns inte längre.')
-    if (!store.isUsable(g)) throw new Error('Tagningen har ingen färdig video att lägga till.')
+    if (!g) throw new Error('The take no longer exists.')
+    if (!store.isUsable(g)) throw new Error('The take has no finished video to add.')
 
     let takeId = g.id
     if (g.segmentId && g.segmentId !== row.id) {
@@ -1157,12 +1157,12 @@ export class SequenceService {
   }
 
   /**
-   * Takes a take off a clip without deleting it: the take list's "Radera" on a film Redigera keeps (a version sent
+   * Takes a take off a clip without deleting it: the take list's "Delete" on a film the Editor keeps (a version sent
    * as a take, an edit's original). The clip forgets it (as its take and as its selection); the row and its file stay
-   * where Redigera has them (the file of one kept in its own home never moved into Tagningar, see adopt).
+   * where the Editor has them (the file of one kept in its own home never moved into Tagningar, see adopt).
    */
   async releaseTake(segmentId: string, generationId: string, caller: Caller = {}): Promise<Sequence> {
-    // A sequence clip or a storyboard transition (whose take list offers the same "Ta bort").
+    // A sequence clip or a storyboard transition (whose take list offers the same "Remove").
     const row = store.requireSegmentRow(segmentId)
     this.refuseWhileRunning(row.sequence_id, caller)
     await this.withFiles(async () => {
@@ -1201,14 +1201,14 @@ export class SequenceService {
     let continuing = !!row.continue_from_previous
     if (patch.continueFromPrevious !== undefined) {
       if (patch.continueFromPrevious && index === 0) {
-        throw new Error('Det första klippet kan inte fortsätta från ett föregående klipp.')
+        throw new Error('The first clip cannot continue from a previous clip.')
       }
       continuing = !!patch.continueFromPrevious
     }
     let ending = !!row.end_from_next
     if (patch.endFromNext !== undefined) {
       if (patch.endFromNext && index === rows.length - 1) {
-        throw new Error('Det sista klippet har inget nästa klipp att ta sin slutbild från.')
+        throw new Error('The last clip has no next clip to take its end image from.')
       }
       ending = !!patch.endFromNext
     }
@@ -1229,7 +1229,7 @@ export class SequenceService {
       params = asKeyframed(params, hasOwnEndImage(params), models)
     } else if (continuing || ending) params.model = imageToVideoVariant(params.model)
     // Switching "end from the next clip" on makes the clip a keyframed one, as an end slot that gets the next clip's
-    // frame and "Gör om mellan grannarna" do (asKeyframed): a model that can take an end image, and no references,
+    // frame and "Redo between neighbours" do (asKeyframed): a model that can take an end image, and no references,
     // which image-to-video can't send (their tokens leave the prompt, so it can be generated as it stands). Later
     // model choices are the user's own: one that can't take it is reported (clipProblem) rather than overruled.
     if (ending && !row.end_from_next) params = asKeyframed(params, true, models)
@@ -1242,7 +1242,7 @@ export class SequenceService {
     if (patch.selectedGenerationId === null) selectedId = null
     else if (patch.selectedGenerationId !== undefined) {
       const g = db.getGeneration(patch.selectedGenerationId)
-      if (!g) throw new Error('Tagningen finns inte längre.')
+      if (!g) throw new Error('The take no longer exists.')
       selectedId = g.id
       if (!g.segmentId) adoptId = g.id
     }
@@ -1350,16 +1350,16 @@ export class SequenceService {
     source: SegmentImageSource | null,
     caller: Caller = {}
   ): Promise<Sequence> {
-    if (slot !== 'start' && slot !== 'end') throw new Error('Okänd bildplats: välj start- eller slutbild.')
+    if (slot !== 'start' && slot !== 'end') throw new Error('Unknown image slot: choose the start or end image.')
     const before = store.requireSegmentRow(segmentId)
     this.refuseWhileRunning(before.sequence_id, caller)
     const kind = source ? source.kind : null
     if (kind === 'previous' && slot !== 'start') {
-      throw new Error('Föregående klipps sista bildruta kan bara bli startbild.')
+      throw new Error("The previous clip's last frame can only become the start image.")
     }
-    if (kind === 'next' && slot !== 'end') throw new Error('Nästa klipps första bildruta kan bara bli slutbild.')
+    if (kind === 'next' && slot !== 'end') throw new Error("The next clip's first frame can only become the end image.")
     if (source && kind !== 'previous' && kind !== 'next') {
-      if (!['file', 'asset-image', 'still', 'frame'].includes(kind as string)) throw new Error('Okänd sorts bild.')
+      if (!['file', 'asset-image', 'still', 'frame'].includes(kind as string)) throw new Error('Unknown kind of image.')
     }
     // Checked before a file is copied or a frame saved: neither should happen for a slot that can't take it.
     this.checkAutomaticSlot(before, kind)
@@ -1399,10 +1399,10 @@ export class SequenceService {
     const rows = store.listSegmentRows(row.sequence_id)
     const index = rows.findIndex((r) => r.id === row.id)
     if (kind === 'previous' && index <= 0) {
-      throw new Error('Det första klippet har inget föregående klipp att ta sin startbild från.')
+      throw new Error('The first clip has no previous clip to take its start image from.')
     }
     if (kind === 'next' && index >= rows.length - 1) {
-      throw new Error('Det sista klippet har inget nästa klipp att ta sin slutbild från.')
+      throw new Error('The last clip has no next clip to take its end image from.')
     }
   }
 
@@ -1418,44 +1418,44 @@ export class SequenceService {
         const stored = this.sql().prepare('SELECT file_path FROM asset_images WHERE id = ?').pluck().get(id) as
           | string
           | undefined
-        if (!stored) throw new Error('Bilden finns inte längre i biblioteket.')
+        if (!stored) throw new Error('The image no longer exists in the library.')
         path = fromStoredPath(stored)
         break
       }
       case 'still': {
         const still = store.getStillRow(source.stillId)
-        if (!still) throw new Error('Stillbilden finns inte längre.')
+        if (!still) throw new Error('The still image no longer exists.')
         path = fromStoredPath(still.file_path)
         break
       }
       case 'file': {
-        if (typeof source.path !== 'string' || !source.path) throw new Error('Välj en bild.')
-        if (!IMAGE_FILE.test(source.path)) throw new Error('Välj en bild i formatet JPG, PNG eller WebP.')
+        if (typeof source.path !== 'string' || !source.path) throw new Error('Choose an image.')
+        if (!IMAGE_FILE.test(source.path)) throw new Error('Choose a JPG, PNG or WebP image.')
         if (!existsSync(source.path) || !statSync(source.path).isFile()) {
-          throw new Error(`Bilden finns inte: ${basename(source.path)}.`)
+          throw new Error(`The image does not exist: ${basename(source.path)}.`)
         }
         path = (await this.requireStills().importFile(source.path, row.sequence_id)).path
         break
       }
       case 'frame': {
         if (typeof source.time !== 'number' || !Number.isFinite(source.time) || source.time < 0) {
-          throw new Error('Ogiltig tidpunkt för bildrutan.')
+          throw new Error('Invalid time for the frame.')
         }
         if (typeof source.generationId !== 'string' || !db.getGeneration(source.generationId)) {
-          throw new Error('Tagningen finns inte längre.')
+          throw new Error('The take no longer exists.')
         }
         path = (await this.requireStills().saveFrame(source.generationId, source.time, row.sequence_id)).path
         break
       }
     }
     if (!path || !existsSync(path)) {
-      throw new Error(`${slotName(slot)} finns inte längre${path ? `: ${basename(path)}` : ''}.`)
+      throw new Error(`${slotName(slot)} no longer exists${path ? `: ${basename(path)}` : ''}.`)
     }
     return path
   }
 
   private requireStills(): StillsAccess {
-    if (!this.deps.stills) throw new Error('Stillbilder kan inte sparas just nu.')
+    if (!this.deps.stills) throw new Error('Still images cannot be saved right now.')
     return this.deps.stills
   }
 
@@ -1537,7 +1537,7 @@ export class SequenceService {
   }
 
   /**
-   * "Gör om mellan grannarna": the clip starts on the previous clip's last frame and ends on the next clip's
+   * "Redo between neighbours": the clip starts on the previous clip's last frame and ends on the next clip's
    * first frame, with the end-capable image-to-video model of its family, so a new take fits between the
    * neighbours without touching them. The first clip, which has no previous clip, keeps its own start image,
    * or gets its current take's first shown frame (saved as a still); the last clip ends where it likes, or on
@@ -1549,7 +1549,7 @@ export class SequenceService {
     const beforeRows = store.listSegmentRows(before.sequence_id)
     const beforeIndex = beforeRows.findIndex((r) => r.id === before.id)
     if (beforeRows.length < 2) {
-      throw new Error('Klippet har inga grannar att göras om mellan. Lägg till fler klipp i sekvensen först.')
+      throw new Error('The clip has no neighbours to be redone between. Add more clips to the sequence first.')
     }
     // Renames from here on (the sequence's folder) move the opening frame while it is held below.
     const mark = db.rewriteMark()
@@ -1577,7 +1577,7 @@ export class SequenceService {
     const rows = store.listSegmentRows(row.sequence_id)
     const index = rows.findIndex((r) => r.id === row.id)
     if (rows.length < 2) {
-      throw new Error('Klippet har inga grannar att göras om mellan. Lägg till fler klipp i sekvensen först.')
+      throw new Error('The clip has no neighbours to be redone between. Add more clips to the sequence first.')
     }
     const continuing = index > 0
     const ending = index < rows.length - 1
@@ -1625,34 +1625,34 @@ export class SequenceService {
 
     if (links.continuing) {
       const previous = rows[index - 1]
-      if (!store.isUsable(store.selectedTake(previous))) note(`Klipp ${index} har ingen färdig vald tagning än.`)
+      if (!store.isUsable(store.selectedTake(previous))) note(`Clip ${index} has no finished selected take yet.`)
       else {
         try {
           const frame = await this.lastFrameOf(previous, index)
           preview.start = { path: frame.path, source: 'previous', fromClip: index, time: frame.time }
         } catch (err) {
-          note(`Startbilden kunde inte tas ut ur klipp ${index}: ${errorText(err)}`)
+          note(`The start image could not be taken from clip ${index}: ${errorText(err)}`)
         }
       }
     } else if (ownStartImage(params)) {
       preview.start = { path: params.startImage!, source: 'image' }
-      if (!existsSync(params.startImage!)) note(`Startbilden finns inte längre: ${basename(params.startImage!)}.`)
+      if (!existsSync(params.startImage!)) note(`The start image no longer exists: ${basename(params.startImage!)}.`)
     }
 
     if (links.ending) {
       const next = rows[index + 1]
-      if (!store.isUsable(store.selectedTake(next))) note(`Klipp ${index + 2} har ingen färdig vald tagning än.`)
+      if (!store.isUsable(store.selectedTake(next))) note(`Clip ${index + 2} has no finished selected take yet.`)
       else {
         try {
           const frame = await this.firstFrameOf(next, index + 2)
           preview.end = { path: frame.path, source: 'next', fromClip: index + 2, time: frame.time }
         } catch (err) {
-          note(`Slutbilden kunde inte tas ut ur klipp ${index + 2}: ${errorText(err)}`)
+          note(`The end image could not be taken from clip ${index + 2}: ${errorText(err)}`)
         }
       }
     } else if (params.endImage && kindOfModelId(params.model) === 'image-to-video') {
       preview.end = { path: params.endImage, source: 'image' }
-      if (!existsSync(params.endImage)) note(`Slutbilden finns inte längre: ${basename(params.endImage)}.`)
+      if (!existsSync(params.endImage)) note(`The end image no longer exists: ${basename(params.endImage)}.`)
     }
 
     // The frames stand in for the slots they fill when the clip's own settings are checked (in reference mode the start
@@ -1666,14 +1666,14 @@ export class SequenceService {
 
   /**
    * Queues a new take from the segment editor's button (or an approval, with its guard). `cancelled` (in-process
-   * callers only, e.g. a storyboard's "Generera saknade") lets the caller call it off until right before Venice is
+   * callers only, e.g. a storyboard's "Generate missing") lets the caller call it off until right before Venice is
    * paid; the promise then rejects with isCancelledSubmit.
    */
   generateSegment(segmentId: string, guard?: SubmitGuard, cancelled?: () => boolean): Promise<Generation> {
     // E.g. "generate all" is uploading this very clip; a second submit would pay for it twice.
     if (this.submitting.has(segmentId)) {
       return Promise.reject(
-        new Error('En tagning för klippet skickas redan till Venice. Vänta tills den syns bland tagningarna.')
+        new Error('A take for the clip is already being sent to Venice. Wait until it shows among the takes.')
       )
     }
     return this.submit(segmentId, typeof cancelled === 'function' ? cancelled : undefined, guard)
@@ -1805,7 +1805,7 @@ export class SequenceService {
   /** A neighbour a frame is taken from needs a finished selected take. */
   private requireNeighbourTake(neighbour: store.SegmentRow, number: number): Generation & { filePath: string } {
     const take = store.selectedTake(neighbour)
-    if (!store.isUsable(take)) throw new Error(`Klipp ${number} behöver en färdig vald tagning först.`)
+    if (!store.isUsable(take)) throw new Error(`Clip ${number} needs a finished selected take first.`)
     return take
   }
 
@@ -1924,7 +1924,7 @@ export class SequenceService {
 
   /**
    * Queues file work behind whatever file work is already running (see fileQueue), and behind a running
-   * "Städa upp" or library switch: those read folder names once and move files by them, so a rename in
+   * "Tidy up" or library switch: those read folder names once and move files by them, so a rename in
    * between would send takes into a folder that no longer belongs to the sequence.
    */
   private withFiles<T>(task: () => Promise<T>): Promise<T> {
@@ -1985,7 +1985,7 @@ export class SequenceService {
 
   /**
    * A finished take copied as a take of another segment, with a video and poster of its own in that segment's
-   * folder, and selected there (trims as `trimStart`; the end untrimmed): "Gör om till sekvens" gives the new
+   * folder, and selected there (trims as `trimStart`; the end untrimmed): "Convert to sequence" gives the new
    * sequence's clips the storyboard's takes without taking them from the storyboard, so either can be changed or
    * deleted without the other. The copy is no new purchase, so it carries no price (the feed would count it
    * twice). Resolves the copy's id.
@@ -2012,7 +2012,7 @@ export class SequenceService {
    * and poster of its own, and resolves its id. The copy is no new purchase, so it carries no price (the feed would
    * count it twice). It keeps what the generation is (source, title, recipe; an import's untouched original, which
    * the two rows then share) but not that it belongs to an edit (editId, parentId): it would otherwise show up as
-   * another version in Redigera. Its file goes where the home rule puts it (jobs.videoLocation): an import's copy
+   * another version in the Editor. Its file goes where the home rule puts it (jobs.videoLocation): an import's copy
    * next to the import in Egna klipp, any other into the sequence's Tagningar. `inTransaction` runs with the insert.
    * Only inside withFiles.
    */
@@ -2022,10 +2022,10 @@ export class SequenceService {
     inTransaction?: (copyId: string) => void
   ): Promise<string> {
     const take = db.getGeneration(takeId)
-    if (!take || !store.isUsable(take)) throw new Error('Tagningen har ingen färdig video att kopiera.')
+    if (!take || !store.isUsable(take)) throw new Error('The take has no finished video to copy.')
     const sequence = store.sequenceOfSegment(segmentId)
     const folder = sequence && this.ensureFolder(sequence.id)
-    if (!sequence || !folder) throw new Error('Klippet finns inte längre.')
+    if (!sequence || !folder) throw new Error('The clip no longer exists.')
     const id = randomUUID()
     const copy: db.StoredGeneration = {
       ...take,
@@ -2155,7 +2155,7 @@ export class SequenceService {
       try {
         await this.moveOutOfSequences(id)
       } catch (err) {
-        // The delete goes ahead: the video stays where the database says it is, and "Städa upp" can move it.
+        // The delete goes ahead: the video stays where the database says it is, and "Tidy up" can move it.
         console.warn(`Could not move generation ${id} out of its sequence folder:`, err)
       }
     }
@@ -2175,7 +2175,7 @@ export class SequenceService {
   /**
    * Where a video has to go when it isn't where its take status says: 'out' of Sekvenser/ for a generation
    * that is no take, 'in' to its sequence's Tagningar/ for a take. Undefined when it is fine where it is
-   * (a sequence from before folders gets one from "Städa upp" or its next rename, not from here).
+   * (a sequence from before folders gets one from "Tidy up" or its next rename, not from here).
    */
   private misplaced(g: Pick<Generation, 'filePath' | 'segmentId' | 'source' | 'editId'>): 'in' | 'out' | undefined {
     if (!g.filePath) return undefined
@@ -2343,7 +2343,7 @@ export class SequenceService {
 
   /**
    * A run that stopped on a problem keeps it in memory only (shown while its sequence is open); nobody awaits a run,
-   * so the problem is also recorded as a failure the user hasn't seen, for "Pågår och klart" and the sidebar. A run
+   * so the problem is also recorded as a failure the user hasn't seen, for Activity and the sidebar. A run
    * the user (or a deleted sequence) stopped leaves nothing.
    */
   private recordRunFailure(sequenceId: string, run: Run): void {
@@ -2353,7 +2353,7 @@ export class SequenceService {
       if (!row) return
       db.addUnseen({
         error: runFailureText(run.error, store.kindOf(row)),
-        label: `Generera saknade i ”${row.name}”`,
+        label: `Generate missing in “${row.name}”`,
         context: { sequenceId, failureOf: 'run' }
       })
     } catch (err) {
@@ -2423,7 +2423,7 @@ export class SequenceService {
           takeId = g.id
         } else if (!takeId) {
           if (generated.has(row.id)) {
-            run.error = `Klipp ${clip}: den nya tagningen togs bort eller valdes bort, så körningen stoppades.`
+            run.error = `Clip ${clip}: the new take was deleted or deselected, so the run stopped.`
             break
           }
           generated.add(row.id)
@@ -2439,7 +2439,7 @@ export class SequenceService {
           // for the clip that now has its number, so look at the sequence again.
           const current = store.getSegmentRow(row.id)
           if (!current || (take.segmentId !== current.id && current.selected_generation_id !== take.id)) continue
-          run.error = `Klipp ${this.clipNumber(current.id, clip)}: ${take.error || 'Genereringen misslyckades.'}`
+          run.error = `Clip ${this.clipNumber(current.id, clip)}: ${take.error || 'The generation failed.'}`
           break
         }
         // The 'settled' handler normally did this already; doing it here too removes any ordering doubt.
@@ -2457,7 +2457,7 @@ export class SequenceService {
           // The library was closed under the run; the number it had is good enough.
         }
         // No number when it went wrong before the run got to any clip.
-        run.error = number ? `Klipp ${number}: ${errorText(err)}` : errorText(err)
+        run.error = number ? `Clip ${number}: ${errorText(err)}` : errorText(err)
       }
     } finally {
       this.loops.delete(run)
@@ -2534,13 +2534,13 @@ export class SequenceService {
    * Renders the cut into the scratch folder and then moves it into the sequence's folder as
    * "<Sekvensnamn> <YYYY-MM-DD HH.MM>.mp4", so Finder never shows a half-written film and a folder rename
    * meanwhile can't pull the target away. Resolves with the film's path. A storyboard is exported the same way
-   * into Storyboards/<namn>/, with its own dedupe (buildStoryboardClips: each later transition's first frame,
+   * into Storyboards/<name>/, with its own dedupe (buildStoryboardClips: each later transition's first frame,
    * which repeats the board the previous one ended on).
    */
   async export(sequenceId: string): Promise<string> {
     const storyboard = store.kindOf(store.requireSequenceRow(sequenceId)) === 'storyboard'
     if (this.exports.has(sequenceId)) {
-      throw new Error(storyboard ? 'Storyboarden exporteras redan.' : 'Sekvensen exporteras redan.')
+      throw new Error(storyboard ? 'The storyboard is already being exported.' : 'The sequence is already being exported.')
     }
     const controller = new AbortController()
     this.exports.set(sequenceId, controller)
@@ -2563,8 +2563,8 @@ export class SequenceService {
       if (!rows.length) {
         throw new Error(
           storyboard
-            ? 'Storyboarden har inga övergångar att exportera än. Lägg till minst två rutor med bilder.'
-            : 'Sekvensen har inga klipp att exportera.'
+            ? 'The storyboard has no transitions to export yet. Add at least two boards with images.'
+            : 'The sequence has no clips to export.'
         )
       }
       const takes = rows.map((r) => store.selectedTake(r))
@@ -2582,7 +2582,7 @@ export class SequenceService {
       emit({ progress: 0 })
       const usable = takes.filter(store.isUsable)
       const clips = storyboard ? await buildStoryboardClips(rows, usable) : await buildConcatClips(rows, usable)
-      // Where the clips meet in the film, recorded with it (Redigera's Klippgränser).
+      // Where the clips meet in the film, recorded with it (the Editor's cut markers).
       const cuts = await exportCuts(clips)
       rendered = join(tmpDir(), `export-${randomUUID()}.mp4`)
       let lastStep = 0
@@ -2606,10 +2606,10 @@ export class SequenceService {
       emit({ progress: 1, done: true, path })
       return path
     } catch (err) {
-      // ffmpeg names its files by their full paths: only the file names are kept, as the message is stored for Pågår
-      // och klart (which agents read) and answered to an agent that started the export.
+      // ffmpeg names its files by their full paths: only the file names are kept, as the message is stored for
+      // Activity (which agents read) and answered to an agent that started the export.
       const message = controller.signal.aborted ? EXPORT_CANCELLED : withoutLocalPaths(errorText(err))
-      // A failure once it had started rendering is kept for "Pågår och klart" (the view that started it may be gone);
+      // A failure once it had started rendering is kept for Activity (the view that started it may be gone);
       // one refused before that (no clips, a missing take) is answered to the click right away. Only deleting the
       // sequence cancels an export, and then there is nothing left to report it on.
       if (started && message !== EXPORT_CANCELLED) this.recordExportFailure(sequenceId, message)
@@ -2635,7 +2635,7 @@ export class SequenceService {
       const storyboard = store.kindOf(row) === 'storyboard'
       db.addUnseen({
         error,
-        label: `Export av ”${row.name}”`,
+        label: `Export of “${row.name}”`,
         context: { sequenceId, ...(storyboard ? { storyboardId: sequenceId } : {}), failureOf: 'export' }
       })
     } catch (err) {
@@ -2655,9 +2655,9 @@ export class SequenceService {
     cuts?: number[]
   ): Promise<string> {
     // Deleting the sequence cancels its export: don't recreate the folder that the delete removes.
-    if (signal.aborted) throw new Error('Exporten avbröts.')
+    if (signal.aborted) throw new Error('The export was cancelled.')
     const folder = this.ensureFolder(sequenceId)
-    if (!folder) throw new Error('Sekvensen finns inte längre.')
+    if (!folder) throw new Error('The sequence no longer exists.')
     const row = store.requireSequenceRow(sequenceId)
     const dir = sequenceDir(folder, store.kindOf(row))
     const name = row.name
@@ -2669,7 +2669,7 @@ export class SequenceService {
         target.release()
         // Another file took the name between the check and the move: take the next free one.
         if (attempt < PLACE_ATTEMPTS && existsSync(rendered) && nameTaken(err, target.path)) continue
-        throw new Error(`Filmen kunde inte sparas i sekvensens mapp: ${errorText(err)}`)
+        throw new Error(`The film could not be saved in the sequence's folder: ${errorText(err)}`)
       }
       target.release()
       try {
@@ -2677,7 +2677,7 @@ export class SequenceService {
         // A finished film is news until the user acts on its banner (or plays it), wherever they are by then.
         db.addUnseen({ exportId })
       } catch (err) {
-        // The film is in place either way; only "Städa upp" and library moves lose track of it.
+        // The film is in place either way; only "Tidy up" and library moves lose track of it.
         console.warn(`Could not record the export ${target.path}:`, err)
       }
       return target.path
@@ -2701,7 +2701,7 @@ export class SequenceService {
  */
 export function registerSequenceIpc(deps: Deps): SequenceService {
   const s = new SequenceService(deps)
-  // Sekvenser's handlers work on sequences only: a storyboard's id (or one of its transitions) is refused with a
+  // The Sequences handlers work on sequences only: a storyboard's id (or one of its transitions) is refused with a
   // pointer to Storyboards, whose own handlers (storyboards.ts) keep its boards and transitions in step. Shared
   // internals take either: a take of a transition is a take of its segment ('segments:generate', with an approval's
   // guard), and the read-only 'segments:previewFrames' and 'sequences:missingClips' describe either.

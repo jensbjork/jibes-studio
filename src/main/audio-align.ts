@@ -127,5 +127,5 @@ export async function alignTo(
     ...(fadeIn > 0 ? [`afade=t=in:ss=0:ns=${fadeIn}`] : []),
     ...(fadeOut > 0 ? [`afade=t=out:ss=${length - fadeOut}:ns=${fadeOut}`] : [])
   ]
-  await filterAudio(returned, out, filters, { signal: o.signal, failure: 'Den nya rösten kunde inte passas in' })
+  await filterAudio(returned, out, filters, { signal: o.signal, failure: 'The new voice could not be fitted in' })
 }

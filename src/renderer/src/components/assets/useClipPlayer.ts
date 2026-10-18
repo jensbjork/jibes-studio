@@ -36,14 +36,14 @@ function ignoreAbort(e: unknown): void {
   // play() is "interrupted" whenever playback is paused or switched while it starts; that isn't a failure,
   // and real failures arrive as the element's error event.
   if (e instanceof DOMException && (e.name === 'AbortError' || e.name === 'NotSupportedError')) return
-  console.warn('Kunde inte spela upp ljudet', e)
+  console.warn("Couldn't play the sound", e)
 }
 
 /**
  * One <audio> element shared by every clip of an asset, so only one plays at a time. The playhead is
  * followed with requestAnimationFrame while playing: smooth on the track, and a window preview stops within
  * a frame of its end instead of the quarter second timeupdate allows. The element is never in the document, so
- * Pågår och klart's playback rule (a designed voice counts as heard after a second of it) watches it directly.
+ * Activity's playback rule (a designed voice counts as heard after a second of it) watches it directly.
  */
 export function useClipPlayer(): ClipPlayer {
   const element = useRef<HTMLAudioElement | null>(null)

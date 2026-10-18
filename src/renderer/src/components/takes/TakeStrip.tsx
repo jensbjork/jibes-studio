@@ -39,20 +39,20 @@ interface Props {
   owner: TakeOwnerKind
   /** Newest first, as main lists them. */
   takes: Generation[]
-  /** The chosen take (the ring and "Vald"). */
+  /** The chosen take (the ring and "Selected"). */
   activeId?: string
   /** A take shown in the player without being chosen. */
   previewId?: string
-  /** Focus and scroll to this take (a link to it, e.g. from Pågår och klart); `n` repeats the request. */
+  /** Focus and scroll to this take (a link to it, e.g. from Activity); `n` repeats the request. */
   focusRequest?: { id: string; n: number }
   /** The film's shape (width / height): the tiles take it. */
   aspect: number
   models: VideoModel[]
   /** A take being made now is chosen by itself when it is done (main's autoSelect), for the pending tooltip. */
   autoSelects: boolean
-  /** Own films on their way in as takes (Sekvenser), shown as pending tiles with ✕. */
+  /** Own films on their way in as takes (Sequences), shown as pending tiles with ✕. */
   importing?: ImportCard[]
-  /** Storyboards: the take was made from other pictures than the boards hold now ("Tidigare bild"). */
+  /** Storyboards: the take was made from other pictures than the boards hold now ("Earlier image"). */
   madeFromEarlierPictures?: (take: Generation) => boolean
   /** The take's prompt differs from the one in the editor now. */
   promptDiffers?: (take: Generation) => boolean
@@ -71,11 +71,11 @@ interface Props {
   onEdit?: (take: Generation) => void
   /** Video files dropped on the strip: own films as takes. */
   onImport?: (paths: string[]) => void
-  /** "Lägg till tagning från fil…". */
+  /** "Add take from file…". */
   onPickFile?: () => void
 }
 
-/** Tile heights: Sekvenser has the room, the transition editor beside the boards is 400 px wide. */
+/** Tile heights: Sequences has the room, the transition editor beside the boards is 400 px wide. */
 const TILE_HEIGHT: Record<TakeOwnerKind, number> = { sequence: 72, storyboard: 56 }
 
 /**
@@ -310,23 +310,23 @@ export default function TakeStrip({
   return (
     <section
       className="relative"
-      aria-label="Tagningar"
+      aria-label="Takes"
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false)
       }}
     >
-      {dropping && <DropHint text="Släpp för att lägga till som tagningar" />}
+      {dropping && <DropHint text="Drop to add as takes" />}
       <div className="mb-1 flex items-center gap-2">
-        <h3 className="font-medium">Tagningar</h3>
-        {takes.length > 0 && <span className="text-[12px] text-muted">{takes.length} st</span>}
+        <h3 className="font-medium">Takes</h3>
+        {takes.length > 0 && <span className="text-[12px] text-muted">{takes.length}</span>}
         {onPickFile && (
           <button
             type="button"
             onClick={onPickFile}
-            title="Lägg till tagning från fil…"
-            aria-label="Lägg till tagning från fil"
+            title="Add take from file…"
+            aria-label="Add take from file"
             className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
           >
             <PlusIcon size={12} />
@@ -336,7 +336,7 @@ export default function TakeStrip({
 
       <div
         // The row and the line under it are one zone: what the line describes holds while the pointer or the focus is
-        // anywhere in it, so moving down to "Använd prompt" or "Radera" (or tabbing there) keeps the same take.
+        // anywhere in it, so moving down to "Use prompt" or "Delete" (or tabbing there) keeps the same take.
         onMouseLeave={leaveZone}
         onFocus={() => setHasFocus(true)}
         onBlur={(e) => {
@@ -345,8 +345,8 @@ export default function TakeStrip({
       >
         {empty ? (
           <div className="rounded-lg border border-dashed border-line px-5 py-5 text-center text-[12px] leading-relaxed text-muted">
-            Inga tagningar ännu. Skriv en prompt och klicka på <span className="text-text">Generera tagning</span>
-            {onImport ? ', eller släpp en egen film här.' : '.'} Varje försök sparas här, så att du kan välja det bästa.
+            No takes yet. Write a prompt and click <span className="text-text">Generate take</span>
+            {onImport ? ', or drop a film of your own here.' : '.'} Every attempt is kept here, so you can pick the best.
           </div>
         ) : (
           <div className="relative">
@@ -358,7 +358,7 @@ export default function TakeStrip({
               {importing.map((card) => (
                 <ImportTile key={card.path} card={card} width={width} height={height} />
               ))}
-              <div role="listbox" aria-orientation="horizontal" aria-label="Tagningar" className="flex gap-2">
+              <div role="listbox" aria-orientation="horizontal" aria-label="Takes" className="flex gap-2">
                 {ordered.map((take, i) => (
                   <TakeTile
                     key={take.id}
@@ -388,12 +388,12 @@ export default function TakeStrip({
                 <button
                   type="button"
                   onClick={onPickFile}
-                  title="Lägg till en egen film som tagning av klippet"
+                  title="Add a film of your own as a take of the clip"
                   className="flex shrink-0 flex-col items-center justify-center gap-1 rounded-md border border-dashed border-line px-2 text-center text-[11px] leading-tight text-muted transition hover:border-muted hover:text-text"
                   style={{ width, height }}
                 >
                   <PlusIcon size={12} />
-                  Lägg till från fil…
+                  Add from file…
                 </button>
               )}
             </div>
@@ -436,7 +436,7 @@ export default function TakeStrip({
           onEdit={
             onEdit &&
             (() => {
-              // Opening it in Redigera is choosing to look at it (D4).
+              // Opening it in the Editor is choosing to look at it (D4).
               markSeen([workKey.generation(menuTake.id)])
               onEdit(menuTake)
             })
@@ -543,7 +543,7 @@ function TakeTile({
     : failed
       ? 'cursor-default bg-accent/10'
       : 'cursor-default bg-raised'
-  // The chosen take: the accent ring (with "Vald"); a previewed one: a quiet ring, so it is found in the row.
+  // The chosen take: the accent ring (with "Selected"); a previewed one: a quiet ring, so it is found in the row.
   const ring = active
     ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg'
     : previewed
@@ -632,19 +632,19 @@ function TakeTile({
       )}
       {failed && (
         <span className="absolute inset-0 flex items-center justify-center px-1 text-center text-[10px] font-medium text-accent">
-          Misslyckades
+          Failed
         </span>
       )}
       {take.fileMissing && (
         <span className="absolute inset-0 flex items-center justify-center px-1 text-center text-[10px] text-muted">
-          Filen saknas
+          File missing
         </span>
       )}
 
       {(active || fresh || (own && badge)) && (
         <span className="pointer-events-none absolute left-1 top-1 flex max-w-[calc(100%-1.75rem)] flex-wrap items-center gap-0.5">
-          {active && <span className="rounded bg-accent px-1 py-px text-[10px] font-medium leading-none text-white">Vald</span>}
-          {fresh && <NewChip variant="overlay" title="Ny – du har inte tittat på den än" />}
+          {active && <span className="rounded bg-accent px-1 py-px text-[10px] font-medium leading-none text-white">Selected</span>}
+          {fresh && <NewChip variant="overlay" title="New – you haven’t looked at it yet" />}
           {own && badge && (
             <span
               title={badge.description}
@@ -658,10 +658,10 @@ function TakeTile({
       )}
       {stale && (
         <span
-          title="Gjord med en tidigare bild i någon av rutorna"
+          title="Made with an earlier image in one of the boards"
           className="pointer-events-none absolute bottom-1 left-1 rounded bg-amber-500/90 px-1 py-px text-[9px] font-medium leading-none text-black"
         >
-          Tidigare bild
+          Earlier image
         </span>
       )}
       {take.status === 'completed' && !take.fileMissing && !stale && (
@@ -678,7 +678,7 @@ function TakeTile({
             e.stopPropagation()
             onMenu('menu')
           }}
-          title={owner === 'storyboard' ? 'Fler val för tagningen' : 'Fler val för tagningen (eller högerklicka)'}
+          title={owner === 'storyboard' ? 'More options for the take' : 'More options for the take (or right-click)'}
           className="absolute right-1 top-1 flex h-[18px] w-[18px] items-center justify-center rounded bg-black/70 text-white/90 opacity-0 transition hover:bg-black/90 group-hover/tile:opacity-100"
         >
           <MoreIcon size={11} />
@@ -705,13 +705,13 @@ function ImportTile({ card, width, height }: { card: ImportCard; width: number; 
       title={card.note ? `${card.name}\n${card.note}` : card.name}
     >
       <Spinner size={12} />
-      <span>Importerar {percent} %</span>
+      <span>Importing {percent}%</span>
       <span className="w-full truncate">{card.name}</span>
       <button
         type="button"
         onClick={() => cancelImport(card.path)}
-        title="Avbryt – det som hunnit kopieras tas bort"
-        aria-label={`Avbryt importen av ${card.name}`}
+        title="Cancel – what has been copied so far is removed"
+        aria-label={`Cancel the import of ${card.name}`}
         className="absolute right-1 top-1 flex h-[18px] w-[18px] items-center justify-center rounded bg-black/60 text-white/90 opacity-0 transition hover:bg-black/90 focus-visible:opacity-100 group-hover/import:opacity-100"
       >
         <CloseIcon size={9} />
@@ -743,7 +743,7 @@ function InfoLine({
   const info = takeInfo(take, modelName)
   const link = 'shrink-0 rounded px-1 py-px text-text transition hover:bg-raised'
   // Which take the buttons act on, in their names: the line may describe another take than the chosen one.
-  const which = `tagning ${position.index + 1} av ${position.count} (${formatTakeTime(take.createdAt)})`
+  const which = `take ${position.index + 1} of ${position.count} (${formatTakeTime(take.createdAt)})`
   return (
     <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] text-muted">
       <span className={`max-w-full truncate select-text ${info.tone === 'error' ? 'text-[#ffb3b5]' : ''}`} title={info.text}>
@@ -753,24 +753,24 @@ function InfoLine({
         <button
           type="button"
           onClick={onDelete}
-          aria-label={`${take.keptByEdit ? 'Ta bort' : 'Radera'} ${which}`}
+          aria-label={`${take.keptByEdit ? 'Remove' : 'Delete'} ${which}`}
           className={`${link} hover:text-accent`}
         >
-          {take.keptByEdit ? 'Ta bort' : 'Radera'}
+          {take.keptByEdit ? 'Remove' : 'Delete'}
         </button>
       )}
       {promptDiffers && take.status !== 'failed' && (
         <>
-          <span className="shrink-0">· Annan prompt än nu</span>
+          <span className="shrink-0">· Not the current prompt</span>
           {onUsePrompt && (
             <button
               type="button"
               onClick={onUsePrompt}
               className={link}
-              title={`Lägg prompten från ${which} i redigeraren`}
-              aria-label={`Använd prompten från ${which}`}
+              title={`Put the prompt from ${which} in the editor`}
+              aria-label={`Use the prompt from ${which}`}
             >
-              Använd prompt
+              Use prompt
             </button>
           )}
         </>

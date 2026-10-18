@@ -11,11 +11,11 @@ import { imageCount, matchesQuery } from './text'
 
 // What a click on a reference thumbnail opens, anchored to it: another library asset for every place of the
 // picture's asset (a library photo), or another photo, a saved picture or a file for just that place (a picture of
-// its own, or "Välj en enskild bild i stället…"). The panel only picks; the form swaps (in place, so no @ImageN
+// its own, or "Pick a single image instead…"). The panel only picks; the form swaps (in place, so no @ImageN
 // number changes).
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i
-/** Saved pictures shown before "Visa fler". */
+/** Saved pictures shown before "Show more". */
 const STILLS_PAGE = 24
 
 /** Every kind in the app's order, `first` (the swapped picture's kind) first. */
@@ -33,8 +33,8 @@ function PanelHeader({ title, hint, onClose }: { title: string; hint?: string; o
       <button
         onClick={onClose}
         className="-mr-1 rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-text"
-        title="Stäng (Esc)"
-        aria-label="Stäng väljaren"
+        title="Close (Esc)"
+        aria-label="Close the picker"
       >
         ✕
       </button>
@@ -42,7 +42,7 @@ function PanelHeader({ title, hint, onClose }: { title: string; hint?: string; o
   )
 }
 
-/** The other way to swap, as a link under the list: "Välj en enskild bild i stället…". */
+/** The other way to swap, as a link under the list: "Pick a single image instead…". */
 export interface SwapAlternative {
   label: string
   title?: string
@@ -95,7 +95,7 @@ function Search({ value, onChange, placeholder }: SearchProps) {
 }
 
 interface ImageProps {
-  /** E.g. "Byt @Image2 mot…". */
+  /** E.g. "Swap @Image2 for…". */
   title: string
   hint?: string
   library: readonly Asset[]
@@ -108,9 +108,9 @@ interface ImageProps {
   /** Saved pictures to offer; left out, the panel lists them itself (a sequence's, or all of them). */
   stills?: Still[]
   sequenceId?: string
-  /** Their heading; default "Sekvensens bilder" or "Sparade bilder". */
+  /** Their heading; default "The sequence's images" or "Saved images". */
   stillsLabel?: string
-  /** E.g. "Byt hela Anna i stället…", under the list. */
+  /** E.g. "Swap all of Anna instead…", under the list. */
   alternative?: SwapAlternative
   onPick: (path: string) => void
   onClose: () => void
@@ -155,20 +155,20 @@ export function SwapImagePicker({
       <PanelHeader title={title} hint={hint} onClose={onClose} />
       <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
         <div className="min-w-0 flex-1">
-          <Search value={query} onChange={setQuery} placeholder="Sök i biblioteket…" />
+          <Search value={query} onChange={setQuery} placeholder="Search the library…" />
         </div>
         <button
           onClick={() => void pickFile()}
           className="shrink-0 rounded-md border border-line px-2.5 py-1.5 text-[12px] transition hover:bg-raised"
-          title="Välj en bildfil på datorn"
+          title="Choose an image file on this Mac"
         >
-          Från fil…
+          From file…
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {sections.length === 0 && (
           <p className="px-1 py-4 text-center text-[12px] text-muted">
-            {query ? `Inget i biblioteket matchar ”${query}”.` : 'Biblioteket har inga bilder än.'}
+            {query ? `Nothing in the library matches “${query}”.` : 'The library has no images yet.'}
           </p>
         )}
         {sections.map(({ kind, assets }) => (
@@ -181,8 +181,8 @@ export function SwapImagePicker({
                   const isCurrent = img.path === current
                   const at = isCurrent ? undefined : placeOf?.(img.path)
                   const of = a.images.length > 1 ? `${k + 1}/${a.images.length}` : undefined
-                  const photo = of ? `foto ${k + 1} av ${a.images.length}` : 'foto'
-                  const state = isCurrent ? ' (den som byts)' : at ? ` (finns redan som ${at})` : ''
+                  const photo = of ? `photo ${k + 1} of ${a.images.length}` : 'photo'
+                  const state = isCurrent ? ' (the one being swapped)' : at ? ` (already there as ${at})` : ''
                   return (
                     <PhotoButton
                       key={img.id}
@@ -192,7 +192,7 @@ export function SwapImagePicker({
                       tone={KIND_TONE[kind].caption}
                       label={`${a.name}, ${photo}${state}`}
                       current={isCurrent}
-                      badge={isCurrent ? 'nu' : at}
+                      badge={isCurrent ? 'now' : at}
                       onPick={() => onPick(img.path)}
                     />
                   )
@@ -204,7 +204,7 @@ export function SwapImagePicker({
         <LooseStills
           stills={stills}
           sequenceId={sequenceId}
-          label={stillsLabel ?? (sequenceId ? 'Sekvensens bilder' : 'Sparade bilder')}
+          label={stillsLabel ?? (sequenceId ? 'The sequence’s images' : 'Saved images')}
           current={current}
           placeOf={placeOf}
           onPick={onPick}
@@ -307,7 +307,7 @@ function StillGrid({ stills, label, current, placeOf, onPick }: LooseProps & { s
           onClick={() => setShown((n) => n + STILLS_PAGE)}
           className="mt-2 w-full rounded-md px-2 py-1 text-[11px] text-muted transition hover:bg-raised hover:text-text"
         >
-          Visa fler ({stills.length - shown} till)
+          Show more ({stills.length - shown} more)
         </button>
       )}
     </section>
@@ -315,7 +315,7 @@ function StillGrid({ stills, label, current, placeOf, onPick }: LooseProps & { s
 }
 
 interface AssetProps {
-  /** E.g. "Byt Anna mot…". */
+  /** E.g. "Swap Anna for…". */
   title: string
   hint?: string
   library: readonly Asset[]
@@ -323,7 +323,7 @@ interface AssetProps {
   from: Asset
   /** Ids of the assets already among the references; they get a marker. */
   present?: ReadonlySet<string>
-  /** E.g. "Välj en enskild bild i stället…", under the list. */
+  /** E.g. "Pick a single image instead…", under the list. */
   alternative?: SwapAlternative
   onPick: (asset: Asset) => void
   onClose: () => void
@@ -346,30 +346,30 @@ export function SwapAssetPicker({ title, hint, library, from, present, alternati
     <>
       <PanelHeader title={title} hint={hint} onClose={onClose} />
       <div className="border-b border-line px-4 py-2.5">
-        <Search value={query} onChange={setQuery} placeholder="Sök i biblioteket…" />
+        <Search value={query} onChange={setQuery} placeholder="Search the library…" />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {sections.length === 0 && (
-          <p className="px-1 py-4 text-center text-[12px] text-muted">Inget i biblioteket matchar ”{query}”.</p>
+          <p className="px-1 py-4 text-center text-[12px] text-muted">Nothing in the library matches “{query}”.</p>
         )}
         {sections.map(({ kind, assets }) => (
           <section key={kind} aria-label={ASSET_COPY[kind].plural} className="mb-4">
             <KindHeading kind={kind} />
             {assets.map((a) => {
               const isFrom = a.id === from.id
-              const sound = a.audio.length ? (a.kind === 'character' ? 'med röst' : 'med ljud') : undefined
-              const facts = [a.images.length ? imageCount(a.images.length) : 'Inga bilder än', sound]
+              const sound = a.audio.length ? (a.kind === 'character' ? 'with voice' : 'with sound') : undefined
+              const facts = [a.images.length ? imageCount(a.images.length) : 'No images yet', sound]
                 .filter(Boolean)
                 .join(' · ')
               // The swapped asset itself is shown (dimmed) so the list reads as the library; one already among the
               // references can still be picked – its photos then take these places too.
-              const note = isFrom ? 'den som byts' : present?.has(a.id) ? 'finns redan med' : undefined
+              const note = isFrom ? 'the one being swapped' : present?.has(a.id) ? 'already included' : undefined
               return (
                 <button
                   key={a.id}
                   onClick={() => onPick(a)}
                   disabled={isFrom || !a.images.length}
-                  title={!a.images.length ? 'Har inga bilder att byta till' : undefined}
+                  title={!a.images.length ? 'Has no images to swap to' : undefined}
                   className="flex w-full items-center gap-3 rounded-md p-1.5 text-left transition hover:bg-raised/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
                 >
                   <AssetAvatar asset={a} className="h-10 w-10 rounded-md" />

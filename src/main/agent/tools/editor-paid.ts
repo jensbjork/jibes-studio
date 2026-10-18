@@ -19,22 +19,22 @@ import { operationInput, operationOutput, operationSummary, segmentIdsOf, type V
 import { baseVersion, editOperation, jobInfo, loadEdit, planInfo, planOperation, versionInfo, versionName, within } from './editor'
 import { defineTool, priceValue, usd, type ToolContext, type ToolOutput } from './kit'
 
-// The two paid requests of Redigera: a paid operation on a version (request_edit_operation) and a new voice for a
+// The two paid requests of the Editor: a paid operation on a version (request_edit_operation) and a new voice for a
 // character (request_voice_design). Like every paid tool they only create an approval request; the user's OK in
 // Studio runs it, through the same edit service the window's buttons use, with the price the user saw as the
 // ceiling (expectedPriceUsd: the service refuses when Venice's price rose by more than a cent).
 
 const CHANGED =
-  'har ändrats sedan agenten bad om lov, så förfrågan gäller inte längre. Be agenten fråga igen om det fortfarande ska göras.'
+  'has changed since the agent asked for permission, so the request no longer applies. Ask the agent to ask again if it should still be done.'
 
 /** How much the price may rise between the request and the approval (Venice rounds to the cent). */
 const PRICE_SLACK_USD = 0.01
 
 /**
- * The plan's problem that only the user's clone consent solves ("Bocka i att du har rätt att använda rösten"): the
- * approval dialog asks for that consent itself, so it doesn't stop the request.
+ * The plan's problem that only the user's clone consent solves ("Tick that you have the right to use the voice"):
+ * the approval dialog asks for that consent itself, so it doesn't stop the request.
  */
-const CONSENT_PROBLEM = /rätt att använda rösten/i
+const CONSENT_PROBLEM = /right to use the voice/i
 
 /** Which file a version is (device, inode, size, modification time): a path names a place, not a film. */
 function fileIdentity(path: string | undefined): string {
@@ -63,13 +63,13 @@ function priceRose(approved: number | undefined, now: number | undefined): boole
 
 /**
  * The price the service may charge at most, as approved. A paid run always needs one; a price Venice couldn't give
- * (the user approved "okänt pris") is 0, so the run goes ahead while it is still unknown and is refused should a
+ * (the user approved "unknown price") is 0, so the run goes ahead while it is still unknown and is refused should a
  * price have appeared meanwhile (verify lapses the request in that case already).
  */
 const approvedPrice = (priceUsd: number | undefined): number => priceUsd ?? 0
 
 function requestApproval(ctx: ToolContext, epoch: number, plan: Omit<ApprovalPlan, 'epoch'>): ReturnType<ToolContext['approvals']['create']> {
-  if (!ctx.connected()) throw new Error('Agentanslutningen är stängd, så förfrågan skickades inte till användaren.')
+  if (!ctx.connected()) throw new Error('The agent connection is closed, so the request wasn\'t sent to the user.')
   return ctx.approvals.create({ ...plan, epoch })
 }
 
@@ -87,38 +87,38 @@ function pendingAnswer(request: ApprovalRequest, reused: boolean): Record<string
   }
 }
 
-/** The character a Röst clip belongs to, and whether the user lets it be cloned. */
+/** The character a Voice clip belongs to, and whether the user lets it be cloned. */
 function cloneSource(assets: AssetIndex, audioId: string): { assetName: string; consent: boolean } {
   const ref = assets.requireAudio(audioId)
   if (ref.asset.kind !== 'character') {
-    throw new Error(`${q(ref.asset.name)} är ingen karaktär: bara en karaktärs röstklipp kan klonas.`)
+    throw new Error(`${q(ref.asset.name)} is not a character: only a character\'s voice clip can be cloned.`)
   }
   return { assetName: ref.asset.name, consent: ref.audio.cloneConsent === true }
 }
 
-/** Why a stopped job can't be continued (Swedish), as Redigera's own "Fortsätt" would refuse it. */
+/** Why a stopped job can't be continued, as the Editor's own "Continue" would refuse it. */
 function cannotResume(job: EditJob): string {
-  if (job.status === 'running') return `Jobbet ${q(job.label)} pågår redan.`
-  if (job.status === 'completed') return `Jobbet ${q(job.label)} är redan klart.`
-  return `Jobbet ${q(job.label)} kan inte fortsättas (versionen det utgår från finns inte längre, eller det finns inget kvar att skicka). Gör om åtgärden med request_edit_operation och operation i stället.`
+  if (job.status === 'running') return `The job ${q(job.label)} is already running.`
+  if (job.status === 'completed') return `The job ${q(job.label)} is already done.`
+  return `The job ${q(job.label)} can't be continued (the version it starts from no longer exists, or there is nothing left to send). Redo the operation with request_edit_operation and operation instead.`
 }
 
 /**
- * "Fortsätt" on a stopped paid job, asked for by an agent: an 'edit' request with resumeJobId. The price is what the
+ * "Continue" on a stopped paid job, asked for by an agent: an 'edit' request with resumeJobId. The price is what the
  * job's unsent and failed parts cost as Studio lists the job; verify lapses the request when the job can no longer be
- * continued or the price rose, and Redigera's own resume refuses again should Venice's price have risen by the time it
+ * continued or the price rose, and the Editor's own resume refuses again should Venice's price have risen by the time it
  * sends (it is given the approved price as its ceiling).
  */
 async function requestResume(ctx: ToolContext, editId: string, jobId: string, note: string | undefined): Promise<ToolOutput> {
   const epoch = ctx.approvals.epoch()
   const edit = await loadEdit(editId)
   const job = edit.jobs.find((j) => j.id === jobId)
-  if (!job) throw new Error(`Redigeringen ${q(edit.name)} har inget jobb med id ${jobId}. get_edit visar jobben.`)
+  if (!job) throw new Error(`The edit ${q(edit.name)} has no job with id ${jobId}. get_edit lists the jobs.`)
   if (!job.canResume) throw new Error(cannotResume(job))
   const base = job.baseId ? edit.versions.find((v) => v.id === job.baseId) : undefined
   const price = job.resumePriceUsd
   const partial = !!job.resumePartialPrice
-  const summary = `Fortsätt jobbet ${q(job.label)}`
+  const summary = `Continue the job ${q(job.label)}`
   const request: ApprovalEditRequest = {
     editId: edit.id,
     editName: edit.name,
@@ -139,17 +139,17 @@ async function requestResume(ctx: ToolContext, editId: string, jobId: string, no
     target: `edit-resume:${job.id}`,
     verify: async () => {
       const now = await loadEdit(edit.id).catch(() => undefined)
-      if (!now) throw new Error('Redigeringen finns inte längre, så förfrågan gäller inte.')
+      if (!now) throw new Error('The edit no longer exists, so the request no longer applies.')
       const j = now.jobs.find((x) => x.id === job.id)
-      if (!j) throw new Error('Jobbet finns inte längre, så förfrågan gäller inte.')
-      if (!j.canResume) throw new Error(`${cannotResume(j)} Förfrågan gäller inte längre.`)
+      if (!j) throw new Error('The job no longer exists, so the request no longer applies.')
+      if (!j.canResume) throw new Error(`${cannotResume(j)} The request no longer applies.`)
       if (priceRose(price, j.resumePriceUsd) || (!partial && j.resumePartialPrice)) {
         throw new Error(
-          `Priset har ändrats sedan agenten frågade (${usd(price)} → ${usd(j.resumePriceUsd)}${j.resumePartialPrice ? ' + en del utan pris' : ''}), så förfrågan gäller inte längre. Be agenten fråga igen.`
+          `The price has changed since the agent asked (${usd(price)} → ${usd(j.resumePriceUsd)}${j.resumePartialPrice ? ' + a part without a price' : ''}), so the request no longer applies. Ask the agent to ask again.`
         )
       }
     },
-    // Redigera's own "Fortsätt", with the approved price as its ceiling: it refuses (and the request fails) should
+    // The Editor's own "Continue", with the approved price as its ceiling: it refuses (and the request fails) should
     // Venice's price have risen past it, or a part have lost its price, by the time the parts are sent.
     execute: async () => {
       const resumed = await callService<EditJob>('edits:resume', job.id, approvedPrice(price), partial || price === undefined)
@@ -164,7 +164,7 @@ async function requestResume(ctx: ToolContext, editId: string, jobId: string, no
       ...pendingAnswer(created, reused)
     },
     approvalId: created.id,
-    summary: `vill fortsätta jobbet ${q(job.label)} i ${q(edit.name)} (${usd(price)}${partial ? ' + en del utan pris' : ''}) – väntar på ditt OK`
+    summary: `wants to continue the job ${q(job.label)} in ${q(edit.name)} (${usd(price)}${partial ? ' + a part without a price' : ''}) – waiting for your OK`
   }
 }
 
@@ -179,7 +179,7 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Request a paid edit operation (needs approval)',
       description:
-        "💰 Asks the user to approve a paid operation on a version of an edit (default the current one) – or, with resume_job_id instead of operation, continuing a stopped paid job (\"Fortsätt\": get_edit lists it with can_resume; its unsent and failed parts are sent again at the price shown, the parts already paid for are kept): transcribe, change_voice, speak_lines, music, effect, regenerate, prompt_edit, extend or upscale – the same operation input as plan_edit_operation, which you should call first. Nothing is sent to Venice or paid for until the user approves in Studio; the dialog shows the version's poster (and the frames a picture operation works from: regenerate's start and end frames, extend's last frame, prompt_edit's first and last frame of the range), what changes (prompt, old → new lines, the lines change_voice gives a new voice when you pass segment_ids, the voice), the parts and the price (with \"+\" and partial_price when a part has none, e.g. a voice clone: the user is asked once more then, as for an unknown price or one above $5). A voice cloned from a character's Röst clip needs the user's consent (clone_consent in list_assets): the dialog asks for it; you can't give it. Problems come back as an error and no request is made; free operations are refused (apply_edit). Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval (job progress, then the new version), then review the version with review_generation. The request lapses if the version's file, the plan (range, prompt, model, voice, lines) or the transcript lines it uses change before the user answers, or if Venice's price rises; a newer request for the same operation on the same version replaces a pending older one, and asking again for the very same thing at the same price returns the pending one (reused) – at another price it replaces it.",
+        "💰 Asks the user to approve a paid operation on a version of an edit (default the current one) – or, with resume_job_id instead of operation, continuing a stopped paid job (\"Continue\": get_edit lists it with can_resume; its unsent and failed parts are sent again at the price shown, the parts already paid for are kept): transcribe, change_voice, speak_lines, music, effect, regenerate, prompt_edit, extend or upscale – the same operation input as plan_edit_operation, which you should call first. Nothing is sent to Venice or paid for until the user approves in Studio; the dialog shows the version's poster (and the frames a picture operation works from: regenerate's start and end frames, extend's last frame, prompt_edit's first and last frame of the range), what changes (prompt, old → new lines, the lines change_voice gives a new voice when you pass segment_ids, the voice), the parts and the price (with \"+\" and partial_price when a part has none, e.g. a voice clone: the user is asked once more then, as for an unknown price or one above $5). A voice cloned from a character's Voice clip needs the user's consent (clone_consent in list_assets): the dialog asks for it; you can't give it. Problems come back as an error and no request is made; free operations are refused (apply_edit). Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval (job progress, then the new version), then review the version with review_generation. The request lapses if the version's file, the plan (range, prompt, model, voice, lines) or the transcript lines it uses change before the user answers, or if Venice's price rises; a newer request for the same operation on the same version replaces a pending older one, and asking again for the very same thing at the same price returns the pending one (reused) – at another price it replaces it.",
       input: {
         edit_id: z.string().describe('An edit_id from list_edits.'),
         base_version_id: z.string().optional().describe("The version to work on (get_edit's versions); default the current one."),
@@ -188,22 +188,22 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
           .string()
           .optional()
           .describe("Instead of operation: a stopped paid job of this edit with can_resume (get_edit's jobs), to continue it."),
-        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog (Swedish): why.')
+        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog: why.')
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      summary: () => 'vill redigera en film'
+      summary: () => 'wants to edit a film'
     },
     async ({ edit_id, base_version_id, operation, resume_job_id, note }) => {
-      if (!operation === !resume_job_id) throw new Error('Ange antingen operation eller resume_job_id.')
+      if (!operation === !resume_job_id) throw new Error('Give either operation or resume_job_id.')
       if (resume_job_id) return requestResume(ctx, edit_id, resume_job_id, note)
-      if (!operation) throw new Error('Ange antingen operation eller resume_job_id.')
+      if (!operation) throw new Error('Give either operation or resume_job_id.')
       const epoch = ctx.approvals.epoch()
       const edit = await loadEdit(edit_id)
       const base = baseVersion(edit, base_version_id)
       const op = await editOperation(operation)
       const plan = await planOperation(edit.id, op, base.id)
       if (!plan.paid) {
-        throw new Error(`${operation.op} är gratis och behöver inget godkännande: gör det med apply_edit.`)
+        throw new Error(`${operation.op} is free and needs no approval: do it with apply_edit.`)
       }
 
       // A cloned voice: whose it is, and whether the user still has to say they may use it.
@@ -220,7 +220,7 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
           ? await callService<Transcript | null>('edits:transcript', base.id)
           : null
       if (segmentIds.length && !transcript) {
-        throw new Error('Versionen har ingen transkription än, så repliker kan inte väljas. Transkribera den först (op: "transcribe").')
+        throw new Error('The version has no transcript yet, so no lines can be chosen. Transcribe it first (op: "transcribe").')
       }
       const transcriptStamp = segmentIds.length ? transcript!.updatedAt : undefined
       const lines =
@@ -258,31 +258,31 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
         ...(source && !source.consent ? { needsCloneConsent: { audioId: clone!, assetName: source.assetName } } : {})
       }
 
-      /** Throws (Swedish) when what would run now is not what the user is shown. */
+      /** Throws when what would run now is not what the user is shown. */
       const verify = async (): Promise<void> => {
         const now = await loadEdit(edit.id).catch(() => undefined)
-        if (!now) throw new Error('Redigeringen finns inte längre, så förfrågan gäller inte.')
+        if (!now) throw new Error('The edit no longer exists, so the request no longer applies.')
         if (!now.versions.some((v) => v.id === base.id)) {
-          throw new Error(`Version ${versionName(base)} finns inte längre i ${q(now.name)}, så förfrågan gäller inte.`)
+          throw new Error(`Version ${versionName(base)} no longer exists in ${q(now.name)}, so the request no longer applies.`)
         }
-        if (baseIdentity(base.id) !== identity) throw new Error(`Filmen i ${versionName(base)} ${CHANGED}`)
+        if (baseIdentity(base.id) !== identity) throw new Error(`The film in ${versionName(base)} ${CHANGED}`)
         if (transcriptStamp !== undefined) {
           const t = await callService<Transcript | null>('edits:transcript', base.id)
-          if (t?.updatedAt !== transcriptStamp) throw new Error(`Transkriptionen ${CHANGED}`)
+          if (t?.updatedAt !== transcriptStamp) throw new Error(`The transcript ${CHANGED}`)
         }
         if (clone) {
           // The dialog asks for the consent and gives it before approving; anything else is a lapse.
           const assetsNow = await AssetIndex.load()
           if (!cloneSource(assetsNow, clone).consent) {
-            throw new Error('Bocka i att du har rätt att använda rösten innan den klonas.')
+            throw new Error('Tick that you have the right to use the voice before it is cloned.')
           }
         }
         const again = await planOperation(edit.id, op, base.id)
         if (again.problems.length) throw new Error(again.problems.join(' '))
-        if (again.fingerprint !== plan.fingerprint) throw new Error(`Det som skulle göras ${CHANGED}`)
+        if (again.fingerprint !== plan.fingerprint) throw new Error(`What was to be done ${CHANGED}`)
         if (priceRose(plan.priceUsd, again.priceUsd)) {
           throw new Error(
-            `Priset har ändrats sedan agenten frågade (${usd(plan.priceUsd)} → ${usd(again.priceUsd)}), så förfrågan gäller inte längre. Be agenten fråga igen.`
+            `The price has changed since the agent asked (${usd(plan.priceUsd)} → ${usd(again.priceUsd)}), so the request no longer applies. Ask the agent to ask again.`
           )
         }
       }
@@ -328,7 +328,7 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
             : {})
         },
         approvalId: created.id,
-        summary: `vill redigera ${q(edit.name)} ${versionName(base)}: ${summary} (${usd(plan.priceUsd)}${plan.partialPrice ? ' + en del utan pris' : ''}) – väntar på ditt OK`
+        summary: `wants to edit ${q(edit.name)} ${versionName(base)}: ${summary} (${usd(plan.priceUsd)}${plan.partialPrice ? ' + a part without a price' : ''}) – waiting for your OK`
       }
     }
   )
@@ -340,25 +340,25 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Request a designed voice (paid, needs approval)',
       description:
-        "💰 Asks the user to approve making a new voice for a character with AI (\"Skapa röst med AI\", seed-audio, about $0.35): a description of the voice and a sample text it reads. Once approved and made, the result is added as a new Röst clip of the character (list_assets / get_asset show it; listen with include_audio). (A recording you already have goes in with add_asset_audio instead – free.) The voice can then be a reference voice (@AudioN) or, once the user allows cloning it, the voice of new lines (speak_lines with clone_audio_id). Write the description in English: age, gender, timbre, pace, accent, mood (\"A calm, deep male voice around fifty, slightly hoarse\"); the sample text in the language the character speaks. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval. One design per character waits at a time: a newer request_voice_design for the same character replaces a pending one (it lapses as \"Ersatt av en nyare förfrågan om samma sak\"), so offer alternatives one after another rather than at once.",
+        "💰 Asks the user to approve making a new voice for a character with AI (\"Design a voice with AI\", seed-audio, about $0.35): a description of the voice and a sample text it reads. Once approved and made, the result is added as a new Voice clip of the character (list_assets / get_asset show it; listen with include_audio). (A recording you already have goes in with add_asset_audio instead – free.) The voice can then be a reference voice (@AudioN) or, once the user allows cloning it, the voice of new lines (speak_lines with clone_audio_id). Write the description in English: age, gender, timbre, pace, accent, mood (\"A calm, deep male voice around fifty, slightly hoarse\"); the sample text in the language the character speaks. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval. One design per character waits at a time: a newer request_voice_design for the same character replaces a pending one (it lapses as \"Replaced by a newer request for the same thing\"), so offer alternatives one after another rather than at once.",
       input: {
         asset_id: z.string().describe('A character (list_assets).'),
         description: z.string().min(3).max(1000).describe('The voice, in English.'),
         sample_text: z.string().min(1).max(1000).describe('What the voice says in the sample (the character’s language).'),
-        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog (Swedish).')
+        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      summary: () => 'vill skapa en röst'
+      summary: () => 'wants to create a voice'
     },
     async ({ asset_id, description, sample_text, note }) => {
       const epoch = ctx.approvals.epoch()
       requireLibrary()
       const asset = (await AssetIndex.load()).require(asset_id)
-      if (asset.kind !== 'character') throw new Error(`${q(asset.name)} är ingen karaktär: bara karaktärer har en röst.`)
+      if (asset.kind !== 'character') throw new Error(`${q(asset.name)} is not a character: only characters have a voice.`)
       const req: VoiceDesignRequest = { assetId: asset.id, description: description.trim(), sampleText: sample_text.trim() }
       const plan = await callService<EditPlan>('voices:plan', req)
       if (plan.problems.length) throw new Error(plan.problems.join(' '))
-      const summary = `Skapa en ny röst till ${asset.name}`
+      const summary = `Create a new voice for ${asset.name}`
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'voice-design',
         client: ctx.clientName(),
@@ -377,13 +377,13 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
         target: `voice-design:${asset.id}`,
         verify: async () => {
           const now = (await AssetIndex.load()).get(asset.id)
-          if (!now) throw new Error('Karaktären finns inte längre, så förfrågan gäller inte.')
+          if (!now) throw new Error('The character no longer exists, so the request no longer applies.')
           const again = await callService<EditPlan>('voices:plan', req)
           if (again.problems.length) throw new Error(again.problems.join(' '))
-          if (again.fingerprint !== plan.fingerprint) throw new Error(`Rösten som skulle skapas ${CHANGED}`)
+          if (again.fingerprint !== plan.fingerprint) throw new Error(`The voice that was to be created ${CHANGED}`)
           if (priceRose(plan.priceUsd, again.priceUsd)) {
             throw new Error(
-              `Priset har ändrats sedan agenten frågade (${usd(plan.priceUsd)} → ${usd(again.priceUsd)}), så förfrågan gäller inte längre. Be agenten fråga igen.`
+              `The price has changed since the agent asked (${usd(plan.priceUsd)} → ${usd(again.priceUsd)}), so the request no longer applies. Ask the agent to ask again.`
             )
           }
         },
@@ -404,7 +404,7 @@ export function registerEditorPaidTools(server: McpServer, ctx: ToolContext): vo
           ...(plan.warnings.length ? { warnings: plan.warnings } : {})
         },
         approvalId: request.id,
-        summary: `vill skapa en ny röst till ${q(asset.name)} (${usd(plan.priceUsd)}) – väntar på ditt OK`
+        summary: `wants to create a new voice for ${q(asset.name)} (${usd(plan.priceUsd)}) – waiting for your OK`
       }
     }
   )

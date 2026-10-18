@@ -40,7 +40,7 @@ export interface ToolContext {
 }
 
 export interface LabeledImage {
-  /** Says what the picture is, e.g. "Anna – foto 2 (image_id …)". */
+  /** Says what the picture is, e.g. "Anna – photo 2 (image_id …)". */
   label: string
   image: ImageBlock
 }
@@ -67,7 +67,7 @@ interface ToolSpec<S extends ZodRawShapeCompat> {
   description: string
   input: S
   annotations: ToolAnnotations
-  /** What the call does, in Swedish, for the activity log ("satte prompten"). */
+  /** What the call does, for the activity log: a past-tense phrase that follows the agent's name ("set the prompt"). */
   summary: (args: ShapeOutput<S>) => string
 }
 
@@ -155,7 +155,7 @@ export function defineTool<S extends ZodRawShapeCompat>(
 /** The window's Generate form, and where the user is in Studio. */
 export async function readForm(ctx: ToolContext): Promise<AgentFormState> {
   const state = await ctx.bridge.send<AgentFormState>('get_form')
-  if (!state || typeof state !== 'object' || !state.params) throw new Error('Studio-fönstret svarade inte som väntat.')
+  if (!state || typeof state !== 'object' || !state.params) throw new Error('The Studio window didn\'t answer as expected.')
   return state
 }
 
@@ -180,7 +180,7 @@ export async function quote(params: GenerationParams): Promise<number | undefine
 
 /** "$0.42", the way Studio shows prices. */
 export function usd(v: number | undefined): string {
-  if (v === undefined) return 'okänt pris'
+  if (v === undefined) return 'unknown price'
   return `$${v.toFixed(v < 0.1 ? 3 : 2)}`
 }
 
@@ -219,7 +219,7 @@ export const assetReferenceItem = z.object({
 
 /**
  * A reference: an asset's photos (and audio), or one loose picture – a still, or an uploaded picture (made a still in
- * Referensbilder first, so the form or clip never points into the scratch folder). A loose picture has no
+ * "Referensbilder" first, so the form or clip never points into the scratch folder). A loose picture has no
  * description, so nothing is appended to the prompt for it.
  */
 export const referenceItem = z.union([
@@ -230,12 +230,12 @@ export const referenceItem = z.union([
     .strict()
 ])
 
-/** The "Ta med beskrivningar" switch, as set_form, validate_prompt, add_segment and update_segment take it. */
+/** The "Include descriptions" switch, as set_form, validate_prompt, add_segment and update_segment take it. */
 export const includeDescriptionsInput = z
   .boolean()
   .optional()
   .describe(
-    "Append the descriptions of the referenced assets to the prompt as a References legend (Studio's \"Ta med beskrivningar\"). Default true; false sends the prompt alone."
+    "Append the descriptions of the referenced assets to the prompt as a References legend (Studio's \"Include descriptions\"). Default true; false sends the prompt alone."
   )
 
 /** Assets whose description is left out of the References legend, as the same tools take them. */
@@ -247,7 +247,7 @@ export const excludedDescriptionsInput = z
     "Asset ids whose descriptions are NOT appended (the others still are). Replaces the list; [] appends all of them again."
   )
 
-/** Who wears which outfit ("bärs av"), as set_form, add_segment and update_segment take it. */
+/** Who wears which outfit ("worn by"), as set_form, add_segment and update_segment take it. */
 export const outfitWearersInput = z
   .array(
     z

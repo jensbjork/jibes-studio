@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
-// The building blocks of Inställningar: a section per subject (heading, one line on what it is for, then its
-// settings), a setting inside it (name, a short help line, the control), "Mer om …" for what doesn't need to be read
+// The building blocks of Settings: a section per subject (heading, one line on what it is for, then its
+// settings), a setting inside it (name, a short help line, the control), "More about …" for what doesn't need to be read
 // every time, and the in-page navigation that follows the scroll.
 
-/** The sections' element ids, for the navigation and for opening Inställningar at one of them. */
+/** The sections' element ids, for the navigation and for opening Settings at one of them. */
 export const SETTINGS_SECTION = {
   venice: 'settings-venice',
   generation: 'settings-generation',
@@ -21,7 +21,7 @@ let pendingSection: SettingsSectionId | undefined
 const sectionListeners = new Set<(id: SettingsSectionId) => void>()
 
 /**
- * Opens Inställningar at a section (the agent drawer's "Inställningar för agentanslutning →"): call it, then navigate
+ * Opens Settings at a section (the agent drawer's "Agent connection settings →"): call it, then navigate
  * to 'settings'. A view already open scrolls there at once; one about to open does when it mounts.
  */
 export function showSettingsSection(id: SettingsSectionId): void {
@@ -55,7 +55,7 @@ export interface SettingsNavItem {
 }
 
 /**
- * One subject of Inställningar: its heading, one line on what it is for, then its settings. `ownIntro`: the content
+ * One subject of Settings: its heading, one line on what it is for, then its settings. `ownIntro`: the content
  * opens with that line itself (a section made elsewhere, like LibrarySection or LibraryArchiveSection), so it starts
  * right under the heading.
  */
@@ -115,7 +115,7 @@ export function SettingsItem({
   )
 }
 
-/** A small dot and word beside a setting's name: "● Sparad", "● Saknas". */
+/** A small dot and word beside a setting's name: "● Saved", "● Missing". */
 export function StatusPill({ tone, children }: { tone: 'ok' | 'missing' | 'neutral'; children: ReactNode }) {
   const dot = tone === 'ok' ? 'bg-emerald-400' : tone === 'missing' ? 'bg-accent' : 'bg-muted'
   const text = tone === 'ok' ? 'text-emerald-300' : tone === 'missing' ? 'text-[#ffb3b5]' : 'text-muted'
@@ -127,7 +127,7 @@ export function StatusPill({ tone, children }: { tone: 'ok' | 'missing' | 'neutr
   )
 }
 
-/** "Mer om …": the longer explanation, closed until asked for. */
+/** "More about …": the longer explanation, closed until asked for. */
 export function MoreAbout({ summary, children }: { summary: string; children: ReactNode }) {
   return (
     <details className="group text-[12px]">
@@ -245,7 +245,7 @@ export function useScrollSpy(
     measure()
     el.addEventListener('scroll', schedule, { passive: true })
     el.addEventListener('scrollend', release)
-    // Sections grow and shrink (status loaded, "Mer om" opened): the reading line may pass another heading.
+    // Sections grow and shrink (status loaded, "More about" opened): the reading line may pass another heading.
     const resize = new ResizeObserver(schedule)
     resize.observe(el)
     if (el.firstElementChild) resize.observe(el.firstElementChild)

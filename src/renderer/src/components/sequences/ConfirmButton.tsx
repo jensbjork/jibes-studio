@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 
 interface Props {
   children: ReactNode
-  /** Short question shown while armed, e.g. "Radera klippet?". */
+  /** Short question shown while armed, e.g. "Delete the clip?". */
   question: string
   confirmLabel?: string
   onConfirm: () => void
@@ -15,7 +15,7 @@ interface Props {
 export default function ConfirmButton({
   children,
   question,
-  confirmLabel = 'Radera',
+  confirmLabel = 'Delete',
   onConfirm,
   className = '',
   title,
@@ -65,7 +65,7 @@ export default function ConfirmButton({
         onClick={() => setArmed(false)}
         className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-text"
       >
-        Avbryt
+        Cancel
       </button>
     </span>
   )

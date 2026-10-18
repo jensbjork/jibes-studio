@@ -2,7 +2,7 @@
 // `studio-voice-isolate` built from native/voice-isolate/main.swift (npm run build:helpers) and shipped in the app's
 // Resources/bin. It runs locally and offline at ~28× real time, so separating is free: it enables removing or
 // keeping only the voice, and keeping the music and effects under a new voice. The helper is optional: without it
-// (another OS, macOS before 13, a build without the Swift toolchain) these features are off with a Swedish reason.
+// (another OS, macOS before 13, a build without the Swift toolchain) these features are off with a plain reason.
 
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
@@ -56,19 +56,19 @@ async function isExecutable(path: string): Promise<boolean> {
 
 async function check(): Promise<SeparationStatus> {
   if (process.platform !== 'darwin') {
-    return { available: false, message: 'Röstseparering finns bara på macOS.' }
+    return { available: false, message: 'Voice separation is only available on macOS.' }
   }
   const darwin = Number.parseInt(release().split('.')[0] ?? '', 10)
   if (!(darwin >= MIN_DARWIN)) {
-    return { available: false, message: 'Röstseparering kräver macOS 13 Ventura eller senare.' }
+    return { available: false, message: 'Voice separation requires macOS 13 Ventura or later.' }
   }
   const helper = helperPath()
   if (!(await isExecutable(helper))) {
     return {
       available: false,
       message: app.isPackaged
-        ? 'Röstseparering saknas i den här versionen av Studio. Installera om Studio.'
-        : 'Röstseparering är inte byggd. Kör npm run build:helpers (kräver Xcode Command Line Tools).'
+        ? 'Voice separation is missing from this version of Studio. Reinstall Studio.'
+        : 'Voice separation is not built. Run npm run build:helpers (requires Xcode Command Line Tools).'
     }
   }
   let reply: ProbeReply
@@ -77,11 +77,11 @@ async function check(): Promise<SeparationStatus> {
     reply = JSON.parse(stdout.trim().split('\n').pop() ?? '{}') as ProbeReply
   } catch (err) {
     console.warn('The voice separation helper failed its probe:', err)
-    return { available: false, message: 'Röstseparering kunde inte startas på den här datorn.' }
+    return { available: false, message: 'Voice separation could not be started on this Mac.' }
   }
   if (!reply.ok) {
     console.warn('The voice separation helper reported:', reply.error)
-    return { available: false, message: 'Den här datorn saknar Apples röstisolering (AUSoundIsolation).' }
+    return { available: false, message: "This Mac doesn't have Apple's voice isolation (AUSoundIsolation)." }
   }
   return { available: true, quality: reply.hq ? 'high' : 'standard' }
 }
@@ -136,15 +136,15 @@ async function removeStaleScratch(dir: string): Promise<void> {
   }
 }
 
-/** "1,2 GB" / "340 MB". */
+/** "1.2 GB" / "340 MB". */
 function formatBytes(bytes: number): string {
   return bytes >= 1024 ** 3
-    ? `${(bytes / 1024 ** 3).toFixed(1).replace('.', ',')} GB`
+    ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
     : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`
 }
 
 /**
- * Refuses (Swedish) when the scratch files won't fit: the sound three times over as 32-bit float WAV at 48 kHz (the
+ * Refuses when the scratch files won't fit: the sound three times over as 32-bit float WAV at 48 kHz (the
  * extracted input, the voice, the background), with SCRATCH_RESERVE_BYTES still left. Unknown free space or length
  * passes (the write itself then reports a full disk).
  */
@@ -160,7 +160,7 @@ async function checkScratchSpace(dir: string, seconds: number | undefined, chann
   }
   if (free - needed < SCRATCH_RESERVE_BYTES) {
     throw new Error(
-      `Det finns för lite ledigt utrymme på disken för att separera rösten (behöver ~${formatBytes(needed)} under tiden).`
+      `There is too little free disk space to separate the voice (needs ~${formatBytes(needed)} meanwhile).`
     )
   }
 }
@@ -179,7 +179,7 @@ async function placeStem(wav: string, out: string): Promise<void> {
  * `out.voice` and `out.background` (.flac as 24-bit FLAC, .wav as 32-bit float): both exactly as long as the input's
  * sound at 48 kHz, latency-compensated to the sample, and summing back to the original (background = input − voice).
  * The sound is first extracted at 48 kHz, keeping stereo (the model scores ~4 dB better on stereo cues); a mono
- * track stays mono, which scores better than the same sound duplicated. Rejects in Swedish when separation isn't
+ * track stays mono, which scores better than the same sound duplicated. Rejects with a reason when separation isn't
  * available here or the file has no sound.
  */
 export async function separateStems(
@@ -188,7 +188,7 @@ export async function separateStems(
   o: { signal?: AbortSignal; onProgress?: (fraction: number) => void } = {}
 ): Promise<void> {
   const status = await separationStatus()
-  if (!status.available) throw new Error(status.message ?? 'Röstseparering saknas på den här datorn.')
+  if (!status.available) throw new Error(status.message ?? "Voice separation isn't available on this Mac.")
   const report = (fraction: number): void => {
     try {
       o.onProgress?.(Math.min(1, Math.max(0, fraction)))
@@ -247,15 +247,15 @@ export async function separateStems(
         available = undefined
         throw new Error(
           stopped === 'stalled'
-            ? 'Röstsepareringen stannade upp och avbröts. Försök igen – händer det igen, starta om datorn.'
-            : 'Röstsepareringen tog orimligt lång tid och avbröts. Försök igen.',
+            ? 'Voice separation stalled and was stopped. Try again – if it happens again, restart the Mac.'
+            : 'Voice separation took unreasonably long and was stopped. Try again.',
           { cause: err }
         )
       }
       if (err instanceof Error && err.name === 'AbortError') throw err
       // A helper that broke since the last check is checked again next time.
       available = undefined
-      throw new Error(`Röstsepareringen misslyckades: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+      throw new Error(`Voice separation failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
     } finally {
       clearTimeout(stall)
       clearTimeout(wall)

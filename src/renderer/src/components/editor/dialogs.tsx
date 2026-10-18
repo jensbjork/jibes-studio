@@ -6,12 +6,12 @@ import Modal from '../pickers/Modal'
 import { FilmIcon } from '../sequences/icons'
 import { fileName, formatLength, formatPrice, summaryLine } from './editorUtils'
 
-// Redigera's two small dialogs: picking an exported film ("Från en export…"), and choosing between the edits that
+// The Editor's two small dialogs: picking an exported film ("From an export…"), and choosing between the edits that
 // already exist for a film and a new one.
 
-const dateFormat = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
-/** "Från en export…": the films exported from sequences and storyboards that are still on disk, newest first. */
+/** "From an export…": the films exported from sequences and storyboards that are still on disk, newest first. */
 export function ExportPickerDialog({ onClose, onPicked }: { onClose: () => void; onPicked: (e: ExportSummary) => void }) {
   const [exports, setExports] = useState<ExportSummary[]>()
   const [error, setError] = useState<string>()
@@ -28,17 +28,17 @@ export function ExportPickerDialog({ onClose, onPicked }: { onClose: () => void;
 
   return (
     <Modal
-      title="Redigera en exporterad film"
-      subtitle="Filmen kopieras in i redigeringen som original; exporten lämnas orörd."
+      title="Edit an exported film"
+      subtitle="The film is copied into the edit as its original; the export is left untouched."
       onClose={onClose}
       maxWidth={520}
     >
       {error && <p className="mb-3 text-[12px] text-accent select-text">{error}</p>}
       {!exports ? (
-        <p className="py-4 text-center text-muted">Hämtar exporter…</p>
+        <p className="py-4 text-center text-muted">Loading exports…</p>
       ) : exports.length === 0 ? (
         <p className="py-4 leading-relaxed text-muted">
-          Inga exporterade filmer än. Exportera en sekvens eller en storyboard först – sedan kan du redigera filmen här.
+          No exported films yet. Export a sequence or a storyboard first – then you can edit the film here.
         </p>
       ) : (
         <ul className="-mx-2 space-y-0.5">
@@ -55,7 +55,7 @@ export function ExportPickerDialog({ onClose, onPicked }: { onClose: () => void;
                   <span className="block truncate text-[11px] text-muted">
                     {dateFormat.format(e.createdAt)}
                     {e.duration !== undefined && ` · ${formatLength(e.duration)}`}
-                    {e.cuts?.length ? ` · ${e.cuts.length + 1} klipp` : ''}
+                    {e.cuts?.length ? ` · ${e.cuts.length + 1} clips` : ''}
                   </span>
                 </span>
               </button>
@@ -81,21 +81,21 @@ export function OpenChoiceDialog({
 }) {
   return (
     <Modal
-      title="Filmen redigeras redan"
-      subtitle="Fortsätt där du var, eller börja om från originalet i en ny redigering."
+      title="This film is already being edited"
+      subtitle="Continue where you left off, or start over from the original in a new edit."
       onClose={onClose}
       maxWidth={480}
       footer={
         <>
           <button type="button" onClick={onClose} className="rounded-md border border-line px-4 py-2 hover:bg-raised">
-            Avbryt
+            Cancel
           </button>
           <button
             type="button"
             onClick={onNew}
             className="rounded-md border border-line px-4 py-2 transition hover:bg-raised"
           >
-            Ny redigering
+            New edit
           </button>
         </>
       }
@@ -117,7 +117,7 @@ export function OpenChoiceDialog({
                 )}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate">Öppna redigeringen ”{e.name}”</span>
+                <span className="block truncate">Open the edit “{e.name}”</span>
                 <span className="block truncate text-[11px] text-muted">{summaryLine(e)}</span>
               </span>
             </button>

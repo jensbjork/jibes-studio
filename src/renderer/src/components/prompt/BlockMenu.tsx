@@ -73,17 +73,17 @@ export default function BlockMenu({ id, anchor, sections, active, onActive, onCh
             value={search.value}
             onChange={(e) => search.onChange(e.target.value)}
             onKeyDown={search.onKeyDown}
-            placeholder="Sök byggsten…"
+            placeholder="Search building blocks…"
             aria-controls={id}
             aria-activedescendant={active >= 0 ? blockOptionId(id, active) : undefined}
             className="w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted"
           />
         </div>
       )}
-      <div id={id} role="listbox" aria-label="Byggstenar" className="min-h-0 flex-1 overflow-y-auto p-1">
+      <div id={id} role="listbox" aria-label="Building blocks" className="min-h-0 flex-1 overflow-y-auto p-1">
         {empty ? (
           <p className="px-3 py-4 text-center text-[12px] text-muted">
-            {query ? `Ingen byggsten matchar ”${query}”.` : 'Inga byggstenar här.'}
+            {query ? `No building block matches “${query}”.` : 'No building blocks here.'}
           </p>
         ) : (
           sections.map((section) => (
@@ -119,7 +119,7 @@ export default function BlockMenu({ id, anchor, sections, active, onActive, onCh
         )}
       </div>
       <p className="border-t border-line px-3 py-1.5 text-[10px] text-muted">
-        ↑↓ välj · ↩ infoga · esc stäng{search ? ' · tips: skriv / direkt i texten' : ''}
+        ↑↓ choose · ↩ insert · esc close{search ? ' · tip: type / right in the text' : ''}
       </p>
     </div>,
     document.body

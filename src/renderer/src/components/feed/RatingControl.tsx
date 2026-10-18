@@ -3,7 +3,7 @@ import { ratingLabel } from '@shared/rating'
 import { MAX_STARS, THUMBS_DOWN, type RatingValue } from '@shared/types'
 
 interface Props {
-  /** The grade: -1 (tumme ner) or 1–3 stars; undefined when not rated. */
+  /** The grade: -1 (thumbs down) or 1–3 stars; undefined when not rated. */
   value?: number
   /** Omit for a read-only display. Clicking the current grade again clears it (null). */
   onChange?: (rating: RatingValue | null) => void
@@ -24,14 +24,14 @@ const THUMB = '👎'
 /** The emoji sits a little smaller than the stars, so the row reads as one line. */
 const thumbGlyph = 'inline-block text-[0.85em] leading-none'
 
-/** The next grade up or down the scale tumme ner < ★ < ★★ < ★★★; from no grade, up is one star and down tumme ner. */
+/** The next grade up or down the scale thumbs down < ★ < ★★ < ★★★; from no grade, up is one star and down thumbs down. */
 function step(value: number | undefined, up: boolean): RatingValue {
   if (up) return value === undefined || value === THUMBS_DOWN ? 1 : (Math.min(MAX_STARS, value + 1) as RatingValue)
   return value === undefined || value <= 1 ? THUMBS_DOWN : ((value - 1) as RatingValue)
 }
 
 /**
- * A grade: 👎 (tumme ner) and one to three stars. Interactive, it previews on hover and works from the keyboard as a
+ * A grade: 👎 (thumbs down) and one to three stars. Interactive, it previews on hover and works from the keyboard as a
  * slider (← → or ↓ ↑ step through the grades, 1–3 and − choose one, 0, Delete or Backspace clear it); clicking the
  * grade that is set clears it. Read-only (no onChange) it shows the same row, or only the grade with filledOnly.
  */
@@ -98,7 +98,7 @@ export default function RatingControl({ value, onChange, size = 'sm', filledOnly
     <div
       role="slider"
       tabIndex={0}
-      aria-label="Ditt betyg"
+      aria-label="Your rating"
       aria-valuemin={THUMBS_DOWN}
       aria-valuemax={MAX_STARS}
       aria-valuenow={value ?? 0}
@@ -113,7 +113,7 @@ export default function RatingControl({ value, onChange, size = 'sm', filledOnly
         tabIndex={-1}
         onMouseEnter={() => setHover(THUMBS_DOWN)}
         onClick={() => set(THUMBS_DOWN)}
-        title={value === THUMBS_DOWN ? 'Ta bort betyget' : ratingLabel(THUMBS_DOWN)}
+        title={value === THUMBS_DOWN ? 'Remove the rating' : ratingLabel(THUMBS_DOWN)}
         className="px-[1px] transition"
       >
         <span
@@ -132,7 +132,7 @@ export default function RatingControl({ value, onChange, size = 'sm', filledOnly
           tabIndex={-1}
           onMouseEnter={() => setHover(n)}
           onClick={() => set(n)}
-          title={n === value ? 'Ta bort betyget' : ratingLabel(n)}
+          title={n === value ? 'Remove the rating' : ratingLabel(n)}
           className={`px-[1px] transition-colors ${
             n > stars ? 'text-muted/40' : previewing ? 'text-amber-300/80' : 'text-amber-400'
           }`}

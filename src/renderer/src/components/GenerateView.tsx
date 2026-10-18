@@ -31,8 +31,8 @@ interface Props {
 
 export default function GenerateView({ intent, onIntentHandled, navigate }: Props) {
   const { models, error: modelsError } = useModels()
-  // Every generation, live (jobs and reviews): the list on the right shows this session's, "Använd igen" from the
-  // Mediabank finds any of them.
+  // Every generation, live (jobs and reviews): the list on the right shows this session's, "Use again" from
+  // Media finds any of them.
   const feed = useGenerations()
   // The form lives in an app-level store (remembered across views and restarts; an agent may fill it too).
   const [params, setParams] = useGenerateParams()
@@ -72,7 +72,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
     rememberImageIds(imageIds.current)
   }, [params, assets, assetsLoaded])
 
-  // Intents from the library, prompt and Mediabank views. Tracked by identity so StrictMode's double effect and
+  // Intents from the library, prompt and Media views. Tracked by identity so StrictMode's double effect and
   // re-renders don't apply one twice.
   const handledIntent = useRef<Intent>(undefined)
   const modelsReady = models.length > 0 || !!modelsError
@@ -95,7 +95,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
         const library = await window.studio.listAssets()
         const asset = library.find((a) => a.id === i.assetId)
         if (!asset) {
-          setNotice('Det du valde finns inte längre i biblioteket.')
+          setNotice('What you picked is no longer in the library.')
           return
         }
         // Stay in the current model family when it has a reference variant. An intent is applied
@@ -109,27 +109,27 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
         setParams((p) => ({ ...p, model: modelId, referenceImages, referenceAudios }))
         if (!asset.images.length) {
           setNotice(
-            `${asset.name} har inga bilder än – lägg till referensfoton under ${ASSET_COPY[asset.kind].plural}.`
+            `${asset.name} has no images yet – add reference photos under ${ASSET_COPY[asset.kind].plural}.`
           )
         } else setNotice(note && `${asset.name}: ${note}`)
       } else if (i.type === 'use-prompt') {
         const prompt = (await window.studio.listPrompts()).find((p) => p.id === i.promptId)
         if (!prompt) {
-          setNotice('Prompten finns inte längre i biblioteket.')
+          setNotice('The prompt is no longer in the library.')
           return
         }
         setParams((p) => ({ ...p, prompt: prompt.body, negativePrompt: prompt.negativePrompt || undefined }))
         setNotice(undefined)
         await window.studio.markPromptUsed(prompt.id)
       } else if (i.type === 'use-generation') {
-        // "Använd igen" in the Mediabank: the same as on a card here, for any clip in the library.
+        // "Use again" in Media: the same as on a card here, for any clip in the library.
         const g = feed.generations.find((x) => x.id === i.generationId)
         if (!g) {
-          setNotice('Klippet finns inte längre i biblioteket.')
+          setNotice('The clip is no longer in the library.')
           return
         }
         if (!canUseAgain(g)) {
-          setNotice('Klippets inställningar kan inte fyllas i här: det är inte gjort av Venice från en prompt.')
+          setNotice('This clip’s settings can’t be filled in here: it wasn’t made by Venice from a prompt.')
           return
         }
         reuse(g)
@@ -166,16 +166,16 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
     await window.studio.acceptConsent(consent.request.flow, consent.request.version)
     setConsent(undefined)
     // The form may have changed while the terms were shown (an agent can fill it): then nothing is sent
-    // until the user has looked at it and pressed Generera, which shows the price.
+    // until the user has looked at it and pressed Generate, which shows the price.
     if (stableJson(getGenerateParams()) !== stableJson(consent.params)) {
-      setNotice('Formuläret ändrades medan villkoren visades. Kontrollera det och tryck Generera igen.')
+      setNotice('The form changed while the terms were shown. Check it and press Generate again.')
       return
     }
     await submit()
   }
 
   // Stable, so the feed's memoized cards don't re-render for it. Only a Venice generation's settings make a form: an
-  // own film's or a version's are placeholders, and a take made from a video in Redigera can't be made here.
+  // own film's or a version's are placeholders, and a take made from a video in the Editor can't be made here.
   const reuse = useCallback(
     (g: Generation) => {
       if (!canUseAgain(g)) return
@@ -219,7 +219,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
           {notice && (
             <div className="mb-3 flex items-start gap-2 rounded-md bg-accent/10 px-3 py-2 text-[12px] text-accent">
               <span className="min-w-0 flex-1">{notice}</span>
-              <button onClick={() => setNotice(undefined)} className="shrink-0 hover:text-text" title="Stäng">
+              <button onClick={() => setNotice(undefined)} className="shrink-0 hover:text-text" title="Close">
                 ✕
               </button>
             </div>
@@ -231,15 +231,15 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
             className="flex w-full items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
           >
             <span className="min-w-0 truncate" title={missing}>
-              {submitting ? 'Skickar…' : (missing ?? 'Generera')}
+              {submitting ? 'Sending…' : (missing ?? 'Generate')}
             </span>
             <span className="shrink-0 text-white/80">{formatUsd(quote)}</span>
           </button>
-          <p className="mt-2 text-center text-[11px] text-muted">⌘ + Enter för att generera</p>
+          <p className="mt-2 text-center text-[11px] text-muted">⌘ + Enter to generate</p>
         </div>
       </section>
 
-      {/* This session's clips; everything older is in the Mediabank. */}
+      {/* This session's clips; everything older is in Media. */}
       <section className="flex min-w-0 flex-1 flex-col">
         <ClipFeed
           feed={feed}
@@ -247,7 +247,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
           navigate={navigate}
           mode="session"
           onReuse={reuse}
-          emptyText="Det du genererar nu hamnar här. Allt du gjort tidigare finns i Mediabanken."
+          emptyText="What you generate now lands here. Everything you made before is in Media."
           openRequest={intent?.type === 'open-generation' ? intent : undefined}
           onOpenRequestHandled={onIntentHandled}
           trailing={
@@ -259,7 +259,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
               )}
               <OpenFolderButton
                 target="generations"
-                title="Öppna mappen Genereringar i Finder"
+                title="Open the folder “Genereringar” in Finder"
                 onError={setFolderError}
                 compact
                 className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"

@@ -12,13 +12,13 @@ interface Props {
   /** The chosen outfit's id; null for none. */
   value: string | null
   onChange: (outfitId: string | null) => void
-  /** Shows the outfit under Kläder. */
+  /** Shows the outfit under Outfits. */
   onOpen: (outfitId: string) => void
-  /** Goes to Kläder, e.g. to create the first outfit. */
+  /** Goes to Outfits, e.g. to create the first outfit. */
   onManage: () => void
 }
 
-/** A character's "Standardklädsel": a select with thumbnails, plus a link to the chosen outfit. */
+/** A character's "Default outfit": a select with thumbnails, plus a link to the chosen outfit. */
 export default function DefaultOutfitPicker({ outfits, loaded, value, onChange, onOpen, onManage }: Props) {
   const anchorRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -65,9 +65,9 @@ export default function DefaultOutfitPicker({ outfits, loaded, value, onChange, 
   if (loaded && outfits.length === 0 && !current) {
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-dashed border-line px-3 py-2.5">
-        <span className="text-muted">Inga kläder sparade än.</span>
+        <span className="text-muted">No outfits saved yet.</span>
         <button onClick={onManage} className="text-muted underline-offset-2 hover:text-text hover:underline">
-          Gå till Kläder →
+          Go to Outfits →
         </button>
       </div>
     )
@@ -90,9 +90,9 @@ export default function DefaultOutfitPicker({ outfits, loaded, value, onChange, 
           <NoOutfitThumb className="h-9 w-9" />
         )}
         <span className="min-w-0 flex-1">
-          <span className="block truncate">{current?.name ?? 'Ingen'}</span>
+          <span className="block truncate">{current?.name ?? 'None'}</span>
           <span className="block truncate text-[11px] text-muted">
-            {current ? imageCountLabel(current.images.length) : loaded ? 'Välj bland dina kläder' : 'Hämtar kläder…'}
+            {current ? imageCountLabel(current.images.length) : loaded ? 'Choose from your outfits' : 'Loading outfits…'}
           </span>
         </span>
         <span className="text-[10px] text-muted">▼</span>
@@ -103,7 +103,7 @@ export default function DefaultOutfitPicker({ outfits, loaded, value, onChange, 
           onClick={() => onOpen(current.id)}
           className="rounded-md px-3 py-2 text-muted hover:bg-raised hover:text-text"
         >
-          Visa klädseln →
+          Show outfit →
         </button>
       )}
 
@@ -113,20 +113,20 @@ export default function DefaultOutfitPicker({ outfits, loaded, value, onChange, 
         onClose={() => setOpen(false)}
         width={300}
         maxHeight={380}
-        label="Välj standardklädsel"
+        label="Choose default outfit"
       >
         <div
           ref={listRef}
           role="listbox"
-          aria-label="Standardklädsel"
+          aria-label="Default outfit"
           onKeyDown={onListKey}
           className="min-h-0 flex-1 overflow-y-auto p-1.5"
         >
           <Option selected={!current} onClick={() => choose(null)}>
             <NoOutfitThumb className="h-8 w-8" />
             <span className="min-w-0 flex-1">
-              <span className="block">Ingen</span>
-              <span className="block text-[11px] text-muted">Bara karaktärens egna bilder</span>
+              <span className="block">None</span>
+              <span className="block text-[11px] text-muted">Only the character's own images</span>
             </span>
           </Option>
           {outfits.map((o) => (
@@ -148,7 +148,7 @@ export default function DefaultOutfitPicker({ outfits, loaded, value, onChange, 
             }}
             className="w-full rounded-md px-2.5 py-1.5 text-left text-muted hover:bg-raised hover:text-text"
           >
-            Hantera kläder →
+            Manage outfits →
           </button>
         </div>
       </Popover>

@@ -1,18 +1,18 @@
-// How a sequence clip that continues from the previous clip ("Startbild från föregående klipp") is sent. Two ways,
+// How a sequence clip that continues from the previous clip ("Start on the previous clip's last frame") is sent. Two ways,
 // chosen per clip (Segment.continueMode):
 //
-// - 'references' (the default, "Med referensbilder"): reference-to-video with the references the clip carries – its
+// - 'references' (the default, "With references"): reference-to-video with the references the clip carries – its
 //   own reference images and voices, or, when it has none, those of the clip it continues from (up the chain, so in
 //   effect the sequence's first clip with references) – and the previous clip's last frame as one more reference
 //   image after them, @Image{N+1}. The prompt as sent starts with an instruction to begin exactly on that frame
 //   (prompt-compose.ts continuationLeadIn). The first frame is then close to, not guaranteed identical with, the
 //   previous clip's last one; characters who leave the picture come back as themselves.
-// - 'exact' ("Exakt startbild"): image-to-video from that frame (its exact first frame), without references.
+// - 'exact' ("Exact start frame"): image-to-video from that frame (its exact first frame), without references.
 //
-// A clip that also ends on the next clip's first frame (end_from_next, "Gör om mellan grannarna") or has an end image of
+// A clip that also ends on the next clip's first frame (end_from_next, "Redo between neighbours") or has an end image of
 // its own needs image-to-video with both frames, so it is always sent exactly; so is one whose model family has no
 // reference-to-video model, or one with no references to carry. Pure and shared, so the clip editor, main's takes,
-// "Generera saknade" and the agent tools all decide it the same way.
+// "Generate missing" and the agent tools all decide it the same way.
 
 import {
   imageToVideoVariant,
@@ -102,17 +102,17 @@ export function carriedReferences(clips: readonly ChainClip[], index: number): C
   return undefined
 }
 
-/** Said when "Med referensbilder" doesn't apply to a clip that also ends on the next clip's first frame. */
+/** Said when "With references" doesn't apply to a clip that also ends on the next clip's first frame. */
 export const ENDS_ON_NEXT_NOTE =
-  'Gäller inte här: klippet slutar också på nästa klipps första bildruta och skickas därför exakt (bild-till-video med båda bildrutorna, utan referenser).'
+  "Doesn't apply here: the clip also ends on the next clip's first frame, so it is sent exactly (image-to-video with both frames, without references)."
 
-/** Said when "Med referensbilder" doesn't apply to a clip with an end image of its own. */
+/** Said when "With references" doesn't apply to a clip with an end image of its own. */
 export const OWN_END_IMAGE_NOTE =
-  'Gäller inte här: klippet har en egen slutbild och skickas därför exakt (bild-till-video, utan referenser).'
+  "Doesn't apply here: the clip has an end image of its own, so it is sent exactly (image-to-video, without references)."
 
 /** Said when a clip in reference mode has nothing to carry. */
 export const NOTHING_CARRIED_NOTE =
-  'Det finns inga referensbilder eller röster att skicka med – varken i klippet eller i klippen det fortsätter från – så klippet börjar exakt på bildrutan. Lägg till referenser här eller i klippet före.'
+  'There are no reference images or voices to send – neither in the clip nor in the clips it continues from – so the clip starts exactly on the frame. Add references here or in the clip before.'
 
 /** How a continuing clip is sent (see the top of this file). */
 export interface ContinuationPlan {
@@ -125,7 +125,7 @@ export interface ContinuationPlan {
    * image of its own (image-to-video with both frames). The editor shows the choice greyed out with `note`.
    */
   applies: boolean
-  /** Why the clip is sent exactly although 'references' was chosen, or why the choice doesn't apply (Swedish). */
+  /** Why the clip is sent exactly although 'references' was chosen, or why the choice doesn't apply. */
   note?: string
   /**
    * Which form the clip editor shows: the reference picker (the choice is 'references' and a reference-to-video model
@@ -171,7 +171,7 @@ export function continuationPlan(clips: readonly ChainClip[], index: number): Co
   if (chosen === 'exact') return exact(undefined)
   const model = referenceToVideoVariant(params.model)
   if (!model) {
-    return exact(`${params.model} har ingen modell för referenser, så klippet börjar exakt på bildrutan, utan referenser.`)
+    return exact(`${params.model} has no model for references, so the clip starts exactly on the frame, without references.`)
   }
   const carried = carriedReferences(clips, index)
   const room = Math.max(0, maxReferenceImages(model) - 1)
@@ -239,7 +239,7 @@ export function inheritedTokensChanged(before: InheritedTokens, after: Inherited
   )
 }
 
-/** "Referensbild 9 skickas inte – plats behövs för startbilden (…)", or undefined when every picture fits. */
+/** "Reference image 9 is not sent – room is needed for the start image (…)", or undefined when every picture fits. */
 export function droppedImagesNote(plan: ContinuationPlan | undefined): string | undefined {
   return plan?.droppedImages.length ? droppedForFrameMessage(plan.droppedImages) : undefined
 }
@@ -296,7 +296,7 @@ export function withContinuationFrame(params: GenerationParams, frame: string): 
 }
 
 /**
- * Why a continuing clip's prompt can't be sent as it stands (Swedish), or undefined. `sent` is sendParams; the plan
+ * Why a continuing clip's prompt can't be sent as it stands, or undefined. `sent` is sendParams; the plan
  * says how. In reference mode the prompt is checked against every carried picture with the frame after those that
  * fit (a token naming a picture that gives way for the frame is an error); exactly, it may name no references at all.
  */

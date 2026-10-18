@@ -1,18 +1,18 @@
 import type { PromptsTab } from './learning-utils'
 
 const TABS: { id: PromptsTab; label: string; title: string }[] = [
-  { id: 'prompts', label: 'Prompter', title: 'Dina sparade prompter' },
+  { id: 'prompts', label: 'Prompts', title: 'Your saved prompts' },
   {
     id: 'learnings',
-    label: 'Lärdomar',
-    title: 'Vad du och agenterna har lärt er om vad som fungerar i prompterna'
+    label: 'Learnings',
+    title: 'What you and the agents have learned about what works in prompts'
   }
 ]
 
-/** The Prompter view's two halves: the prompt library and the learnings. */
+/** The Prompts view's two halves: the prompt library and the learnings. */
 export default function ViewTabs({ tab, onTab }: { tab: PromptsTab; onTab: (tab: PromptsTab) => void }) {
   return (
-    <div role="tablist" aria-label="Prompter och lärdomar" className="no-drag flex items-center gap-1">
+    <div role="tablist" aria-label="Prompts and learnings" className="no-drag flex items-center gap-1">
       {TABS.map((t) => (
         <button
           key={t.id}

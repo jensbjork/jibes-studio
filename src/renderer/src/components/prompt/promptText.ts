@@ -32,7 +32,7 @@ export interface PromptReference {
   path: string
   /** The library asset the photo belongs to; undefined for a picture added from disk. */
   asset?: Asset
-  /** 1-based position of the photo among the asset's photos ("foto 2"). */
+  /** 1-based position of the photo among the asset's photos ("photo 2"). */
   photo?: number
   /** False for pictures past the model's limit: they are not sent. */
   sent: boolean
@@ -51,22 +51,22 @@ export function promptReferences(
   })
 }
 
-/** "Anna · foto 2", or "Egen bild · strand.jpg" for a picture that isn't a library photo. */
+/** "Anna · photo 2", or "Own image · beach.jpg" for a picture that isn't a library photo. */
 export function referenceLabel(ref: PromptReference): string {
-  if (!ref.asset) return `Egen bild · ${fileName(ref.path)}`
-  return ref.photo ? `${ref.asset.name} · foto ${ref.photo}` : ref.asset.name
+  if (!ref.asset) return `Own image · ${fileName(ref.path)}`
+  return ref.photo ? `${ref.asset.name} · photo ${ref.photo}` : ref.asset.name
 }
 
-/** "@Image3 · Anna (foto 2)", the hover card's title line. */
+/** "@Image3 · Anna (photo 2)", the hover card's title line. */
 export function referenceTitle(ref: PromptReference): string {
-  if (!ref.asset) return `@Image${ref.index} · egen bild`
-  return `@Image${ref.index} · ${ref.asset.name}${ref.photo ? ` (foto ${ref.photo})` : ''}`
+  if (!ref.asset) return `@Image${ref.index} · own image`
+  return `@Image${ref.index} · ${ref.asset.name}${ref.photo ? ` (photo ${ref.photo})` : ''}`
 }
 
-/** "@Audio1 · Anna (röst)", the hover card's title line for a clip. */
+/** "@Audio1 · Anna (voice)", the hover card's title line for a clip. */
 export function audioTitle(audio: FormAudio): string {
   const s = audio.source
-  if (!s) return `@Audio${audio.index} · eget ljud`
+  if (!s) return `@Audio${audio.index} · own sound`
   return `@Audio${audio.index} · ${s.asset.name} (${audioRole(s.asset.kind)})`
 }
 
@@ -116,8 +116,8 @@ export function unusedAudios(prompt: string, audios: readonly FormAudio[]): Form
 
 /**
  * An asset among the references, as the prompt names it: "Anna (@Image1, @Image2, voice @Audio1) wearing …",
- * for a pose "Anna (@Image1) and Erik (@Image3) posed as in Kram (@Image5)", for a product held by a character
- * "Anna (@Image1) holding Kaffeburken (@Image4)".
+ * for a pose "Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)", for a product held by a character
+ * "Anna (@Image1) holding Coffee tin (@Image4)".
  */
 export interface ReferenceGroup {
   name: string
@@ -131,7 +131,7 @@ export interface ReferenceGroup {
   outfits?: { name: string; indices: number[] }[]
   /** For a pose: the characters that take it (their names and @ImageN numbers). */
   people?: { name: string; indices: number[] }[]
-  /** For a product: the character holding it ("hålls av"); undefined: nobody. */
+  /** For a product: the character holding it ("held by"); undefined: nobody. */
   holder?: { name: string; indices: number[] }
 }
 
@@ -145,9 +145,9 @@ function groupTokens(group: ReferenceGroup, language: PromptLanguage): string {
 }
 
 /**
- * The whole reference for a group: "Anna (@Image1, @Image2, voice @Audio1) wearing Röd klänning (@Image3)", for
- * a pose the characters that take it and the pose ("Anna (@Image1) and Erik (@Image3) posed as in Kram
- * (@Image5)"), for a product the character holding it, if any ("Anna (@Image1) holding Kaffeburken (@Image4)").
+ * The whole reference for a group: "Anna (@Image1, @Image2, voice @Audio1) wearing Red dress (@Image3)", for
+ * a pose the characters that take it and the pose ("Anna (@Image1) and Erik (@Image3) posed as in Hug
+ * (@Image5)"), for a product the character holding it, if any ("Anna (@Image1) holding Coffee tin (@Image4)").
  */
 export function groupText(group: ReferenceGroup, language: PromptLanguage): string {
   if (group.kind === 'pose') return poseReference(group, group.people ?? [], language)
@@ -166,7 +166,7 @@ export function groupInsertText(group: ReferenceGroup, language: PromptLanguage,
   if (/\(\s*$/.test(before)) return groupTokens(group, language)
   const head = before.replace(/\s+$/, '')
   const name = group.name.trim()
-  if (name && head.toLocaleLowerCase('sv').endsWith(name.toLocaleLowerCase('sv'))) {
+  if (name && head.toLocaleLowerCase('en').endsWith(name.toLocaleLowerCase('en'))) {
     const prev = head.slice(0, head.length - name.length)
     if (!prev || /[^\p{L}\p{N}]$/u.test(prev)) {
       // A pose's people and a product's holder are written before its name, which is already in the text.
@@ -253,7 +253,7 @@ export interface PromptMark {
   index?: number
   /** Kind of the asset a valid token's picture or clip belongs to; undefined for a file from disk. */
   kind?: AssetKind
-  /** What is wrong (Swedish). */
+  /** What is wrong. */
   problem?: string
   /** The right spelling of a near miss, e.g. "@Image3" for "@img3". */
   suggestion?: string
@@ -265,18 +265,18 @@ export function markKey(ref: ReferenceKind | undefined, index: number | undefine
 }
 
 export const NOT_REFERENCE_MODE =
-  'Referensbilder används bara i läget Referens – i det här läget skickas inga referensbilder.'
+  'Reference images are only used in the References mode – this mode sends no reference images.'
 
-export const AUDIO_NOT_SENT = 'Ljudklipp skickas bara i läget Referens, med en modell som tar emot ljud.'
+export const AUDIO_NOT_SENT = 'Audio clips are only sent in the References mode, with a model that takes audio.'
 
 function missingImageText(n: number, count: number): string {
-  if (!count) return `@Image${n} finns inte – inga referensbilder är valda än.`
-  return `@Image${n} finns inte – bara ${imageCount(count)} ${count === 1 ? 'är vald' : 'är valda'}.`
+  if (!count) return `@Image${n} doesn’t exist – no reference images are chosen yet.`
+  return `@Image${n} doesn’t exist – only ${imageCount(count)} ${count === 1 ? 'is' : 'are'} chosen.`
 }
 
 function missingAudioText(n: number, count: number): string {
-  if (!count) return `@Audio${n} finns inte – inga ljudklipp är valda än.`
-  return `@Audio${n} finns inte – bara ${clipCount(count)} ${count === 1 ? 'är valt' : 'är valda'}.`
+  if (!count) return `@Audio${n} doesn’t exist – no sound clips are chosen yet.`
+  return `@Audio${n} doesn’t exist – only ${clipCount(count)} ${count === 1 ? 'is' : 'are'} chosen.`
 }
 
 /** What the prompt's references are checked against, for highlighting. */
@@ -317,7 +317,7 @@ export function promptMarks(prompt: string, ctx: MarkContext, issues: readonly P
       (!ref
         ? missingImageText(t.index, references.length)
         : !ref.sent
-          ? `@Image${t.index} skickas inte – modellen tar max ${imageCount(maxImages)}.`
+          ? `@Image${t.index} is not sent – the model takes at most ${imageCount(maxImages)}.`
           : undefined)
     marks.push({
       start: t.start,
@@ -336,7 +336,7 @@ export function promptMarks(prompt: string, ctx: MarkContext, issues: readonly P
       (!audio
         ? missingAudioText(t.index, audios.length)
         : t.index > maxAudios
-          ? `@Audio${t.index} skickas inte – modellen tar max ${clipCount(maxAudios)}.`
+          ? `@Audio${t.index} is not sent – the model takes at most ${clipCount(maxAudios)}.`
           : undefined)
     marks.push({
       start: t.start,
@@ -361,10 +361,10 @@ export function promptMarks(prompt: string, ctx: MarkContext, issues: readonly P
       problem:
         (audio ? audioRefused : notReference) ??
         (m.suggestion
-          ? `Felstavad hänvisning – skrivs ${m.suggestion}.`
+          ? `Misspelled reference – it is written ${m.suggestion}.`
           : audio
-            ? 'Ofullständig hänvisning – skriv @Audio och ljudklippets nummer, t.ex. @Audio1.'
-            : 'Ofullständig hänvisning – skriv @Image och bildens nummer, t.ex. @Image1.')
+            ? 'Incomplete reference – write @Audio and the sound clip’s number, e.g. @Audio1.'
+            : 'Incomplete reference – write @Image and the image’s number, e.g. @Image1.')
     })
   }
   for (const issue of issues) {
@@ -457,7 +457,7 @@ export function removeRanges(text: string, ranges: readonly TextRange[]): string
   return out
 }
 
-/** "voice " / "röst " in front of an @AudioN inside a reference: it goes with the token. */
+/** "voice " / "röst " (Swedish prompts) in front of an @AudioN inside a reference: it goes with the token. */
 const AUDIO_WORD_BEFORE = /(?:voice|sound|röst|ljud)[ \t]+$/iu
 
 function removeOne(text: string, start: number, end: number): string {
@@ -530,7 +530,7 @@ export interface MenuSection {
 /** True when `query` starts the text or one of its words (case-insensitive). */
 export function startsWord(text: string, query: string): boolean {
   if (!query) return true
-  const t = text.toLocaleLowerCase('sv')
+  const t = text.toLocaleLowerCase('en')
   return t.startsWith(query) || t.split(/[\s\-–_(),.:;/]+/).some((w) => w.startsWith(query))
 }
 
@@ -540,7 +540,7 @@ function kindWords(kind: AssetKind): string {
 }
 
 /** Words an audio clip is found by in the "@" menu, besides its asset's name. */
-const AUDIO_SEARCH_WORDS = 'audio ljud röst voice sound ljudmiljö'
+const AUDIO_SEARCH_WORDS = 'audio sound voice soundscape'
 
 /** How a library asset fits among the references, as AssetPicker reports it. */
 function libraryStatus(
@@ -551,20 +551,20 @@ function libraryStatus(
   withVoice: boolean
 ): { status: string; warning?: string; disabled: boolean } {
   const total = asset.images.length
-  if (!total) return { status: `${ASSET_COPY[asset.kind].singular} · inga bilder än`, disabled: true }
+  if (!total) return { status: `${ASSET_COPY[asset.kind].singular} · no images yet`, disabled: true }
   const used = asset.images.filter((img) => inRefs.has(img.path)).length
   const pending = total - used
   const voice = withVoice && bringsVoice(asset)
   const status =
     `${ASSET_COPY[asset.kind].singular} · ${imageCount(total)}` +
-    (voice ? ' + röst' : '') +
-    (used ? ` · ${used} redan tillagda` : '')
-  if (!free) return { status, warning: 'får inte plats', disabled: true }
-  if (pending > free) return { status, warning: `bara ${free} får plats`, disabled: false }
+    (voice ? ' + voice' : '') +
+    (used ? ` · ${used} already added` : '')
+  if (!free) return { status, warning: 'doesn’t fit', disabled: true }
+  if (pending > free) return { status, warning: `only ${free} ${free === 1 ? 'fits' : 'fit'}`, disabled: false }
   const outfit =
     asset.kind === 'character' && asset.defaultOutfitId ? byId.get(asset.defaultOutfitId) : undefined
   const outfitPending = outfit?.kind === 'outfit' ? outfit.images.filter((img) => !inRefs.has(img.path)).length : 0
-  if (outfitPending > free - pending) return { status, warning: 'kläderna får inte plats', disabled: false }
+  if (outfitPending > free - pending) return { status, warning: 'the outfit doesn’t fit', disabled: false }
   return { status, disabled: false }
 }
 
@@ -580,7 +580,7 @@ export function tokenMenuSections(options: {
   references: readonly PromptReference[]
   audios?: readonly FormAudio[]
   groups: readonly AssetGroup[]
-  /** The whole library; omit to leave out "Lägg till från biblioteket". */
+  /** The whole library; omit to leave out "Add from the library". */
   library?: readonly Asset[]
   maxImages: number
   /** The model takes reference audio: adding a character from the library brings its voice. */
@@ -589,7 +589,7 @@ export function tokenMenuSections(options: {
 }): MenuSection[] {
   const { references, groups, library, maxImages, only } = options
   const audios = options.audios ?? []
-  const q = options.query.toLocaleLowerCase('sv').replace(/^@/, '')
+  const q = options.query.toLocaleLowerCase('en').replace(/^@/, '')
   const sections: MenuSection[] = []
 
   const referenceItems: MenuItem[] = []
@@ -627,7 +627,7 @@ export function tokenMenuSections(options: {
         }
       }
       pushAudiosOf(r.asset.id)
-    } else if (only !== 'audio' && (imageMatches(r) || (!!q && startsWord('egen bild', q)))) {
+    } else if (only !== 'audio' && (imageMatches(r) || (!!q && startsWord('own image', q)))) {
       referenceItems.push({ type: 'image', key: `image:${r.index}`, reference: r })
     }
   }
@@ -635,13 +635,13 @@ export function tokenMenuSections(options: {
   if (only !== 'image') {
     for (const a of audios) {
       if (audioListed.has(a.index)) continue
-      if (!audioMatches(a) && !(!!q && !a.source && startsWord('eget ljud', q))) continue
+      if (!audioMatches(a) && !(!!q && !a.source && startsWord('own sound', q))) continue
       audioListed.add(a.index)
       referenceItems.push({ type: 'audio', key: `audio:${a.index}`, audio: a })
     }
   }
   if (referenceItems.length) {
-    const title = only === 'audio' ? 'Ljudklipp' : audios.length && only !== 'image' ? 'Referenser' : 'Referensbilder'
+    const title = only === 'audio' ? 'Sound clips' : audios.length && only !== 'image' ? 'References' : 'Reference images'
     sections.push({ key: 'references', title, items: referenceItems, more: 0 })
   }
 
@@ -665,7 +665,7 @@ export function tokenMenuSections(options: {
     if (items.length) {
       sections.push({
         key: 'library',
-        title: 'Lägg till från biblioteket',
+        title: 'Add from the library',
         items,
         more: candidates.length - items.length
       })

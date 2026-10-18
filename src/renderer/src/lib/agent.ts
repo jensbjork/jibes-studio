@@ -130,21 +130,21 @@ let stopFeed: (() => void) | undefined
 function notifyNewApproval(a: ApprovalRequest): void {
   if (document.hasFocus() || typeof Notification === 'undefined') return
   try {
-    // An image request makes a still, an edit changes a film in Redigera, a voice design makes a voice, a removal
+    // An image request makes a still, an edit changes a film in the Editor, a voice design makes a voice, a removal
     // removes things; the rest generates video.
     const what =
       a.kind === 'image'
-        ? 'vill skapa en bild'
+        ? 'wants to create an image'
         : a.kind === 'edit'
-          ? 'vill redigera en film'
+          ? 'wants to edit a film'
           : a.kind === 'voice-design'
-            ? 'vill skapa en röst'
+            ? 'wants to create a voice'
             : a.kind === 'delete'
-              ? 'vill ta bort något'
-              : 'vill generera'
-    // "Agenten vill generera" for a generic MCP client name, "OpenClaw vill generera" for a real one.
+              ? 'wants to delete something'
+              : 'wants to generate'
+    // "The agent wants to generate" for a generic MCP client name, "OpenClaw wants to generate" for a real one.
     const note = new Notification(`${agentDisplayName(a.client)} ${what}`, {
-      body: 'Öppna Studio för att godkänna eller avböja.',
+      body: 'Open Studio to approve or decline.',
       silent: false
     })
     note.onclick = () => window.focus()
@@ -191,7 +191,7 @@ export function startAgentFeed(): () => void {
 
 /**
  * Fetches the requests again. Main lists a pending request with its params following files moved since it was
- * made, so a view that saw the library change (e.g. "Städa upp") gets the paths as they are now.
+ * made, so a view that saw the library change (e.g. "Tidy up") gets the paths as they are now.
  */
 export function refreshApprovals(): Promise<void> {
   return window.studio.listApprovals().then(applyApprovals, () => {})
@@ -207,7 +207,7 @@ export async function refreshAgentStatus(): Promise<void> {
 
 // ── Actions ─────────────────────────────────────────────────────────────────
 
-/** Switches the server on or off; rejects with main's Swedish message (e.g. the port is taken). */
+/** Switches the server on or off; rejects with main's message (e.g. the port is taken). */
 export async function setAgentEnabled(enabled: boolean): Promise<AgentStatus> {
   const status = await window.studio.setAgentEnabled(enabled)
   applyStatus(status)
@@ -220,7 +220,7 @@ export async function setAgentPort(port: number): Promise<AgentStatus> {
   return status
 }
 
-/** "Sök igen" / "Försök igen": looks for Tailscale again, or retries starting; pending requests stay. */
+/** "Search again" / "Try again": looks for Tailscale again, or retries starting; pending requests stay. */
 export async function restartAgent(): Promise<AgentStatus> {
   const status = await window.studio.restartAgent()
   applyStatus(status)

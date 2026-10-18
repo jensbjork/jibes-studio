@@ -90,18 +90,18 @@ Optional, but please use one when a change clearly belongs to an area. Pick the 
 | Scope | Area | Mainly |
 | --- | --- | --- |
 | `generate` | The Generate view, its list of this session's clips and the job queue | `GenerateView.tsx`, `ParamsForm.tsx`, `jobs.ts`, `venice.ts`, `shared/session.ts` |
-| `media` | The Mediabank: every video (the clip feed), picture and exported film | `components/media/`, `components/feed/` |
+| `media` | Media: every video (the clip feed), picture and exported film | `components/media/`, `components/feed/` |
 | `prompt` | The prompt editor and `@ImageN` / `@AudioN` reference checks | `components/prompt/`, `shared/prompt-refs.ts` |
 | `library` | Characters, environments, products, outfits and poses, the prompt library, reviews and learnings | `components/assets/`, `components/prompts/`, `library.ts`, `reviews.ts` |
 | `assets` | Reference images, audio clips and asset folders on disk | `assets.ts`, `references.ts` |
-| `sequences` | Sequences and storyboards: clips, boards, transitions, takes, trims, preview, keyframes, own clips (*Egna klipp*) | `components/sequences/`, `components/storyboards/`, `components/takes/`, `sequences.ts`, `storyboards.ts`, `sequence-store.ts`, `imports.ts` |
-| `editor` | Redigera: edits, versions, the free and paid operations, voices, transcripts and voice separation | `components/editor/`, `edits.ts`, `edit-ops.ts`, `edit-store.ts`, `edit-mix.ts`, `venice-audio.ts`, `voice-separation.ts`, `shared/edit-plan.ts`, `native/` |
-| `images` | Stills and Venice's image models (*Skapa bild…*, frames saved from takes) | `components/images/`, `images.ts`, `stills.ts` |
+| `sequences` | Sequences and storyboards: clips, boards, transitions, takes, trims, preview, keyframes, own clips | `components/sequences/`, `components/storyboards/`, `components/takes/`, `sequences.ts`, `storyboards.ts`, `sequence-store.ts`, `imports.ts` |
+| `editor` | The Editor: edits, versions, the free and paid operations, voices, transcripts and voice separation | `components/editor/`, `edits.ts`, `edit-ops.ts`, `edit-store.ts`, `edit-mix.ts`, `venice-audio.ts`, `voice-separation.ts`, `shared/edit-plan.ts`, `native/` |
+| `images` | Stills and Venice's image models (*Create image…*, frames saved from takes) | `components/images/`, `images.ts`, `stills.ts` |
 | `export` | ffmpeg export of sequences and storyboards | `sequence-export.ts`, `ffmpeg.ts` |
 | `agent` | Agent connection: approvals, activity, the agent guide | `agent/approvals.ts`, `agent/guide.ts`, `components/agent/` |
 | `mcp` | The MCP server, its tools, transport and agents' uploads | `agent/server.ts`, `agent/network.ts`, `agent/uploads.ts`, `agent/fetch-url.ts`, `agent/tools/` |
 | `db` | SQLite schema and migrations | `db.ts` |
-| `ui` | Shared UI components, layout and styling, the sidebar and *Pågår och klart* | `components/pickers/`, `Sidebar.tsx`, `components/work/`, `lib/work.ts`, `work.ts`, `styles.css` |
+| `ui` | Shared UI components, layout and styling, the sidebar and *Activity* | `components/pickers/`, `Sidebar.tsx`, `components/work/`, `lib/work.ts`, `work.ts`, `styles.css` |
 | `settings` | The Settings view, the base folder and profiles | `SettingsView.tsx`, `components/library/`, `settings.ts`, `library-root.ts`, `paths.ts` |
 | `build` | electron-vite, electron-builder and packaging | `electron.vite.config.ts`, `electron-builder.yml` |
 | `deps` | Dependency updates | `package.json`, `package-lock.json` |
@@ -190,13 +190,14 @@ request focused. Before asking for review, check that:
       photos) or a `studio.db`.
 - [ ] **Docs are updated** when behaviour, settings, scripts or agent tools change (README, `docs/` incl. the guide,
       `CHANGELOG.md` under *Unreleased*).
-- [ ] **UI copy is in Swedish** (for now) and addresses the user as "du"; user-facing error messages from the main
-      process are Swedish too. Code, comments, logs and docs are in English.
+- [ ] **UI copy is in English**: short, plain and friendly, sentence case for buttons and headings; user-facing
+      error messages from the main process too. Library folder names on disk stay Swedish (they are data). Code,
+      comments, logs and docs are in English.
 - [ ] **Migrations are append-only**: schema changes are a new entry at the end of the `migrations` array in
       `src/main/db.ts`, tested on a copy of a library (see
       [DEVELOPMENT.md](docs/DEVELOPMENT.md#database-migrations)).
 - [ ] **Money stays guarded**: every new path that sends a generation goes through `JobManager.submit` (and its
-      `@ImageN` / `@AudioN` check), every paid audio or edit request through Redigera's plan and its price check
+      `@ImageN` / `@AudioN` check), every paid audio or edit request through the Editor's plan and its price check
       (`expectedPriceUsd`), nothing paid is ever sent again or by itself after a restart, and anything an agent
       triggers that costs money still needs approval in the app.
 - [ ] **Agents keep up**: a new user-facing capability gets matching agent tools and guide text in
@@ -227,7 +228,7 @@ There is no formatter configuration beyond `.editorconfig`; match the code aroun
 ## Reporting bugs
 
 Use the *Bug report* issue form. Include the Studio version (or commit), how you run it, the macOS version, the
-exact Swedish message you saw, and steps to reproduce. Redact API keys, the agent token and personal paths from
+exact message you saw, and steps to reproduce. Redact API keys, the agent token and personal paths from
 logs and screenshots. Vulnerabilities go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## License

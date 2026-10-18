@@ -2,7 +2,7 @@ import type { KeyboardEvent, ReactNode, RefObject } from 'react'
 import { SearchIcon } from '../feed/icons'
 import { CloseIcon } from '../sequences/icons'
 
-// The Mediabank's shared pieces: the header Bilder and Filmer use (laid out like the clip feed's, so the tabs stay
+// Media's shared pieces: the header Images and Films use (laid out like the clip feed's, so the tabs stay
 // put when switching), its search field, and the notice row under it.
 
 /**
@@ -36,7 +36,7 @@ export function MediaToolbar({
   )
 }
 
-/** The count at the right end of the second row: "42 bilder", "3 av 42 bilder". */
+/** The count at the right end of the second row: "42 images", "3 of 42 images". */
 export function CountLine({ text }: { text: string }) {
   return (
     <span className="ml-auto min-w-0 truncate pl-2 text-[12px] text-muted tabular-nums" title={text} aria-live="polite">
@@ -89,7 +89,7 @@ export function SearchField({
             onChange('')
             inputRef.current?.focus()
           }}
-          title="Rensa sökningen"
+          title="Clear the search"
           className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted hover:bg-line hover:text-text"
         >
           <CloseIcon size={9} />
@@ -104,7 +104,7 @@ export function NoticeRow({ text, onClose }: { text: string; onClose: () => void
   return (
     <div className="flex items-start gap-2 border-b border-line/60 bg-raised/50 px-6 py-2 text-[12px] text-text">
       <span className="min-w-0 flex-1 select-text">{text}</span>
-      <button type="button" onClick={onClose} className="shrink-0 hover:text-text" title="Stäng">
+      <button type="button" onClick={onClose} className="shrink-0 hover:text-text" title="Close">
         ✕
       </button>
     </div>

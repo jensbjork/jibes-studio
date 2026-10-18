@@ -6,10 +6,10 @@ export { titleFromBody } from '@shared/prompts'
 export type SortKey = 'updated' | 'used' | 'lastUsed' | 'title'
 
 export const SORT_OPTIONS: { id: SortKey; label: string }[] = [
-  { id: 'updated', label: 'Senast ändrad' },
-  { id: 'used', label: 'Mest använd' },
-  { id: 'lastUsed', label: 'Senast använd' },
-  { id: 'title', label: 'Namn A–Ö' }
+  { id: 'updated', label: 'Last updated' },
+  { id: 'used', label: 'Most used' },
+  { id: 'lastUsed', label: 'Last used' },
+  { id: 'title', label: 'Name A–Z' }
 ]
 
 export function isSortKey(value: unknown): value is SortKey {
@@ -17,7 +17,7 @@ export function isSortKey(value: unknown): value is SortKey {
 }
 
 /** Comparison key for text; tags are unique per prompt ignoring case (the backend dedupes that way). */
-export const fold = (s: string): string => s.trim().toLocaleLowerCase('sv')
+export const fold = (s: string): string => s.trim().toLocaleLowerCase('en')
 
 export interface TagInfo {
   /** Folded, used for filtering. */
@@ -39,7 +39,7 @@ export function collectTags(prompts: SavedPrompt[]): TagInfo[] {
       else tags.set(key, { key, label: tag.trim(), count: 1 })
     }
   }
-  return [...tags.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'sv'))
+  return [...tags.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'en'))
 }
 
 /** Every whitespace-separated term must occur in the title, body, negative prompt or tags. */
@@ -63,7 +63,7 @@ const comparators: Record<SortKey, (a: SavedPrompt, b: SavedPrompt) => number> =
   updated: (a, b) => b.updatedAt - a.updatedAt,
   used: (a, b) => b.useCount - a.useCount || (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0),
   lastUsed: (a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0),
-  title: (a, b) => a.title.localeCompare(b.title, 'sv', { sensitivity: 'base' })
+  title: (a, b) => a.title.localeCompare(b.title, 'en', { sensitivity: 'base' })
 }
 
 /** Favourites always come first, whatever the chosen order. */
@@ -94,24 +94,24 @@ export function addTags(current: string[], added: string[]): string[] {
   return next
 }
 
-const timeFormat = new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit' })
-const dayFormat = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short' })
-const fullFormat = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })
+const timeFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+const dayFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
+const fullFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 
-/** "i dag 14:32", "i går 09:10", "3 okt." or "3 okt. 2025". */
+/** "today 14:32", "yesterday 09:10", "3 Oct" or "3 Oct 2025". */
 export function formatWhen(ts: number): string {
   const date = new Date(ts)
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
   const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime()
-  if (ts >= today) return `i dag ${timeFormat.format(date)}`
-  if (ts >= yesterday) return `i går ${timeFormat.format(date)}`
+  if (ts >= today) return `today ${timeFormat.format(date)}`
+  if (ts >= yesterday) return `yesterday ${timeFormat.format(date)}`
   return date.getFullYear() === now.getFullYear() ? dayFormat.format(date) : fullFormat.format(date)
 }
 
 export function formatUses(count: number): string {
-  if (count === 0) return 'Aldrig använd'
-  return count === 1 ? 'Använd 1 gång' : `Använd ${count} gånger`
+  if (count === 0) return 'Never used'
+  return count === 1 ? 'Used once' : `Used ${count} times`
 }
 
 export async function copyText(text: string): Promise<void> {

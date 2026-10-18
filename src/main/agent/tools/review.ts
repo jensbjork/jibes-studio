@@ -88,7 +88,7 @@ const CLIP_CHECKLIST = [
   'Camera and light: shot size, angle and movement, light and mood as asked? (camera-good / camera-wrong, lighting-good / lighting-wrong)',
   'Motion and quality: natural movement, no warped hands or faces, no flicker or melting. (good-motion / bad-motion / artifacts)',
   "Sound (include_audio): does the voice match @AudioN's timbre and pacing, are spoken lines right? (voice-match / voice-mismatch)",
-  'Then add_review with an honest grade (-1 = tumme ner, or 1–3 stars) and tags, and save_learning for anything that would help the next prompt.'
+  'Then add_review with an honest grade (-1 = thumbs down, or 1–3 stars) and tags, and save_learning for anything that would help the next prompt.'
 ]
 
 /** Added to CLIP_CHECKLIST for a take of a storyboard transition. */
@@ -144,7 +144,7 @@ const sameName = (a: string, b: string): boolean =>
 function requireGeneration(id: string): Generation {
   requireLibrary()
   const g = db.getGeneration(id)
-  if (!g) throw new Error(`Genereringen ${id} finns inte (längre). Använd list_generations för att se vilka som finns.`)
+  if (!g) throw new Error(`The generation ${id} doesn't exist (any more). Use list_generations to see the ones there are.`)
   return g
 }
 
@@ -155,8 +155,8 @@ async function listExports(): Promise<ExportSummary[]> {
 
 async function requireExport(id: string): Promise<ExportSummary> {
   const exp = (await listExports()).find((e) => e.id === id)
-  if (!exp) throw new Error(`Det finns ingen exporterad film med id ${id}. Använd list_exports för att se vilka som finns.`)
-  if (!exp.exists) throw new Error('Filmen finns inte längre på disken (flyttad eller raderad i Finder?).')
+  if (!exp) throw new Error(`There is no exported film with id ${id}. Use list_exports to see the ones there are.`)
+  if (!exp.exists) throw new Error('The film is no longer on disk (moved or deleted in Finder?).')
   return exp
 }
 
@@ -180,15 +180,15 @@ async function listLearnings(query: LearningQuery = {}): Promise<Learning[]> {
  */
 async function requireOwnLearning(ctx: ToolContext, id: string): Promise<Learning> {
   const learning = (await listLearnings()).find((l) => l.id === id)
-  if (!learning) throw new Error(`Det finns ingen lärdom med id ${id}. Använd list_learnings för att se vilka som finns.`)
+  if (!learning) throw new Error(`There is no learning with id ${id}. Use list_learnings to see the ones there are.`)
   if (!sameName(learning.author, authorName(ctx))) {
     throw new Error(
-      `Lärdomen ${q(learning.title)} skrevs av ${learning.author === 'user' ? 'användaren (eller har ändrats av användaren)' : learning.author}, och du kan bara ändra dina egna. Spara en ny lärdom med save_learning om du har något att lägga till.`
+      `The learning ${q(learning.title)} was written by ${learning.author === 'user' ? 'the user (or has been changed by the user)' : learning.author}, and you can only change your own. Save a new learning with save_learning if you have something to add.`
     )
   }
   if (learning.pinned) {
     throw new Error(
-      `Användaren har fäst lärdomen ${q(learning.title)}, så den kan inte ändras av agenter. Spara en ny lärdom med save_learning om resultaten säger något annat, och nämn vad den ändrar.`
+      `The user has pinned the learning ${q(learning.title)}, so agents can't change it. Save a new learning with save_learning if the results say otherwise, and say what it changes.`
     )
   }
   return learning
@@ -245,8 +245,8 @@ async function referenceMedia(
   return { images, audio, missing }
 }
 
-/** A grade in the activity line: "tumme ner", "2 stjärnor". */
-const gradeText = (rating: number): string => ratingLabel(rating).toLocaleLowerCase('sv')
+/** A grade in the activity line: "thumbs down", "2 stars". */
+const gradeText = (rating: number): string => ratingLabel(rating).toLocaleLowerCase('en')
 
 /** The take's reviews and the user's rating, as the review tools show them. */
 async function reviewsOf(generationId: string): Promise<{ rating: number | null; reviews: Record<string, unknown>[] }> {
@@ -263,7 +263,7 @@ interface FilmClip {
   continue_from_previous: boolean
   end_from_next: boolean
   prompt: string
-  /** The take's title when it is the user's own film or a Redigera version (its clip may have no prompt). */
+  /** The take's title when it is the user's own film or an Editor version (its clip may have no prompt). */
   title?: string
   /** Seconds in the film. */
   start: number
@@ -477,7 +477,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Review a generation',
       description:
-        "Look closely at what a finished generation – or the user's own clip, or a version made in Redigera – actually became, to learn how prompts translate into video: returns its prompt (and sent_prompt, the prompt as Venice got it with the descriptions of its referenced assets appended, when that differs; an own clip or a version has its source, title and recipe instead), settings, the reference token maps, price, the user's rating (-1 = tumme ner, 1–3 = stars) and every review so far, then `frames` frames evenly spaced from the first to the last (JPEG, 512 px wide, each captioned \"t = 2.4 s\"), followed by the reference images it was made from (include_references) so you can compare identity, outfit, pose and place – and with include_audio the clip's own sound (MP3, up to 30 s from audio_start) plus the reference voice windows (@AudioN), for clients that take audio. Afterwards record what you saw with add_review, and anything that generalises with save_learning. Free; changes nothing.",
+        "Look closely at what a finished generation – or the user's own clip, or a version made in the Editor – actually became, to learn how prompts translate into video: returns its prompt (and sent_prompt, the prompt as Venice got it with the descriptions of its referenced assets appended, when that differs; an own clip or a version has its source, title and recipe instead), settings, the reference token maps, price, the user's rating (-1 = thumbs down, 1–3 = stars) and every review so far, then `frames` frames evenly spaced from the first to the last (JPEG, 512 px wide, each captioned \"t = 2.4 s\"), followed by the reference images it was made from (include_references) so you can compare identity, outfit, pose and place – and with include_audio the clip's own sound (MP3, up to 30 s from audio_start) plus the reference voice windows (@AudioN), for clients that take audio. Afterwards record what you saw with add_review, and anything that generalises with save_learning. Free; changes nothing.",
       input: {
         generation_id: z.string(),
         frames: z.number().int().min(1).max(12).default(6).describe('How many frames, first to last. Default 6.'),
@@ -496,7 +496,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
           .describe('With include_audio: where the sound starts, in seconds – to hear a long version past its first 30 s.')
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'granskade en generering'
+      summary: () => 'reviewed a generation'
     },
     async ({ generation_id, frames, include_references, include_audio, audio_start }) => {
       const g = requireGeneration(generation_id)
@@ -509,7 +509,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         created: localTime(g.createdAt),
         model: g.model,
         prompt: g.prompt,
-        // An import or a Redigera version: how it was made instead of a prompt.
+        // An import or an Editor version: how it was made instead of a prompt.
         ...(g.recipe ? { recipe: recipeInfo(g.recipe) } : {}),
         // What Venice actually got, when the descriptions of its references were appended to the prompt.
         ...(g.sentPrompt && g.sentPrompt !== g.prompt ? { sent_prompt: g.sentPrompt } : {}),
@@ -521,7 +521,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         reviews,
         ...(g.error ? { error: g.error } : {})
       }
-      const summary = `granskade ${g.source && g.source !== 'generated' ? 'videon' : 'genereringen'} ${q(generationTitle(g, 40))}`
+      const summary = `reviewed the ${g.source && g.source !== 'generated' ? 'video' : 'generation'} ${q(generationTitle(g, 40))}`
       if (g.status !== 'completed') {
         data.note =
           g.status === 'failed'
@@ -535,7 +535,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
       let file: string | undefined
       let length = 0
       try {
-        file = requireVideoFile(g.filePath, 'Genereringen')
+        file = requireVideoFile(g.filePath, 'The generation')
         length = await videoLength(file, g.videoDuration)
         data.video_seconds = seconds(length)
         const times = spreadTimes(0, lastFrameTime(length), frames).map((t) => clampTime(t, length))
@@ -605,24 +605,24 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
           .describe(`Frame width in pixels (256–${MAX_FRAME_WIDTH}). Default ${FRAME_WIDTH}.`)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: ({ times }) => `tittade på ${times.length === 1 ? 'en bildruta' : `${times.length} bildrutor`}`
+      summary: ({ times }) => `looked at ${times.length === 1 ? 'a frame' : `${times.length} frames`}`
     },
     async ({ generation_id, export_id, times, width }) => {
-      if (!generation_id === !export_id) throw new Error('Ange antingen generation_id eller export_id.')
+      if (!generation_id === !export_id) throw new Error('Give either generation_id or export_id.')
       let file: string
       let length: number
       let what: string
       if (generation_id) {
         const g = requireGeneration(generation_id)
-        if (g.status !== 'completed') throw new Error('Genereringen är inte färdig, så den har inga bildrutor än.')
-        file = requireVideoFile(g.filePath, 'Genereringen')
+        if (g.status !== 'completed') throw new Error('The generation isn\'t finished, so it has no frames yet.')
+        file = requireVideoFile(g.filePath, 'The generation')
         length = await videoLength(file, g.videoDuration)
         what = `Generation ${g.id}`
       } else {
         const exp = await requireExport(export_id!)
         file = exp.path
         length = await videoLength(file, exp.duration)
-        what = `Film ${exp.sequenceName ? `”${exp.sequenceName}”` : basename(exp.path)}`
+        what = `Film ${exp.sequenceName ? `"${exp.sequenceName}"` : basename(exp.path)}`
       }
       const clamped = [...new Set(times.map((t) => Math.round(clampTime(t, length) * 1000) / 1000))]
       const images = await framesAt(file, clamped, (caption) => `${what} – ${caption}`, width)
@@ -645,14 +645,14 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List exported films',
       description:
-        "Films exported from sequences and storyboards (newest first): export_id, the sequence or storyboard it came from (if it still exists), the file, when it was made, its length, its cuts (where the clips meet, in seconds; recorded since Redigera came, so older films have none) and whether the file is still on disk. Look at one with review_export or get_frames; change it with create_edit({export_id}).",
+        "Films exported from sequences and storyboards (newest first): export_id, the sequence or storyboard it came from (if it still exists), the file, when it was made, its length, its cuts (where the clips meet, in seconds; recorded since the Editor came, so older films have none) and whether the file is still on disk. Look at one with review_export or get_frames; change it with create_edit({export_id}).",
       input: {
         sequence_id: z.string().optional().describe('Only films exported from this sequence.'),
         storyboard_id: z.string().optional().describe('Only films exported from this storyboard.'),
         limit: z.number().int().min(1).max(100).default(20)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'listade exporterade filmer'
+      summary: () => 'listed the exported films'
     },
     async ({ sequence_id, storyboard_id, limit }) => {
       const owner = storyboard_id ?? sequence_id
@@ -691,7 +691,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         audio_start: z.number().min(0).default(0).describe('With include_audio: where the sound starts, in seconds.')
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'granskade en film'
+      summary: () => 'reviewed a film'
     },
     async ({ export_id, frames_per_clip, include_cut_frames, include_audio, audio_start }) => {
       const exp = await requireExport(export_id)
@@ -794,7 +794,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         data,
         images,
         audio,
-        summary: `granskade filmen ${q(exp.sequenceName ?? basename(exp.path))}`
+        summary: `reviewed the film ${q(exp.sequenceName ?? basename(exp.path))}`
       }
     }
   )
@@ -812,13 +812,13 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         frames_per_clip: z.number().int().min(2).max(6).default(3).describe('Frames per clip, first and last included (2–6). Default 3.')
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'granskade en sekvens'
+      summary: () => 'reviewed a sequence'
     },
     async ({ sequence_id, frames_per_clip }) => {
       requireLibrary()
       if (isStoryboardId(sequence_id)) {
         throw new Error(
-          'Det här är en storyboard, inte en sekvens. Granska dess övergångar en och en med review_generation (get_storyboard visar tagningarna) och en exporterad film med review_export.'
+          'This is a storyboard, not a sequence. Review its transitions one by one with review_generation (get_storyboard lists the takes) and an exported film with review_export.'
         )
       }
       const sequence = await loadSequence(sequence_id)
@@ -884,7 +884,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
           how_to_review: CONTINUITY_CHECKLIST
         },
         images,
-        summary: `granskade sekvensen ${q(sequence.name)}`
+        summary: `reviewed the sequence ${q(sequence.name)}`
       }
     }
   )
@@ -896,15 +896,15 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Add review',
       description:
-        "Records your review of a generation, under your name, next to the user's own rating and other agents' reviews (Studio shows them in the clip's details). Be honest and specific: a grade – rating -1 (tumme ner, thumbs down: the prompt wasn't followed, or it is unusable) or 1–3 stars (1 = usable with clear flaws, 2 = good with small flaws, 3 = exactly what the prompt asked for) – tags from the suggested vocabulary, and a note that says what worked and what didn't, naming tokens and moments (\"@Image2's outfit turned blue after t = 4 s; the dolly-in worked\"). Look first with review_generation. Each call adds a new review; to remove one (a review about the wrong generation, say), ask the user with request_delete. Free.",
+        "Records your review of a generation, under your name, next to the user's own rating and other agents' reviews (Studio shows them in the clip's details). Be honest and specific: a grade – rating -1 (thumbs down: the prompt wasn't followed, or it is unusable) or 1–3 stars (1 = usable with clear flaws, 2 = good with small flaws, 3 = exactly what the prompt asked for) – tags from the suggested vocabulary, and a note that says what worked and what didn't, naming tokens and moments (\"@Image2's outfit turned blue after t = 4 s; the dolly-in worked\"). Look first with review_generation. Each call adds a new review; to remove one (a review about the wrong generation, say), ask the user with request_delete. Free.",
       input: {
         generation_id: z.string(),
-        rating: ratingInput.optional().describe('-1 = tumme ner (dålig), 1–3 = stjärnor'),
+        rating: ratingInput.optional().describe('-1 = thumbs down (bad), 1–3 = stars'),
         tags: tagList.optional(),
-        note: z.string().min(1).max(2000).describe('What you saw, in English or Swedish.')
+        note: z.string().min(1).max(2000).describe('What you saw, in any language.')
       },
       annotations: WRITE,
-      summary: ({ rating }) => (rating ? `recenserade en generering (${gradeText(rating)})` : 'recenserade en generering')
+      summary: ({ rating }) => (rating ? `reviewed a generation (${gradeText(rating)})` : 'reviewed a generation')
     },
     async ({ generation_id, rating, tags, note }) => {
       const g = requireGeneration(generation_id)
@@ -916,7 +916,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
       )
       return {
         data: reviewInfo(review),
-        summary: `recenserade ${q(generationTitle(g, 40))}${rating ? ` (${gradeText(rating)})` : ''}`
+        summary: `reviewed ${q(generationTitle(g, 40))}${rating ? ` (${gradeText(rating)})` : ''}`
       }
     }
   )
@@ -928,19 +928,19 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List reviews',
       description:
-        "Reviews of generations, newest first: the user's own (author \"user\": their rating and note – the most important signal of what they like) and agents'. Filter by generation_id, by author, by tag (e.g. \"identity-drift\" to see when characters drift), or by grade (min_rating for stars, thumbs_down for tumme ner). Each review outside a single generation comes with that generation's prompt and model, so you can see which prompts got which verdicts.",
+        "Reviews of generations, newest first: the user's own (author \"user\": their rating and note – the most important signal of what they like) and agents'. Filter by generation_id, by author, by tag (e.g. \"identity-drift\" to see when characters drift), or by grade (min_rating for stars, thumbs_down for a thumbs down). Each review outside a single generation comes with that generation's prompt and model, so you can see which prompts got which verdicts.",
       input: {
         generation_id: z.string().optional(),
         author: z.string().optional().describe('"user" for the user\'s own reviews, or an agent\'s name.'),
         tag: z.string().optional(),
         min_rating: minStarsInput
           .optional()
-          .describe('Only reviews with at least this many stars (1–3); a tumme ner (-1) never passes.'),
-        thumbs_down: z.boolean().optional().describe('true: only reviews that gave tumme ner (thumbs down, -1).'),
+          .describe('Only reviews with at least this many stars (1–3); a thumbs down (-1) never passes.'),
+        thumbs_down: z.boolean().optional().describe('true: only reviews that gave a thumbs down (-1).'),
         limit: z.number().int().min(1).max(100).default(20)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'läste recensionerna'
+      summary: () => 'read the reviews'
     },
     async ({ generation_id, author, tag, min_rating, thumbs_down, limit }) => {
       requireLibrary()
@@ -984,7 +984,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Save learning',
       description:
-        "Records a learning: a short, general insight about prompting that should change how prompts are written from now on, distilled from reviewed results – e.g. title \"Outfit token after the character\", insight \"Seedance 2.5: naming the outfit right after the character's tokens keeps the outfit; when the outfit token comes first it drifts.\" Give the model it applies to (leave it out if it holds for every model), tags, and evidence: the generation ids it is based on. Learnings are listed in Studio (Prompter → Lärdomar) and at the end of get_studio_guide for every later session, so write them for a reader who wasn't there; check list_learnings first and update your own learning instead of saving a duplicate. Free.",
+        "Records a learning: a short, general insight about prompting that should change how prompts are written from now on, distilled from reviewed results – e.g. title \"Outfit token after the character\", insight \"Seedance 2.5: naming the outfit right after the character's tokens keeps the outfit; when the outfit token comes first it drifts.\" Give the model it applies to (leave it out if it holds for every model), tags, and evidence: the generation ids it is based on. Learnings are listed in Studio (Prompts → Learnings) and at the end of get_studio_guide for every later session, so write them for a reader who wasn't there; check list_learnings first and update your own learning instead of saving a duplicate. Free.",
       input: {
         title: z.string().min(1).max(120),
         insight: z.string().min(1).max(2000),
@@ -993,7 +993,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         evidence: z.array(z.string()).max(50).optional().describe('Generation ids the learning is based on.')
       },
       annotations: WRITE,
-      summary: ({ title }) => `sparade lärdomen ${q(title)}`
+      summary: ({ title }) => `saved the learning ${q(title)}`
     },
     async ({ title, insight, model, tags, evidence }) => {
       requireLibrary()
@@ -1005,7 +1005,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         evidence: evidence ?? []
       }
       const saved = await callService<Learning>('learnings:save', input, ctx.clientName())
-      return { data: learningInfo(saved), summary: `sparade lärdomen ${q(saved.title)}` }
+      return { data: learningInfo(saved), summary: `saved the learning ${q(saved.title)}` }
     }
   )
 
@@ -1026,7 +1026,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         evidence: z.array(z.string()).max(50).optional()
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'ändrade en lärdom'
+      summary: () => 'changed a learning'
     },
     async ({ learning_id, title, insight, model, tags, evidence }) => {
       const current = await requireOwnLearning(ctx, learning_id)
@@ -1040,7 +1040,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         ...(evidence ? { evidence } : {})
       }
       const saved = await callService<Learning>('learnings:save', input, ctx.clientName())
-      return { data: learningInfo(saved), summary: `ändrade lärdomen ${q(saved.title)}` }
+      return { data: learningInfo(saved), summary: `changed the learning ${q(saved.title)}` }
     }
   )
 
@@ -1060,7 +1060,7 @@ export function registerReviewTools(server: McpServer, ctx: ToolContext): void {
         limit: z.number().int().min(1).max(200).default(50)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'läste lärdomarna'
+      summary: () => 'read the learnings'
     },
     async ({ query, model, tag, author, limit }) => {
       // Studio filters (every word of the query in title, insight, model or tags; a model's learnings plus the

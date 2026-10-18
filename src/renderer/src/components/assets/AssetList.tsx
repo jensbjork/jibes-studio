@@ -33,7 +33,7 @@ interface Props {
   onDelete: (assetId: string, nextId: string | undefined) => Promise<void>
 }
 
-/** Karaktärer, Miljöer, Produkter, Kläder or Poser: the shared side list, with drops of Finder files on a row. */
+/** Characters, Environments, Products, Outfits or Poses: the shared side list, with drops of Finder files on a row. */
 export default function AssetList({
   kind,
   assets,
@@ -53,14 +53,15 @@ export default function AssetList({
   return (
     <SideList
       title={copy.plural}
-      createLabel={copy.newName}
+      // "＋ New": "Environments ＋ New environment" doesn't fit the list's header; the tooltip names the kind.
+      createLabel="New"
       createTitle={copy.newName}
       onCreate={onCreate}
       creating={creating}
       items={ready ? assets : undefined}
       selectedId={selectedId}
       onSelect={onSelect}
-      searchPlaceholder="Sök namn eller beskrivning"
+      searchPlaceholder="Search name or description"
       searchText={(a) => a.description}
       emptyText={copy.listHint}
       deleteQuestion={(a) => deleteAssetQuestion(a)}
@@ -91,23 +92,23 @@ interface ItemProps {
   onDropFiles: (paths: string[]) => void
 }
 
-/** "3 bilder · röst · i Röd klänning": what the asset has, short enough for the list column. */
+/** "3 images · voice · in Red dress": what the asset has, short enough for the list column. */
 function summary(a: Asset, outfitName: string | undefined): string {
   const parts = [imageCountLabel(a.images.length)]
   const audio = ASSET_COPY[a.kind].audio
   if (audio && assetAudio(a).length) parts.push(audio.listLabel)
-  if (outfitName) parts.push(`i ${outfitName}`)
+  if (outfitName) parts.push(`in ${outfitName}`)
   return parts.join(' · ')
 }
 
 /**
- * What Pågår och klart says about an asset (only characters have work of their own so far: a voice made with AI):
- * "Skapar en röst…", "1 ny röst", "… · 1 misslyckades".
+ * What Activity says about an asset (only characters have work of their own so far: a voice made with AI):
+ * "Creating a voice…", "1 new voice", "… · 1 failed".
  */
 function workTitle(c: WorkCounts): string | undefined {
   const parts: string[] = []
-  if (c.running > 0) parts.push(c.running === 1 ? 'Skapar en röst…' : `Skapar ${c.running} röster…`)
-  if (c.unseen > 0) parts.push(c.unseen === 1 ? '1 ny röst' : `${c.unseen} nya röster`)
+  if (c.running > 0) parts.push(c.running === 1 ? 'Creating a voice…' : `Creating ${c.running} voices…`)
+  if (c.unseen > 0) parts.push(c.unseen === 1 ? '1 new voice' : `${c.unseen} new voices`)
   if (c.failed > 0) parts.push(failedText(c.failed))
   return parts.length ? parts.join(' · ') : undefined
 }
@@ -150,16 +151,16 @@ function AssetListItem({ asset: a, control, outfitName, addingImages, addingAudi
       name={a.name}
       meta={
         over
-          ? 'Släpp för att lägga till'
+          ? 'Drop to add'
           : addingImages
-            ? 'Lägger till bilder…'
+            ? 'Adding images…'
             : addingAudio
-              ? 'Lägger till ljud…'
+              ? 'Adding sound…'
               : summary(a, outfitName)
       }
       status={<StatusMark running={work.running} fresh={work.unseen} failed={work.failed} variant="inline" />}
       title={title}
-      deleteTitle={`Radera ${ASSET_COPY[a.kind].definite}`}
+      deleteTitle={`Delete ${ASSET_COPY[a.kind].definite}`}
       highlight={over}
       dropHandlers={{ onDragEnter, onDragOver, onDragLeave, onDrop }}
     />

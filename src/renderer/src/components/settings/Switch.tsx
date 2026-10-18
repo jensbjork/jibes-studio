@@ -1,4 +1,4 @@
-/** An on/off switch for Inställningar. Name it with `label` or with `labelledBy` (the id of its visible text). */
+/** An on/off switch for Settings. Name it with `label` or with `labelledBy` (the id of its visible text). */
 export default function Switch({
   on,
   disabled,

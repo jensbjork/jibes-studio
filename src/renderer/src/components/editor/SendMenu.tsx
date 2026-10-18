@@ -5,13 +5,13 @@ import { mediaUrl } from '../../lib/media'
 import { FilmIcon, PlusIcon } from '../sequences/icons'
 import { menuRow, onMenuKeyDown, SubView } from '../storyboards/ui'
 
-// "Skicka till": a version into Sekvenser — as a new take of the clip the film came from (when it was a take), or as
+// "Send to": a version into Sequences — as a new take of the clip the film came from (when it was a take), or as
 // a new clip at the end of any sequence (or a new one). The version is used where it is; nothing is copied.
 
 export interface SentTo {
   sequenceId: string
   segmentId: string
-  /** "”Strandscen” (klipp 4)": for the notice. */
+  /** "“Beach scene” (clip 4)": for the notice. */
   where: string
 }
 
@@ -37,7 +37,7 @@ export default function SendMenu({
       const result = await window.studio.sendEditToSequence(versionId, target)
       const sequence = await window.studio.getSequence(result.sequenceId).catch(() => undefined)
       const index = sequence?.segments.findIndex((s) => s.id === result.segmentId) ?? -1
-      onSent({ ...result, where: `”${sequence?.name ?? name}”${index >= 0 ? ` (klipp ${index + 1})` : ''}` })
+      onSent({ ...result, where: `“${sequence?.name ?? name}”${index >= 0 ? ` (clip ${index + 1})` : ''}` })
     } catch (e) {
       onError(ipcErrorMessage(e))
     } finally {
@@ -47,14 +47,14 @@ export default function SendMenu({
 
   if (picking) {
     return (
-      <SubView title="Som nytt klipp sist i…" onBack={() => setPicking(false)}>
+      <SubView title="As a new clip at the end of…" onBack={() => setPicking(false)}>
         <SequenceChoice busy={busy} onPick={(id, name) => void send({ sequenceId: id }, name)} onError={onError} />
       </SubView>
     )
   }
 
   return (
-    <div role="menu" aria-label="Skicka till" onKeyDown={onMenuKeyDown} className="p-1">
+    <div role="menu" aria-label="Send to" onKeyDown={onMenuKeyDown} className="p-1">
       {asTake && (
         <button
           type="button"
@@ -66,9 +66,9 @@ export default function SendMenu({
           className={`${menuRow} flex-col items-start gap-0.5`}
         >
           <span>
-            Som ny tagning av klipp {origin.clipNumber ?? ''} i ”{origin.sequenceName ?? 'sekvensen'}”
+            As a new take of clip {origin.clipNumber ?? ''} in “{origin.sequenceName ?? 'the sequence'}”
           </span>
-          <span className="text-[11px] leading-snug text-muted">Den väljs i klippet; den gamla tagningen finns kvar.</span>
+          <span className="text-[11px] leading-snug text-muted">It’s selected in the clip; the old take is kept.</span>
         </button>
       )}
       <button
@@ -79,8 +79,8 @@ export default function SendMenu({
         onClick={() => setPicking(true)}
         className={`${menuRow} flex-col items-start gap-0.5`}
       >
-        <span>Som nytt klipp i en sekvens…</span>
-        <span className="text-[11px] leading-snug text-muted">Läggs sist; nästa AI-klipp kan fortsätta från det.</span>
+        <span>As a new clip in a sequence…</span>
+        <span className="text-[11px] leading-snug text-muted">Added at the end; the next AI clip can continue from it.</span>
       </button>
     </div>
   )
@@ -123,9 +123,9 @@ function SequenceChoice({
     <div className="flex min-h-0 flex-col">
       <div className="max-h-64 min-h-0 overflow-y-auto p-1">
         {!sequences ? (
-          <p className="px-3 py-3 text-center text-muted">Hämtar sekvenser…</p>
+          <p className="px-3 py-3 text-center text-muted">Loading sequences…</p>
         ) : sequences.length === 0 ? (
-          <p className="px-3 py-3 text-[12px] text-muted">Inga sekvenser än – skapa en nedan.</p>
+          <p className="px-3 py-3 text-[12px] text-muted">No sequences yet – create one below.</p>
         ) : (
           sequences.map((s) => (
             <button
@@ -143,7 +143,7 @@ function SequenceChoice({
                 )}
               </span>
               <span className="min-w-0 flex-1 truncate">{s.name}</span>
-              <span className="shrink-0 text-[11px] text-muted">{s.segmentCount} klipp</span>
+              <span className="shrink-0 text-[11px] text-muted">{s.segmentCount} {s.segmentCount === 1 ? 'clip' : 'clips'}</span>
             </button>
           ))
         )}
@@ -158,8 +158,8 @@ function SequenceChoice({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Ny sekvens"
-          aria-label="Namn på ny sekvens"
+          placeholder="New sequence"
+          aria-label="Name of the new sequence"
           className="min-w-0 flex-1 rounded-md border border-line bg-raised px-2 py-1 text-[12px] outline-none focus:border-muted"
         />
         <button
@@ -168,7 +168,7 @@ function SequenceChoice({
           className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
         >
           <PlusIcon size={11} />
-          Skapa
+          Create
         </button>
       </form>
     </div>

@@ -83,7 +83,7 @@ export function modeOf(referenceCount: number): ImageMode {
 export function modelsForMode(models: readonly ImageModel[], mode: ImageMode): ImageModel[] {
   return models
     .filter((m) => m.edit === (mode === 'edit'))
-    .sort((a, b) => Number(a.offline) - Number(b.offline) || a.name.localeCompare(b.name, 'sv'))
+    .sort((a, b) => Number(a.offline) - Number(b.offline) || a.name.localeCompare(b.name, 'en'))
 }
 
 /**
@@ -180,36 +180,36 @@ export function formatImagePrice(usd: number | undefined): string {
   return `$${rounded.toFixed(4).replace(/0{1,2}$/, '')}`
 }
 
-/** "16:9 · liggande", "Auto (som basbilden)". */
+/** "16:9 · landscape", "Auto (like the base image)". */
 export function aspectRatioLabel(ratio: string): string {
-  if (ratio === 'auto') return 'Auto (som basbilden)'
+  if (ratio === 'auto') return 'Auto (like the base image)'
   const [w, h] = ratio.split(':').map(Number)
   if (!w || !h) return ratio
-  return `${ratio} · ${w === h ? 'kvadrat' : w > h ? 'liggande' : 'stående'}`
+  return `${ratio} · ${w === h ? 'square' : w > h ? 'landscape' : 'portrait'}`
 }
 
-const QUALITY_LABELS: Record<string, string> = { low: 'Låg', medium: 'Medel', high: 'Hög' }
+const QUALITY_LABELS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
 export function qualityLabel(quality: string): string {
   return QUALITY_LABELS[quality] ?? quality
 }
 
 const SOURCE_LABELS: Record<Still['source'], string> = {
-  generated: 'Skapad bild',
-  upload: 'Egen bild',
-  frame: 'Bildruta ur ett klipp'
+  generated: 'Created image',
+  upload: 'Own image',
+  frame: 'Frame from a clip'
 }
 
 export function stillSourceLabel(still: Pick<Still, 'source'>): string {
-  return SOURCE_LABELS[still.source] ?? 'Bild'
+  return SOURCE_LABELS[still.source] ?? 'Image'
 }
 
-/** "i dag 14:02", "3 okt. 14:02". */
+/** "today 14:02", "3 Oct 14:02". */
 export function formatStillTime(ms: number): string {
   const d = new Date(ms)
-  const time = d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
-  if (new Date().toDateString() === d.toDateString()) return `i dag ${time}`
-  return `${d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })} ${time}`
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  if (new Date().toDateString() === d.toDateString()) return `today ${time}`
+  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${time}`
 }
 
 /**
@@ -241,7 +241,7 @@ export function stillParamsForSubmit(params: StillParams, model: ImageModel | un
 // ── Storyboard boards ─────────────────────────────────────────────────────────
 
 /**
- * "Använd föregående bild som referens": the references with the previous board's image first (on) or without it
+ * "Use the previous image as a reference": the references with the previous board's image first (on) or without it
  * (off). The others keep their order; the previous image is never in the list twice.
  */
 export function withPreviousReference(references: readonly string[], previous: string, on: boolean): string[] {

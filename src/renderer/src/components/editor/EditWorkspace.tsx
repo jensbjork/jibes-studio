@@ -18,8 +18,8 @@ import { useEdit, useTimeline, useTranscript } from './useEdit'
 import { useRunner, type PendingConfirm } from './useEditOps'
 import VersionsPanel from './VersionsPanel'
 
-// One edit open, beside Redigera's list: the header, the player and the timeline, and Åtgärder above Versioner on the
-// right. Operations work on the current version; the player can show another one beside it (Jämför ⇄). Keys: space,
+// One edit open, beside the Editor's list: the header, the player and the timeline, and Actions above Versions on the
+// right. Operations work on the current version; the player can show another one beside it (Compare ⇄). Keys: space,
 // J/K/L, ← → (frames, with ⇧ seconds), I/O, Esc, ⌘Z/⌘⇧Z.
 
 interface Notice {
@@ -38,7 +38,7 @@ function loadTab(): EditorTab {
   }
 }
 
-/** Show this version in the player once the edit has loaded ("Gå dit" in Pågår och klart, an agent's open_in_studio). */
+/** Show this version in the player once the edit has loaded ("Go there" in Activity, an agent's open_in_studio). */
 export interface ShowVersionRequest {
   versionId: string
   /** An agent asked: showing it isn't the user choosing it, so it isn't marked seen (playing it still is). */
@@ -198,7 +198,7 @@ export default function EditWorkspace({
       if (e.defaultPrevented) return
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]')) return
-      // Space and Enter on a button reached with the keyboard (a version row, Använd, a tab) press that button. One
+      // Space and Enter on a button reached with the keyboard (a version row, Use, a tab) press that button. One
       // that only has focus because it was clicked leaves Space to the player, as before (see focusOrigin.ts: a key
       // press turns :focus-visible on, so it can't tell).
       if (
@@ -265,7 +265,7 @@ export default function EditWorkspace({
       <div className="flex h-full flex-col">
         <div className="drag h-12 shrink-0 border-b border-line" />
         <div className="flex flex-1 items-center justify-center text-muted">
-          {error ?? 'Laddar redigeringen…'}
+          {error ?? 'Loading the edit…'}
         </div>
       </div>
     )
@@ -298,13 +298,13 @@ export default function EditWorkspace({
       tone: 'success',
       text: (
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>Skickad till {sent.where}.</span>
+          <span>Sent to {sent.where}.</span>
           <button
             type="button"
             onClick={() => navigate('sequences', { type: 'open-sequence', sequenceId: sent.sequenceId, segmentId: sent.segmentId })}
             className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
           >
-            Öppna sekvensen
+            Open the sequence
           </button>
         </span>
       )
@@ -316,14 +316,14 @@ export default function EditWorkspace({
       text: (
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>
-            Undertexterna sparades: <span className="font-mono">{fileName(path)}</span>
+            Subtitles saved: <span className="font-mono">{fileName(path)}</span>
           </span>
           <button
             type="button"
             onClick={() => window.studio.revealFile(path)}
             className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
           >
-            Visa i Finder
+            Show in Finder
           </button>
         </span>
       )
@@ -353,7 +353,7 @@ export default function EditWorkspace({
         )}
         {error && (
           <Banner tone="error">
-            Redigeringen kunde inte läsas in på nytt: {error}
+            The edit couldn’t be reloaded: {error}
           </Banner>
         )}
         <div className="flex min-h-0 flex-1">
@@ -375,7 +375,7 @@ export default function EditWorkspace({
               opRange={opRange}
             />
           </div>
-          {/* Narrower in a narrow window, where Redigera's list beside it leaves the player little room. */}
+          {/* Narrower in a narrow window, where the Editor's list beside it leaves the player little room. */}
           <aside className="flex w-[320px] shrink-0 flex-col border-l border-line @min-[61rem]/main:w-[380px] @min-[83rem]/main:w-[440px]">
             <ActionsPanel tab={tab} onTab={setTab} />
             <VersionsPanel
@@ -414,18 +414,18 @@ export default function EditWorkspace({
 function PriceConfirm({ pending, onAnswer }: { pending: PendingConfirm; onAnswer: (yes: boolean) => void }) {
   const price = pending.priceUsd !== undefined ? formatPrice(pending.priceUsd) : undefined
   const text = pending.check.unknown
-    ? 'Venice anger inget pris för det här i förväg. Det dras från ditt saldo hos Venice när det skickas.'
+    ? 'Venice gives no price for this in advance. It’s charged to your Venice balance when it’s sent.'
     : pending.check.partial
-      ? `Det kostar minst ${price}. ${pending.priceNote ? `${pending.priceNote.replace(/\.$/, '')}.` : 'En del anger Venice inget pris för i förväg.'}`
-      : `Det här kostar ${price}.`
+      ? `It costs at least ${price}. ${pending.priceNote ? `${pending.priceNote.replace(/\.$/, '')}.` : 'Venice gives no price in advance for part of it.'}`
+      : `This costs ${price}.`
   return (
     <ConfirmDialog
       title={`${pending.label}?`}
-      confirmLabel={pending.check.expensive && price ? `Fortsätt · ${price}` : 'Fortsätt'}
+      confirmLabel={pending.check.expensive && price ? `Continue · ${price}` : 'Continue'}
       onConfirm={() => onAnswer(true)}
       onCancel={() => onAnswer(false)}
     >
-      {text} Fortsätt?
+      {text} Continue?
     </ConfirmDialog>
   )
 }

@@ -1,17 +1,17 @@
-// Pure planning helpers for Redigera, shared by main (plans and jobs), the window (live previews of a plan) and the
+// Pure planning helpers for the Editor, shared by main (plans and jobs), the window (live previews of a plan) and the
 // agents' tools: snapping a marked range to what an operation allows, cutting a long voice into chunks Venice bills
 // as few minutes as possible for, turning word timestamps into lines, carrying a transcript across a cut, SRT,
-// fitting a new line into the gap the old one left, the Swedish labels of operations and the price arithmetic.
+// fitting a new line into the gap the old one left, the labels of operations and the price arithmetic.
 // Pure (no Node or DOM), like everything in src/shared.
 
 import type { AudioGenModel, EditOperation, EditRange, TranscriptSegment, TranscriptWord } from './types'
 
-/** Läs in repliker på nytt: the most lines one operation takes (the window, the plans and the agents' schema). */
+/** Re-recording lines: the most lines one operation takes (the window, the plans and the agents' schema). */
 export const MAX_SPEAK_LINES = 200
 
 // ── Numbers as the window shows them ─────────────────────────────────────────
 
-/** "0:41,0" (minutes, seconds and tenths; hours when there are any: "1:02:03,4"). Negative and NaN read as 0. */
+/** "0:41.0" (minutes, seconds and tenths; hours when there are any: "1:02:03.4"). Negative and NaN read as 0. */
 export function formatTimecode(seconds: number): string {
   const tenths = Math.round((Number.isFinite(seconds) ? Math.max(0, seconds) : 0) * 10)
   const h = Math.floor(tenths / 36_000)
@@ -19,12 +19,12 @@ export function formatTimecode(seconds: number): string {
   const s = Math.floor((tenths % 600) / 10)
   const d = tenths % 10
   const ss = String(s).padStart(2, '0')
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss},${d}` : `${m}:${ss},${d}`
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}.${d}` : `${m}:${ss}.${d}`
 }
 
-/** "4,0 s": seconds with one decimal and a Swedish decimal comma. */
+/** "4.0 s": seconds with one decimal. (The name is kept from when it wrote a Swedish decimal comma.) */
 export function formatSecondsSv(seconds: number): string {
-  return `${(Math.round(seconds * 10) / 10).toFixed(1).replace('.', ',')} s`
+  return `${(Math.round(seconds * 10) / 10).toFixed(1)} s`
 }
 
 /**
@@ -52,7 +52,7 @@ export interface SnapOptions {
   wholeSeconds?: boolean
   /** The only lengths the model makes (seconds); the nearest one is used. */
   allowed?: number[]
-  /** Points an edge sticks to when it is near: cut markers (Klippgränser), transcript line edges. */
+  /** Points an edge sticks to when it is near: cut markers, transcript line edges. */
   cuts?: number[]
   /** How near (seconds) an edge must be to a cut to stick to it; default 0.2. */
   tolerance?: number
@@ -61,21 +61,21 @@ export interface SnapOptions {
 /** Below this a change of the range isn't worth a note (well under a frame at any frame rate). */
 const SNAP_EPSILON = 0.005
 
-function listSv(values: number[]): string {
-  const parts = values.map((v) => String(v).replace('.', ','))
-  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} eller ${parts[parts.length - 1]}` : parts[0]
+function listText(values: number[]): string {
+  const parts = values.map((v) => String(v))
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} or ${parts[parts.length - 1]}` : parts[0]
 }
 
 /**
  * The marked range as the operation will use it: inside the film, its edges on cut markers they are near and on the
  * frame grid, and its length one the operation allows (whole seconds, one of the model's lengths, min–max). A length
  * change keeps the start and moves the end, or moves the start back when the end would pass the film's end. `note`
- * says (in Swedish) how the range changed when it changed visibly; `problem` says why the operation can't run on
+ * says how the range changed when it changed visibly; `problem` says why the operation can't run on
  * this film at all (the film is shorter than the operation's shortest length, nothing is marked).
  */
 export function snapRange(r: EditRange, o: SnapOptions): { range: EditRange; note?: string; problem?: string } {
   const duration = Number.isFinite(o.duration) ? Math.max(0, o.duration) : 0
-  if (!(duration > 0)) return { range: { start: 0, end: 0 }, problem: 'Filmen har ingen längd att markera i.' }
+  if (!(duration > 0)) return { range: { start: 0, end: 0 }, problem: 'The film has no length to mark in.' }
   const fps = o.fps && Number.isFinite(o.fps) && o.fps > 0 ? o.fps : undefined
   const clampT = (t: number): number => Math.min(duration, Math.max(0, Number.isFinite(t) ? t : 0))
   let start = clampT(Math.min(r.start, r.end))
@@ -118,7 +118,7 @@ export function snapRange(r: EditRange, o: SnapOptions): { range: EditRange; not
   if (length < frame / 2 && !constrained) {
     return {
       range: { start: round6(start), end: round6(start) },
-      problem: 'Markeringen är tom. Dra över tidslinjen för att markera ett avsnitt.'
+      problem: 'The selection is empty. Drag across the timeline to mark a section.'
     }
   }
 
@@ -127,20 +127,20 @@ export function snapRange(r: EditRange, o: SnapOptions): { range: EditRange; not
   const allowed = (o.allowed ?? []).filter((a) => Number.isFinite(a) && a > 0).sort((a, b) => a - b)
   if (allowed.length) {
     wanted = allowed.reduce((best, a) => (Math.abs(a - length) < Math.abs(best - length) ? a : best), allowed[0])
-    why = allowed.length <= 4 ? `modellen gör bara ${listSv(allowed)} s` : 'modellen gör hela sekunder'
+    why = allowed.length <= 4 ? `the model only makes ${listText(allowed)} s` : 'the model makes whole seconds'
   } else if (o.wholeSeconds) {
     wanted = Math.max(1, Math.round(length))
-    why = 'modellen gör hela sekunder'
+    why = 'the model makes whole seconds'
   }
   if (o.min !== undefined && wanted < o.min - 1e-9) {
     wanted = allowed.length ? (allowed.find((a) => a >= o.min! - 1e-9) ?? o.min) : o.min
     if (o.wholeSeconds) wanted = Math.ceil(wanted - 1e-9)
-    why = `kortast ${String(o.min).replace('.', ',')} s`
+    why = `at least ${String(o.min)} s`
   }
   if (o.max !== undefined && wanted > o.max + 1e-9) {
     wanted = allowed.length ? ([...allowed].reverse().find((a) => a <= o.max! + 1e-9) ?? o.max) : o.max
     if (o.wholeSeconds) wanted = Math.floor(wanted + 1e-9)
-    why = `längst ${String(o.max).replace('.', ',')} s`
+    why = `at most ${String(o.max)} s`
   }
   // A length that isn't fixed by the model stays on the frame grid (rounded inwards to the limit it hit).
   if (fps && !allowed.length && !o.wholeSeconds && Math.abs(wanted - length) > 1e-9) {
@@ -149,7 +149,7 @@ export function snapRange(r: EditRange, o: SnapOptions): { range: EditRange; not
   if (wanted > duration + 1e-6) {
     return {
       range: { start: 0, end: round6(duration) },
-      problem: `Filmen är bara ${formatSecondsSv(duration)} lång – åtgärden behöver minst ${formatSecondsSv(wanted)}.`
+      problem: `The film is only ${formatSecondsSv(duration)} long – the operation needs at least ${formatSecondsSv(wanted)}.`
     }
   }
   if (Math.abs(wanted - length) > 1e-9) {
@@ -162,7 +162,7 @@ export function snapRange(r: EditRange, o: SnapOptions): { range: EditRange; not
   const range = { start: round6(start), end: round6(end) }
   const moved = Math.abs(range.end - range.start - length) > SNAP_EPSILON
   return moved && why
-    ? { range, note: `Markeringen justeras till ${formatSecondsSv(range.end - range.start)} — ${why}` }
+    ? { range, note: `The selection is adjusted to ${formatSecondsSv(range.end - range.start)} — ${why}` }
     : { range }
 }
 
@@ -541,91 +541,91 @@ function excerpt(text: string, max = 32): string {
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t
 }
 
-const rangeSv = (r: EditRange): string => `${formatTimecode(r.start)}–${formatTimecode(r.end)}`
-const dbSv = (db: number): string => `${db > 0 ? '+' : db < 0 ? '−' : '±'}${String(Math.abs(Math.round(db * 10) / 10)).replace('.', ',')} dB`
-const secondsShort = (s: number): string => `${String(Math.round(s * 10) / 10).replace('.', ',')} s`
+const rangeText = (r: EditRange): string => `${formatTimecode(r.start)}–${formatTimecode(r.end)}`
+const dbText = (db: number): string => `${db > 0 ? '+' : db < 0 ? '−' : '±'}${String(Math.abs(Math.round(db * 10) / 10))} dB`
+const secondsShort = (s: number): string => `${String(Math.round(s * 10) / 10)} s`
 
 /**
- * What an operation did, in Swedish, for the version list and the jobs ("Bytte röst → Aria", "Musik: lugnt piano").
+ * What an operation did, for the version list and the jobs ("Changed voice → Aria", "Music: calm piano").
  * `voiceName` names the voice of a voice operation, `mediaLabel` the sound an add-audio or layer operation uses.
  */
 export function operationLabel(op: EditOperation, ctx: { voiceName?: string; mediaLabel?: string } = {}): string {
   const target = (t: 'all' | 'voice' | 'background' | undefined): string =>
-    t === 'voice' ? ' på rösten' : t === 'background' ? ' på bakgrunden' : ''
+    t === 'voice' ? ' on the voice' : t === 'background' ? ' on the background' : ''
   switch (op.op) {
     case 'trim':
-      return `Behöll ${rangeSv(op.keep)}`
+      return `Kept ${rangeText(op.keep)}`
     case 'cut':
-      return `Klippte bort ${rangeSv(op.range)}`
+      return `Cut out ${rangeText(op.range)}`
     case 'fade': {
       const fin = op.inSeconds && op.inSeconds > 0 ? op.inSeconds : 0
       const fout = op.outSeconds && op.outSeconds > 0 ? op.outSeconds : 0
-      if (fin && fout) return `Tonade in ${secondsShort(fin)} och ut ${secondsShort(fout)}`
-      return fin ? `Tonade in från svart ${secondsShort(fin)}` : `Tonade ut till svart ${secondsShort(fout)}`
+      if (fin && fout) return `Faded in ${secondsShort(fin)} and out ${secondsShort(fout)}`
+      return fin ? `Faded in from black ${secondsShort(fin)}` : `Faded out to black ${secondsShort(fout)}`
     }
     case 'volume':
-      return `Volym ${dbSv(op.gainDb)}${target(op.target)}${op.range ? ` ${rangeSv(op.range)}` : ''}`
+      return `Volume ${dbText(op.gainDb)}${target(op.target)}${op.range ? ` ${rangeText(op.range)}` : ''}`
     case 'mute':
       if (!op.range) {
-        if (op.target === 'voice') return 'Tog bort rösten'
-        if (op.target === 'background') return 'Bara rösten'
-        return 'Tystade hela filmen'
+        if (op.target === 'voice') return 'Removed the voice'
+        if (op.target === 'background') return 'Voice only'
+        return 'Muted the whole film'
       }
       return op.target === 'voice'
-        ? `Tystade rösten ${rangeSv(op.range)}`
+        ? `Muted the voice ${rangeText(op.range)}`
         : op.target === 'background'
-          ? `Tystade bakgrunden ${rangeSv(op.range)}`
-          : `Tystade ${rangeSv(op.range)}`
+          ? `Muted the background ${rangeText(op.range)}`
+          : `Muted ${rangeText(op.range)}`
     case 'denoise':
-      return `Tog bort brus (${op.strength === 'strong' ? 'stark' : 'mild'})`
+      return `Removed noise (${op.strength === 'strong' ? 'strong' : 'mild'})`
     case 'loudness':
-      return `Jämnade ut ljudnivån till ${String(op.lufs).replace('-', '−')} LUFS`
+      return `Evened out the loudness to ${String(op.lufs).replace('-', '−')} LUFS`
     case 'add-audio':
       return op.replaceBed
-        ? `Ersatte originalljudet${ctx.mediaLabel ? `: ${excerpt(ctx.mediaLabel)}` : ''}`
-        : `La till ljud${ctx.mediaLabel ? `: ${excerpt(ctx.mediaLabel)}` : ''}`
+        ? `Replaced the original sound${ctx.mediaLabel ? `: ${excerpt(ctx.mediaLabel)}` : ''}`
+        : `Added sound${ctx.mediaLabel ? `: ${excerpt(ctx.mediaLabel)}` : ''}`
     case 'layer': {
       const name = ctx.mediaLabel ? ` ${excerpt(ctx.mediaLabel)}` : ''
-      if (op.remove) return `Tog bort lagret${name}`
-      if (op.at !== undefined && op.gainDb === undefined) return `Flyttade lagret${name}`
-      return `Ändrade lagret${name}`
+      if (op.remove) return `Removed the layer${name}`
+      if (op.at !== undefined && op.gainDb === undefined) return `Moved the layer${name}`
+      return `Changed the layer${name}`
     }
     case 'transcribe':
-      return 'Transkriberade'
+      return 'Transcribed'
     case 'change-voice': {
-      const voice = ctx.voiceName ?? (op.voice.kind === 'preset' ? op.voice.voice : 'eget röst-ID')
-      return `Bytte röst → ${voice}`
+      const voice = ctx.voiceName ?? (op.voice.kind === 'preset' ? op.voice.voice : 'own voice ID')
+      return `Changed voice → ${voice}`
     }
     case 'speak-lines': {
-      const voice = ctx.voiceName ?? (op.voice.kind === 'preset' ? op.voice.voice : op.voice.kind === 'custom' ? 'eget röst-ID' : 'klonad röst')
+      const voice = ctx.voiceName ?? (op.voice.kind === 'preset' ? op.voice.voice : op.voice.kind === 'custom' ? 'own voice ID' : 'cloned voice')
       const n = op.lines.length
-      if (n === 1 && op.lines[0].segmentId === undefined) return `Ny replik: ${excerpt(op.lines[0].text)} (${voice})`
-      return `Läste in ${n} ${n === 1 ? 'replik' : 'repliker'} (${voice})`
+      if (n === 1 && op.lines[0].segmentId === undefined) return `New line: ${excerpt(op.lines[0].text)} (${voice})`
+      return `Recorded ${n} ${n === 1 ? 'line' : 'lines'} (${voice})`
     }
     case 'music':
-      return `Musik: ${excerpt(op.prompt)}`
+      return `Music: ${excerpt(op.prompt)}`
     case 'effect':
-      return `Ljudeffekt: ${excerpt(op.prompt)}`
+      return `Sound effect: ${excerpt(op.prompt)}`
     case 'regenerate':
-      return `Gjorde om ${rangeSv(op.range)}`
+      return `Regenerated ${rangeText(op.range)}`
     case 'prompt-edit':
-      return `Ändrade ${rangeSv(op.range)}: ${excerpt(op.prompt, 28)}`
+      return `Edited ${rangeText(op.range)}: ${excerpt(op.prompt, 28)}`
     case 'extend':
-      return `Förlängde ${secondsShort(op.seconds)}`
+      return `Extended ${secondsShort(op.seconds)}`
     case 'upscale':
-      return `Uppskalade ${op.factor}×`
+      return `Upscaled ${op.factor}×`
   }
 }
 
-/** What a frame of a picture operation's plan (plan.frames) shows: Swedish for the dialogs, English for the agents. */
+/** What a frame of a picture operation's plan (plan.frames) shows: short for the dialogs, fuller for the agents. */
 export interface FrameCaption {
-  sv: string
+  ui: string
   en: string
 }
 
 /**
- * The captions of a picture operation's start and end frames (plan.frames): what Gör om avsnittet starts and ends on,
- * where Förläng continues from, what Ändra med prompt rewrites. A range starting at the film's first frame starts on
+ * The captions of a picture operation's start and end frames (plan.frames): what Regenerate section starts and ends on,
+ * where Extend continues from, what Edit with prompt rewrites. A range starting at the film's first frame starts on
  * that frame, which the take replaces too.
  */
 export function frameCaptions(op: EditOperation | undefined): { start: FrameCaption; end: FrameCaption } {
@@ -633,33 +633,33 @@ export function frameCaptions(op: EditOperation | undefined): { start: FrameCapt
     case 'extend':
       return {
         start: {
-          sv: 'Filmens sista bildruta – förlängningen fortsätter härifrån',
+          ui: "The film's last frame – the extension continues from here",
           en: "Start frame: the film's last frame (the extension continues from it)"
         },
-        end: { sv: 'Slutbild', en: 'End frame' }
+        end: { ui: 'End image', en: 'End frame' }
       }
     case 'prompt-edit':
       return {
-        start: { sv: 'Första bildrutan i markeringen', en: 'The first frame of the range (the stretch the change rewrites)' },
-        end: { sv: 'Sista bildrutan i markeringen', en: 'The last frame of the range' }
+        start: { ui: 'The first frame of the selection', en: 'The first frame of the range (the stretch the change rewrites)' },
+        end: { ui: 'The last frame of the selection', en: 'The last frame of the range' }
       }
     case 'regenerate':
       return {
         start:
           op.range.start <= 1e-3
             ? {
-                sv: 'Filmens första bildruta – avsnittet börjar där',
+                ui: "The film's first frame – the section starts there",
                 en: "Start frame: the film's first frame (the range starts at the film's start)"
               }
-            : { sv: 'Sista bildrutan före markeringen', en: 'Start frame (the last frame before the range)' },
-        end: { sv: 'Första bildrutan efter markeringen', en: 'End frame (the first frame after the range)' }
+            : { ui: 'The last frame before the selection', en: 'Start frame (the last frame before the range)' },
+        end: { ui: 'The first frame after the selection', en: 'End frame (the first frame after the range)' }
       }
     default:
-      return { start: { sv: 'Startbild', en: 'Start frame' }, end: { sv: 'Slutbild', en: 'End frame' } }
+      return { start: { ui: 'Start image', en: 'Start frame' }, end: { ui: 'End image', en: 'End frame' } }
   }
 }
 
-/** The video-input models Ändra med prompt offers, with the source lengths each takes (seconds). */
+/** The video-input models Edit with prompt offers, with the source lengths each takes (seconds). */
 export const PICTURE_EDIT_MODELS: Record<
   string,
   { label: string; minSeconds: number; maxSeconds: number; referenceImages: boolean; kind: 'r2v-edit' | 'v2v' }
@@ -733,7 +733,7 @@ export function totalPrice(parts: readonly (number | undefined)[]): { priceUsd?:
   return { priceUsd: roundUsd(known.reduce((sum, p) => sum + p, 0)), partialPrice: known.length < parts.length }
 }
 
-/** The price note of a per-minute billed operation: "debiteras per påbörjad minut: 3 min". */
+/** The price note of a per-minute billed operation: "billed per started minute: 3 min". */
 export function minuteBillingNote(minutes: number): string {
-  return `debiteras per påbörjad minut: ${Math.max(0, Math.round(minutes))} min`
+  return `billed per started minute: ${Math.max(0, Math.round(minutes))} min`
 }

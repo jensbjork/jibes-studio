@@ -50,10 +50,10 @@ export function spreadTimes(from: number, to: number, count: number): number[] {
   return out
 }
 
-/** The video exists on disk; tools say so in Swedish when it doesn't. */
+/** The video exists on disk; tools say so when it doesn't. */
 export function requireVideoFile(path: string | undefined, what: string): string {
-  if (!path) throw new Error(`${what} har ingen videofil.`)
-  if (!existsSync(path)) throw new Error(`${what} finns inte längre på disken (flyttad eller raderad i Finder?).`)
+  if (!path) throw new Error(`${what} has no video file.`)
+  if (!existsSync(path)) throw new Error(`${what} is no longer on disk (moved or deleted in Finder?).`)
   return path
 }
 

@@ -1,5 +1,5 @@
 // Export of the whole library to one zip file, and import of such a file in another Studio installation
-// (Inställningar → Export och import).
+// (Settings → Export & import).
 //
 // Export: a consistent copy of the database (SQLite's online backup, taken while the app runs) and every file in the
 // library's own folders are packed by macOS's /usr/bin/zip, which streams them from disk (media stored as they are,
@@ -17,7 +17,7 @@
 // exactly as when the user picks a library folder (setLibraryRoot 'open'). The library open before stays where it is.
 // Nothing that exists is ever overwritten.
 //
-// Only the user does either, from Inställningar: no agent tool reaches them, and the handlers refuse an agent's call.
+// Only the user does either, from Settings: no agent tool reaches them, and the handlers refuse an agent's call.
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, realpathSync, rmSync, statSync, type Dirent } from 'node:fs'
@@ -75,16 +75,16 @@ const CACHE_KEPT_WHEN_USED = new Set<string>([APP_DATA.thumbs, APP_DATA.frames, 
 /** Finder's own files. */
 const IGNORABLE = new Set(['.DS_Store', '.localized'])
 
-const USER_ONLY = 'Det här kan bara du göra i Studio.'
-const RUNNING = 'En export eller import av biblioteket pågår redan. Vänta tills den är klar.'
-const EXPORT_RUNNING = 'Biblioteket exporteras just nu. Vänta tills exporten är klar och försök igen.'
-const NO_LIBRARY = 'Inget bibliotek är öppet.'
-const NOT_STUDIO = 'Filen är inte en export av ett Studio-bibliotek.'
+const USER_ONLY = 'Only you can do this in Studio.'
+const RUNNING = 'A library export or import is already running. Wait until it is done.'
+const EXPORT_RUNNING = 'The library is being exported right now. Wait until the export is done and try again.'
+const NO_LIBRARY = 'No library is open.'
+const NOT_STUDIO = 'The file is not an export of a Studio library.'
 const NEWER_ARCHIVE =
-  'Biblioteket i filen har sparats av en nyare version av Studio. Uppdatera appen för att importera det.'
+  'The library in the file was saved by a newer version of Studio. Update the app to import it.'
 const DAMAGED =
-  'Filen är skadad eller ofullständig: innehållet stämmer inte med det som exporterades. Exportera biblioteket igen.'
-const UNSAFE = 'Filen innehåller sökvägar eller länkar som pekar utanför biblioteket och importeras inte.'
+  "The file is damaged or incomplete: its content doesn't match what was exported. Export the library again."
+const UNSAFE = 'The file contains paths or links that point outside the library and is not imported.'
 
 const POLL_MS = 500
 /** Room left on the disk beyond the zip or the unpacked library. */
@@ -136,7 +136,7 @@ export function configureLibraryArchive(d: ArchiveDeps): void {
   deps = d
 }
 
-/** A running export, in Swedish, for the library's busy reason: no switch or clean-up moves files under it. */
+/** A running export, in words, for the library's busy reason: no switch or clean-up moves files under it. */
 export function archiveBusyReason(): string | undefined {
   return job?.kind === 'export' ? EXPORT_RUNNING : undefined
 }
@@ -152,30 +152,30 @@ function emit(p: ArchiveProgress): void {
 
 // ── Small helpers ────────────────────────────────────────────────────────────
 
-/** "1,2 GB", "820 MB". */
+/** "1.2 GB", "820 MB". */
 function sizeText(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toLocaleString('sv-SE', { maximumFractionDigits: 1 })} GB`
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toLocaleString('en-GB', { maximumFractionDigits: 1 })} GB`
   return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`
 }
 
-/** "”a”", "”a”, ”b” och 3 till". */
+/** "“a”", "“a”, “b” and 3 more". */
 function someNames(names: string[]): string {
-  const shown = names.slice(0, 3).map((n) => `”${basename(n)}”`)
+  const shown = names.slice(0, 3).map((n) => `“${basename(n)}”`)
   const more = names.length - shown.length
-  return more > 0 ? `${shown.join(', ')} och ${more} till` : shown.join(', ')
+  return more > 0 ? `${shown.join(', ')} and ${more} more` : shown.join(', ')
 }
 
-/** A file system error as a Swedish reason; Studio's own errors pass through. */
+/** A file system error as a plain reason; Studio's own errors pass through. */
 function reason(err: unknown): string {
   const code = (err as NodeJS.ErrnoException | undefined)?.code
-  if (code === 'EROFS') return 'disken är skrivskyddad'
-  if (code === 'EEXIST') return 'det finns redan något med samma namn'
-  if (code === 'ENOTEMPTY') return 'mappen är inte tom'
-  if (code === 'EIO' || code === 'ENXIO') return 'disken gick inte att läsa (är den ansluten?)'
+  if (code === 'EROFS') return 'the disk is write-protected'
+  if (code === 'EEXIST') return 'something with the same name already exists'
+  if (code === 'ENOTEMPTY') return 'the folder is not empty'
+  if (code === 'EIO' || code === 'ENXIO') return 'the disk could not be read (is it connected?)'
   return fileErrorReason(err)
 }
 
-function asSwedish(err: unknown, what: string): Error {
+function withReason(err: unknown, what: string): Error {
   if (err instanceof Cancelled) return err
   const syscall = (err as NodeJS.ErrnoException | undefined)?.syscall
   if (typeof syscall === 'string') return new Error(`${what}: ${reason(err)}.`)
@@ -218,8 +218,8 @@ async function ensureRoom(dir: string, bytes: number, what: string): Promise<voi
   const free = await freeSpace(dir)
   if (free === undefined || free >= bytes + SPACE_MARGIN) return
   throw new Error(
-    `Det får inte plats: ${what} ungefär ${sizeText(bytes)}, men det finns bara ${sizeText(free)} ledigt där. ` +
-      'Välj en annan disk eller frigör utrymme.'
+    `It doesn't fit: ${what} about ${sizeText(bytes)}, but there is only ${sizeText(free)} free there. ` +
+      'Choose another disk or free up space.'
   )
 }
 
@@ -505,7 +505,7 @@ function checkDatabase(file: string, manifest: ArchiveManifest): DatabaseInfo {
     if (db.isNewerSchema(version)) throw new Error(NEWER_ARCHIVE)
     const integrity = conn.pragma('integrity_check', { simple: true })
     if (integrity !== 'ok') {
-      throw new Error('Databasen i filen är skadad (SQLite:s kontroll hittade fel). Exportera biblioteket igen.')
+      throw new Error("The database in the file is damaged (SQLite's check found errors). Export the library again.")
     }
     const info = describeDatabase(conn)
     const same =
@@ -516,7 +516,7 @@ function checkDatabase(file: string, manifest: ArchiveManifest): DatabaseInfo {
   } catch (err) {
     const code = (err as { code?: unknown } | undefined)?.code
     if (typeof code === 'string' && code.startsWith('SQLITE_')) {
-      throw new Error('Databasen i filen gick inte att öppna; filen är troligen skadad. Exportera biblioteket igen.')
+      throw new Error('The database in the file could not be opened; the file is probably damaged. Export the library again.')
     }
     throw err
   } finally {
@@ -585,7 +585,7 @@ async function walk(j: Job, root: string, rel: string, list: FileList): Promise<
   try {
     entries = await readdir(join(root, rel), { withFileTypes: true })
   } catch (err) {
-    throw new Error(`Mappen ”${rel}” gick inte att läsa: ${reason(err)}.`)
+    throw new Error(`The folder “${rel}” could not be read: ${reason(err)}.`)
   }
   const inAppData = rel === FOLDERS.appData
   let kept = 0
@@ -636,9 +636,9 @@ async function listLibraryFiles(j: Job, root: string, kept: readonly string[]): 
 
 function zipFailure(code: number | null, stderr: string): string {
   // zip's own exit codes: 14 writing failed (a full disk), 15 the zip couldn't be created there.
-  if (code === 14 || /no space/i.test(stderr)) return 'Zip-filen gick inte att skriva klart. Är disken full?'
-  if (code === 15) return 'Zip-filen gick inte att skapa där. Välj en annan mapp.'
-  return `Packningen avbröts (zip avslutades med kod ${code ?? 'okänd'}).`
+  if (code === 14 || /no space/i.test(stderr)) return 'The zip file could not be finished. Is the disk full?'
+  if (code === 15) return 'The zip file could not be created there. Choose another folder.'
+  return `Packing stopped (zip ended with code ${code ?? 'unknown'}).`
 }
 
 /** Adds the files to the zip; resolves with those that vanished or couldn't be read meanwhile. */
@@ -648,7 +648,7 @@ async function packFiles(j: Job, root: string, part: string, list: FileList, tot
   const stop = poll(j, async () => {
     const s = await stat(part)
     if (!j.polling) return
-    emit({ kind: 'export', phase: 'packing', done: Math.min(s.size, total), total, message: 'Packar filerna…' })
+    emit({ kind: 'export', phase: 'packing', done: Math.min(s.size, total), total, message: 'Packing the files…' })
   })
   try {
     // -g appends to the zip in place (it only grows, so its size is the progress), -0 stores the files as they are
@@ -676,14 +676,14 @@ function leftOutNote(missing: string[], skipped: string[]): string | undefined {
   const notes: string[] = []
   if (missing.length) {
     notes.push(
-      `${missing.length === 1 ? 'En fil' : `${missing.length} filer`} togs bort, flyttades eller gick inte att läsa ` +
-        `medan exporten pågick och kom inte med: ${someNames(missing)}. Exportera igen om du behöver ` +
-        `${missing.length === 1 ? 'den' : 'dem'}.`
+      `${missing.length === 1 ? 'One file was' : `${missing.length} files were`} deleted, moved or unreadable ` +
+        `while the export ran and did not come along: ${someNames(missing)}. Export again if you need ` +
+        `${missing.length === 1 ? 'it' : 'them'}.`
     )
   }
   if (skipped.length) {
     notes.push(
-      `${skipped.length === 1 ? 'En länk' : `${skipped.length} länkar`} i biblioteksmapparna följde inte med: ` +
+      `${skipped.length === 1 ? 'One link' : `${skipped.length} links`} in the library folders did not come along: ` +
         `${someNames(skipped)}.`
     )
   }
@@ -695,18 +695,18 @@ function exportTarget(path: string, root: string): string {
   let target = resolve(path).normalize('NFC')
   if (extname(target).toLowerCase() !== '.zip') target += '.zip'
   if (libraryFolders().some((name) => isWithin(target, join(root, name)))) {
-    throw new Error('Spara zip-filen utanför biblioteket, till exempel i Hämtade filer.')
+    throw new Error('Save the zip file outside the library, for example in Downloads.')
   }
-  if (!existsSync(dirname(target))) throw new Error(`Mappen ”${dirname(target)}” finns inte.`)
+  if (!existsSync(dirname(target))) throw new Error(`The folder “${dirname(target)}” does not exist.`)
   try {
-    if (statSync(target).isDirectory()) throw new Error(`”${basename(target)}” är en mapp. Välj ett filnamn.`)
+    if (statSync(target).isDirectory()) throw new Error(`“${basename(target)}” is a folder. Choose a file name.`)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
   return target
 }
 
-/** Why an export can't start now, in Swedish. */
+/** Why an export can't start now. */
 function exportRefusal(): string | undefined {
   if (job) return RUNNING
   if (!isLibraryReady()) return NO_LIBRARY
@@ -718,7 +718,7 @@ function exportRefusal(): string | undefined {
  * once the new zip is complete). Resolves null when it was called off.
  */
 export async function exportLibraryTo(path: string): Promise<ArchiveResult | null> {
-  if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Välj var zip-filen ska sparas.')
+  if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Choose where to save the zip file.')
   const refusal = exportRefusal()
   if (refusal) throw new Error(refusal)
   const target = exportTarget(path, libraryRoot())
@@ -726,7 +726,7 @@ export async function exportLibraryTo(path: string): Promise<ArchiveResult | nul
 }
 
 async function runExport(j: Job, target: string): Promise<ArchiveResult> {
-  emit({ kind: 'export', phase: 'preparing', message: 'Gör en kopia av databasen…' })
+  emit({ kind: 'export', phase: 'preparing', message: 'Copying the database…' })
   // A clean-up or switch already under way finishes first; a new one is refused while this runs (archiveBusyReason).
   await libraryOperationSettled()
   checkCancelled(j)
@@ -742,25 +742,25 @@ async function runExport(j: Job, target: string): Promise<ArchiveResult> {
   try {
     await db.getDb().backup(snapshot)
   } catch (err) {
-    throw new Error(`Databasen gick inte att kopiera: ${reason(err)}.`)
+    throw new Error(`The database could not be copied: ${reason(err)}.`)
   }
   // Read in the same tick as the copy finished, so it matches it.
   const keptCache = cacheFilesInUse()
   const info = finishSnapshot(snapshot)
   checkCancelled(j)
 
-  emit({ kind: 'export', phase: 'preparing', message: 'Går igenom filerna…' })
+  emit({ kind: 'export', phase: 'preparing', message: 'Going through the files…' })
   const list = await listLibraryFiles(j, root, keptCache)
   const snapshotBytes = (await stat(snapshot)).size
   const total = list.bytes + snapshotBytes
-  await ensureRoom(dirname(target), total, 'zip-filen blir')
+  await ensureRoom(dirname(target), total, 'the zip file will be')
   checkCancelled(j)
 
   // Written beside the target and renamed when complete, so a zip by that name is always a whole one.
   const part = `${target}.part`
   j.partials.add(part)
   await rm(part, { force: true })
-  emit({ kind: 'export', phase: 'packing', done: 0, total, message: 'Packar filerna…' })
+  emit({ kind: 'export', phase: 'packing', done: 0, total, message: 'Packing the files…' })
   // The database copy goes in first, from the staging folder, under the same path as in the library.
   const first = await runTool(j, ZIP, ['-q', '-nw', '-b', staging, part, '--', DATABASE_ENTRY], { cwd: staging })
   checkCancelled(j)
@@ -770,7 +770,7 @@ async function runExport(j: Job, target: string): Promise<ArchiveResult> {
   if (list.skipped.length) console.warn(`Export: skipped ${list.skipped.length} links or special files.`)
 
   // The manifest last: it describes what the zip really holds.
-  emit({ kind: 'export', phase: 'packing', done: total, total, message: 'Gör klart…' })
+  emit({ kind: 'export', phase: 'packing', done: total, total, message: 'Finishing…' })
   const listing = await listArchive(part, j)
   const manifest: ArchiveManifest = {
     format: FORMAT,
@@ -792,7 +792,7 @@ async function runExport(j: Job, target: string): Promise<ArchiveResult> {
   try {
     await rename(part, target)
   } catch (err) {
-    throw asSwedish(err, 'Zip-filen kunde inte sparas')
+    throw withReason(err, 'The zip file could not be saved')
   }
   j.partials.delete(part)
   const bytes = (await stat(target)).size
@@ -803,7 +803,7 @@ async function runExport(j: Job, target: string): Promise<ArchiveResult> {
 
 // ── Import ───────────────────────────────────────────────────────────────────
 
-/** Why an import can't start now, in Swedish (it ends by switching libraries, which would be refused). */
+/** Why an import can't start now (it ends by switching libraries, which would be refused). */
 function importRefusal(): string | undefined {
   if (job) return RUNNING
   return deps.busy()
@@ -812,32 +812,32 @@ function importRefusal(): string | undefined {
 /** The destination: a new folder, or an empty one, outside the open library and writable. */
 async function checkDestination(target: string): Promise<void> {
   const file = await lstat(target).catch(() => undefined)
-  if (file && !file.isDirectory()) throw new Error(`”${basename(target)}” är en fil. Välj ett namn för en ny mapp.`)
+  if (file && !file.isDirectory()) throw new Error(`“${basename(target)}” is a file. Choose a name for a new folder.`)
   const ins = await inspectLibraryFolder(target)
   // Elsewhere in the open library's base folder is fine (as for opening a library kept there); inside its own folders,
   // which a move carries along and a clean-up works in, it is not.
   const root = isLibraryReady() ? libraryRoot() : undefined
   if (ins.isCurrent || (root && libraryFolders().some((name) => isWithin(target, join(root, name))))) {
-    throw new Error('Välj en plats utanför det bibliotek som är öppet nu.')
+    throw new Error('Choose a place outside the library that is open now.')
   }
-  if (ins.hasLibrary) throw new Error('Mappen innehåller redan ett Studio-bibliotek. Välj en ny eller tom mapp.')
+  if (ins.hasLibrary) throw new Error('The folder already holds a Studio library. Choose a new or empty folder.')
   if (!ins.empty) {
     throw new Error(
-      `Mappen ”${basename(target)}” är inte tom. Välj en ny eller tom mapp – Studio skriver aldrig över något.`
+      `The folder “${basename(target)}” is not empty. Choose a new or empty folder – Studio never overwrites anything.`
     )
   }
-  if (!ins.writable) throw new Error(`Studio kan inte skriva i ”${dirname(target)}”. Välj en annan plats.`)
+  if (!ins.writable) throw new Error(`Studio cannot write in “${dirname(target)}”. Choose another place.`)
 }
 
 /** A new folder next to target to unpack into, named so a leftover from a crash is recognisable in Finder. */
 async function unpackFolder(target: string): Promise<string> {
   for (let n = 1; ; n++) {
-    const dir = `${target} (importeras${n === 1 ? '' : ` ${n}`})`
+    const dir = `${target} (importing${n === 1 ? '' : ` ${n}`})`
     try {
       await mkdir(dir)
       return dir
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST' || n >= 50) throw asSwedish(err, 'Mappen kunde inte skapas')
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST' || n >= 50) throw withReason(err, 'The folder could not be created')
     }
   }
 }
@@ -849,7 +849,7 @@ async function unpack(j: Job, zip: string, dir: string, total: number): Promise<
     const name = current
     const partial = name ? await stat(join(dir, name)).then((s) => s.size, () => 0) : 0
     if (j.polling) {
-      emit({ kind: 'import', phase: 'unpacking', done: Math.min(done + partial, total), total, message: 'Packar upp…' })
+      emit({ kind: 'import', phase: 'unpacking', done: Math.min(done + partial, total), total, message: 'Unpacking…' })
     }
   })
   try {
@@ -872,8 +872,8 @@ async function unpack(j: Job, zip: string, dir: string, total: number): Promise<
     if (r.code !== 0) {
       throw new Error(
         /no space/i.test(r.stderr)
-          ? 'Filen gick inte att packa upp: disken är full.'
-          : 'Filen gick inte att packa upp; den är troligen skadad.'
+          ? 'The file could not be unpacked: the disk is full.'
+          : 'The file could not be unpacked; it is probably damaged.'
       )
     }
   } finally {
@@ -906,26 +906,26 @@ async function checkUnpacked(j: Job, dir: string, listing: ArchiveListing): Prom
 async function clearEmptyFolder(dir: string): Promise<void> {
   const names = await readdir(dir).catch(() => undefined)
   if (!names) return
-  if (names.some((n) => !IGNORABLE.has(n))) throw new Error(`Mappen ”${basename(dir)}” är inte tom längre.`)
+  if (names.some((n) => !IGNORABLE.has(n))) throw new Error(`The folder “${basename(dir)}” is no longer empty.`)
   for (const n of names) await rm(join(dir, n), { force: true })
   await rmdir(dir)
 }
 
 /**
  * Unpacks a Studio export (`zip`) into `target` – a new or empty folder – checks it and opens it as the library, the
- * same way as choosing a library folder in Inställningar; the library open before stays where it is. Resolves null
+ * same way as choosing a library folder in Settings; the library open before stays where it is. Resolves null
  * when it was called off. A library unpacked but refused when opened (something started meanwhile) stays in target.
  */
 export async function importLibraryFrom(zip: string, target: string): Promise<ArchiveResult | null> {
-  if (typeof zip !== 'string' || !isAbsolute(zip)) throw new Error('Välj en zip-fil.')
-  if (typeof target !== 'string' || !isAbsolute(target)) throw new Error('Välj var biblioteket ska ligga.')
+  if (typeof zip !== 'string' || !isAbsolute(zip)) throw new Error('Choose a zip file.')
+  if (typeof target !== 'string' || !isAbsolute(target)) throw new Error('Choose where the library should go.')
   const refusal = importRefusal()
   if (refusal) throw new Error(refusal)
   return runJob('import', (j) => runImport(j, resolve(zip), resolve(target).normalize('NFC')))
 }
 
 async function runImport(j: Job, zip: string, target: string): Promise<ArchiveResult> {
-  emit({ kind: 'import', phase: 'preparing', message: 'Läser filen…' })
+  emit({ kind: 'import', phase: 'preparing', message: 'Reading the file…' })
   const manifest = await readManifest(zip, j)
   const listing = await listArchive(zip, j)
   if (listing.unsafe) throw new Error(UNSAFE)
@@ -936,33 +936,33 @@ async function runImport(j: Job, zip: string, target: string): Promise<ArchiveRe
   try {
     await mkdir(parent, { recursive: true })
   } catch (err) {
-    throw asSwedish(err, `Mappen ”${parent}” kunde inte skapas`)
+    throw withReason(err, `The folder “${parent}” could not be created`)
   }
-  await ensureRoom(parent, listing.bytes + listing.manifestBytes, 'biblioteket tar')
+  await ensureRoom(parent, listing.bytes + listing.manifestBytes, 'the library takes')
   checkCancelled(j)
 
   // Unpacked beside the destination (same disk, so moving it into place is a rename) and only named as the library
   // once it has been checked.
   const dir = await unpackFolder(target)
   j.partials.add(dir)
-  emit({ kind: 'import', phase: 'unpacking', done: 0, total: listing.bytes, message: 'Packar upp…' })
+  emit({ kind: 'import', phase: 'unpacking', done: 0, total: listing.bytes, message: 'Unpacking…' })
   await unpack(j, zip, dir, listing.bytes)
 
-  emit({ kind: 'import', phase: 'checking', message: 'Kontrollerar databasen och filerna…' })
+  emit({ kind: 'import', phase: 'checking', message: 'Checking the database and the files…' })
   await checkUnpacked(j, dir, listing)
   const info = checkDatabase(join(dir, DATABASE_ENTRY), manifest)
   await rm(join(dir, ARCHIVE_MANIFEST), { force: true })
   checkCancelled(j)
 
   j.committed = true
-  emit({ kind: 'import', phase: 'opening', message: 'Öppnar biblioteket…' })
+  emit({ kind: 'import', phase: 'opening', message: 'Opening the library…' })
   // Checked again: something may have been put there while the zip was unpacked.
   await checkDestination(target)
   try {
     if (existsSync(target)) await clearEmptyFolder(target)
     await rename(dir, target)
   } catch (err) {
-    throw asSwedish(err, `Biblioteket kunde inte läggas i ”${basename(target)}”`)
+    throw withReason(err, `The library could not be put in “${basename(target)}”`)
   }
   j.partials.delete(dir)
 
@@ -974,13 +974,13 @@ async function runImport(j: Job, zip: string, target: string): Promise<ArchiveRe
     if (wasReady && !isLibraryReady()) reloadWindows()
     const why = err instanceof Error ? err.message : String(err)
     throw new Error(
-      `Biblioteket packades upp i ”${target}” men kunde inte öppnas: ${why} Du kan öppna det senare under ` +
-        'Inställningar → Bibliotek → Byt mapp.'
+      `The library was unpacked in “${target}” but could not be opened: ${why} You can open it later under ` +
+        'Settings → Library → Change folder.'
     )
   }
   reloadWindows()
   const bytes = (await stat(zip)).size
-  emit({ kind: 'import', phase: 'done', message: 'Biblioteket är importerat och öppnas nu.' })
+  emit({ kind: 'import', phase: 'done', message: 'The library is imported and opens now.' })
   console.info(`Imported a library: ${listing.files} files, schema ${info.version}.`)
   return { path: target, bytes, counts: info.counts }
 }
@@ -1004,10 +1004,10 @@ async function runJob<T>(kind: Job['kind'], fn: (j: Job) => Promise<T>): Promise
   } catch (err) {
     if (j.cancelled && !j.committed) {
       await removePartials(j)
-      emit({ kind, phase: 'cancelled', message: 'Avbrutet. Inget sparades.' })
+      emit({ kind, phase: 'cancelled', message: 'Cancelled. Nothing was saved.' })
       return null
     }
-    const e = asSwedish(err, kind === 'export' ? 'Exporten misslyckades' : 'Importen misslyckades')
+    const e = withReason(err, kind === 'export' ? 'The export failed' : 'The import failed')
     console.warn(`Library ${kind} failed:`, err)
     emit({ kind, phase: 'failed', message: e.message })
     throw e
@@ -1061,9 +1061,9 @@ async function saveDialog(e: IpcMainInvokeEvent, options: SaveDialogOptions): Pr
   return res.canceled || !res.filePath ? undefined : res.filePath
 }
 
-/** "Studio-bibliotek 2026-10-10" for a.zip named so, made unique in dir: "… 2", "… 3". */
+/** "Studio library 2026-10-10" for a.zip named so, made unique in dir: "… 2", "… 3". */
 function freeFolderName(dir: string, zip: string): string {
-  const base = basename(zip, extname(zip)).replace(/[/:]/g, '-').trim() || 'Studio-bibliotek'
+  const base = basename(zip, extname(zip)).replace(/[/:]/g, '-').trim() || 'Studio library'
   for (let n = 1; ; n++) {
     const name = n === 1 ? base : `${base} ${n}`
     if (!existsSync(join(dir, name)) || n > 99) return name
@@ -1079,11 +1079,11 @@ export function registerArchiveIpc(d: ArchiveDeps): void {
     const refusal = exportRefusal()
     if (refusal) throw new Error(refusal)
     const target = await saveDialog(e, {
-      title: 'Exportera biblioteket',
-      message: 'Hela biblioteket packas i en zip-fil. API-nyckeln och agentens token följer inte med.',
-      defaultPath: join(app.getPath('downloads'), `Studio-bibliotek ${dayStamp(new Date())}.zip`),
-      buttonLabel: 'Exportera',
-      filters: [{ name: 'Zip-arkiv', extensions: ['zip'] }],
+      title: 'Export library',
+      message: "The whole library is packed into a zip file. The API key and the agent's token don't come along.",
+      defaultPath: join(app.getPath('downloads'), `Studio library ${dayStamp(new Date())}.zip`),
+      buttonLabel: 'Export',
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }],
       properties: ['createDirectory', 'showOverwriteConfirmation']
     })
     return target ? exportLibraryTo(target) : null
@@ -1095,11 +1095,11 @@ export function registerArchiveIpc(d: ArchiveDeps): void {
     if (refusal) throw new Error(refusal)
     const win = windowOf(e)
     const options = {
-      title: 'Importera ett bibliotek',
-      message: 'Välj en zip-fil som exporterats från Studio.',
-      buttonLabel: 'Välj',
+      title: 'Import a library',
+      message: 'Choose a zip file exported from Studio.',
+      buttonLabel: 'Choose',
       defaultPath: app.getPath('downloads'),
-      filters: [{ name: 'Studio-bibliotek', extensions: ['zip'] }],
+      filters: [{ name: 'Studio library', extensions: ['zip'] }],
       properties: ['openFile' as const]
     }
     const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
@@ -1109,13 +1109,13 @@ export function registerArchiveIpc(d: ArchiveDeps): void {
     await readArchiveManifest(zip)
     const movies = app.getPath('videos')
     const target = await saveDialog(e, {
-      title: 'Var ska biblioteket ligga?',
+      title: 'Where should the library go?',
       message:
-        'Biblioteket packas upp i en ny mapp med det här namnet och öppnas sedan. Det bibliotek du har öppet nu ' +
-        'ligger kvar där det är.',
+        'The library is unpacked into a new folder with this name and then opened. The library you have open now ' +
+        'stays where it is.',
       defaultPath: join(movies, freeFolderName(movies, zip)),
-      buttonLabel: 'Importera',
-      nameFieldLabel: 'Mapp:',
+      buttonLabel: 'Import',
+      nameFieldLabel: 'Folder:',
       properties: ['createDirectory', 'showOverwriteConfirmation']
     })
     return target ? importLibraryFrom(zip, target) : null

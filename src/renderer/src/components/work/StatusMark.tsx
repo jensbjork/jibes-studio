@@ -1,6 +1,6 @@
 import { countsAria } from './workText'
 
-// The marks of Pågår och klart, one system for the whole app: a neutral spinner (with a count) while something
+// The marks of Activity, one system for the whole app: a neutral spinner (with a count) while something
 // runs, a 6 px emerald dot when something finished that the user hasn't seen, an accent dot for a new failure.
 // At most one spinner and one dot per row.
 
@@ -11,7 +11,7 @@ interface SpinnerProps {
   className?: string
 }
 
-/** A small ring with a quarter arc turning: "pågår". Still for reduced motion. */
+/** A small ring with a quarter arc turning: "running". Still for reduced motion. */
 export function Spinner({ size = 12, className = 'text-text' }: SpinnerProps) {
   const stroke = size <= 10 ? 1.25 : 1.5
   const r = (size - stroke) / 2
@@ -106,8 +106,8 @@ interface ChipProps {
   className?: string
 }
 
-/** "Ny": finished and not looked at yet. */
-export function NewChip({ label = 'Ny', variant = 'soft', title, className = '' }: ChipProps) {
+/** "New": finished and not looked at yet. */
+export function NewChip({ label = 'New', variant = 'soft', title, className = '' }: ChipProps) {
   if (variant === 'overlay') {
     return (
       <span

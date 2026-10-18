@@ -8,7 +8,7 @@ import { useCardRun, useEditor } from './EditorContext'
 import { fileName, formatClock, formatLength } from './editorUtils'
 import { Check, GainSlider, PlanNotes, TimeAt } from './ui'
 
-// "Lägg till ljud…" / "Ersätt originalljudet…": a sound from the library (a character's voice, a place's
+// "Add sound…" / "Replace the original…": a sound from the library (a character's voice, a place's
 // soundscape), from this edit's earlier sounds (paid results are reused for free), or from a file (copied into the
 // edit's Ljud/ folder), laid on the film as a layer. Free.
 
@@ -24,12 +24,12 @@ interface Source {
 }
 
 const MEDIA_KIND: Record<EditMedia['kind'], string> = {
-  voice: 'Ny röst',
-  speech: 'Replik',
-  music: 'Musik',
-  effect: 'Ljudeffekt',
-  audio: 'Ljud',
-  bake: 'Mixat ljud'
+  voice: 'New voice',
+  speech: 'Line',
+  music: 'Music',
+  effect: 'Sound effect',
+  audio: 'Sound',
+  bake: 'Mixed sound'
 }
 
 export default function AddAudioDialog({ replace, onClose }: { replace?: boolean; onClose: () => void }) {
@@ -108,24 +108,24 @@ export default function AddAudioDialog({ replace, onClose }: { replace?: boolean
 
   const submit = async () => {
     if (!op) return
-    const outcome = await card.run({ op, label: replace ? 'Ersätt originalljudet' : 'Lägg till ljud' })
+    const outcome = await card.run({ op, label: replace ? 'Replace the original sound' : 'Add sound' })
     if (outcome.ok) onClose()
   }
 
   return (
     <Modal
-      title={replace ? 'Ersätt originalljudet' : 'Lägg till ljud'}
+      title={replace ? 'Replace the original sound' : 'Add sound'}
       subtitle={
         replace
-          ? 'Filmens eget ljud tystas och det du väljer spelas från början i stället.'
-          : 'Ljudet läggs som ett lager på tidslinjen. Gratis – det blir en ny version.'
+          ? 'The film’s own sound is muted and what you choose plays from the start instead.'
+          : 'The sound is laid as a layer on the timeline. Free – it becomes a new version.'
       }
       onClose={onClose}
       maxWidth={520}
       footer={
         <>
           <button type="button" onClick={onClose} className="rounded-md border border-line px-4 py-2 hover:bg-raised">
-            Avbryt
+            Cancel
           </button>
           <button
             type="button"
@@ -133,7 +133,7 @@ export default function AddAudioDialog({ replace, onClose }: { replace?: boolean
             onClick={() => void submit()}
             className="rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
           >
-            {card.running ? 'Skapar version…' : replace ? 'Ersätt ljudet' : 'Lägg till'}
+            {card.running ? 'Creating version…' : replace ? 'Replace the sound' : 'Add'}
           </button>
         </>
       }
@@ -142,8 +142,8 @@ export default function AddAudioDialog({ replace, onClose }: { replace?: boolean
         <div className="flex items-center gap-1 border-b border-line">
           {(
             [
-              ['library', 'Från biblioteket'],
-              ['edit', 'Från redigeringen']
+              ['library', 'From the library'],
+              ['edit', 'From the edit']
             ] as const
           ).map(([id, label]) => (
             <button
@@ -163,7 +163,7 @@ export default function AddAudioDialog({ replace, onClose }: { replace?: boolean
             disabled={adding}
             className="ml-auto rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
           >
-            {adding ? 'Kopierar…' : 'Från fil…'}
+            {adding ? 'Copying…' : 'From file…'}
           </button>
         </div>
 
@@ -173,26 +173,26 @@ export default function AddAudioDialog({ replace, onClose }: { replace?: boolean
           onChoose={setChosen}
           empty={
             tab === 'library'
-              ? 'Inga röster eller ljudmiljöer i biblioteket än. Lägg till dem under Karaktärer och Miljöer.'
-              : 'Inget ljud i den här redigeringen än. Musik, repliker och filer du lägger till hamnar här och kan användas igen gratis.'
+              ? 'No voices or soundscapes in the library yet. Add them under Characters and Environments.'
+              : 'No sound in this edit yet. Music, lines and files you add end up here and can be used again for free.'
           }
         />
         {fileError && <p className="text-[12px] text-accent select-text">{fileError}</p>}
 
         {source && (
           <div className="space-y-3 border-t border-line pt-4">
-            {!replace && <TimeAt label="Börjar vid" value={at} onChange={setAt} player={player} />}
+            {!replace && <TimeAt label="Starts at" value={at} onChange={setAt} player={player} />}
             <GainSlider value={gain} onChange={setGain} />
             {!replace && (
-              <Check checked={duck} onChange={setDuck} hint="Ljudet sänks automatiskt när någon pratar.">
-                Sänk under tal
+              <Check checked={duck} onChange={setDuck} hint="The sound is lowered automatically when someone speaks.">
+                Lower under speech
               </Check>
             )}
-            <Check checked={loop} onChange={setLoop} hint={`Upprepas till filmens slut (${formatLength(duration)}).`}>
-              Loopa
+            <Check checked={loop} onChange={setLoop} hint={`Repeats until the film ends (${formatLength(duration)}).`}>
+              Loop
             </Check>
             <Check checked={fades} onChange={setFades}>
-              Tona in och ut (1 s)
+              Fade in and out (1 s)
             </Check>
           </div>
         )}
@@ -260,7 +260,7 @@ function SourceList({
                 e.stopPropagation()
                 toggle(s)
               }}
-              aria-label={playing === s.key ? 'Stoppa' : `Lyssna på ${s.label}`}
+              aria-label={playing === s.key ? 'Stop' : `Listen to ${s.label}`}
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-raised text-text transition hover:bg-line"
             >
               {playing === s.key ? <PauseIcon size={10} /> : <PlayIcon size={10} className="translate-x-px" />}

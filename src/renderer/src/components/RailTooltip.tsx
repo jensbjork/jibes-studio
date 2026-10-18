@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-// The collapsed sidebar's tooltips: the row's name and, below it, what is going on there ("Sekvenser" /
-// "2 tagningar genereras · 1 ny tagning"). Native titles show late and plain; these appear 250 ms after the
+// The collapsed sidebar's tooltips: the row's name and, below it, what is going on there ("Sequences" /
+// "2 takes generating · 1 new take"). Native titles show late and plain; these appear 250 ms after the
 // pointer settles, at once on keyboard focus, beside the rail, and go away with Esc.
 
 const HOVER_DELAY_MS = 250
@@ -111,7 +111,7 @@ export function useRailTooltip(
 }
 
 // ── The rows of the sidebar and its rail ─────────────────────────────────────
-// Shared by the sidebar's rows, Pågår och klart and the agent's row, so every icon lines up.
+// Shared by the sidebar's rows, Activity and the agent's row, so every icon lines up.
 
 /** Fades labels, headings and inline marks out while the rail collapses (and in as it expands). */
 export function fade(collapsed: boolean): string {

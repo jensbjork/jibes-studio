@@ -20,7 +20,7 @@ interface Props {
   owner: TakeOwnerKind
   /** It is the clip's (or transition's) chosen take. */
   active: boolean
-  /** Its prompt differs from the clip's now ("Använd tagningens prompt" is offered only then). */
+  /** Its prompt differs from the clip's now ("Use the take’s prompt" is offered only then). */
   promptDiffers: boolean
   onView: (view: TakeMenuView) => void
   onClose: () => void
@@ -32,8 +32,8 @@ interface Props {
 
 /**
  * A take's menu (⋯ on the tile, a right-click, or Shift+F10): preview it without choosing it, bring its prompt back,
- * open it in Redigera, show it in Finder, and delete it – the last one asked again in the menu itself. A take
- * Redigera keeps (a version, or the film an edit started from) is only taken off the clip, as main does.
+ * open it in the Editor, show it in Finder, and delete it – the last one asked again in the menu itself. A take
+ * the Editor keeps (a version, or the film an edit started from) is only taken off the clip, as main does.
  */
 export default function TakeMenu({
   anchorRef,
@@ -51,15 +51,15 @@ export default function TakeMenu({
   onDelete
 }: Props) {
   const playable = isPlayable(take)
-  const place = owner === 'storyboard' ? 'övergången' : 'klippet'
+  const place = owner === 'storyboard' ? 'the transition' : 'the clip'
   const kept = take.keptByEdit === true
-  const editorOf = owner === 'storyboard' ? 'övergångens' : 'klippets'
+  const editorOf = owner === 'storyboard' ? 'the transition’s' : 'the clip’s'
   const removeLabel = kept
     ? owner === 'storyboard'
-      ? 'Ta bort från övergången…'
-      : 'Ta bort från klippet…'
-    : 'Radera tagningen…'
-  const label = `Tagningen från ${formatTakeTime(take.createdAt)}`
+      ? 'Remove from the transition…'
+      : 'Remove from the clip…'
+    : 'Delete the take…'
+  const label = `The take from ${formatTakeTime(take.createdAt)}`
 
   // Esc closes the menu only: the transition editor around the strip closes itself on an Esc nobody handled.
   const keepEscape = (e: KeyboardEvent<HTMLElement>) => {
@@ -78,14 +78,14 @@ export default function TakeMenu({
       <div onKeyDown={keepEscape}>
         {view === 'delete' ? (
           <div className="p-3">
-            <p className="mb-1">{kept ? `Ta bort tagningen från ${place}?` : 'Radera tagningen?'}</p>
+            <p className="mb-1">{kept ? `Remove the take from ${place}?` : 'Delete the take?'}</p>
             <p className="mb-3 text-[12px] leading-relaxed text-muted">
-              {kept ? 'Filmen finns kvar i Redigera.' : 'Videofilen flyttas till papperskorgen.'}
+              {kept ? 'The film stays in the Editor.' : 'The video file goes to the Trash.'}
               {!kept && active && (
                 <span className="mt-1.5 block">
                   {owner === 'storyboard'
-                    ? 'Det är den valda tagningen – övergången använder då en annan av sina tagningar.'
-                    : 'Det är den valda tagningen – klippet står utan vald tagning tills du väljer en annan.'}
+                    ? 'It’s the selected take – the transition then uses another of its takes.'
+                    : 'It’s the selected take – the clip has no selected take until you pick another.'}
                 </span>
               )}
             </p>
@@ -95,7 +95,7 @@ export default function TakeMenu({
                 onClick={onClose}
                 className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
               >
-                Avbryt
+                Cancel
               </button>
               <button
                 type="button"
@@ -106,7 +106,7 @@ export default function TakeMenu({
                 }}
                 className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
               >
-                {kept ? 'Ta bort' : 'Radera'}
+                {kept ? 'Remove' : 'Delete'}
               </button>
             </div>
           </div>
@@ -118,15 +118,15 @@ export default function TakeMenu({
               data-menu-item
               autoFocus
               disabled={!playable || active}
-              title={active ? 'Den är redan vald' : playable ? undefined : 'Tagningen kan inte spelas'}
+              title={active ? 'It’s already selected' : playable ? undefined : 'The take can’t be played'}
               onClick={() => {
                 onClose()
                 onPreview()
               }}
               className={menuRow}
             >
-              <span className="flex-1">Förhandsvisa utan att välja</span>
-              <span className="text-[11px] text-muted">⌥-klick</span>
+              <span className="flex-1">Preview without selecting</span>
+              <span className="text-[11px] text-muted">⌥-click</span>
             </button>
             {onUsePrompt && hasReusablePrompt(take) && (
               <button
@@ -134,14 +134,14 @@ export default function TakeMenu({
                 role="menuitem"
                 data-menu-item
                 disabled={!promptDiffers}
-                title={promptDiffers ? `Lägg tagningens prompt i ${editorOf} redigerare` : 'Samma prompt som nu'}
+                title={promptDiffers ? `Put the take’s prompt in ${editorOf} editor` : 'Same prompt as now'}
                 onClick={() => {
                   onClose()
                   onUsePrompt()
                 }}
                 className={menuRow}
               >
-                Använd tagningens prompt
+                Use the take’s prompt
               </button>
             )}
             {onEdit && playable && (
@@ -149,9 +149,9 @@ export default function TakeMenu({
                 type="button"
                 role="menuitem"
                 data-menu-item
-                title={`Öppna tagningen i Redigera och ändra den med AI. ${
-                  owner === 'storyboard' ? 'Övergången' : 'Klippet'
-                } rörs inte förrän du skickar tillbaka en version.`}
+                title={`Open the take in the Editor and change it with AI. The ${
+                  owner === 'storyboard' ? 'transition' : 'clip'
+                } isn’t touched until you send a version back.`}
                 onClick={() => {
                   onClose()
                   onEdit()
@@ -159,7 +159,7 @@ export default function TakeMenu({
                 className={menuRow}
               >
                 <ScissorsIcon size={13} className="shrink-0 text-muted" />
-                Redigera tagningen…
+                Edit the take…
               </button>
             )}
             {take.filePath && !take.fileMissing && (
@@ -173,7 +173,7 @@ export default function TakeMenu({
                 }}
                 className={menuRow}
               >
-                Visa i Finder
+                Show in Finder
               </button>
             )}
             <div className="mx-2 my-1 border-t border-line" />
@@ -182,7 +182,7 @@ export default function TakeMenu({
               role="menuitem"
               data-menu-item
               onClick={() => onView('delete')}
-              title={kept ? `Filmen finns kvar i Redigera; den tas bara bort från ${place}.` : undefined}
+              title={kept ? `The film stays in the Editor; it’s only removed from ${place}.` : undefined}
               className={`${menuRow} text-muted hover:text-accent`}
             >
               {removeLabel}

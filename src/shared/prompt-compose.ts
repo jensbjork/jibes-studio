@@ -5,12 +5,12 @@
 //
 //   References:
 //   - Anna (@Image1, @Image2; voice @Audio1): tall woman in her thirties, short red hair
-//   - Röd klänning (@Image3), worn by Anna (@Image1, @Image2): a red silk dress with thin straps
-//   - Stranden (@Image4): a windswept pebble beach at dawn
+//   - Red dress (@Image3), worn by Anna (@Image1, @Image2): a red silk dress with thin straps
+//   - The beach (@Image4): a windswept pebble beach at dawn
 //
 // Composed at send time, never written into the editor's text: a description edited in the library applies to the
-// next generation, the prompt stays readable, and "Använd igen" can't append it twice. Pure and shared, so the
-// editor's "Läggs till i prompten" box (renderer), the submit (main) and the agent tools all compose exactly the
+// next generation, the prompt stays readable, and "Use again" can't append it twice. Pure and shared, so the
+// editor's "Added to the prompt" box (renderer), the submit (main) and the agent tools all compose exactly the
 // same text.
 
 import { pathKey } from './generation-filter'
@@ -38,7 +38,7 @@ const AUDIO_WORD: Record<PromptLanguage, { voice: string; sound: string }> = {
   sv: { voice: 'röst', sound: 'ljud' }
 }
 
-/** Between an outfit's name and the character wearing it ("Röd klänning (@Image3), worn by Anna (@Image1)"). */
+/** Between an outfit's name and the character wearing it ("Red dress (@Image3), worn by Anna (@Image1)"). */
 const WORN_BY: Record<PromptLanguage, string> = { en: 'worn by', sv: 'bärs av' }
 
 /** What is put after a shortened description. */
@@ -78,7 +78,7 @@ function legendText(text: string): string {
   return (typeof text === 'string' ? text : '').replace(AT_SIGNS, '').replace(/\s+/g, ' ').trim()
 }
 
-/** Whether the params append the descriptions at all ("Ta med beskrivningar"): on unless switched off. */
+/** Whether the params append the descriptions at all ("Include descriptions"): on unless switched off. */
 export function includesDescriptions(params: Pick<GenerationParams, 'includeDescriptions'>): boolean {
   return params.includeDescriptions !== false
 }
@@ -165,7 +165,7 @@ function withImages(d: Draft): string {
 }
 
 /**
- * "Anna (@Image1, @Image2; voice @Audio1)", "Röd klänning (@Image3), worn by Anna (@Image1)": an entry's name, tokens
+ * "Anna (@Image1, @Image2; voice @Audio1)", "Red dress (@Image3), worn by Anna (@Image1)": an entry's name, tokens
  * and wearer, what stays when its description can't.
  */
 function label(d: Draft, language: PromptLanguage): string {

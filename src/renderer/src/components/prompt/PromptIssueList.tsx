@@ -23,7 +23,7 @@ export default function PromptIssueList({ id, issues, onFix, onReveal }: Props) 
         return (
           <li key={issue.key} className="flex items-start gap-2 text-[12px] leading-snug">
             <span
-              aria-label={error ? 'Fel' : 'Varning'}
+              aria-label={error ? 'Error' : 'Warning'}
               className={`mt-[5px] h-2 w-2 shrink-0 rounded-full ${error ? 'bg-accent' : 'bg-amber-400'}`}
             />
             <div className="min-w-0 flex-1">
@@ -31,7 +31,7 @@ export default function PromptIssueList({ id, issues, onFix, onReveal }: Props) 
                 <button
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => onReveal(first)}
-                  title="Visa i prompten"
+                  title="Show in the prompt"
                   className={`text-left hover:underline ${error ? 'text-red-300' : 'text-amber-200'}`}
                 >
                   {issue.message}

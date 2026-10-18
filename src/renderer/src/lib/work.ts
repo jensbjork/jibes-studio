@@ -14,7 +14,7 @@ import { ipcErrorMessage } from './hooks'
 import { mediaPathOf } from './media'
 import type { Navigate } from './navigation'
 
-// Pågår och klart: what Studio is working on and what has finished that the user hasn't looked at yet. Main builds
+// Activity: what Studio is working on and what has finished that the user hasn't looked at yet. Main builds
 // the whole picture (WorkSummary, see src/main/work.ts) and pushes it on every change; this module keeps the latest
 // one for the window, lets every view select the small part it shows without re-rendering on unrelated pushes, and
 // owns the renderer half of the seen rule: playing a video or sound for a second, a picture or failure being on
@@ -32,7 +32,7 @@ const LOCAL_SEEN_MS = 30_000
  * finishes), and the mark must not be lost in between.
  */
 const WANTED_MS = 10_000
-/** How long the "n markerade som sedda · Ångra" toast stays. Main keeps the rows for undo as long. */
+/** How long the "n marked as seen · Undo" toast stays. Main keeps the rows for undo as long. */
 const TOAST_MS = 10_000
 
 /** The latest summary from main (highest revision). */
@@ -158,7 +158,7 @@ export function getWork(): WorkSummary {
   return shown
 }
 
-/** The whole summary; re-renders on every change. For the panel and the sidebar's Pågår och klart row. */
+/** The whole summary; re-renders on every change. For the panel and the sidebar's Activity row. */
 export function useWork(): WorkSummary {
   return useSyncExternalStore(subscribe, getWork)
 }
@@ -240,7 +240,7 @@ export function useIsUnseen(key: string | undefined): boolean {
   return useSyncExternalStore(subscribe, () => key !== undefined && known(key))
 }
 
-/** Generations finished (not failed) and not seen yet, listed in full or not: the clip feed's "Nya". */
+/** Generations finished (not failed) and not seen yet, listed in full or not: the clip feed's "New". */
 function freshGenerationIds(s: WorkSummary): ReadonlySet<string> {
   const ids = new Set<string>()
   for (const w of s.unseen) if (w.status === 'completed' && w.generationId) ids.add(w.generationId)
@@ -309,7 +309,7 @@ export function markSeen(keys: string[]): void {
   for (const key of listed) locallySeen.set(key, until)
   if (listed.length) recompute()
   window.studio.markSeen(send).catch((e: unknown) => {
-    console.warn('Kunde inte markera som sett', e)
+    console.warn('Could not mark as seen', e)
     for (const key of listed) locallySeen.delete(key)
     recompute()
   })
@@ -322,7 +322,7 @@ function inScope(w: FinishedWork, scope: SeenScope | undefined): boolean {
   return true
 }
 
-// The toast that follows "Markera alla som sedda": "7 markerade som sedda · Ångra" for ten seconds.
+// The toast that follows "Mark all as seen": "7 marked as seen · Undo" for ten seconds.
 
 export interface SeenToast {
   id: number
@@ -366,12 +366,12 @@ export function dismissSeenToast(): void {
 }
 
 function seenCountText(n: number): string {
-  return n === 1 ? '1 markerad som sedd' : `${n} markerade som sedda`
+  return `${n} marked as seen`
 }
 
 /**
- * "Markera alla som sedda", for everything or one view or owner (a sequence, storyboard, edit …). Hidden at once
- * here; main removes the rows and keeps them ten seconds for Ångra, which the toast offers.
+ * "Mark all as seen", for everything or one view or owner (a sequence, storyboard, edit …). Hidden at once
+ * here; main removes the rows and keeps them ten seconds for Undo, which the toast offers.
  */
 export async function markAllSeen(scope?: SeenScope): Promise<void> {
   // Past the listed ones nothing says where an item belongs: those go everywhere only with everything.
@@ -397,7 +397,7 @@ export async function markAllSeen(scope?: SeenScope): Promise<void> {
             try {
               await window.studio.undoMarkAllSeen(undoToken)
             } catch (e) {
-              setToast({ id: ++toastIds, text: `Kunde inte ångra: ${ipcErrorMessage(e)}`, error: true })
+              setToast({ id: ++toastIds, text: `Couldn’t undo: ${ipcErrorMessage(e)}`, error: true })
             }
           }
         : undefined
@@ -405,11 +405,11 @@ export async function markAllSeen(scope?: SeenScope): Promise<void> {
   } catch (e) {
     for (const key of keys) locallySeen.delete(key)
     recompute()
-    setToast({ id: ++toastIds, text: `Kunde inte markera som sedda: ${ipcErrorMessage(e)}`, error: true })
+    setToast({ id: ++toastIds, text: `Couldn’t mark as seen: ${ipcErrorMessage(e)}`, error: true })
   }
 }
 
-/** True when anything in the scope is new or failed and unseen (for showing "Markera alla som sedda"). */
+/** True when anything in the scope is new or failed and unseen (for showing "Mark all as seen"). */
 export function useHasUnseen(scope?: SeenScope): boolean {
   const view = scope?.view
   const ownerId = scope?.ownerId
@@ -547,7 +547,7 @@ export function useSeenPictureWhenVisible(ref: RefObject<Element | null>, path: 
 
 // ── Going there ──────────────────────────────────────────────────────────────
 
-/** A picture opened on its own from Pågår och klart (see jumpTo), with the sequence or storyboard it belongs to. */
+/** A picture opened on its own from Activity (see jumpTo), with the sequence or storyboard it belongs to. */
 export interface ShownStill {
   stillId: string
   sequenceId?: string
@@ -575,11 +575,11 @@ export function useShownWorkStill(): ShownStill | undefined {
 }
 
 /**
- * Opens the place a piece of work belongs to: the clip drawer in Generera, the clip or take in Sekvenser, the
- * transition or board in Storyboards, the edit (and version) in Redigera, the asset (and voice) in its view, the clip,
- * picture or film in the Mediabank; an agent request being carried out opens in the approval dialog. A picture with
+ * Opens the place a piece of work belongs to: the clip drawer in Generate, the clip or take in Sequences, the
+ * transition or board in Storyboards, the edit (and version) in the Editor, the asset (and voice) in its view, the clip,
+ * picture or film in Media; an agent request being carried out opens in the approval dialog. A picture with
  * no board or clip to be seen in (one made for a sequence as a whole) also opens on its own, over its view; one that
- * counts under the Mediabank opens in its Bilder instead. Going there doesn't mark anything seen by itself.
+ * counts under Media opens in its Images instead. Going there doesn't mark anything seen by itself.
  */
 export function jumpTo(target: WorkTarget, navigate: Navigate): void {
   if (target.approvalId) {
@@ -595,7 +595,7 @@ export function jumpTo(target: WorkTarget, navigate: Navigate): void {
       else navigate('generate')
       return
     case 'media':
-      // Generera's clips from an earlier session and pictures with no place of their own.
+      // Generate's clips from an earlier session and pictures with no place of their own.
       if (target.generationId) {
         navigate('media', { type: 'open-media', tab: 'videos', generationId: target.generationId })
       } else if (target.stillId) navigate('media', { type: 'open-media', tab: 'pictures', stillId: target.stillId })
@@ -632,7 +632,7 @@ export function jumpTo(target: WorkTarget, navigate: Navigate): void {
       else navigate('editor')
       return
     default:
-      // The asset views (Karaktärer … Poser): a designed voice opens its character with the clip in view, a failed
+      // The asset views (Characters … Poses): a designed voice opens its character with the clip in view, a failed
       // design with its error.
       if (target.assetId) {
         navigate(target.view, {
@@ -690,7 +690,7 @@ export function startWorkFeed(): () => void {
       document.removeEventListener('timeupdate', onMediaEvent, true)
       document.removeEventListener('ended', onMediaEvent, true)
     }
-    window.studio.getWorkSummary().then(receive, (e: unknown) => console.warn('Kunde inte läsa vad som pågår', e))
+    window.studio.getWorkSummary().then(receive, (e: unknown) => console.warn('Could not read what is going on', e))
   }
   let stopped = false
   return () => {

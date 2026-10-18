@@ -109,7 +109,7 @@ export function imageUses(owners: Pick<StillOwners, 'sequences' | 'storyboards'>
   return uses
 }
 
-/** The still's owner as the tools name it: its sequence or its storyboard, or none (Referensbilder). */
+/** The still's owner as the tools name it: its sequence or its storyboard, or none (the folder "Referensbilder"). */
 function ownerInfo(sequenceId: string | undefined, owners: StillOwners): Record<string, unknown> {
   if (!sequenceId) return { sequence_id: null }
   const owner = owners.byId.get(sequenceId)
@@ -209,7 +209,7 @@ export async function loadImageModels(): Promise<ImageModel[]> {
   try {
     return await callService<ImageModel[]>('images:models')
   } catch (err) {
-    throw new Error(`Kunde inte hämta bildmodellerna från Venice: ${errorText(err)}`)
+    throw new Error(`Couldn't fetch the image models from Venice: ${errorText(err)}`)
   }
 }
 
@@ -231,7 +231,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List image models',
       description:
-        "Venice's image models that request_image_generation can use, with the price of one picture at the default settings, and whether the user's \"Säkert läge för bilder\" (safe_mode: Venice blurs adult content) is on. takes_references: false are text-to-image models (prompt only; negative_prompt allowed); true are models that combine up to max_input_images reference pictures (characters, products, outfits, places, poses, stills) into a new picture. The defaults are marked: Seedream (seedream-v5-pro, and seedream-v5-pro-edit with references), the same family as the Seedance video models.",
+        "Venice's image models that request_image_generation can use, with the price of one picture at the default settings, and whether the user's \"Safe mode for images\" (safe_mode: Venice blurs adult content) is on. takes_references: false are text-to-image models (prompt only; negative_prompt allowed); true are models that combine up to max_input_images reference pictures (characters, products, outfits, places, poses, stills) into a new picture. The defaults are marked: Seedream (seedream-v5-pro, and seedream-v5-pro-edit with references), the same family as the Seedance video models.",
       input: {
         takes_references: z
           .boolean()
@@ -239,7 +239,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
           .describe('Only the models that take references (true) or only the text-to-image ones (false).')
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'listade bildmodellerna'
+      summary: () => 'listed the image models'
     },
     async ({ takes_references }) => {
       const models = (await loadImageModels()).filter(
@@ -262,11 +262,11 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
         data: {
           default_text_to_image: text?.id ?? null,
           default_with_references: edit?.id ?? null,
-          // Read-only for agents: only the user switches it, in Inställningar → Generering → Bilder.
+          // Read-only for agents: only the user switches it, in Settings → Generation → Images.
           safe_mode: safeMode,
           safe_mode_note: safeMode
-            ? '"Säkert läge för bilder" is on: Venice blurs adult content in the pictures it makes. Only the user can switch it off (Inställningar → Generering → Bilder).'
-            : '"Säkert läge för bilder" is off: Venice does not blur adult content.',
+            ? '"Safe mode for images" is on: Venice blurs adult content in the pictures it makes. Only the user can switch it off (Settings → Generation → Images).'
+            : '"Safe mode for images" is off: Venice does not blur adult content.',
           models: models.map((m, i) => ({
             id: m.id,
             name: m.name,
@@ -298,11 +298,11 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
         limit: z.number().int().min(1).max(100).default(30)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'listade stillbilderna'
+      summary: () => 'listed the still images'
     },
     async ({ sequence_id, storyboard_id, include_thumbnails, limit }) => {
       requireLibrary()
-      if (sequence_id && storyboard_id) throw new Error('Ange sequence_id eller storyboard_id, inte båda.')
+      if (sequence_id && storyboard_id) throw new Error('Give sequence_id or storyboard_id, not both.')
       // A storyboard's id given as sequence_id is taken as meant: its stills are what was asked for.
       const ownerId = storyboard_id ?? sequence_id
       const owner = !ownerId
@@ -338,7 +338,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
             : {})
         },
         images,
-        summary: owner ? `listade stillbilderna i ${q(owner.name)}` : 'listade stillbilderna'
+        summary: owner ? `listed the still images in ${q(owner.name)}` : 'listed the still images'
       }
     }
   )
@@ -356,7 +356,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
         include_references: z.boolean().default(false)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'tittade på en stillbild'
+      summary: () => 'looked at a still image'
     },
     async ({ still_id, include_references }) => {
       const [stills, assets, owners] = await Promise.all([StillIndex.load(), AssetIndex.load(), loadStillOwners()])
@@ -395,14 +395,14 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
         storyboard_id: z.string().optional().describe('The storyboard that gets the still instead.')
       },
       annotations: WRITE,
-      summary: () => 'sparade en bildruta som stillbild'
+      summary: () => 'saved a frame as a still image'
     },
     async ({ generation_id, time, sequence_id, storyboard_id }) => {
       requireLibrary()
-      if (sequence_id && storyboard_id) throw new Error('Ange sequence_id eller storyboard_id, inte båda.')
+      if (sequence_id && storyboard_id) throw new Error('Give sequence_id or storyboard_id, not both.')
       const g = db.getGeneration(generation_id)
-      if (!g) throw new Error(`Det finns ingen generering med id ${generation_id}.`)
-      if (g.status !== 'completed') throw new Error('Genereringen är inte färdig, så den har inga bildrutor än.')
+      if (!g) throw new Error(`There is no generation with id ${generation_id}.`)
+      if (g.status !== 'completed') throw new Error('The generation isn\'t finished, so it has no frames yet.')
       const own = g.segmentId ? store.sequenceOfSegment(g.segmentId)?.id : undefined
       const asked = storyboard_id ?? sequence_id
       const target = asked ?? own
@@ -419,7 +419,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: stillInfo(still, assets, stills, owners),
         images: image ? [{ label: `Still ${still.id} – frame at t = ${seconds(time).toFixed(1)} s`, image }] : [],
-        summary: `sparade en bildruta som stillbild${ownerName ? ` i ${q(ownerName)}` : ''}`
+        summary: `saved a frame as a still image${ownerName ? ` in ${q(ownerName)}` : ''}`
       }
     }
   )
@@ -431,18 +431,18 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Import a picture as a still',
       description:
-        "Copies a picture you send into Studio as a still – of a sequence (sequence_id) or a storyboard (storyboard_id), or, with neither, among the loose reference pictures (Referensbilder) – to use as a board's picture, a clip's start or end image, a reference of a new picture (reference_still_ids) or a loose reference ({still_id}). source: {upload_id} (a ready image upload) or {url} (fetched like begin_upload({url}); waits at most 45 s). The same picture imported again into the same place gives the still it became the first time. Free. Returns the still and its picture.",
+        "Copies a picture you send into Studio as a still – of a sequence (sequence_id) or a storyboard (storyboard_id), or, with neither, among the loose reference pictures (the folder \"Referensbilder\") – to use as a board's picture, a clip's start or end image, a reference of a new picture (reference_still_ids) or a loose reference ({still_id}). source: {upload_id} (a ready image upload) or {url} (fetched like begin_upload({url}); waits at most 45 s). The same picture imported again into the same place gives the still it became the first time. Free. Returns the still and its picture.",
       input: {
         source: z.union([uploadSource, urlSource]),
         sequence_id: z.string().optional(),
         storyboard_id: z.string().optional()
       },
       annotations: WRITE,
-      summary: () => 'importerade en bild som stillbild'
+      summary: () => 'imported an image as a still image'
     },
     async ({ source, sequence_id, storyboard_id }) => {
       requireLibrary()
-      if (sequence_id && storyboard_id) throw new Error('Ange sequence_id eller storyboard_id, inte båda.')
+      if (sequence_id && storyboard_id) throw new Error('Give sequence_id or storyboard_id, not both.')
       const ownerId = storyboard_id ?? sequence_id
       // Checked before anything is fetched: the owner must be what the agent says it is.
       const owner = !ownerId
@@ -456,7 +456,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: stillInfo(still, assets, stills, owners),
         images: image ? [{ label: `Still ${still.id}`, image }] : [],
-        summary: `importerade en bild som stillbild${owner ? ` i ${q(owner.name)}` : ' (Referensbilder)'}`
+        summary: `imported an image as a still image${owner ? ` in ${q(owner.name)}` : ' (Loose images)'}`
       }
     }
   )
@@ -471,7 +471,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
         "The start and end images a clip would be generated with, as pictures: its chosen start/end image, or the automatic frames – the previous clip's last frame (continue_from_previous, at that clip's end trim) and the next clip's first frame (end_from_next, at that clip's start trim) – taken from the neighbours' selected takes as they are now. problems says what still stops them (e.g. a neighbour without a finished take). Free; changes nothing.",
       input: { segment_id: z.string() },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'tittade på start- och slutbilden för ett klipp'
+      summary: () => 'looked at the start and end images of a clip'
     },
     async ({ segment_id }) => {
       const { sequence, index } = await loadClip(segment_id)
@@ -480,7 +480,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: { segment_id, clip_number: index + 1, ...preview.data },
         images: preview.images,
-        summary: `tittade på start- och slutbilden för klipp ${index + 1} i ${q(sequence.name)}`
+        summary: `looked at the start and end images of clip ${index + 1} in ${q(sequence.name)}`
       }
     }
   )
@@ -492,10 +492,10 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Set a clip up to be redone between its neighbours',
       description:
-        "Free. Prepares a new take of a clip that starts exactly where the previous clip ends and ends exactly where the next clip begins (\"Gör om mellan grannarna\"), so the neighbours stay untouched: turns on continue_from_previous and end_from_next (only the one that exists for the first or last clip), switches to the family's image-to-video model that takes an end image (keeping duration, prompt and audio) and drops the clip's references, which image-to-video can't take. Returns the clip, both frames as images, any problems and the price. Then rewrite the prompt for what happens between the frames (update_segment) and ask for request_segment_generation. The clip's existing takes are kept.",
+        "Free. Prepares a new take of a clip that starts exactly where the previous clip ends and ends exactly where the next clip begins (\"Redo between neighbours\"), so the neighbours stay untouched: turns on continue_from_previous and end_from_next (only the one that exists for the first or last clip), switches to the family's image-to-video model that takes an end image (keeping duration, prompt and audio) and drops the clip's references, which image-to-video can't take. Returns the clip, both frames as images, any problems and the price. Then rewrite the prompt for what happens between the frames (update_segment) and ask for request_segment_generation. The clip's existing takes are kept.",
       input: { segment_id: z.string() },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'ställde in ett klipp att göras om mellan grannarna'
+      summary: () => 'set up a clip to be redone between its neighbours'
     },
     async ({ segment_id }) => {
       const { sequence, segment } = await loadClip(segment_id)
@@ -503,7 +503,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
       const hadReferences = !!segment.params.referenceImages?.length || !!segment.params.referenceAudios?.length
       const updated = await callService<Sequence>('segments:bridge', segment_id)
       const at = updated.segments.findIndex((s) => s.id === segment_id)
-      if (at < 0) throw new Error('Klippet finns inte längre.')
+      if (at < 0) throw new Error('The clip no longer exists.')
       const [assets, stills] = await Promise.all([AssetIndex.load(), StillIndex.load()])
       const bridged = updated.segments[at]
       const preview = await framePreview(segment_id, at + 1, assets, stills)
@@ -511,19 +511,19 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
       const notes: string[] = []
       if (hadReferences && !bridged.params.referenceImages?.length) {
         notes.push(
-          'Klippets referenser (bilder och röster) togs bort: bild-till-video tar inga referenser – utseendet kommer från start- och slutbilden.'
+          'The clip\'s references (images and voices) were removed: image-to-video takes no references – the look comes from the start and end images.'
         )
       }
       if (bridged.params.prompt !== segment.params.prompt) {
         notes.push(
-          'Prompten skickar inga referenser längre, så @-referenserna togs bort ur den. Skriv om den: beskriv i ord vad som händer mellan start- och slutbilden.'
+          'The prompt no longer sends references, so its @ references were taken out. Rewrite it: describe in words what happens between the start and end images.'
         )
       }
       if (at === 0 && !continues(updated, at)) {
         notes.push(
           bridged.params.startImage
-            ? 'Det första klippet har inget föregående klipp: det börjar på sin egen startbild (den första bildrutan i tagningen som var vald).'
-            : 'Det första klippet har inget föregående klipp och ingen startbild än: välj en med update_segment({start_image}).'
+            ? 'The first clip has no previous clip: it starts on its own start image (the first frame of the take that was selected).'
+            : 'The first clip has no previous clip and no start image yet: choose one with update_segment({start_image}).'
         )
       }
       return {
@@ -536,7 +536,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
             'Look at the two frames, rewrite the prompt for what happens between them (update_segment), then request_segment_generation.'
         },
         images: preview.images,
-        summary: `ställde in klipp ${at + 1} i ${q(updated.name)} att göras om mellan grannarna (${usd(price)})`
+        summary: `set up clip ${at + 1} in ${q(updated.name)} to be redone between its neighbours (${usd(price)})`
       }
     }
   )

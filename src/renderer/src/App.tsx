@@ -113,7 +113,7 @@ function Workspace() {
   const refreshSettings = () => window.studio.getSettings().then(setSettings)
   useEffect(() => {
     void refreshSettings()
-    // A setting changed elsewhere (safe mode in the image dialog) must not leave Inställningar showing the old one.
+    // A setting changed elsewhere (safe mode in the image dialog) must not leave Settings showing the old one.
     return window.studio.onSettingsChange(() => void refreshSettings())
   }, [])
 
@@ -133,7 +133,7 @@ function Workspace() {
   // bridge that lets them read and fill the Generate form. Mounted here, so both work whatever view is open.
   useEffect(() => startAgentFeed(), [])
   useAgentBridge(view, navigate)
-  // Pågår och klart: what runs and what is new, for the sidebar, every view and the panel; also installs the
+  // Activity: what runs and what is new, for the sidebar, every view and the panel; also installs the
   // playback rule that marks a video seen once it has played.
   useEffect(() => startWorkFeed(), [])
 
@@ -158,7 +158,7 @@ function Workspace() {
       e.stopPropagation()
       setCollapsed((c) => !c)
     }
-    // Capture phase on the window: a view's own key handling (Redigera's player keys …) never sees it first.
+    // Capture phase on the window: a view's own key handling (the Editor's player keys …) never sees it first.
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [])
@@ -186,7 +186,7 @@ function Workspace() {
       <main className="@container/main min-w-0 flex-1">
         {view === 'generate' && <GenerateView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />}
         {view === 'media' && <MediaView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />}
-        {/* Keyed so Karaktärer, Miljöer, Produkter, Kläder and Poser each start with their own selection, search,
+        {/* Keyed so Characters, Environments, Products, Outfits and Poses each start with their own selection, search,
             drafts and sound players. */}
         {assetKind && (
           <AssetsView
@@ -226,13 +226,13 @@ function Starting({ error, onRetry }: { error?: string; onRetry: () => void }) {
       {error && (
         <div className="flex flex-1 items-center justify-center p-8 pb-20">
           <div className="max-w-sm text-center">
-            <h1 className="text-base font-semibold">Studio kunde inte läsa biblioteket</h1>
+            <h1 className="text-base font-semibold">Studio couldn’t read the library</h1>
             <p className="mt-2 leading-relaxed text-muted select-text">{error}</p>
             <button
               onClick={onRetry}
               className="mt-5 rounded-md border border-line px-4 py-2 transition hover:bg-raised"
             >
-              Försök igen
+              Try again
             </button>
           </div>
         </div>

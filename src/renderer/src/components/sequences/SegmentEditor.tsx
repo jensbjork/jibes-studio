@@ -56,9 +56,9 @@ interface Props {
   handleRef: RefObject<EditorHandle | null>
   navigate: Navigate
   onPreviewFrom: (segmentId: string) => void
-  /** Configures the clip to be redone between its neighbours ("Gör om mellan grannarna"; free). */
+  /** Configures the clip to be redone between its neighbours ("Redo between neighbours"; free). */
   onBridge: (segmentId: string) => Promise<void>
-  /** "Gör om mellan grannarna" just configured this clip; the frames box says what to do next. */
+  /** "Redo between neighbours" just configured this clip; the frames box says what to do next. */
   justBridged?: boolean
 }
 
@@ -164,7 +164,7 @@ export default function SegmentEditor({
     setError(undefined)
     try {
       // main generates from the stored params, so the latest edits must be saved first.
-      if (!(await flush())) throw new Error('Ändringarna kunde inte sparas. Försök igen.')
+      if (!(await flush())) throw new Error("The changes couldn't be saved. Try again.")
       addTake(await window.studio.generateSegment(segmentId))
     } catch (e) {
       const message = ipcErrorMessage(e)
@@ -189,7 +189,7 @@ export default function SegmentEditor({
     // The clip may have changed while the terms were shown (an agent can edit it): then nothing is sent until
     // the user has looked at it and pressed the button again, which shows the price.
     if (clipNowRef.current !== clip || stableJson(params) !== stableJson(segment.params)) {
-      setError('Klippet ändrades medan villkoren visades. Kontrollera det och tryck Generera igen.')
+      setError('The clip changed while the terms were shown. Check it and press Generate again.')
       return
     }
     await generate()
@@ -241,7 +241,7 @@ export default function SegmentEditor({
     setError(undefined)
     try {
       // The bridge keeps prompt, duration and sound, so the latest typing must be saved first.
-      if (!(await flush())) throw new Error('Ändringarna kunde inte sparas. Försök igen.')
+      if (!(await flush())) throw new Error("The changes couldn't be saved. Try again.")
       await onBridge(segmentId)
     } catch (e) {
       setError(ipcErrorMessage(e))
@@ -260,7 +260,7 @@ export default function SegmentEditor({
   }
 
   const anyReady = sequence.segments.slice(index).some((s) => readyTake(s))
-  // An own film (or a version from Redigera) as the clip's take: the clip is that film, and the form for an AI take
+  // An own film (or a version from the Editor) as the clip's take: the clip is that film, and the form for an AI take
   // instead stays folded away until asked for. It opens by itself whenever the selected take is a generated one.
   const chosen = selectedTake(segment)
   const ownTake = chosen && isOwnTake(chosen) ? chosen : undefined
@@ -272,7 +272,7 @@ export default function SegmentEditor({
       {consent && (
         <ConsentDialog
           request={consent.request}
-          cost={`klipp ${index + 1} · ${formatUsd(quote)}`}
+          cost={`clip ${index + 1} · ${formatUsd(quote)}`}
           onAccept={acceptConsent}
           onCancel={() => setConsent(undefined)}
         />
@@ -280,11 +280,11 @@ export default function SegmentEditor({
 
       <div className="flex-1 overflow-y-auto px-5 pb-5">
         <div className="sticky top-0 z-10 -mx-5 mb-4 flex h-11 items-center gap-2 border-b border-line bg-bg/95 px-5 backdrop-blur">
-          <h2 className="font-semibold">Klipp {index + 1}</h2>
+          <h2 className="font-semibold">Clip {index + 1}</h2>
           {ownTake && (
             <span className="flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-[11px] text-text">
               <CameraIcon size={11} />
-              {ownTake.source === 'edit' ? 'Redigerad film' : 'Eget klipp'}
+              {ownTake.source === 'edit' ? 'Edited film' : 'Own clip'}
             </span>
           )}
           <SaveState status={draft.status} error={draft.error} />
@@ -292,19 +292,19 @@ export default function SegmentEditor({
             <button
               onClick={() => onPreviewFrom(segmentId)}
               disabled={!anyReady}
-              title={anyReady ? 'Förhandsvisa sekvensen från det här klippet' : 'Inga färdiga klipp att spela härifrån'}
+              title={anyReady ? 'Preview the sequence from this clip' : 'No finished clips to play from here'}
               className={smallButton}
             >
               <PlayIcon size={10} />
-              Härifrån
+              From here
             </button>
             <ConfirmButton
-              question="Radera klippet?"
+              question="Delete the clip?"
               onConfirm={remove}
-              title="Radera klippet (tagningarna finns kvar i Mediabanken)"
+              title="Delete the clip (the takes stay in Media)"
               className={deleteButton}
             >
-              Radera
+              Delete
             </ConfirmButton>
           </div>
         </div>
@@ -320,12 +320,12 @@ export default function SegmentEditor({
               onClick={() => setAiAsked(true)}
               className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-1 text-left transition hover:text-text"
             >
-              <span>Generera en AI-tagning i stället…</span>
+              <span>Generate an AI take instead…</span>
               <ChevronDownIcon size={12} className="shrink-0 text-muted" />
             </button>
             <p className="mt-1 px-1 text-[11px] leading-snug text-muted">
-              Klippet är din egen film. Vill du prova en AI-tagning på samma plats öppnar du formuläret – filmen finns
-              kvar bland tagningarna och du väljer själv vilken som används.
+              The clip is your own film. To try an AI take in the same place, open the form – the film stays among the
+              takes and you choose which one is used.
             </p>
           </div>
         ) : (
@@ -337,7 +337,7 @@ export default function SegmentEditor({
                 className="mb-3 flex items-center gap-1 text-[12px] text-muted transition hover:text-text"
               >
                 <ChevronDownIcon size={11} className="rotate-180" />
-                Dölj formuläret för en AI-tagning
+                Hide the form for an AI take
               </button>
             )}
             <KeyframeBox
@@ -368,16 +368,16 @@ export default function SegmentEditor({
                 !referenceForm
                   ? undefined
                   : plan?.mode === 'references'
-                    ? `+ sista bildrutan i klipp ${index} skickas efter dessa (som @Image${plan.frameToken ?? 1}), och prompten börjar med att klippet ska starta på den.${
+                    ? `+ the last frame of clip ${index} is sent after these (as @Image${plan.frameToken ?? 1}), and the prompt begins by saying the clip should start on it.${
                         inherited
-                          ? ` Bilderna och rösterna kommer från klipp ${inherited.fromClip} – ändrar du dem blir de klippets egna.`
+                          ? ` The images and voices come from clip ${inherited.fromClip} – if you change them, they become this clip's own.`
                           : ''
                       }`
-                    : `Utan referenser börjar klippet exakt på sista bildrutan i klipp ${index}. Lägg till referenser här (eller i klippet före), så skickas de med tillsammans med bildrutan.`
+                    : `Without references the clip starts exactly on the last frame of clip ${index}. Add references here (or in the clip before) and they're sent along with the frame.`
               }
               endImageRequired
-              startImageNote={continuing ? `Sista bildrutan från klipp ${index} används som startbild.` : undefined}
-              endImageNote={endFromNext ? `Första bildrutan från klipp ${index + 2} används som slutbild.` : undefined}
+              startImageNote={continuing ? `The last frame of clip ${index} is used as the start image.` : undefined}
+              endImageNote={endFromNext ? `The first frame of clip ${index + 2} is used as the end image.` : undefined}
               onSubmit={() => void generate()}
               navigate={navigate}
               sequenceId={sequence.id}
@@ -395,11 +395,11 @@ export default function SegmentEditor({
             className="flex w-full items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
           >
             <span className="truncate" title={blocked}>
-              {submitting ? 'Skickar…' : (blocked ?? (segment.takes.length ? 'Generera ny tagning' : 'Generera tagning'))}
+              {submitting ? 'Sending…' : (blocked ?? (segment.takes.length ? 'Generate new take' : 'Generate take'))}
             </span>
             <span className="shrink-0 text-white/80">{formatUsd(quote)}</span>
           </button>
-          <p className="mt-2 text-center text-[11px] text-muted">⌘ + Enter för att generera</p>
+          <p className="mt-2 text-center text-[11px] text-muted">⌘ + Enter to generate</p>
         </div>
       )}
     </div>
@@ -430,7 +430,7 @@ interface FileFacts {
 }
 
 /**
- * An own film's name and info line: "0:31 · 1080p · 30 bilder/s · ljud · arbetskopia av 4K HDR". The frame rate and
+ * An own film's name and info line: "0:31 · 1080p · 30 fps · sound · working copy of 4K HDR". The frame rate and
  * the sound are read from the file itself; the working copy's reasons from the import.
  */
 function OwnClipInfo({ take }: { take: Generation }) {
@@ -453,8 +453,8 @@ function OwnClipInfo({ take }: { take: Generation }) {
   const parts = [
     take.videoDuration !== undefined ? formatClock(take.videoDuration) : undefined,
     take.params.resolution,
-    facts?.fps ? `${Math.round(facts.fps)} bilder/s` : undefined,
-    facts ? (facts.hasAudio ? 'ljud' : 'utan ljud') : undefined,
+    facts?.fps ? `${Math.round(facts.fps)} fps` : undefined,
+    facts ? (facts.hasAudio ? 'sound' : 'no sound') : undefined,
     workingCopyNote(take.recipe?.import?.workingCopy)
   ].filter((p): p is string => !!p)
 
@@ -465,8 +465,8 @@ function OwnClipInfo({ take }: { take: Generation }) {
       </p>
       {take.fileMissing ? (
         <p className="mt-0.5 text-[11px] leading-snug text-amber-300">
-          Filmen finns inte längre där den låg (flyttad eller raderad i Finder). Lägg till filen igen eller generera en
-          AI-tagning.
+          The film is no longer where it was (moved or deleted in Finder). Add the file again or generate an AI
+          take.
         </p>
       ) : (
         <p className="mt-0.5 text-[11px] text-muted tabular-nums">{parts.join(' · ')}</p>
@@ -479,11 +479,11 @@ function SaveState({ status, error }: { status: DraftStatus; error?: string }) {
   if (error) {
     return (
       <span className="truncate text-[11px] text-accent" title={error}>
-        Kunde inte spara
+        Couldn't save
       </span>
     )
   }
   return (
-    <span className="text-[11px] text-muted">{status === 'idle' ? 'Sparat' : 'Sparar…'}</span>
+    <span className="text-[11px] text-muted">{status === 'idle' ? 'Saved' : 'Saving…'}</span>
   )
 }

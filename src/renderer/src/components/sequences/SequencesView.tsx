@@ -60,7 +60,7 @@ function loadLastOpen(): string | undefined {
   }
 }
 
-// Sequences used to have a Tidslinje / Storyboard switch remembered per sequence under these keys. Storyboards are
+// Sequences used to have a Timeline / Storyboard switch remembered per sequence under these keys. Storyboards are
 // their own view now; the leftovers are cleared once so they don't sit in the window's storage forever.
 const RETIRED_KEYS = ['sequences:viewMode:v1', 'sequences:lastViewMode:v1']
 let retiredKeysCleared = false
@@ -74,14 +74,14 @@ function clearRetiredKeys(): void {
   }
 }
 
-/** "Klipp 2", "Klipp 2 och 4", "Klipp 1, 3 och 4". */
+/** "Clip 2", "Clips 2 and 4", "Clips 1, 3 and 4". */
 function clipList(numbers: number[]): string {
-  if (numbers.length === 1) return `Klipp ${numbers[0]}`
-  return `Klipp ${numbers.slice(0, -1).join(', ')} och ${numbers[numbers.length - 1]}`
+  if (numbers.length === 1) return `Clip ${numbers[0]}`
+  return `Clips ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`
 }
 
 /**
- * What "Generera saknade" would pay for, one key per clip: what its take sends and the frames it starts or ends
+ * What "Generate missing" would pay for, one key per clip: what its take sends and the frames it starts or ends
  * on from its neighbours. Compared after the consent dialog, so accepting it can't pay for clips that changed
  * while the terms were shown.
  */
@@ -89,7 +89,7 @@ function runPlanKeys(sequence: Sequence): string[] {
   return sequence.segments.flatMap((s, i) => (!needsTake(s) || pendingTake(s) ? [] : [clipKey(sequence, i)]))
 }
 
-/** The first segment "Generera saknade" would have to generate but can't, so it can be pointed out up front. */
+/** The first segment "Generate missing" would have to generate but can't, so it can be pointed out up front. */
 function findRunProblem(sequence: Sequence, ffmpegOk: boolean): { segmentId: string; message: string } | undefined {
   for (const [i, s] of sequence.segments.entries()) {
     if (!needsTake(s) || pendingTake(s)) continue
@@ -104,18 +104,18 @@ function findRunProblem(sequence: Sequence, ffmpegOk: boolean): { segmentId: str
     if (isOwnTake(chosen) && chosen?.fileMissing && input) {
       return {
         segmentId: s.id,
-        message: `Klipp ${i + 1}:s egna video saknas (flyttad eller raderad i Finder). Lägg till filen igen eller generera en AI-tagning.`
+        message: `Clip ${i + 1}'s own video is missing (moved or deleted in Finder). Add the file again or generate an AI take.`
       }
     }
     const reason =
       input ??
-      (continuing && !ffmpegOk ? 'ffmpeg krävs för att fortsätta från föregående klipp' : undefined) ??
-      (endFromNext && !ffmpegOk ? 'ffmpeg krävs för att ta slutbilden från nästa klipp' : undefined) ??
-      (endFromNext && !supportsEndImage(params.model) ? 'modellen tar ingen slutbild – välj en annan' : undefined) ??
+      (continuing && !ffmpegOk ? 'ffmpeg is needed to continue from the previous clip' : undefined) ??
+      (endFromNext && !ffmpegOk ? 'ffmpeg is needed to take the end image from the next clip' : undefined) ??
+      (endFromNext && !supportsEndImage(params.model) ? "the model can't take an end image – pick another" : undefined) ??
       (ownEndImageRefused(params, endFromNext)
-        ? 'modellen tar ingen slutbild – välj en annan eller ta bort bilden'
+        ? "the model can't take an end image – pick another or remove the image"
         : undefined)
-    if (reason) return { segmentId: s.id, message: `Klipp ${i + 1}: ${reason}` }
+    if (reason) return { segmentId: s.id, message: `Clip ${i + 1}: ${reason}` }
   }
   return undefined
 }
@@ -128,7 +128,7 @@ interface Notice {
   info?: boolean
 }
 
-/** "Från klippflödet…" / "Från Redigera…": a clip picked from the library, to add after a clip (or at the end). */
+/** "From Media…" / "From the Editor…": a clip picked from the library, to add after a clip (or at the end). */
 interface PickRequest {
   source: Exclude<ClipSource, 'file'>
   afterSegmentId?: string
@@ -167,14 +167,14 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   const { sequence } = store
   const sequenceId = sequence?.id
 
-  // ── Pågår och klart for the open sequence (also what an agent or an earlier visit started) ────────────────
+  // ── Activity for the open sequence (also what an agent or an earlier visit started) ────────────────────────
   const exportStatus = useExportStatus(sequenceId)
   const ownerUnseenFilter = useCallback((w: FinishedWork) => !!sequenceId && w.ownerId === sequenceId, [sequenceId])
   const ownerRunningFilter = useCallback((w: RunningWork) => !!sequenceId && w.ownerId === sequenceId, [sequenceId])
   const ownerUnseen = useUnseen(ownerUnseenFilter)
   const ownerRunning = useRunning(ownerRunningFilter)
-  // A "Generera saknade" run that stopped on a problem: main keeps its error with the sequence while the app runs,
-  // and as a failure in Pågår och klart (also after a restart) until it has been seen.
+  // A "Generate missing" run that stopped on a problem: main keeps its error with the sequence while the app runs,
+  // and as a failure in Activity (also after a restart) until it has been seen.
   const runFailure = ownerUnseen
     .filter((w) => w.failureOf === 'run')
     .sort((a, b) => b.finishedAt - a.finishedAt)[0]
@@ -193,14 +193,14 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   // A click on a take plays it once the player has it (see TrimControls).
   const [playRequest, setPlayRequest] = useState<PlayRequest>()
   const playCount = useRef(0)
-  // A take to focus in the strip (a link to it: Pågår och klart, an agent's open_in_studio).
+  // A take to focus in the strip (a link to it: Activity, an agent's open_in_studio).
   const [takeFocus, setTakeFocus] = useState<{ sequenceId: string; segmentId?: string; id: string; n: number }>()
   const focusCount = useRef(0)
   const player = useRef<TakePlayerHandle>(null)
   // Open with the clips the run would pay for when it was opened (see runPlanKeys).
   const [runConsentOpen, setRunConsentOpen] = useState<ReadonlySet<string>>()
   const [dismissedRunError, setDismissedRunError] = useState<string>()
-  // The clip "Gör om mellan grannarna" was just used on, so its editor says what to do next.
+  // The clip "Redo between neighbours" was just used on, so its editor says what to do next.
   const [bridgedId, setBridgedId] = useState<string>()
   const [picking, setPicking] = useState<PickRequest>()
   // Own films: inspected, asked about when there is something to decide, imported (cards show the progress).
@@ -244,12 +244,12 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     gone.current.delete(intent.sequenceId)
     const { sequenceId, segmentId, generationId } = intent
     if (segmentId) {
-      // A given clip (an agent's open_in_studio, Pågår och klart): select it. One that no longer exists falls back
+      // A given clip (an agent's open_in_studio, Activity): select it. One that no longer exists falls back
       // as usual.
       pickNewestFor.current = undefined
       setSegmentChoice((m) => ({ ...m, [sequenceId]: segmentId }))
     } else if (!generationId) {
-      // Opened from "Lägg i sekvens": show the clip that was just added.
+      // Opened from "Add to sequence": show the clip that was just added.
       pickNewestFor.current = sequenceId
     }
     // A given take is focused in the strip – never chosen, and never counted as seen by being shown this way (D4):
@@ -347,10 +347,10 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     }
   }
 
-  /** The list's ✕ (after its question in the row) and ⋯ → Radera sekvensen…; throws, so the row can show the error. */
+  /** The list's ✕ (after its question in the row) and ⋯ → Delete sequence…; throws, so the row can show the error. */
   const removeSequence = async (id: string, nextId?: string) => {
     // Let go of it first: main announces the change before it answers, and the open sequence would otherwise be
-    // fetched again in between and found gone ("Sekvensen finns inte längre" in the log on every delete). The open
+    // fetched again in between and found gone ("The sequence no longer exists" in the log on every delete). The open
     // one gives way to its neighbour in the list.
     const wasOpen = id === selectedId
     const rest = (sequences ?? []).filter((s) => s.id === id || !gone.current.has(s.id))
@@ -391,7 +391,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     if (!sequenceId) return
     setNotice(undefined)
     if (!(await flushAll())) {
-      setNotice({ text: 'Ändringarna kunde inte sparas. Försök igen.', sequenceId })
+      setNotice({ text: "The changes couldn't be saved. Try again.", sequenceId })
       return
     }
     let fresh: Sequence
@@ -409,7 +409,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     }
     if (expected && runPlanKeys(fresh).some((k) => !expected.has(k))) {
       setNotice({
-        text: 'Klippen ändrades medan villkoren visades. Kontrollera dem och tryck ”Generera saknade” igen – knappen visar priset.',
+        text: 'The clips changed while the terms were shown. Check them and press “Generate missing” again – the button shows the price.',
         sequenceId
       })
       return
@@ -453,7 +453,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   const exportSequence = async () => {
     if (!sequenceId) return
     if (!(await flushAll())) {
-      setNotice({ text: 'Ändringarna kunde inte sparas. Försök igen.', sequenceId })
+      setNotice({ text: "The changes couldn't be saved. Try again.", sequenceId })
       return
     }
     await exportStatus.run(() => window.studio.exportSequence(sequenceId))
@@ -502,7 +502,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     setNotice(undefined)
     // A new clip takes the previous clip's settings as its template, so save edits first.
     await flushAll()
-    // A sequence with nothing in it yet (the empty Klipp 1 of a new sequence): the films take the empty clip's place,
+    // A sequence with nothing in it yet (the empty Clip 1 of a new sequence): the films take the empty clip's place,
     // and there is no shape to ask about – the first film gives the sequence its shape.
     const placeholders = sequence.segments.every(isUntouchedClip) ? sequence.segments.map((s) => s.id) : []
     const outcome = await importFlow.begin(
@@ -554,7 +554,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     }
   }
 
-  /** A clip picked from the feed or Redigera becomes a new clip (its selected take), after the chosen one. */
+  /** A clip picked from the feed or the Editor becomes a new clip (its selected take), after the chosen one. */
   const addPicked = async (generationId: string, request: PickRequest) => {
     setPicking(undefined)
     if (!sequence) return
@@ -592,7 +592,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     store.refresh()
   }
 
-  /** "Exportformat": the film's height, or null for Automatiskt (the first clip's own size). */
+  /** "Export format": the film's height, or null for Automatic (the first clip's own size). */
   const setExportHeight = (exportHeight: number | null) => {
     if (!sequenceId) return
     store.update((s) => ({ ...s, exportHeight }))
@@ -637,7 +637,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     if (by === 'click') requestPlay(take.id)
   }
 
-  /** "Välj den" under a previewed take: it becomes the clip's take (already watched, so it isn't started over). */
+  /** "Use this take" under a previewed take: it becomes the clip's take (already watched, so it isn't started over). */
   const choosePreviewed = (take: Generation) => {
     setTakePreview(undefined)
     markSeen([workKey.generation(take.id)])
@@ -655,8 +655,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       }))
     }))
     try {
-      // A version or an edit's original is only taken off this clip (Redigera keeps it): what the list's "Ta bort"
-      // said (release), and what main does for anything Redigera keeps by now.
+      // A version or an edit's original is only taken off this clip (the Editor keeps it): what the list's "Remove"
+      // said (release), and what main does for anything the Editor keeps by now.
       const segmentId = segment?.id ?? take.segmentId
       await window.studio.deleteGeneration(
         take.id,
@@ -670,7 +670,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
 
   const reusePrompt = (take: Generation) => editorHandle.current?.applyPrompt(take.params)
 
-  /** "Lägg till tagning från fil…". */
+  /** "Add take from file…". */
   const pickTakeFiles = async () => {
     try {
       const paths = await window.studio.pickVideos(true)
@@ -681,7 +681,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   }
 
   /**
-   * "Gör om mellan grannarna": main sets the clip to start on the previous clip's last frame and end on the next
+   * "Redo between neighbours": main sets the clip to start on the previous clip's last frame and end on the next
    * clip's first frame with a model that takes both (free). The editor then shows the frames and the price;
    * generating is the user's own click.
    */
@@ -689,7 +689,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     if (!sequenceId) return
     setNotice(undefined)
     if (!(await flushAll())) {
-      setNotice({ text: 'Ändringarna kunde inte sparas. Försök igen.', sequenceId })
+      setNotice({ text: "The changes couldn't be saved. Try again.", sequenceId })
       return
     }
     try {
@@ -719,19 +719,22 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   const notReady = sequence ? sequence.segments.flatMap((s, i) => (readyTake(s) ? [] : [i + 1])) : []
   const readyCount = (sequence?.segments.length ?? 0) - notReady.length
   const exportBlocked = !ffmpegOk
-    ? 'ffmpeg saknas – installera med brew install ffmpeg'
+    ? 'ffmpeg is missing – install it with brew install ffmpeg'
     : !sequence?.segments.length
-      ? 'Lägg till klipp först'
+      ? 'Add clips first'
       : notReady.length
-        ? `${clipList(notReady)} saknar färdig vald tagning`
+        ? notReady.length === 1
+          ? `${clipList(notReady)} has no finished selected take`
+          : `${clipList(notReady)} have no finished selected takes`
         : undefined
-  const previewDisabled = readyCount === 0 ? 'Inga klipp har en färdig vald tagning ännu' : undefined
+  const previewDisabled = readyCount === 0 ? 'No clip has a finished selected take yet' : undefined
 
-  // While the app runs, main keeps the run's error with the sequence; after a restart only Pågår och klart has it.
+  // While the app runs, main keeps the run's error with the sequence; after a restart only Activity has it.
   const runError = sequence?.runError ?? runFailure?.error
   const runConsent = parseConsent(runError)
-  // Run errors are prefixed "Klipp N: …"; offer a jump to that clip.
-  const runErrorClip = Number(/^Klipp (\d+)/.exec(runError ?? '')?.[1])
+  // Run errors are prefixed "Clip N: …" ("Klipp N: …" in failures saved before the app was in English); offer a jump
+  // to that clip.
+  const runErrorClip = Number(/^(?:Clip|Klipp) (\d+)/.exec(runError ?? '')?.[1])
   const runErrorSegment = runErrorClip ? sequence?.segments[runErrorClip - 1] : undefined
   const visibleNotice = notice && (!notice.sequenceId || notice.sequenceId === sequenceId) ? notice : undefined
   // The right pane shows the take chosen in the strip, also before main has confirmed it.
@@ -815,13 +818,14 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     <>
       {ffmpeg && !ffmpeg.ok && (
         <Banner tone="warning">
-          <span className="font-medium">ffmpeg saknas</span> – export och ”Fortsätt från föregående klipp” är avstängda.{' '}
+          <span className="font-medium">ffmpeg is missing</span> – export and “Start on the previous clip's last
+          frame” are turned off.{' '}
           {/* The status message usually says how to install already; don't repeat it. */}
           {ffmpeg.message && !ffmpeg.message.includes('brew install') && (
             <span className="opacity-80">{ffmpeg.message} </span>
           )}
-          Installera med <code className="rounded bg-black/30 px-1 py-px font-mono">brew install ffmpeg</code> och
-          starta om Studio.
+          Install it with <code className="rounded bg-black/30 px-1 py-px font-mono">brew install ffmpeg</code> and
+          restart Studio.
         </Banner>
       )}
       {visibleNotice && (
@@ -829,7 +833,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
           <span className="whitespace-pre-line">{visibleNotice.text}</span>
         </Banner>
       )}
-      {importFlow.inspecting && <Banner tone="info">Läser filerna…</Banner>}
+      {importFlow.inspecting && <Banner tone="info">Reading the files…</Banner>}
       {runError && runError !== dismissedRunError && !sequence?.running && (
         <SeenWhenVisible seenKey={runFailure?.key}>
           <Banner
@@ -841,23 +845,23 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
           >
             {runConsent ? (
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                Generera saknade stoppades: modellen kräver att du godkänner leverantörens villkor.
+                Generate missing stopped: the model needs you to accept the provider's terms.
                 <button
                   onClick={() => sequence && setRunConsentOpen(new Set(runPlanKeys(sequence)))}
                   className="rounded bg-accent px-2 py-0.5 font-medium text-white hover:bg-accent-hover"
                 >
-                  Granska och fortsätt
+                  Review and continue
                 </button>
               </span>
             ) : (
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span>Generera saknade stoppades – {runError}</span>
+                <span>Generate missing stopped – {runError}</span>
                 {runErrorSegment && runErrorSegment.id !== segment?.id && (
                   <button
                     onClick={() => selectSegment(runErrorSegment.id)}
                     className="rounded border border-accent/40 px-2 py-0.5 font-medium hover:bg-accent/10"
                   >
-                    Visa klipp {runErrorClip}
+                    Show clip {runErrorClip}
                   </button>
                 )}
               </span>
@@ -868,20 +872,20 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       {exportStatus.done && (
         <Banner tone="success" onDismiss={exportStatus.dismissDone}>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span title={exportStatus.done.mediaPath}>Filmen är klar</span>
+            <span title={exportStatus.done.mediaPath}>The film is ready</span>
             <button
               onClick={() => void exportStatus.reveal()}
               className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
             >
-              Visa i Finder
+              Show in Finder
             </button>
             {exportStatus.done.exportId && (
               <button
                 onClick={() => exportStatus.edit(navigate)}
-                title="Ändra den färdiga filmen med AI i Redigera. Sekvensen rörs inte."
+                title="Change the finished film with AI in the Editor. The sequence isn't touched."
                 className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
               >
-                Redigera
+                Edit
               </button>
             )}
           </span>
@@ -992,8 +996,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               sequence.segments.length === 0 && (
                 <div className="flex flex-1 items-center justify-center p-8">
                   <p className="max-w-sm text-center leading-relaxed text-muted">
-                    Lägg till ett första klipp ovan. Varje klipp är en egen generering – eller en egen film – och nästa
-                    klipp kan fortsätta från det förras sista bildruta så att övergången blir sömlös.
+                    Add a first clip above. Each clip is a generation of its own – or a film of your own – and the next
+                    clip can continue from the last frame of the one before, so the transition is seamless.
                   </p>
                 </div>
               )
@@ -1011,7 +1015,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               <EmptyState creating={creating} onCreate={() => void createSequence()} navigate={navigate} />
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted">
-                {selectedId && !store.error ? 'Laddar sekvens…' : ''}
+                {selectedId && !store.error ? 'Loading sequence…' : ''}
               </div>
             )}
           </>
@@ -1024,7 +1028,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       {importFlow.dialog}
       <GenerationPickerDialog
         open={!!picking}
-        title={picking?.source === 'edit' ? 'Lägg till en version från Redigera' : 'Lägg till ett klipp från Mediabanken'}
+        title={picking?.source === 'edit' ? 'Add a version from the Editor' : 'Add a clip from Media'}
         sources={picking?.source === 'edit' ? ['edit'] : ['generated', 'import', 'edit']}
         onClose={() => setPicking(undefined)}
         onPicked={(g) => picking && void addPicked(g.id, picking)}
@@ -1032,7 +1036,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       {runConsentOpen && runConsent && (
         <ConsentDialog
           request={runConsent}
-          cost={`Generera saknade, ${runPlan.toGenerate.length} klipp · ${formatUsd(runQuote)}`}
+          cost={`Generate missing, ${runPlan.toGenerate.length} ${runPlan.toGenerate.length === 1 ? 'clip' : 'clips'} · ${formatUsd(runQuote)}`}
           onAccept={() => void acceptRunConsent(runConsent, runConsentOpen)}
           onCancel={() => setRunConsentOpen(undefined)}
         />
@@ -1062,7 +1066,7 @@ function Banner({
     >
       <div className="min-w-0 flex-1 select-text">{children}</div>
       {onDismiss && (
-        <button onClick={onDismiss} title="Stäng" className="mt-0.5 shrink-0 opacity-60 transition hover:opacity-100">
+        <button onClick={onDismiss} title="Close" className="mt-0.5 shrink-0 opacity-60 transition hover:opacity-100">
           <CloseIcon size={11} />
         </button>
       )}
@@ -1083,13 +1087,12 @@ function selectionHintText(segment: Segment): string | undefined {
   if (!pending && !completed) return undefined
   if (selectedTake(segment)?.fileMissing && completed) {
     return (
-      'Den valda tagningens videofil finns inte längre. Klicka på en annan tagning för att använda den i ' +
-      'sekvensen.'
+      "The selected take's video file no longer exists. Click another take to use it in the sequence."
     )
   }
   return pending && !completed
-    ? 'Tagningen genereras. Den väljs automatiskt när den är klar.'
-    : 'Ingen tagning är vald. Klicka på en tagning för att använda den i sekvensen.'
+    ? "The take is being generated. It's selected automatically when it's done."
+    : 'No take is selected. Click a take to use it in the sequence.'
 }
 
 /** Shown in the player's place while the clip has no usable chosen take. */
@@ -1118,27 +1121,27 @@ function EmptyState({
     <div className="flex flex-1 items-center justify-center p-8">
       <div className="max-w-md text-center">
         <FilmIcon size={30} className="mx-auto mb-4 text-muted" />
-        <h2 className="mb-2 text-base font-semibold">Bygg längre videor av flera klipp</h2>
+        <h2 className="mb-2 text-base font-semibold">Build longer videos from several clips</h2>
         <p className="mb-5 leading-relaxed text-muted">
-          En generering blir som mest runt 15 sekunder. I en sekvens lägger du klipp efter varandra, låter varje klipp
-          fortsätta från det förras sista bildruta, väljer de bästa tagningarna, trimmar och exporterar allt som en film.
+          A generation is at most around 15 seconds. In a sequence you put clips one after another, let each clip
+          continue from the last frame of the one before, pick the best takes, trim, and export it all as one film.
         </p>
         <button
           onClick={onCreate}
           disabled={creating}
           className="rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
         >
-          Skapa en sekvens
+          Create a sequence
         </button>
         <p className="mt-4 text-[11px] leading-relaxed text-muted">
-          Vill du hellre börja med bilder? I{' '}
+          Rather start with images? In{' '}
           <button onClick={() => navigate('storyboards')} className={link}>
             Storyboards
           </button>{' '}
-          gör du en bild för varje viktigt ögonblick och genererar klippen mellan dem. Befintliga videor kan du lägga i
-          en sekvens direkt från{' '}
+          you make an image for every key moment and generate the clips between them. You can put existing videos into
+          a sequence straight from{' '}
           <button onClick={() => navigate('generate')} className={link}>
-            Generera
+            Generate
           </button>
           .
         </p>

@@ -52,8 +52,8 @@ export default function AudioChips({ audios, language, onInsert, onRemove, onMov
     describeMove: (from, to) => {
       const name = audioLabel(audios[from])
       return sentAt(audios, to)
-        ? `${name} flyttades till plats ${to + 1} och heter nu @Audio${to + 1}.`
-        : `${name} flyttades till plats ${to + 1} och skickas inte med den här modellen.`
+        ? `${name} moved to place ${to + 1} and is now @Audio${to + 1}.`
+        : `${name} moved to place ${to + 1} and isn’t sent with this model.`
     }
   })
   if (!audios.length) return null
@@ -63,7 +63,7 @@ export default function AudioChips({ audios, language, onInsert, onRemove, onMov
     <>
       <div
         role="list"
-        aria-label={`Ljudreferenser${reorder.enabled ? ' – dra eller tryck ⌥← / ⌥→ på ett ljud för att ändra ordningen' : ''}`}
+        aria-label={`Sound references${reorder.enabled ? ' – drag or press ⌥← / ⌥→ on a sound to change the order' : ''}`}
         onDragOver={(e) => void reorder.onDragOver(e)}
         onDrop={(e) => void reorder.onDrop(e)}
         onDragLeave={reorder.onDragLeave}
@@ -92,9 +92,9 @@ export default function AudioChips({ audios, language, onInsert, onRemove, onMov
               title={
                 sent
                   ? reorder.enabled && !dragging
-                    ? 'Dra för att ändra ordningen (eller ⌥← / ⌥→)'
+                    ? 'Drag to change the order (or ⌥← / ⌥→)'
                     : undefined
-                  : 'Skickas inte med den här modellen'
+                  : 'Not sent with this model'
               }
             >
               <span className="py-0.5 pl-0.5">
@@ -102,7 +102,7 @@ export default function AudioChips({ audios, language, onInsert, onRemove, onMov
               </span>
               <button
                 onClick={() => onInsert(text)}
-                title={`Infoga ”${text}” i prompten${reorder.enabled ? ' – dra för att ändra ordningen (⌥← / ⌥→)' : ''}`}
+                title={`Insert “${text}” in the prompt${reorder.enabled ? ' – drag to change the order (⌥← / ⌥→)' : ''}`}
                 className="flex min-w-0 items-center gap-1.5 py-0.5 pl-1.5 pr-1.5"
               >
                 <span className="min-w-0 truncate font-medium">{name}</span>
@@ -117,8 +117,8 @@ export default function AudioChips({ audios, language, onInsert, onRemove, onMov
               </button>
               <button
                 onClick={() => onRemove(a.index)}
-                title={`Ta bort ${label} från ljudreferenserna`}
-                aria-label={`Ta bort ${label}`}
+                title={`Remove ${label} from the sound references`}
+                aria-label={`Remove ${label}`}
                 className="mr-1 shrink-0 rounded-full px-1 text-muted hover:text-text"
               >
                 ✕

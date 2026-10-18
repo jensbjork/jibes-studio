@@ -18,7 +18,7 @@ import { formatClipSeconds } from './text'
 export interface AudioSource {
   asset: Asset
   audio: AssetAudio
-  /** 1-based position among the asset's clips ("röst 2"). */
+  /** 1-based position among the asset's clips ("voice 2"). */
   clip: number
 }
 
@@ -42,7 +42,7 @@ export function voiceOf(asset: Asset): AssetAudio | undefined {
   return asset.kind === 'character' ? clipsOf(asset)[0] : undefined
 }
 
-/** Whether adding the character brings its voice: it has one, long enough to be sent ("+ röst" in the pickers). */
+/** Whether adding the character brings its voice: it has one, long enough to be sent ("+ voice" in the pickers). */
 export function bringsVoice(asset: Asset): boolean {
   const voice = voiceOf(asset)
   return !!voice && !isAudioClipTooShort(voice.clipLength)
@@ -126,20 +126,20 @@ export function audioIndicesOf(audios: readonly FormAudio[], assetId: string): n
   return audios.filter((a) => a.source?.asset.id === assetId).map((a) => a.index)
 }
 
-/** "röst", "ljudmiljö", "ljud": what a clip of the kind is called in the form. */
+/** "voice", "soundscape", "sound": what a clip of the kind is called in the form. */
 export function audioRole(kind: AssetKind | undefined): string {
-  return kind === 'character' ? 'röst' : kind === 'environment' ? 'ljudmiljö' : 'ljud'
+  return kind === 'character' ? 'voice' : kind === 'environment' ? 'soundscape' : 'sound'
 }
 
-/** What a clip is, in two parts: "Anna" and "röst" ("röst 2" when it has several), or "Eget ljud" and its file. */
+/** What a clip is, in two parts: "Anna" and "voice" ("voice 2" when it has several), or "Own sound" and its file. */
 export function audioLabelParts(audio: Pick<FormAudio, 'path' | 'source'>): { name: string; detail: string } {
   const s = audio.source
-  if (!s) return { name: 'Eget ljud', detail: audio.path.split('/').pop() ?? audio.path }
+  if (!s) return { name: 'Own sound', detail: audio.path.split('/').pop() ?? audio.path }
   const several = clipsOf(s.asset).length > 1
   return { name: s.asset.name, detail: `${audioRole(s.asset.kind)}${several ? ` ${s.clip}` : ''}` }
 }
 
-/** "Anna · röst", "Anna · röst 2" (when it has several), "Eget ljud · intervju.mp3". */
+/** "Anna · voice", "Anna · voice 2" (when it has several), "Own sound · interview.mp3". */
 export function audioLabel(audio: Pick<FormAudio, 'path' | 'source'>): string {
   const { name, detail } = audioLabelParts(audio)
   return `${name} · ${detail}`
@@ -179,18 +179,18 @@ export function audioInsertText(audio: Pick<FormAudio, 'index' | 'source'>, lang
 
 // ── Edits ────────────────────────────────────────────────────────────────────
 
-/** A new audio list, and a note (Swedish) when not everything fitted. */
+/** A new audio list, and a note when not everything fitted. */
 export interface AudiosChange {
   audios: ReferenceAudio[]
   note?: string
 }
 
-/** "rösten för Anna", "ljudmiljön för Stranden", "ljudet intervju.mp3": a clip named in a note. */
+/** "the voice of Anna", "the soundscape of Stranden", "the sound interview.mp3": a clip named in a note. */
 function clipName(ref: ReferenceAudio, source: AudioSource | undefined): string {
-  if (!source) return `ljudet ${ref.path.split('/').pop() ?? ref.path}`
+  if (!source) return `the sound ${ref.path.split('/').pop() ?? ref.path}`
   const kind = source.asset.kind
-  const what = kind === 'character' ? 'rösten' : kind === 'environment' ? 'ljudmiljön' : 'ljudet'
-  return `${what} för ${source.asset.name}`
+  const what = kind === 'character' ? 'the voice' : kind === 'environment' ? 'the soundscape' : 'the sound'
+  return `${what} of ${source.asset.name}`
 }
 
 function capitalized(text: string): string {
@@ -232,25 +232,25 @@ export function addAudios(
   const notes: string[] = []
   if (tooShort.length) {
     notes.push(
-      `${capitalized(swedishNames(tooShort))} är kortare än ${MIN_AUDIO_CLIP_SECONDS} s och togs inte med – ` +
-        'Venice tar inte emot så korta ljudklipp.'
+      `${capitalized(englishNames(tooShort))} ${tooShort.length === 1 ? 'is' : 'are'} shorter than ${MIN_AUDIO_CLIP_SECONDS} s and ` +
+        `${tooShort.length === 1 ? 'wasn’t' : 'weren’t'} included – Venice doesn’t take sound clips that short.`
     )
   }
   if (full.length) {
-    notes.push(`${capitalized(swedishNames(full))} fick inte plats – modellen tar max ${max} ljudklipp.`)
+    notes.push(`${capitalized(englishNames(full))} didn’t fit – the model takes at most ${max} sound ${max === 1 ? 'clip' : 'clips'}.`)
   }
   if (tooLong.length) {
     notes.push(
-      `${capitalized(swedishNames(tooLong))} fick inte plats – ljudreferenserna får vara högst ` +
-        `${MAX_REFERENCE_AUDIO_SECONDS} s tillsammans (nu ${formatClipSeconds(total)}).`
+      `${capitalized(englishNames(tooLong))} didn’t fit – the sound references may be at most ` +
+        `${MAX_REFERENCE_AUDIO_SECONDS} s together (now ${formatClipSeconds(total)}).`
     )
   }
   return { audios: out, ...(notes.length ? { note: notes.join(' ') } : {}) }
 }
 
-function swedishNames(items: readonly string[]): string {
+function englishNames(items: readonly string[]): string {
   if (items.length <= 1) return items[0] ?? ''
-  return `${items.slice(0, -1).join(', ')} och ${items[items.length - 1]}`
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
 /** Whether a clip would fit after the ones there: a free place and room in the total length. */
@@ -260,12 +260,12 @@ export function fitsAudio(
   byPath: ReadonlyMap<string, AudioSource>,
   max: number
 ): { fits: boolean; reason?: string } {
-  if (current.some((a) => a.path === ref.path)) return { fits: false, reason: 'redan tillagt' }
+  if (current.some((a) => a.path === ref.path)) return { fits: false, reason: 'already added' }
   const length = windowOf(ref, byPath.get(ref.path)).length
-  if (isAudioClipTooShort(length)) return { fits: false, reason: `kortare än ${MIN_AUDIO_CLIP_SECONDS} s` }
-  if (current.length >= max) return { fits: false, reason: `max ${max} ljudklipp` }
+  if (isAudioClipTooShort(length)) return { fits: false, reason: `shorter than ${MIN_AUDIO_CLIP_SECONDS} s` }
+  if (current.length >= max) return { fits: false, reason: `at most ${max} sound ${max === 1 ? 'clip' : 'clips'}` }
   if (totalSeconds(current, byPath) + length > MAX_REFERENCE_AUDIO_SECONDS + EPSILON) {
-    return { fits: false, reason: `över ${MAX_REFERENCE_AUDIO_SECONDS} s totalt` }
+    return { fits: false, reason: `over ${MAX_REFERENCE_AUDIO_SECONDS} s in total` }
   }
   return { fits: true }
 }
@@ -277,7 +277,7 @@ export function removeAudiosOf(current: readonly ReferenceAudio[], asset: Asset)
 }
 
 /**
- * The form's audio following the library: a clip whose file moved (its asset was renamed, "Städa upp" tidied
+ * The form's audio following the library: a clip whose file moved (its asset was renamed, "Tidy up" tidied
  * it) points at where it is now, and a clip whose window in the form is the window it had at the last look
  * (`previous`, clip id → clip) gets the window it has now – the user moved it in the library. Windows set
  * otherwise (by an agent, say) are left alone. Clips are recognised by path, else by the clip id remembered for

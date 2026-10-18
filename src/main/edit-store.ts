@@ -1,4 +1,4 @@
-// Persistence for Redigera: edits, their versions (completed generations rows with source 'edit'), the audio an
+// Persistence for the Editor: edits, their versions (completed generations rows with source 'edit'), the audio an
 // edit owns (edit_media), multi-step paid jobs and their steps (media_jobs, media_job_steps), transcripts and
 // voice clone handles. Everything here is synchronous SQLite; files are the services' business (edits.ts,
 // edit-ops.ts). JSON columns (recipe, details, request, segments) hold ids only, never file paths: paths live in
@@ -20,7 +20,7 @@ const conn = (): ReturnType<typeof db.getDb> => db.getDb()
 
 /** Ids arrive over IPC and from agents; anything that isn't one is refused before it reaches a query. */
 export function safeId(id: unknown, what = 'id'): string {
-  if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id)) throw new Error(`Ogiltigt ${what}.`)
+  if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id)) throw new Error(`Invalid ${what}.`)
   return id
 }
 
@@ -58,7 +58,7 @@ export function getEditRow(id: string): EditRow | undefined {
 
 export function requireEditRow(id: unknown): EditRow {
   const row = getEditRow(safeId(id))
-  if (!row) throw new Error('Redigeringen finns inte längre.')
+  if (!row) throw new Error('The edit no longer exists.')
   return row
 }
 
@@ -163,8 +163,8 @@ export function editOfVersion(g: Pick<Generation, 'id' | 'editId' | 'source'>): 
 }
 
 /**
- * Flags the generations Redigera keeps (editOfVersion finds their edit: a version, or the film an edit started from)
- * with `keptByEdit`, as EditService.keeps decides it. A take list shows "Ta bort" for them, and generations:delete only
+ * Flags the generations the Editor keeps (editOfVersion finds their edit: a version, or the film an edit started from)
+ * with `keptByEdit`, as EditService.keeps decides it. A take list shows "Remove" for them, and generations:delete only
  * takes them off the clip.
  */
 export function attachKeptByEdit<T extends Pick<Generation, 'id' | 'editId' | 'source' | 'keptByEdit'>>(gens: T[]): T[] {
@@ -175,7 +175,7 @@ export function attachKeptByEdit<T extends Pick<Generation, 'id' | 'editId' | 's
       else delete g.keptByEdit
     }
   } catch (err) {
-    console.warn('Reading which takes Redigera keeps failed:', err)
+    console.warn('Reading which takes the Editor keeps failed:', err)
   }
   return gens
 }
@@ -354,13 +354,13 @@ export type StepEndpoint = 'voice-changer' | 'audio-queue' | 'speech' | 'transcr
 export interface JobRequest {
   /** Picture and audio jobs of an edit. */
   operation?: EditOperation
-  /** Voice design (Karaktärer → Röst). */
+  /** Voice design (Characters → Voice). */
   voiceDesign?: VoiceDesignRequest
-  /** Swedish label, e.g. "Bytte röst → Aria". */
+  /** Label, e.g. "Changed voice → Aria". */
   label: string
   /** What the finish needs that the plan worked out (scopes, line slots, placement); see edit-ops.ts. */
   finish?: Record<string, unknown>
-  /** A picture job whose finish failed for a reason another try can't change: no free "Fortsätt" for it. */
+  /** A picture job whose finish failed for a reason another try can't change: no free "Continue" for it. */
   noRefinish?: boolean
 }
 
@@ -425,7 +425,7 @@ export function getJob(id: string): StoredJob | undefined {
 
 export function requireJob(id: unknown): StoredJob {
   const job = getJob(safeId(id))
-  if (!job) throw new Error('Jobbet finns inte längre.')
+  if (!job) throw new Error('The job no longer exists.')
   return job
 }
 
@@ -537,7 +537,7 @@ export function updateJob(
     sets.push('request = @request')
     values.request = JSON.stringify(patch.request)
   }
-  // Every job is paid work (a Redigera operation or a designed voice): one that fails is news for the user wherever
+  // Every job is paid work (an Editor operation or a designed voice): one that fails is news for the user wherever
   // they are, also when the edit isn't open. A cancelled job is the user's own doing and isn't.
   const before = patch.status === 'failed' ? getJob(id) : undefined
   conn().prepare(`UPDATE media_jobs SET ${sets.join(', ')} WHERE id = @id`).run(values)
@@ -812,7 +812,7 @@ export function validClone(audioId: string, model: string, marginMs = 3600_000):
     .get(audioId, model, Date.now() + marginMs) as CloneRow | undefined
 }
 
-/** The clone handles of a Röst clip go (its consent was withdrawn): a new line needs a new clone, and so consent. */
+/** The clone handles of a voice clip go (its consent was withdrawn): a new line needs a new clone, and so consent. */
 export function forgetClones(audioId: string): void {
   conn().prepare('DELETE FROM voice_clones WHERE audio_id = ?').run(audioId)
 }

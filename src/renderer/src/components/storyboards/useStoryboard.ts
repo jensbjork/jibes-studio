@@ -193,7 +193,7 @@ export function useStoryboardList(): { storyboards?: StoryboardSummary[]; reload
     const offStoryboard = window.studio.onStoryboardChange(soon)
     // Covers follow board images, which move with their stills.
     const offStills = window.studio.onStillsChange(soon)
-    // "Klara" counts change when a take finishes.
+    // "Done" counts change when a take finishes.
     const offGeneration = window.studio.onGenerationUpdate((g) => {
       if (g.segmentId && (g.status === 'completed' || g.status === 'failed')) soon()
     })

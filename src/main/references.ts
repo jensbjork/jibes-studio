@@ -27,18 +27,18 @@ export function serialized(): <T>(task: () => Promise<T>) => Promise<T> {
   }
 }
 
-/** A short Swedish reason for a failed file operation, for messages like "Kunde inte kopiera x: <reason>." */
+/** A short reason for a failed file operation, for messages like "Could not copy x: <reason>." */
 export function fileErrorReason(err: unknown): string {
   switch ((err as NodeJS.ErrnoException | undefined)?.code) {
     case 'ENOENT':
-      return 'filen finns inte'
+      return 'the file does not exist'
     case 'EACCES':
     case 'EPERM':
-      return 'behörighet saknas'
+      return 'permission denied'
     case 'EISDIR':
-      return 'det är en mapp'
+      return 'it is a folder'
     case 'ENOSPC':
-      return 'disken är full'
+      return 'the disk is full'
     default:
       return err instanceof Error ? err.message : String(err)
   }
@@ -76,7 +76,7 @@ export async function copyInto(src: string, dir: string, base: string, ext: stri
   try {
     await copyFile(src, tmp, constants.COPYFILE_EXCL)
     const [from, to] = await Promise.all([stat(src), stat(tmp)])
-    if (from.size !== to.size) throw new Error('kopian blev ofullständig')
+    if (from.size !== to.size) throw new Error('the copy was incomplete')
     return await placeFile(tmp, dir, base, ext)
   } finally {
     // Gone already when the placement succeeded.
@@ -85,7 +85,7 @@ export async function copyInto(src: string, dir: string, base: string, ext: stri
 }
 
 function abortError(): Error {
-  return Object.assign(new Error('Avbrutet.'), { name: 'AbortError' })
+  return Object.assign(new Error('Cancelled.'), { name: 'AbortError' })
 }
 
 /**
@@ -155,7 +155,7 @@ export async function cloneInto(
       await streamCopy(src, tmp, from.size, opts)
     }
     const to = await stat(tmp)
-    if (from.size !== to.size) throw new Error('kopian blev ofullständig')
+    if (from.size !== to.size) throw new Error('the copy was incomplete')
     if (opts.signal?.aborted) throw abortError()
     opts.onProgress?.(1)
     return await placeFile(tmp, dir, base, ext)
@@ -223,7 +223,7 @@ async function importFile(src: string, dir: string, material: Material): Promise
   const name = basename(src)
   try {
     const info = await stat(src)
-    if (!info.isFile()) throw Object.assign(new Error('det är en mapp'), { code: 'EISDIR' })
+    if (!info.isFile()) throw Object.assign(new Error('it is a folder'), { code: 'EISDIR' })
     const existing = await findIdentical(dir, info.size, await fileHash(src, info))
     if (existing) return existing
     const ext = extname(src)
@@ -235,8 +235,8 @@ async function importFile(src: string, dir: string, material: Material): Promise
     if (cached && copied) hashCache.set(copy, { size: copied.size, mtimeMs: copied.mtimeMs, hash: cached.hash })
     return copy
   } catch (err) {
-    const what = material === 'audio' ? 'ljudfilen' : material === 'video' ? 'videon' : 'bilden'
-    throw new Error(`Kunde inte kopiera ${what} ${name} till biblioteket: ${fileErrorReason(err)}.`)
+    const what = material === 'audio' ? 'the audio file' : material === 'video' ? 'the video' : 'the image'
+    throw new Error(`Could not copy ${what} ${name} to the library: ${fileErrorReason(err)}.`)
   }
 }
 

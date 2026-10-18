@@ -47,7 +47,7 @@ export function Banner({
     >
       <div className="min-w-0 flex-1 select-text">{children}</div>
       {onDismiss && (
-        <button onClick={onDismiss} title="Stäng" className="mt-0.5 shrink-0 opacity-60 transition hover:opacity-100">
+        <button onClick={onDismiss} title="Close" className="mt-0.5 shrink-0 opacity-60 transition hover:opacity-100">
           <CloseIcon size={11} />
         </button>
       )}
@@ -65,7 +65,7 @@ export function SubView({ title, onBack, children }: { title?: string; onBack: (
           onClick={onBack}
           className="rounded px-1.5 py-0.5 text-[12px] text-muted transition hover:bg-raised hover:text-text"
         >
-          ‹ Tillbaka
+          ‹ Back
         </button>
         {title && <span className="truncate text-[11px] text-muted">{title}</span>}
       </div>
@@ -75,7 +75,7 @@ export function SubView({ title, onBack, children }: { title?: string; onBack: (
 }
 
 /**
- * A question in front of the storyboard before a change that throws work away (asked only when it would). Avbryt
+ * A question in front of the storyboard before a change that throws work away (asked only when it would). Cancel
  * has the focus: the change may have come from a stray click or key.
  */
 export function ConfirmDialog({
@@ -126,7 +126,7 @@ export function ConfirmDialog({
         </div>
         <div className="flex justify-end gap-2 border-t border-line p-4">
           <button type="button" autoFocus onClick={onCancel} className={secondaryButton}>
-            Avbryt
+            Cancel
           </button>
           <button type="button" onClick={onConfirm} className={primaryButton}>
             {confirmLabel}

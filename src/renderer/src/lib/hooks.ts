@@ -158,7 +158,7 @@ export function useQuote(params: GenerationParams, model: VideoModel | undefined
   return quote
 }
 
-// ── Audio models and voice separation (Redigera, voice design) ─────────────
+// ── Audio models and voice separation (Editor, voice design) ─────────────
 
 // Venice's audio models, shared like the video model list. Main caches the list for 10 minutes; the window asks again
 // after that, so a voice changer Venice starts listing (or one the API key unlocks) shows up without a restart.
@@ -167,7 +167,7 @@ let audioCatalog: { promise: Promise<AudioCatalog>; at: number; forced: boolean 
 const audioCatalogListeners = new Set<(catalog: AudioCatalog) => void>()
 
 /**
- * The audio catalog. force: fetch it again past main's cache ("Kontrollera igen", a new API key); a forced fetch
+ * The audio catalog. force: fetch it again past main's cache ("Check again", a new API key); a forced fetch
  * already on its way is shared. A failed fetch is forgotten so the next caller tries again.
  */
 export function loadAudioCatalog(force = false): Promise<AudioCatalog> {
@@ -178,7 +178,7 @@ export function loadAudioCatalog(force = false): Promise<AudioCatalog> {
     audioCatalog = entry
     promise.then(
       (catalog) => {
-        // A forced fetch keeps that mark only while it runs; afterwards the next "Kontrollera igen" asks again.
+        // A forced fetch keeps that mark only while it runs; afterwards the next "Check again" asks again.
         if (audioCatalog === entry) audioCatalog = { ...entry, forced: false }
         for (const listener of audioCatalogListeners) listener(catalog)
       },
@@ -196,7 +196,7 @@ export function useAudioCatalog(): {
   error?: string
   /** A fetch is on its way. */
   loading: boolean
-  /** Fetches the list again from Venice ("Kontrollera igen"). */
+  /** Fetches the list again from Venice ("Check again"). */
   refresh: () => void
 } {
   const [catalog, setCatalog] = useState<AudioCatalog>()
@@ -222,7 +222,7 @@ export function useAudioCatalog(): {
     const listener = (c: AudioCatalog) => setCatalog(c)
     audioCatalogListeners.add(listener)
     load(false)
-    // Some models are only listed to keyed accounts: a key saved (or removed) in Inställningar asks again.
+    // Some models are only listed to keyed accounts: a key saved (or removed) in Settings asks again.
     let keyed: boolean | undefined
     const offSettings = window.studio.onSettingsChange(() => {
       void window.studio.getSettings().then((s) => {
@@ -245,7 +245,7 @@ export function useAudioCatalog(): {
 let separationPromise: Promise<SeparationStatus> | undefined
 
 /**
- * Whether this Mac can separate voice and background (Ta bort rösten, Bara rösten, keeping the background under a
+ * Whether this Mac can separate voice and background (Remove the voice, Only the voice, keeping the background under a
  * new voice). Asked once per window; a failure or "not available" is asked again next time, since main only caches
  * success.
  */

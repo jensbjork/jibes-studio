@@ -52,9 +52,9 @@ import { callService } from './local-ipc'
 // options, and the prompt checks.
 
 export const NO_LIBRARY =
-  'Studio har inget bibliotek öppet. Användaren behöver välja en biblioteksmapp i Studio innan du kan arbeta där.'
+  'Studio has no library open. The user needs to choose a library folder in Studio before you can work there.'
 
-/** Throws (in Swedish) unless a library is open; tools that read or change it call this first. */
+/** Throws unless a library is open; tools that read or change it call this first. */
 export function requireLibrary(): void {
   if (!isLibraryReady()) throw new Error(NO_LIBRARY)
 }
@@ -80,23 +80,23 @@ export function seconds(value: number): number {
 
 /**
  * A "generate all" run error as an agent should read it. A run stopped by Venice asking for consent carries the
- * raw consent request ("Klipp 2: NEEDS_CONSENT:{…}") for the window, which asks the user and restarts the run.
+ * raw consent request ("Clip 2: NEEDS_CONSENT:{…}") for the window, which asks the user and restarts the run.
  */
 export function readableRunError(error: string | undefined): string | undefined {
   if (!error) return undefined
   const at = error.indexOf(NEEDS_CONSENT)
   if (at < 0) return error
-  return `${error.slice(0, at)}Venice vill att användaren godkänner modellens villkor innan klippet kan genereras. Det görs i Studio under Sekvenser (”Generera saknade”).`
+  return `${error.slice(0, at)}Venice wants the user to accept the model's terms before the clip can be generated. That is done in Studio under Sequences (“Generate missing”).`
 }
 
-/** "Anna" → "”Anna”", for names in messages. */
-export const q = (name: string): string => `”${name}”`
+/** "Anna" → "“Anna”", for names in messages. */
+export const q = (name: string): string => `“${name}”`
 
 // ── Assets, their photos and their audio clips ───────────────────────────────
 
 export interface PhotoRef {
   asset: Asset
-  /** 1-based, as "foto 2" in Studio. */
+  /** 1-based, as "photo 2" in Studio. */
   photoNumber: number
   imageId: string
 }
@@ -155,7 +155,7 @@ export class AssetIndex {
     const asset = this.byId.get(id)
     if (!asset) {
       throw new Error(
-        `Det finns ingen karaktär, miljö, produkt, klädsel eller pose med id ${id}. Använd list_assets för att se vad som finns.`
+        `There is no character, environment, product, outfit or pose with id ${id}. Use list_assets to see what there is.`
       )
     }
     return asset
@@ -175,7 +175,7 @@ export class AssetIndex {
     const ref = this.byImageId.get(imageId)
     if (!ref) {
       throw new Error(
-        `Det finns ingen bild med id ${imageId} bland karaktärerna, miljöerna, produkterna, kläderna och poserna. Bildernas id finns i image_ids från list_assets eller get_asset.`
+        `There is no image with id ${imageId} among the characters, environments, products, outfits and poses. The images' ids are in image_ids from list_assets or get_asset.`
       )
     }
     return ref
@@ -192,7 +192,7 @@ export class AssetIndex {
   requireAudio(id: string): AudioRef {
     const ref = this.byAudioId.get(id)
     if (!ref) {
-      throw new Error(`Det finns inget ljudklipp med id ${id}. Ljudklippens id finns i audio från list_assets eller get_asset.`)
+      throw new Error(`There is no audio clip with id ${id}. The audio clips' ids are in audio from list_assets or get_asset.`)
     }
     return ref
   }
@@ -247,7 +247,7 @@ export class StillIndex {
 
   require(id: string): Still {
     const still = this.byId.get(id)
-    if (!still) throw new Error(`Det finns ingen stillbild med id ${id}. list_stills visar vilka som finns.`)
+    if (!still) throw new Error(`There is no still image with id ${id}. list_stills shows which there are.`)
     return still
   }
 
@@ -403,9 +403,9 @@ export interface ResolvedReferences {
   paths: string[]
   /** Audio windows in @Audio order (after any existing ones), without duplicates, within the limits. */
   audios: ReferenceAudio[]
-  /** Clips that were asked for (or would have been added by default) but don't fit, and why (Swedish). */
+  /** Clips that were asked for (or would have been added by default) but don't fit, and why. */
   skippedAudio: (AudioInfo & { reason: string })[]
-  /** What was decided on the agent's behalf (Swedish), e.g. a voice left out because the model takes none. */
+  /** What was decided on the agent's behalf, e.g. a voice left out because the model takes none. */
   notes: string[]
 }
 
@@ -415,7 +415,7 @@ function chosenImages(asset: Asset, item: AssetReferenceItem): Asset['images'] {
     const image = asset.images.find((img) => img.id === imageId)
     if (!image) {
       throw new Error(
-        `Bilden ${imageId} hör inte till ${q(asset.name)}. Bildernas id finns i image_ids från list_assets eller get_asset.`
+        `The image ${imageId} doesn't belong to ${q(asset.name)}. The images' ids are in image_ids from list_assets or get_asset.`
       )
     }
     return image
@@ -439,14 +439,14 @@ function chosenAudio(
       const clip = clips.find((a) => a.id === audioId)
       if (!clip) {
         throw new Error(
-          `Ljudklippet ${audioId} hör inte till ${q(asset.name)}. Ljudklippens id finns i audio från list_assets eller get_asset.`
+          `The audio clip ${audioId} doesn't belong to ${q(asset.name)}. The audio clips' ids are in audio from list_assets or get_asset.`
         )
       }
       return clip
     })
     if (target && !target.audioInput) {
       throw new Error(
-        `${target.modelLabel} tar inte emot ljudreferenser (@Audio1 …). Ta bort audio_ids, eller välj en modell med audio_input: true i list_models.`
+        `${target.modelLabel} doesn't take audio references (@Audio1 …). Remove audio_ids, or choose a model with audio_input: true in list_models.`
       )
     }
     return chosen
@@ -454,17 +454,17 @@ function chosenAudio(
   const wanted = item.include_voice ?? asset.kind === 'character'
   if (!wanted || !clips.length) {
     if (item.include_voice === true && !clips.length) {
-      notes.push(`${q(asset.name)} har inget ljudklipp än, så inget ljud lades till.`)
+      notes.push(`${q(asset.name)} has no audio clip yet, so no sound was added.`)
     }
     return []
   }
   if (target && !target.audioInput) {
     if (item.include_voice === true) {
       throw new Error(
-        `${target.modelLabel} tar inte emot ljudreferenser (@Audio1 …). Sätt include_voice till false, eller välj en modell med audio_input: true i list_models.`
+        `${target.modelLabel} doesn't take audio references (@Audio1 …). Set include_voice to false, or choose a model with audio_input: true in list_models.`
       )
     }
-    notes.push(`Rösten för ${q(asset.name)} togs inte med: ${target.modelLabel} tar inte emot ljudreferenser.`)
+    notes.push(`The voice of ${q(asset.name)} was left out: ${target.modelLabel} doesn't take audio references.`)
     return []
   }
   // Asked for with include_voice: true it is passed on, and what takes it (the form, a clip's check) says why it
@@ -515,14 +515,14 @@ export function resolveReferences(
     if (!images.length && !clips.length) {
       throw new Error(
         asset.images.length
-          ? `${q(asset.name)} ger inga referenser: image_ids är tom och inget ljud valdes.`
-          : `${q(asset.name)} har inga bilder än. Lägg till bilder med add_asset_images först.`
+          ? `${q(asset.name)} gives no references: image_ids is empty and no sound was chosen.`
+          : `${q(asset.name)} has no images yet. Add images with add_asset_images first.`
       )
     }
     for (const clip of tooShort) {
       skippedAudio.push({
         ...describeAudio(referenceAudioOf(clip), index),
-        reason: `Röstklippet är bara ${seconds(clip.clipLength)} s – Venice tar bara emot ljudklipp på minst ${MIN_AUDIO_CLIP_SECONDS} s, så det lades inte till. Lägg till en längre inspelning med add_asset_audio (eller välj ett längre referensfönster med update_asset_audio).`
+        reason: `The voice clip is only ${seconds(clip.clipLength)} s – Venice only takes audio clips of at least ${MIN_AUDIO_CLIP_SECONDS} s, so it wasn't added. Add a longer recording with add_asset_audio (or choose a longer reference window with update_asset_audio).`
       })
     }
     for (const image of images) {
@@ -537,13 +537,13 @@ export function resolveReferences(
       seenAudio.add(key)
       const ref = referenceAudioOf(clip)
       if (limits && count + 1 > limits.maxAudios) {
-        skippedAudio.push({ ...describeAudio(ref, index), reason: `Modellen tar högst ${limits.maxAudios} ljudklipp.` })
+        skippedAudio.push({ ...describeAudio(ref, index), reason: `The model takes at most ${limits.maxAudios} audio ${limits.maxAudios === 1 ? 'clip' : 'clips'}.` })
         continue
       }
       if (limits && total + clip.clipLength > MAX_REFERENCE_AUDIO_SECONDS + 1e-6) {
         skippedAudio.push({
           ...describeAudio(ref, index),
-          reason: `Ljudreferenserna får vara högst ${MAX_REFERENCE_AUDIO_SECONDS} s tillsammans (det här klippet är ${seconds(clip.clipLength)} s, ${seconds(total)} s är redan valda). Korta klippens referensfönster med update_asset_audio.`
+          reason: `The audio references may be at most ${MAX_REFERENCE_AUDIO_SECONDS} s together (this clip is ${seconds(clip.clipLength)} s, ${seconds(total)} s are already chosen). Shorten the clips' reference windows with update_asset_audio.`
         })
         continue
       }
@@ -559,11 +559,11 @@ export function resolveReferences(
 export function assetPhotoPath(assetId: string, imageId: string | undefined, index: AssetIndex): string {
   const asset = index.require(assetId)
   if (!asset.images.length) {
-    throw new Error(`${q(asset.name)} har inga bilder än. Lägg till bilder med add_asset_images först.`)
+    throw new Error(`${q(asset.name)} has no images yet. Add images with add_asset_images first.`)
   }
   if (!imageId) return asset.images[0].path
   const image = asset.images.find((img) => img.id === imageId)
-  if (!image) throw new Error(`Bilden ${imageId} hör inte till ${q(asset.name)}.`)
+  if (!image) throw new Error(`The image ${imageId} doesn't belong to ${q(asset.name)}.`)
   return image.path
 }
 
@@ -579,7 +579,7 @@ export async function loadModels(): Promise<VideoModel[]> {
   try {
     models = await callService<VideoModel[]>('models:list')
   } catch (err) {
-    throw new Error(`Kunde inte hämta modellerna från Venice: ${errorText(err)}`)
+    throw new Error(`Couldn't fetch the models from Venice: ${errorText(err)}`)
   }
   rememberPromptLimits(models)
   return models
@@ -613,7 +613,7 @@ export function usableModels(models: readonly VideoModel[]): VideoModel[] {
 
 export function requireModel(models: readonly VideoModel[], id: string): VideoModel {
   const model = usableModels(models).find((m) => m.id === id)
-  if (!model) throw new Error(`Modellen ${id} finns inte hos Venice just nu. Använd list_models för att se vilka som finns.`)
+  if (!model) throw new Error(`The model ${id} isn't available at Venice right now. Use list_models to see which there are.`)
   return model
 }
 
@@ -651,7 +651,7 @@ export function modelForMode(models: readonly VideoModel[], currentModel: string
   const sibling = currentModel.replace(/(text|image|reference)-to-video/, mode)
   const preferred = [sibling, DEFAULT_MODEL[mode]].find((c) => list.some((m) => m.id === c))
   const id = preferred ?? [...list].sort((a, b) => a.name.localeCompare(b.name))[0]?.id
-  if (!id) throw new Error(`Venice har ingen modell för läget ${mode} just nu.`)
+  if (!id) throw new Error(`Venice has no model for the ${mode} mode right now.`)
   return id
 }
 
@@ -683,19 +683,19 @@ export interface OutputOptions {
 
 function oneOf(label: string, value: string, allowed: readonly string[], model: VideoModel): void {
   if (allowed.length && !allowed.includes(value)) {
-    throw new Error(`${label} ${value} går inte med ${model.name}. Välj något av: ${allowed.join(', ')}.`)
+    throw new Error(`${label} ${value} doesn't work with ${model.name}. Choose one of: ${allowed.join(', ')}.`)
   }
 }
 
-/** Throws (in Swedish, naming what is allowed) when the model can't do one of the given options. */
+/** Throws (naming what is allowed) when the model can't do one of the given options. */
 export function checkOutputOptions(model: VideoModel, o: OutputOptions): void {
-  if (o.duration !== undefined) oneOf('Längden', o.duration, model.durations, model)
-  if (o.resolution !== undefined) oneOf('Upplösningen', o.resolution, model.resolutions, model)
-  if (o.aspectRatio !== undefined) oneOf('Bildformatet', o.aspectRatio, model.aspectRatios, model)
+  if (o.duration !== undefined) oneOf('The duration', o.duration, model.durations, model)
+  if (o.resolution !== undefined) oneOf('The resolution', o.resolution, model.resolutions, model)
+  if (o.aspectRatio !== undefined) oneOf('The aspect ratio', o.aspectRatio, model.aspectRatios, model)
   if (o.audio !== undefined) {
-    if (o.audio && !model.audio) throw new Error(`${model.name} kan inte göra ljud.`)
+    if (o.audio && !model.audio) throw new Error(`${model.name} can't make sound.`)
     if (model.audio && !model.audioConfigurable && !o.audio) {
-      throw new Error(`${model.name} gör alltid ljud; det går inte att stänga av.`)
+      throw new Error(`${model.name} always makes sound; it can't be turned off.`)
     }
   }
 }
@@ -703,7 +703,7 @@ export function checkOutputOptions(model: VideoModel, o: OutputOptions): void {
 export function checkPromptLength(model: VideoModel | undefined, prompt: string | undefined): void {
   const limit = model?.promptCharacterLimit
   if (limit && prompt && prompt.length > limit) {
-    throw new Error(`Prompten är ${prompt.length} tecken men ${model.name} tar högst ${limit}. Korta ner den.`)
+    throw new Error(`The prompt is ${prompt.length} characters but ${model.name} takes at most ${limit}. Shorten it.`)
   }
 }
 
@@ -769,28 +769,28 @@ export function issueList(issues: readonly PromptIssue[]): { severity: string; c
 }
 
 /**
- * What stops these params from being generated, in Swedish: missing input for the mode, or the first blocking
+ * What stops these params from being generated: missing input for the mode, or the first blocking
  * @ImageN / @AudioN problem. `continuing`: a sequence clip that continues from the previous one; it is generated
  * image-to-video with that clip's last frame (extracted when it is generated) and sends no references.
  * `endFromNext`: it ends on the next clip's first frame, so its model must take an end image.
  */
 export function blockingProblem(params: GenerationParams, continuing = false, endFromNext = false): string | undefined {
   const kind = kindOfModelId(params.model)
-  if (!params.prompt.trim()) return 'Prompten är tom.'
+  if (!params.prompt.trim()) return 'The prompt is empty.'
   // An end image the model can't take would be dropped on the way to Venice: a keyframe paid for and lost.
   if (endFromNext && !supportsEndImage(params.model)) {
-    return `Modellen ${params.model} kan inte ta en slutbild. Välj en bild-till-video-modell som kan det (supports_end_image, t.ex. Seedance), eller slå av end_from_next.`
+    return `The model ${params.model} can't take an end image. Choose an image-to-video model that can (supports_end_image, e.g. Seedance), or turn off end_from_next.`
   }
   if (kind === 'image-to-video' && params.endImage && !supportsEndImage(params.model)) {
-    return `Modellen ${params.model} kan inte ta en slutbild. Välj en modell som kan det, eller ta bort slutbilden (end_image: null).`
+    return `The model ${params.model} can't take an end image. Choose a model that can, or remove the end image (end_image: null).`
   }
   if (continuing) return blockingContinuationError(params)
   if (kind === 'image-to-video' && !params.startImage) {
     return endFromNext
-      ? 'Klippet slutar på nästa klipps första bildruta men har ingen startbild. Välj en startbild (start_image) eller låt det fortsätta från föregående klipp.'
-      : 'Det finns ingen startbild.'
+      ? "The clip ends on the next clip's first frame but has no start image. Choose a start image (start_image) or let it continue from the previous clip."
+      : 'There is no start image.'
   }
-  if (kind === 'reference-to-video' && !params.referenceImages?.length) return 'Det finns inga referensbilder.'
+  if (kind === 'reference-to-video' && !params.referenceImages?.length) return 'There are no reference images.'
   if (kind === 'image-to-video' && (endFromNext || params.endImage)) {
     // The automatic frames follow the same rule as a keyframe: references can't go along with pictures.
     const tokens = blockingContinuationError(params)
@@ -804,10 +804,10 @@ export function blockingProblem(params: GenerationParams, continuing = false, en
  * end images rather than from the previous clip.
  */
 function keyframeTokensMessage(message: string): string {
-  if (!message.startsWith('Klippet fortsätter')) return message
-  const named = /ta bort (.*) ur (prompten|den negativa prompten)/.exec(message)
+  if (!message.startsWith('The clip continues from')) return message
+  const named = /remove (.*) from (the prompt|the negative prompt), /.exec(message)
   return named
-    ? `Klippet genereras från sin start- och slutbild (bild-till-video) och skickar inga referenser – ta bort ${named[1]} ur ${named[2]} och beskriv i ord vad som händer.`
+    ? `The clip is generated from its start and end images (image-to-video) and sends no references – remove ${named[1]} from ${named[2]} and describe in words what happens.`
     : message
 }
 
@@ -915,7 +915,7 @@ export function descriptionInfo(params: GenerationParams, index: AssetIndex): Re
   }
 }
 
-/** An agent's "bärs av" choice (set_form, add_segment, update_segment; kit.ts outfitWearersInput). */
+/** An agent's "worn by" choice (set_form, add_segment, update_segment; kit.ts outfitWearersInput). */
 export interface OutfitWearerInput {
   outfit_asset_id: string
   /** null: nobody; left out: the default again. */
@@ -926,7 +926,7 @@ export interface OutfitWearerInput {
  * GenerationParams.outfitWearers with an agent's choices applied (`choices` undefined: none), kept to the outfits and
  * characters among `references` (the picture paths of the form or clip, also those past the model's limit;
  * outfitWearersAmong). Each outfit must be an outfit and each character a character, both with a photo among the
- * references; otherwise refused (Swedish), naming every problem.
+ * references; otherwise refused, naming every problem.
  */
 export function applyOutfitWearers(
   current: GenerationParams['outfitWearers'],
@@ -941,11 +941,11 @@ export function applyOutfitWearers(
   /** The asset an id names, checked to be of `kind` and among the references; undefined (and a problem) if not. */
   const among = (id: string, kind: 'outfit' | 'character', what: string): Asset | undefined => {
     const asset = index.get(id.trim())
-    if (!asset) problems.push(`Det finns ingen tillgång med id ${id} (${what}).`)
+    if (!asset) problems.push(`There is no asset with id ${id} (${what}).`)
     else if (asset.kind !== kind) {
-      problems.push(`${q(asset.name)} är ingen ${kind === 'outfit' ? 'klädsel' : 'karaktär'} (${what}).`)
+      problems.push(`${q(asset.name)} is not ${kind === 'outfit' ? 'an outfit' : 'a character'} (${what}).`)
     } else if (!present.has(asset.id)) {
-      problems.push(`${q(asset.name)} finns inte bland referensbilderna – lägg till den först (${what}).`)
+      problems.push(`${q(asset.name)} is not among the reference images – add it first (${what}).`)
     } else return asset
     return undefined
   }
@@ -957,13 +957,13 @@ export function applyOutfitWearers(
         : undefined
     if (!outfit || (typeof choice.character_asset_id === 'string' && !character)) continue
     if (seen.has(outfit.id)) {
-      problems.push(`${q(outfit.name)} står mer än en gång i outfit_wearers.`)
+      problems.push(`${q(outfit.name)} appears more than once in outfit_wearers.`)
       continue
     }
     seen.add(outfit.id)
     wearers = withOutfitWearer(wearers, outfit.id, character ? character.id : choice.character_asset_id)
   }
-  if (problems.length) throw new Error(`Vem som bär kläderna kunde inte sättas: ${problems.join(' ')}`)
+  if (problems.length) throw new Error(`Who wears the outfits couldn't be set: ${problems.join(' ')}`)
   return outfitWearersAmong(wearers, present)
 }
 

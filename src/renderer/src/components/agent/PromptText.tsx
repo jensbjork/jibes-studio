@@ -67,8 +67,8 @@ export default function PromptText({
       )
     })
   }
-  for (const t of findImageTokens(prompt)) mark(t, 'image', targets, 'pekar inte på någon av bilderna som skickas')
-  for (const t of findAudioTokens(prompt)) mark(t, 'audio', audioTargets, 'pekar inte på något av ljudklippen som skickas')
+  for (const t of findImageTokens(prompt)) mark(t, 'image', targets, 'doesn’t point at any of the images that are sent')
+  for (const t of findAudioTokens(prompt)) mark(t, 'audio', audioTargets, 'doesn’t point at any of the sound clips that are sent')
   for (const m of findMalformedTokens(prompt)) {
     if (marks.some((x) => m.start < x.end && x.start < m.end)) continue
     marks.push({
@@ -80,7 +80,7 @@ export default function PromptText({
           {...card.bind(m.start, {
             token: m.raw,
             ref: 'image',
-            problem: m.suggestion ? `Felskriven referens – menar du ${m.suggestion}?` : 'Felskriven referens'
+            problem: m.suggestion ? `Misspelled reference – did you mean ${m.suggestion}?` : 'Misspelled reference'
           })}
           className={broken}
         >

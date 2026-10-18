@@ -19,14 +19,14 @@ import { markKey } from '../prompt/promptText'
 import { ImageTile, PictureHover } from './ApprovalPictures'
 import PromptText, { type TokenTarget } from './PromptText'
 
-// The approval dialog's panels for Redigera's paid requests: an operation on a version of an edit (the version's
+// The approval dialog's panels for the Editor's paid requests: an operation on a version of an edit (the version's
 // poster, the start and end frames of a picture operation, what changes – prompt, old → new lines, the voice – the
-// parts and the price), continuing a stopped paid job ("Fortsätt"), and a new voice designed for a character. A
+// parts and the price), continuing a stopped paid job ("Continue"), and a new voice designed for a character. A
 // cloned voice also needs the user's own consent, asked here with a required checkbox, since an agent can never give
 // it.
 
 /** The plan's problem that only the clone consent solves; the checkbox below takes care of it. */
-const CONSENT_PROBLEM = /rätt att använda rösten/i
+const CONSENT_PROBLEM = /right to use the voice/i
 
 /** A library audio clip by id, with the asset it belongs to. */
 function audioById(assets: readonly Asset[], audioId: string): { asset: Asset; audio: AssetAudio } | undefined {
@@ -55,7 +55,7 @@ export interface EditApprovalState {
   job?: EditJob
   /** What approving waits for is on screen: the plan (an operation) or the job (continuing one). */
   ready: boolean
-  /** Why it can't be approved as it looks now (Swedish), e.g. the version is gone. */
+  /** Why it can't be approved as it looks now, e.g. the version is gone. */
   blocking?: string
   /** The plan is being made again (after the edit changed): approving waits for it. */
   loading: boolean
@@ -122,16 +122,16 @@ export function useEditApproval(a: ApprovalRequest): EditApprovalState {
   const blocking = !pending
     ? undefined
     : state.error
-      ? `Redigeringen kunde inte läsas: ${state.error.replace(/\.$/, '')}`
+      ? `The edit couldn’t be read: ${state.error.replace(/\.$/, '')}`
       : versionGone
-        ? `Version v${request.baseNumber ?? '?'} finns inte längre i redigeringen`
+        ? `Version v${request.baseNumber ?? '?'} is no longer in the edit`
         : problems[0]?.replace(/\.$/, '')
   return { edit: state.edit, plan: state.plan, blocking, loading: state.loading, ready: !!state.plan }
 }
 
 /**
  * Continuing a stopped job, as the edit has it now: main lapses the request when the job can no longer be continued
- * or "Fortsätt" would cost more than the user is shown (by more than a cent), so the dialog says so before the click.
+ * or "Continue" would cost more than the user is shown (by more than a cent), so the dialog says so before the click.
  */
 function resumeState(
   a: ApprovalRequest,
@@ -149,15 +149,15 @@ function resumeState(
       : job.resumePriceUsd === undefined || job.resumePriceUsd > a.priceUsd + 0.01) ||
       (!request.partialPrice && !!job.resumePartialPrice))
   const blocking = error
-    ? `Redigeringen kunde inte läsas: ${error.replace(/\.$/, '')}`
+    ? `The edit couldn’t be read: ${error.replace(/\.$/, '')}`
     : !edit
       ? undefined
       : !job
-        ? 'Jobbet finns inte längre i redigeringen'
+        ? 'The job is no longer in the edit'
         : !job.canResume
-          ? `Jobbet ”${job.label}” kan inte fortsättas längre`
+          ? `The job “${job.label}” can no longer be continued`
           : rose
-            ? `Det kostar nu ${job.resumePriceUsd !== undefined ? formatUsd(job.resumePriceUsd) : 'ett okänt pris'}${job.resumePartialPrice ? ' +' : ''} att fortsätta`
+            ? `Continuing now costs ${job.resumePriceUsd !== undefined ? formatUsd(job.resumePriceUsd) : 'an unknown price'}${job.resumePartialPrice ? ' +' : ''}`
             : undefined
   return { edit, job, blocking, loading, ready: !!job }
 }
@@ -183,7 +183,7 @@ function Frame({ path, badge, caption }: { path?: string; badge: string; caption
         </PictureHover>
       ) : (
         <div className="flex h-24 w-40 items-center justify-center rounded border border-dashed border-line px-2 text-center text-[11px] text-muted">
-          {path ? 'Bilden saknas' : 'Ingen bild'}
+          {path ? 'Image missing' : 'No image'}
         </div>
       )}
       {caption && <p className="text-[11px] leading-snug text-muted">{caption}</p>}
@@ -191,7 +191,7 @@ function Frame({ path, badge, caption }: { path?: string; badge: string; caption
   )
 }
 
-/** "Förinställd röst Aria (ElevenLabs …)", "Röst-id …", or the character whose Röst clip is cloned, with a play button. */
+/** "Preset voice Aria (ElevenLabs …)", "Voice ID …", or the character whose Voice clip is cloned, with a play button. */
 function VoiceRow({ op, assets }: { op: EditOperation; assets: readonly Asset[] }) {
   if (op.op !== 'change-voice' && op.op !== 'speak-lines') return null
   const v = op.voice
@@ -204,13 +204,13 @@ function VoiceRow({ op, assets }: { op: EditOperation; assets: readonly Asset[] 
             path={found.audio.path}
             start={found.audio.clipStart}
             length={found.audio.clipLength}
-            label={`${possessive(found.asset.name, 'sv')} röstprov`}
+            label={`${possessive(found.asset.name, 'en')} voice sample`}
           />
         )}
         <span className={`font-medium ${found ? KIND_TONE[found.asset.kind].text : ''}`}>
-          {found ? `${possessive(found.asset.name, 'sv')} röst` : 'En karaktärs röst'}
+          {found ? `${possessive(found.asset.name, 'en')} voice` : 'A character’s voice'}
         </span>
-        <span className="truncate text-muted">klonas från röstprovet · {op.model}</span>
+        <span className="truncate text-muted">cloned from the voice sample · {op.model}</span>
       </div>
     )
   }
@@ -219,11 +219,11 @@ function VoiceRow({ op, assets }: { op: EditOperation; assets: readonly Asset[] 
       {v.kind === 'preset' ? (
         <>
           <span className="font-medium">{v.voice}</span>
-          <span className="text-muted"> · förinställd röst i {op.model}</span>
+          <span className="text-muted"> · preset voice in {op.model}</span>
         </>
       ) : (
         <>
-          <span className="font-medium">Röst-id {v.voiceId}</span>
+          <span className="font-medium">Voice ID {v.voiceId}</span>
           <span className="text-muted"> · {op.model}</span>
         </>
       )}
@@ -232,9 +232,9 @@ function VoiceRow({ op, assets }: { op: EditOperation; assets: readonly Asset[] 
 }
 
 const BACKGROUND: Record<string, string> = {
-  keep: 'Bakgrundsljudet behålls',
-  duck: 'Originalljudet sänks där rösten byts',
-  remove: 'Originalljudet tas bort där rösten byts'
+  keep: 'The background sound is kept',
+  duck: 'The original sound is lowered where the voice changes',
+  remove: 'The original sound is removed where the voice changes'
 }
 
 /** The settings line of an operation: model, resolution, sound, background. */
@@ -242,33 +242,33 @@ function settingsOf(op: EditOperation): string[] {
   switch (op.op) {
     case 'regenerate':
     case 'prompt-edit':
-      return [op.model, op.resolution, op.audio === 'keep' ? 'originalljudet behålls' : 'nytt ljud från modellen'].filter(
+      return [op.model, op.resolution, op.audio === 'keep' ? 'the original sound is kept' : 'new sound from the model'].filter(
         (s): s is string => !!s
       )
     case 'extend':
-      return [op.model, op.resolution, op.audio === 'model' ? 'ljud från modellen' : 'tystnad'].filter((s): s is string => !!s)
+      return [op.model, op.resolution, op.audio === 'model' ? 'sound from the model' : 'silence'].filter((s): s is string => !!s)
     case 'music':
-      return [op.model, op.instrumental ? 'instrumental' : undefined, op.duck === false ? undefined : 'sänks under tal'].filter(
+      return [op.model, op.instrumental ? 'instrumental' : undefined, op.duck === false ? undefined : 'lowered under speech'].filter(
         (s): s is string => !!s
       )
     case 'effect':
       return [op.model, `${op.seconds} s`]
     case 'change-voice':
-      return [BACKGROUND[op.background], op.removeNoise ? 'brus tas bort' : undefined].filter((s): s is string => !!s)
+      return [BACKGROUND[op.background], op.removeNoise ? 'noise is removed' : undefined].filter((s): s is string => !!s)
     case 'speak-lines':
-      return [BACKGROUND[op.background], op.fit === 'tempo' ? 'tempot anpassas (högst 15 %)' : 'repliken får ta plats'].filter(
+      return [BACKGROUND[op.background], op.fit === 'tempo' ? 'the tempo is adjusted (at most 15%)' : 'a line may run long'].filter(
         (s): s is string => !!s
       )
     case 'transcribe':
-      return [op.model ?? 'ElevenLabs Scribe', op.language ? `språk: ${op.language}` : 'språket känns igen automatiskt']
+      return [op.model ?? 'ElevenLabs Scribe', op.language ? `language: ${op.language}` : 'the language is detected automatically']
     case 'upscale':
-      return [`${op.factor}×`, 'hela versionen']
+      return [`${op.factor}×`, 'the whole version']
     default:
       return []
   }
 }
 
-/** The parts and their prices, and the price note ("debiteras per påbörjad minut: 3 min"). */
+/** The parts and their prices, and the price note ("charged per started minute: 3 min"). */
 function Steps({ request }: { request: ApprovalEditRequest }) {
   const steps = request.steps ?? []
   if (!steps.length && !request.priceNote) return null
@@ -276,12 +276,12 @@ function Steps({ request }: { request: ApprovalEditRequest }) {
     <div>
       {steps.length > 1 && (
         <>
-          <Label className="mt-3">Delar</Label>
+          <Label className="mt-3">Parts</Label>
           <ul className="max-h-32 space-y-0.5 overflow-y-auto text-[12px]">
             {steps.map((s, i) => (
               <li key={`${s.label}:${i}`} className="flex justify-between gap-3">
                 <span className="truncate text-muted">{s.label}</span>
-                <span className="shrink-0 tabular-nums">{s.priceUsd !== undefined ? formatUsd(s.priceUsd) : 'pris anges inte'}</span>
+                <span className="shrink-0 tabular-nums">{s.priceUsd !== undefined ? formatUsd(s.priceUsd) : 'no price given'}</span>
               </li>
             ))}
           </ul>
@@ -321,7 +321,7 @@ export function EditSummary({
     [op, assets]
   )
   const pending = a.status === 'pending'
-  // Asked again while the dialog is open: the consent may have been given in Karaktärer meanwhile.
+  // Asked again while the dialog is open: the consent may have been given in Characters meanwhile.
   const given = request.needsCloneConsent ? audioById(assets, request.needsCloneConsent.audioId)?.audio.cloneConsent : false
   const settings = op ? settingsOf(op) : []
   const editName = state.edit?.name ?? request.editName
@@ -331,7 +331,7 @@ export function EditSummary({
   const [lit, setLit] = useState<string>()
   const targets: TokenTarget[] = references.map(({ id, photo }) => ({
     kind: photo?.asset.kind,
-    label: photo ? `${photo.asset.name} (foto ${photo.number})` : `Bilden saknas (${id})`,
+    label: photo ? `${photo.asset.name} (photo ${photo.number})` : `Image missing (${id})`,
     path: photo?.path,
     name: photo?.asset.name,
     number: photo?.number,
@@ -343,21 +343,21 @@ export function EditSummary({
       <div>
         <p className="font-medium">{request.summary}</p>
         <p className="text-[12px] text-muted">
-          {editName ? `Redigeringen ”${editName}”` : 'Redigeringen'}
-          {request.baseNumber ? ` · utgår från v${request.baseNumber}` : ''}
+          {editName ? `The edit “${editName}”` : 'The edit'}
+          {request.baseNumber ? ` · starts from v${request.baseNumber}` : ''}
           {base?.generation.videoDuration ? ` (${formatTimecode(base.generation.videoDuration)})` : ''}
-          {base && !base.current ? ' – inte den aktuella versionen, så resultatet blir en egen gren' : ''}
+          {base && !base.current ? ' – not the current version, so the result becomes a branch of its own' : ''}
         </p>
       </div>
 
       <div className="flex flex-wrap items-start gap-3">
-        <Frame path={poster} badge={versionBadge} caption="Versionen som ändras" />
+        <Frame path={poster} badge={versionBadge} caption="The version that changes" />
         {request.frames?.start !== undefined || request.frames?.end !== undefined ? (
           <>
             {request.frames?.start && (
-              <Frame path={request.frames.start} badge="Start" caption={captions.start.sv} />
+              <Frame path={request.frames.start} badge="Start" caption={captions.start.ui} />
             )}
-            {request.frames?.end && <Frame path={request.frames.end} badge="Slut" caption={captions.end.sv} />}
+            {request.frames?.end && <Frame path={request.frames.end} badge="End" caption={captions.end.ui} />}
           </>
         ) : null}
       </div>
@@ -366,7 +366,7 @@ export function EditSummary({
 
       {prompt !== undefined && (
         <div>
-          <Label>{op?.op === 'music' ? 'Beskrivning av musiken' : op?.op === 'effect' ? 'Beskrivning av ljudet' : 'Prompt'}</Label>
+          <Label>{op?.op === 'music' ? 'Description of the music' : op?.op === 'effect' ? 'Description of the sound' : 'Prompt'}</Label>
           {references.length > 0 ? (
             <PromptText
               prompt={prompt}
@@ -385,7 +385,7 @@ export function EditSummary({
 
       {references.length > 0 && (
         <div>
-          <Label>Bilder att utgå från</Label>
+          <Label>Images to start from</Label>
           <div className="flex flex-wrap gap-2">
             {references.map(({ id, photo }, i) => {
               const key = markKey('image', i + 1)
@@ -399,8 +399,8 @@ export function EditSummary({
                   onLight={(on) => setLit((cur) => (on ? key : cur === key ? undefined : cur))}
                 />
               ) : (
-                <div key={id} className="relative h-16 w-16 shrink-0 overflow-hidden rounded bg-raised" title="Bilden saknas">
-                  <span className="flex h-full items-center justify-center text-[10px] text-accent">Saknas</span>
+                <div key={id} className="relative h-16 w-16 shrink-0 overflow-hidden rounded bg-raised" title="Image missing">
+                  <span className="flex h-full items-center justify-center text-[10px] text-accent">Missing</span>
                   <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">@Image{i + 1}</span>
                 </div>
               )
@@ -411,14 +411,14 @@ export function EditSummary({
 
       {op && (op.op === 'change-voice' || op.op === 'speak-lines') && (
         <div>
-          <Label>Ny röst</Label>
+          <Label>New voice</Label>
           <VoiceRow op={op} assets={assets} />
         </div>
       )}
 
       {request.lines && request.lines.length > 0 && (
         <div>
-          <Label>{request.lines.length === 1 ? 'Repliken' : `Repliker (${request.lines.length})`}</Label>
+          <Label>{request.lines.length === 1 ? 'The line' : `Lines (${request.lines.length})`}</Label>
           <ul className="max-h-56 space-y-1.5 overflow-y-auto">
             {request.lines.map((line, i) => (
               <li key={i} className="rounded-md border border-line bg-raised px-3 py-1.5 text-[12px] leading-relaxed">
@@ -429,7 +429,7 @@ export function EditSummary({
                     <span className="mx-1.5 text-muted">→</span>
                   </>
                 ) : (
-                  <span className="mr-1.5 text-muted">Ny replik:</span>
+                  <span className="mr-1.5 text-muted">New line:</span>
                 )}
                 <span className="select-text">{line.new}</span>
               </li>
@@ -440,7 +440,7 @@ export function EditSummary({
 
       {request.voiceLines && request.voiceLines.length > 0 && (
         <div>
-          <Label>{request.voiceLines.length === 1 ? 'Repliken som får ny röst' : `Repliker som får ny röst (${request.voiceLines.length})`}</Label>
+          <Label>{request.voiceLines.length === 1 ? 'The line that gets a new voice' : `Lines that get a new voice (${request.voiceLines.length})`}</Label>
           <ul className="max-h-56 space-y-1.5 overflow-y-auto">
             {request.voiceLines.map((line, i) => (
               <li key={i} className="rounded-md border border-line bg-raised px-3 py-1.5 text-[12px] leading-relaxed">
@@ -474,8 +474,8 @@ export function EditSummary({
         state.plan.priceUsd !== undefined &&
         Math.abs(state.plan.priceUsd - a.priceUsd) > 0.01 && (
           <p className="text-[12px] text-amber-300">
-            Venice anger nu {formatUsd(state.plan.priceUsd)}. Är det mer än när agenten frågade går förfrågan inte
-            igenom – be då agenten fråga igen.
+            Venice now quotes {formatUsd(state.plan.priceUsd)}. If that’s more than when the agent asked, the request
+            won’t go through – then ask the agent to ask again.
           </p>
         )}
 
@@ -489,11 +489,11 @@ export function EditSummary({
             className="mt-0.5"
           />
           <span>
-            <span className="font-medium">Jag har rätt att använda den här rösten</span>
+            <span className="font-medium">I have the right to use this voice</span>
             <span className="block text-muted">
               {given
-                ? `Du har redan sagt att ${possessive(request.needsCloneConsent.assetName, 'sv')} röst får klonas.`
-                : `${possessive(request.needsCloneConsent.assetName, 'sv')} röstprov klonas för de nya replikerna. Krävs innan du godkänner; det sparas på röstklippet (Karaktärer → Röst).`}
+                ? `You have already said that ${possessive(request.needsCloneConsent.assetName, 'en')} voice may be cloned.`
+                : `${possessive(request.needsCloneConsent.assetName, 'en')} voice sample is cloned for the new lines. Required before you approve; it’s saved on the voice clip (Characters → Voice).`}
             </span>
           </span>
         </label>
@@ -504,11 +504,11 @@ export function EditSummary({
 
 /** "≈ $0.45 +" for a price with a part Venice doesn't price, else "$0.45". */
 function priceText(usd: number | undefined, partial: boolean | undefined): string {
-  if (usd === undefined) return 'okänt pris'
+  if (usd === undefined) return 'unknown price'
   return partial ? `≈ ${formatUsd(usd)} +` : formatUsd(usd)
 }
 
-/** "Fortsätt jobbet ”Byt röst” · $0.40": the stopped job, how far it got and what continuing it sends again. */
+/** "Continue the job “Change voice” · $0.40": the stopped job, how far it got and what continuing it sends again. */
 export function ResumeSummary({
   approval: a,
   request,
@@ -521,7 +521,7 @@ export function ResumeSummary({
   const job = state.job
   const base = state.edit?.versions.find((v) => v.id === request.baseId)
   const editName = state.edit?.name ?? request.editName
-  const stopped = job?.status === 'cancelled' ? 'Avbröts' : 'Stoppade'
+  const stopped = job?.status === 'cancelled' ? 'Cancelled' : 'Stopped'
   return (
     <section className="space-y-3">
       <div>
@@ -529,8 +529,8 @@ export function ResumeSummary({
           {request.summary} · {priceText(a.priceUsd, request.partialPrice)}
         </p>
         <p className="text-[12px] text-muted">
-          {editName ? `Redigeringen ”${editName}”` : 'Redigeringen'}
-          {request.baseNumber ? ` · utgår från v${request.baseNumber}` : ''}
+          {editName ? `The edit “${editName}”` : 'The edit'}
+          {request.baseNumber ? ` · starts from v${request.baseNumber}` : ''}
           {base?.generation.videoDuration ? ` (${formatTimecode(base.generation.videoDuration)})` : ''}
         </p>
       </div>
@@ -538,22 +538,22 @@ export function ResumeSummary({
         <Frame
           path={base?.generation.thumbPath}
           badge={request.baseNumber ? `v${request.baseNumber}` : 'Version'}
-          caption="Versionen jobbet utgår från"
+          caption="The version the job starts from"
         />
       )}
       {job ? (
         <div className="rounded-md border border-line bg-raised px-3 py-2 text-[12px] leading-relaxed">
           <p>
-            {stopped} efter {job.stepsDone} av {job.stepsTotal} {job.stepsTotal === 1 ? 'del' : 'delar'}
-            {job.costUsd > 0 ? ` · ${formatUsd(job.costUsd)} redan betalt` : ''}
+            {stopped} after {job.stepsDone} of {job.stepsTotal} {job.stepsTotal === 1 ? 'part' : 'parts'}
+            {job.costUsd > 0 ? ` · ${formatUsd(job.costUsd)} already paid` : ''}
           </p>
           {job.error && <p className="text-[#ffb3b5] select-text">{job.error}</p>}
           <p className="mt-1 text-muted">
-            Det som redan är klart används. Bara delarna som inte skickats eller misslyckades skickas igen.
+            What’s already done is used. Only the parts that weren’t sent or that failed are sent again.
           </p>
         </div>
       ) : (
-        !state.blocking && <p className="text-[12px] text-muted">Läser jobbet…</p>
+        !state.blocking && <p className="text-[12px] text-muted">Reading the job…</p>
       )}
       {request.priceNote && <p className="text-[12px] text-muted">{request.priceNote}</p>}
     </section>
@@ -569,24 +569,24 @@ export function VoiceDesignSummary({ request }: { request: ApprovalEditRequest }
       {design ? (
         <>
           <div>
-            <Label>Beskriv rösten</Label>
+            <Label>Describe the voice</Label>
             <p className="whitespace-pre-wrap rounded-md border border-line bg-raised px-3 py-2 leading-relaxed select-text">
               {design.description}
             </p>
           </div>
           <div>
-            <Label>Provtext</Label>
+            <Label>Sample text</Label>
             <p className="whitespace-pre-wrap rounded-md border border-line bg-raised px-3 py-2 leading-relaxed select-text">
               {design.sampleText}
             </p>
           </div>
           <p className="text-[12px] text-muted">
-            {design.model ?? 'seed-audio-1-0'} · Rösten läggs till som ett nytt röstklipp under Röst
-            {request.assetName ? ` hos ${request.assetName}` : ''}. Lyssna på den innan den används.
+            {design.model ?? 'seed-audio-1-0'} · The voice is added as a new voice clip under Voice
+            {request.assetName ? ` for ${request.assetName}` : ''}. Listen to it before it’s used.
           </p>
         </>
       ) : (
-        <p className="text-accent">Förfrågan saknar uppgifter om rösten.</p>
+        <p className="text-accent">The request doesn’t say anything about the voice.</p>
       )}
       <Steps request={request} />
     </section>

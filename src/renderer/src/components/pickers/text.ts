@@ -62,7 +62,7 @@ export function assetReference(
   return `${name} (${referenceTokens(indices, audios, word)})`
 }
 
-/** The word between a character and its clothes in the prompt language ("Promptspråk" in Settings). */
+/** The word between a character and its clothes in the prompt language ("Prompt language" in Settings). */
 const WEARING: Record<PromptLanguage, string> = { en: 'wearing', sv: 'i' }
 
 /** "A", "A and B", "A, B and C" in the prompt language. */
@@ -72,7 +72,7 @@ export function promptList(items: string[], language: PromptLanguage): string {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
-/** What the clothes add after a character's reference: " wearing Röd klänning (@Image3)", or ''. */
+/** What the clothes add after a character's reference: " wearing Red dress (@Image3)", or ''. */
 export function wearingText(outfits: { name: string; indices: number[] }[], language: PromptLanguage): string {
   if (!outfits.length) return ''
   return ` ${WEARING[language]} ${promptList(
@@ -82,7 +82,7 @@ export function wearingText(outfits: { name: string; indices: number[] }[], lang
 }
 
 /**
- * A character with its voice and what it wears, e.g. "Anna (@Image1, @Image2, voice @Audio1) wearing Röd klänning
+ * A character with its voice and what it wears, e.g. "Anna (@Image1, @Image2, voice @Audio1) wearing Red dress
  * (@Image3)" (or "Anna (@Image1, @Image2, röst @Audio1) i …" when prompts are written in Swedish), so the model
  * knows whose voice the audio is and whose clothes the outfit images are.
  */
@@ -135,20 +135,20 @@ export function productReference(
   return holder ? `${assetReference(holder.name, holder.indices)} ${HOLDING[language]} ${item}` : item
 }
 
-/** "1 bild", "3 bilder". */
+/** "1 image", "3 images". */
 export function imageCount(n: number): string {
-  return `${n} ${n === 1 ? 'bild' : 'bilder'}`
+  return `${n} ${n === 1 ? 'image' : 'images'}`
 }
 
-/** "1 ljudklipp", "3 ljudklipp". */
+/** "1 sound clip", "3 sound clips". */
 export function clipCount(n: number): string {
-  return `${n} ljudklipp`
+  return `${n} ${n === 1 ? 'sound clip' : 'sound clips'}`
 }
 
-/** Seconds as the form shows them: "8 s", "7,5 s" (one decimal, Swedish decimal comma). */
+/** Seconds as the form shows them: "8 s", "7.5 s" (one decimal). */
 export function formatClipSeconds(seconds: number): string {
   const rounded = Math.round(Math.max(0, seconds) * 10) / 10
-  return `${String(rounded).replace('.', ',')} s`
+  return `${String(rounded)} s`
 }
 
 /** "(@Image1, @Image2, voice @Audio1)": a bracket holding nothing but reference tokens. */
@@ -176,8 +176,8 @@ export function formatDuration(seconds: number): string {
 
 /** Case-insensitive match where every whitespace-separated term must occur somewhere in the haystack. */
 export function matchesQuery(haystack: string, query: string): boolean {
-  const terms = query.toLocaleLowerCase('sv').split(/\s+/).filter(Boolean)
+  const terms = query.toLocaleLowerCase('en').split(/\s+/).filter(Boolean)
   if (!terms.length) return true
-  const text = haystack.toLocaleLowerCase('sv')
+  const text = haystack.toLocaleLowerCase('en')
   return terms.every((t) => text.includes(t))
 }

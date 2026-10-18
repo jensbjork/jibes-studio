@@ -5,10 +5,10 @@ import AddAudioDialog from './AddAudioDialog'
 import { useCardRun, useEditor } from './EditorContext'
 import { Choice, CostTag, Field, GainSlider, OpCard, PlanNotes, Target } from './ui'
 
-// Ljud: free, local changes to the sound. Each makes a new version with the picture copied as it is, so they take
+// Sound: free, local changes to the sound. Each makes a new version with the picture copied as it is, so they take
 // seconds and lose nothing; the voice and the background can be handled apart where this Mac can separate them.
 
-const NO_SEPARATION = 'Röstseparering saknas på den här datorn.'
+const NO_SEPARATION = "Voice separation isn't available on this Mac."
 
 const actionButton =
   'rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent'
@@ -20,8 +20,8 @@ export default function SoundTab() {
     <div className="space-y-1">
       {separation && !separation.available && (
         <p className="mx-3 mb-2 rounded-md border border-line px-3 py-2 text-[11px] leading-relaxed text-muted">
-          {separation.message ?? NO_SEPARATION} Rösten och bakgrunden kan inte ändras var för sig – allt annat
-          fungerar.
+          {separation.message ?? NO_SEPARATION} The voice and the background can’t be changed separately – everything
+          else works.
         </p>
       )}
       <VolumeCard open={open === 'volume'} onToggle={() => toggle('volume')} />
@@ -47,14 +47,14 @@ function ScopeChoice({ value, onChange }: { value: Scope; onChange: (s: Scope) =
       value={selection ? value : 'film'}
       onChange={onChange}
       inline
-      label="Gäller"
+      label="Applies to"
       options={[
-        { value: 'film', label: 'Hela filmen' },
+        { value: 'film', label: 'The whole film' },
         {
           value: 'range',
-          label: 'Markeringen',
+          label: 'The selection',
           disabled: !selection,
-          title: selection ? undefined : 'Markera ett avsnitt på tidslinjen först'
+          title: selection ? undefined : 'Mark a section on the timeline first'
         }
       ]}
     />
@@ -74,18 +74,18 @@ function VolumeCard({ open, onToggle }: CardProps) {
 
   const op: EditOperation = { op: 'volume', gainDb: gain, range, target: what }
   return (
-    <OpCard title="Volym" summary="Höj eller sänk ljudet, rösten eller bakgrunden." badge={<CostTag paid={false} />} open={open} onToggle={onToggle}>
+    <OpCard title="Volume" summary="Raise or lower the sound, the voice or the background." badge={<CostTag paid={false} />} open={open} onToggle={onToggle}>
       <ScopeChoice value={scope} onChange={setScope} />
-      <Field label="Vad">
+      <Field label="What">
         <Choice
           value={what}
           onChange={setTarget}
           inline
-          label="Vad"
+          label="What"
           options={[
-            { value: 'all', label: 'Allt ljud' },
-            { value: 'voice', label: 'Rösten', disabled: !separated, title: separated ? undefined : NO_SEPARATION },
-            { value: 'background', label: 'Bakgrunden', disabled: !separated, title: separated ? undefined : NO_SEPARATION }
+            { value: 'all', label: 'All sound' },
+            { value: 'voice', label: 'The voice', disabled: !separated, title: separated ? undefined : NO_SEPARATION },
+            { value: 'background', label: 'The background', disabled: !separated, title: separated ? undefined : NO_SEPARATION }
           ]}
         />
       </Field>
@@ -93,10 +93,10 @@ function VolumeCard({ open, onToggle }: CardProps) {
       <button
         type="button"
         disabled={card.running || gain === 0}
-        onClick={() => void card.run({ op, label: 'Volym' })}
+        onClick={() => void card.run({ op, label: 'Volume' })}
         className={`${actionButton} w-full`}
       >
-        {card.running ? 'Skapar version…' : 'Ändra volymen'}
+        {card.running ? 'Creating version…' : 'Change the volume'}
       </button>
       <PlanNotes error={card.error} />
     </OpCard>
@@ -120,22 +120,22 @@ function MuteCard({ open, onToggle }: CardProps) {
 
   return (
     <OpCard
-      title="Tysta och ta bort rösten"
-      summary="Tysta markeringen, ta bort rösten eller behåll bara den."
+      title="Mute and remove the voice"
+      summary="Mute the selection, remove the voice or keep only the voice."
       badge={<CostTag paid={false} />}
       open={open}
       onToggle={onToggle}
     >
       <div>
-        <Target range={selection} whole="Ingen markering" />
+        <Target range={selection} whole="No selection" />
         <button
           type="button"
           disabled={!selection || !!busy}
-          onClick={() => selection && void go('mute', { op: 'mute', range: selection, target: 'all' }, 'Tysta markeringen')}
-          title={selection ? 'Allt ljud i markeringen tystas' : 'Markera ett avsnitt på tidslinjen först'}
+          onClick={() => selection && void go('mute', { op: 'mute', range: selection, target: 'all' }, 'Mute the selection')}
+          title={selection ? 'All sound in the selection is muted' : 'Mark a section on the timeline first'}
           className={`${actionButton} mt-2 w-full`}
         >
-          {busy === 'mute' ? 'Skapar version…' : 'Tysta markeringen'}
+          {busy === 'mute' ? 'Creating version…' : 'Mute the selection'}
         </button>
       </div>
       <div className="space-y-2.5 border-t border-line pt-3">
@@ -144,24 +144,24 @@ function MuteCard({ open, onToggle }: CardProps) {
           <button
             type="button"
             disabled={!separated || !!busy}
-            title={separated ? 'Musik och effekter blir kvar' : NO_SEPARATION}
-            onClick={() => void go('voice', { op: 'mute', range, target: 'voice' }, 'Ta bort rösten')}
+            title={separated ? 'Music and effects stay' : NO_SEPARATION}
+            onClick={() => void go('voice', { op: 'mute', range, target: 'voice' }, 'Remove the voice')}
             className={actionButton}
           >
-            {busy === 'voice' ? 'Skapar version…' : 'Ta bort rösten'}
+            {busy === 'voice' ? 'Creating version…' : 'Remove the voice'}
           </button>
           <button
             type="button"
             disabled={!separated || !!busy}
-            title={separated ? 'Musik och effekter tas bort, rösten blir kvar' : NO_SEPARATION}
-            onClick={() => void go('background', { op: 'mute', range, target: 'background' }, 'Bara rösten')}
+            title={separated ? 'Music and effects are removed, the voice stays' : NO_SEPARATION}
+            onClick={() => void go('background', { op: 'mute', range, target: 'background' }, 'Only the voice')}
             className={actionButton}
           >
-            {busy === 'background' ? 'Skapar version…' : 'Bara rösten'}
+            {busy === 'background' ? 'Creating version…' : 'Only the voice'}
           </button>
         </div>
         <p className="text-[11px] leading-relaxed text-muted">
-          Rösten skiljs från bakgrunden på datorn – första gången tar det en stund för en lång film.
+          The voice is separated from the background on this Mac – the first time takes a while for a long film.
         </p>
       </div>
       <PlanNotes error={card.error} />
@@ -170,8 +170,8 @@ function MuteCard({ open, onToggle }: CardProps) {
 }
 
 const LOUDNESS: { value: -14 | -16 | -23; label: string; hint: string }[] = [
-  { value: -14, label: '−14 LUFS', hint: 'webb och sociala medier' },
-  { value: -16, label: '−16 LUFS', hint: 'poddar och strömning' },
+  { value: -14, label: '−14 LUFS', hint: 'web and social media' },
+  { value: -16, label: '−16 LUFS', hint: 'podcasts and streaming' },
   { value: -23, label: '−23 LUFS', hint: 'TV' }
 ]
 
@@ -187,48 +187,48 @@ function CleanCard({ open, onToggle }: CardProps) {
   }
   return (
     <OpCard
-      title="Brus och ljudnivå"
-      summary="Ta bort brus och jämna ut ljudnivån i hela filmen."
+      title="Noise and loudness"
+      summary="Remove noise and even out the loudness of the whole film."
       badge={<CostTag paid={false} />}
       open={open}
       onToggle={onToggle}
     >
-      <Field label="Ta bort brus">
+      <Field label="Remove noise">
         <div className="flex items-center gap-3">
           <Choice
             value={strength}
             onChange={setStrength}
             inline
-            label="Styrka"
+            label="Strength"
             options={[
               { value: 'mild', label: 'Mild' },
-              { value: 'strong', label: 'Stark' }
+              { value: 'strong', label: 'Strong' }
             ]}
           />
           <button
             type="button"
             disabled={!!busy}
-            onClick={() => void go('denoise', { op: 'denoise', strength }, 'Ta bort brus')}
+            onClick={() => void go('denoise', { op: 'denoise', strength }, 'Remove noise')}
             className={`${actionButton} ml-auto`}
           >
-            {busy === 'denoise' ? 'Skapar version…' : 'Ta bort brus'}
+            {busy === 'denoise' ? 'Creating version…' : 'Remove noise'}
           </button>
         </div>
       </Field>
-      <Field label="Jämna ut ljudnivån">
+      <Field label="Even out the loudness">
         <Choice
           value={lufs}
           onChange={setLufs}
-          label="Ljudnivå"
+          label="Loudness"
           options={LOUDNESS.map((l) => ({ value: l.value, label: l.label, hint: l.hint }))}
         />
         <button
           type="button"
           disabled={!!busy}
-          onClick={() => void go('loudness', { op: 'loudness', lufs }, 'Jämna ut ljudnivån')}
+          onClick={() => void go('loudness', { op: 'loudness', lufs }, 'Even out the loudness')}
           className={`${actionButton} mt-2 w-full`}
         >
-          {busy === 'loudness' ? 'Skapar version…' : 'Jämna ut ljudnivån'}
+          {busy === 'loudness' ? 'Creating version…' : 'Even out the loudness'}
         </button>
       </Field>
       <PlanNotes error={card.error} />
@@ -240,23 +240,23 @@ function AddCard({ open, onToggle }: CardProps) {
   const [dialog, setDialog] = useState<'add' | 'replace'>()
   return (
     <OpCard
-      title="Lägg till ljud"
-      summary="Musik, en röst eller en ljudmiljö ovanpå – eller i stället för originalljudet."
+      title="Add sound"
+      summary="Music, a voice or a soundscape on top – or in place of the original sound."
       badge={<CostTag paid={false} />}
       open={open}
       onToggle={onToggle}
     >
       <div className="grid grid-cols-2 gap-2">
         <button type="button" onClick={() => setDialog('add')} className={actionButton}>
-          Lägg till ljud…
+          Add sound…
         </button>
         <button type="button" onClick={() => setDialog('replace')} className={actionButton}>
-          Ersätt originalljudet…
+          Replace the original…
         </button>
       </div>
       <p className="text-[11px] leading-relaxed text-muted">
-        Från biblioteket (en röst eller ljudmiljö), från tidigare ljud i den här redigeringen, eller från en egen fil.
-        Det hamnar som ett lager på tidslinjen.
+        From the library (a voice or a soundscape), from earlier sound in this edit, or from a file of your own. It
+        lands as a layer on the timeline.
       </p>
       {dialog && <AddAudioDialog replace={dialog === 'replace'} onClose={() => setDialog(undefined)} />}
     </OpCard>

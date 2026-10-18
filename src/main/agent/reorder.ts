@@ -22,9 +22,10 @@ const pathKey = (path: string): string => path.normalize('NFC')
 
 interface Words {
   token: string
+  one: string
   plural: string
   list: string
-  /** What a token of the other list is, with its pronoun: "ett ljudklipp – ange det". */
+  /** What a token of the other list is, with its pronoun: "an audio clip – give it". */
   other: string
   otherList: string
 }
@@ -32,15 +33,23 @@ interface Words {
 const WORDS: Record<ReferenceKind, Words> = {
   image: {
     token: '@Image',
-    plural: 'referensbilder',
+    one: 'reference image',
+    plural: 'reference images',
     list: 'images',
-    other: 'ett ljudklipp – ange det',
+    other: 'an audio clip – give it',
     otherList: 'audios'
   },
-  audio: { token: '@Audio', plural: 'ljudreferenser', list: 'audios', other: 'en bild – ange den', otherList: 'images' }
+  audio: {
+    token: '@Audio',
+    one: 'audio reference',
+    plural: 'audio references',
+    list: 'audios',
+    other: 'an image – give it',
+    otherList: 'images'
+  }
 }
 
-/** "formuläret" → "Formuläret", for a message that starts with where. */
+/** "the form" → "The form", for a message that starts with where. */
 const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
 
 /** "@Image1–@Image4", the tokens a list of n references has. */
@@ -70,20 +79,20 @@ function positionsOf(
     if (n > paths.length) {
       throw new Error(
         paths.length
-          ? `${words.token}${n} finns inte: ${where} har ${paths.length} ${words.plural} (${tokenRange(kind, paths.length)}).`
-          : `${capitalized(where)} har inga ${words.plural}.`
+          ? `${words.token}${n} doesn't exist: ${where} has ${paths.length} ${paths.length === 1 ? words.one : words.plural} (${tokenRange(kind, paths.length)}).`
+          : `${capitalized(where)} has no ${words.plural}.`
       )
     }
     return [n - 1]
   }
   const other: ReferenceKind = kind === 'image' ? 'audio' : 'image'
   if (tokenNumber(entry, other) !== undefined) {
-    throw new Error(`${entry} är ${words.other} i ${words.otherList}, inte i ${words.list}.`)
+    throw new Error(`${entry} is ${words.other} in ${words.otherList}, not in ${words.list}.`)
   }
   const malformed = findMalformedTokens(entry)[0]
   if (malformed) {
     throw new Error(
-      `”${entry}” är ingen giltig referens${malformed.suggestion ? ` – menade du ${malformed.suggestion}?` : '.'}`
+      `“${entry}” is not a valid reference${malformed.suggestion ? ` – did you mean ${malformed.suggestion}?` : '.'}`
     )
   }
   const keys = paths.map(pathKey)
@@ -94,7 +103,7 @@ function positionsOf(
       const i = at(photo.path)
       if (i < 0) {
         throw new Error(
-          `Bilden ${entry} (${photo.asset.name}, foto ${photo.photoNumber}) är inte en av ${words.plural}na i ${where}.`
+          `The image ${entry} (${photo.asset.name}, photo ${photo.photoNumber}) is not one of the ${words.plural} in ${where}.`
         )
       }
       return [i]
@@ -105,7 +114,7 @@ function positionsOf(
       const i = at(clip.audio.path)
       if (i < 0) {
         throw new Error(
-          `Ljudklippet ${entry} (${clip.asset.name}, klipp ${clip.clipNumber}) är inte en av ${words.plural}na i ${where}.`
+          `The audio clip ${entry} (${clip.asset.name}, clip ${clip.clipNumber}) is not one of the ${words.plural} in ${where}.`
         )
       }
       return [i]
@@ -118,22 +127,22 @@ function positionsOf(
     )
     const found = keys.flatMap((key, i) => (own.has(key) ? [i] : []))
     if (!found.length) {
-      const none = kind === 'image' ? 'inga bilder' : 'inga ljudklipp'
-      throw new Error(`${q(asset.name)} har ${none} bland ${words.plural}na i ${where}.`)
+      const none = kind === 'image' ? 'no images' : 'no audio clips'
+      throw new Error(`${q(asset.name)} has ${none} among the ${words.plural} in ${where}.`)
     }
     return found
   }
-  const id = kind === 'image' ? 'bild-id (image_id)' : 'ljud-id (audio_id)'
+  const id = kind === 'image' ? 'an image id (image_id)' : 'an audio id (audio_id)'
   throw new Error(
-    `”${entry}” är varken en referens (${words.token}1 …), ett ${id} eller ett tillgångs-id. Använd tokens från get_workspace eller get_sequence.`
+    `“${entry}” is neither a reference (${words.token}1 …), ${id} nor an asset id. Use tokens from get_workspace or get_sequence.`
   )
 }
 
 /**
  * The references the agent named, as 0-based positions in the current list, in the order named. A reference is
  * named by its token in the current numbering ("@Image3"), its photo or audio clip id, or its asset's id (all of
- * that asset's items in the list, in their current order). Throws (in Swedish) on a name that is no reference of
- * the list or one named twice. `where` names the list for messages ("formuläret").
+ * that asset's items in the list, in their current order). Throws on a name that is no reference of
+ * the list or one named twice. `where` names the list for messages ("the form").
  */
 export function namedPositions(
   kind: ReferenceKind,
@@ -147,7 +156,7 @@ export function namedPositions(
     for (const i of positionsOf(kind, entry, paths, index, where)) {
       if (first.includes(i)) {
         const { token, list } = WORDS[kind]
-        throw new Error(`${token}${i + 1} nämns mer än en gång i ${list}. Ange varje referens en gång.`)
+        throw new Error(`${token}${i + 1} is named more than once in ${list}. Name each reference once.`)
       }
       first.push(i)
     }
@@ -215,7 +224,7 @@ export function movedTokens(
 
 /**
  * The reference images past the model's limit, which stay in the list but aren't sent (Studio shows them as
- * "skickas inte"): with the place they have in the list, so reorder_references can move one forward.
+ * "not sent"): with the place they have in the list, so reorder_references can move one forward.
  */
 export function notSentInfo(paths: readonly string[], modelId: string, index: AssetIndex): Record<string, unknown> {
   const max = maxReferenceImages(modelId)

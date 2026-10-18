@@ -1,4 +1,4 @@
-// Own clips ("Egna klipp") in the window: bringing the user's own video files into the library from a file dialog or a
+// Own clips (in the folder "Egna klipp") in the window: bringing the user's own video files into the library from a file dialog or a
 // drop (on the feed, a sequence's timeline, a clip's takes), what is said before (refusals, a large copy, a working
 // copy, a film of another shape than the sequence), and the import's progress while it runs. The import itself is
 // main's (imports.ts); this decides nothing main doesn't check again.
@@ -14,7 +14,7 @@ const VIDEO_FILE = /\.(mp4|mov|m4v|webm|mkv)$/i
 /** Main asks before copying more than this when the file can't be cloned into the library's volume. */
 const LARGE_COPY_BYTES = 2 * 1024 ** 3
 
-/** Two shapes closer than this are the same for the question "passa in eller beskär". */
+/** Two shapes closer than this are the same for the question "fit or crop". */
 const ASPECT_TOLERANCE = 0.05
 
 export function isVideoFile(path: string): boolean {
@@ -39,9 +39,9 @@ export function droppedVideoPaths(e: Pick<DragEvent, 'dataTransfer'>): { paths: 
 
 // ── Words ────────────────────────────────────────────────────────────────────
 
-/** "3,4 GB", "820 MB". */
+/** "3.4 GB", "820 MB". */
 export function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toLocaleString('sv-SE', { maximumFractionDigits: 1 })} GB`
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toLocaleString('en-GB', { maximumFractionDigits: 1 })} GB`
   return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`
 }
 
@@ -53,37 +53,37 @@ export function aspectValue(aspect: string | undefined): number | undefined {
   return Number.isFinite(v) && v > 0 ? v : undefined
 }
 
-/** "stående", "liggande" or "kvadratisk", for a shape. */
+/** "portrait", "landscape" or "square", for a shape. */
 export function shapeWord(aspect: number): string {
-  if (Math.abs(aspect - 1) < 0.03) return 'kvadratisk'
-  return aspect < 1 ? 'stående' : 'liggande'
+  if (Math.abs(aspect - 1) < 0.03) return 'square'
+  return aspect < 1 ? 'portrait' : 'landscape'
 }
 
-/** How a working-copy reason reads in "Studio gör en arbetskopia (HDR → SDR, 4K → 1080p)". */
+/** How a working-copy reason reads in "Studio makes a working copy (HDR → SDR, 4K → 1080p)". */
 function reasonText(reason: string): string {
   return reason === 'HDR' ? 'HDR → SDR' : reason
 }
 
-/** "Studio gör en arbetskopia (HDR → SDR, 4K → 1080p). Originalet sparas bredvid." */
+/** "Studio makes a working copy (HDR → SDR, 4K → 1080p). The original is kept alongside." */
 export function workingCopySentence(reasons: readonly string[]): string {
-  return `Studio gör en arbetskopia (${reasons.map(reasonText).join(', ')}). Originalet sparas bredvid.`
+  return `Studio makes a working copy (${reasons.map(reasonText).join(', ')}). The original is kept alongside.`
 }
 
 /**
- * The end of an own clip's info line: "arbetskopia av 4K HDR" when the reasons say what the original was, else
- * "arbetskopia (variabel bildfrekvens)"; undefined without a working copy.
+ * The end of an own clip's info line: "working copy of 4K HDR" when the reasons say what the original was, else
+ * "working copy (variable frame rate)"; undefined without a working copy.
  */
 export function workingCopyNote(reasons: readonly string[] | undefined): string | undefined {
   if (!reasons?.length) return undefined
   const size = reasons.find((r) => r.includes('→'))?.split('→')[0].trim()
   const parts = [size, reasons.includes('HDR') ? 'HDR' : undefined, reasons.includes('ProRes') ? 'ProRes' : undefined]
     .filter((p): p is string => !!p)
-  return parts.length ? `arbetskopia av ${parts.join(' ')}` : `arbetskopia (${reasons.join(', ')})`
+  return parts.length ? `working copy of ${parts.join(' ')}` : `working copy (${reasons.join(', ')})`
 }
 
 // ── Progress ─────────────────────────────────────────────────────────────────
 
-/** One file on its way into the library, as the window shows it (a card with a bar and Avbryt). */
+/** One file on its way into the library, as the window shows it (a card with a bar and Cancel). */
 export interface ImportCard {
   path: string
   name: string
@@ -92,7 +92,7 @@ export interface ImportCard {
   target: ImportTarget['kind']
   sequenceId?: string
   segmentId?: string
-  /** "Studio gör en arbetskopia (…)", when one is made. */
+  /** "Studio makes a working copy (…)", when one is made. */
   note?: string
 }
 
@@ -173,12 +173,12 @@ function forget(paths: readonly string[]): void {
 }
 
 /** Stops every running import (main has one queue); what is half made is removed. */
-/** Stops one file's import (its card's Avbryt); the other files go on. */
+/** Stops one file's import (its card's Cancel); the other files go on. */
 export function cancelImport(path: string): void {
   void window.studio.cancelImports(path).catch(() => {})
 }
 
-/** A card for a file on its way in: name, "Förbereder… 34 %", a bar and Avbryt. */
+/** A card for a file on its way in: name, "Preparing… 34 %", a bar and Cancel. */
 export function ImportCardView({ card, compact = false }: { card: ImportCard; compact?: boolean }) {
   const percent = Math.round(card.fraction * 100)
   return (
@@ -187,17 +187,17 @@ export function ImportCardView({ card, compact = false }: { card: ImportCard; co
         {card.name}
       </span>
       <div className="flex items-center gap-2">
-        <span className="shrink-0 tabular-nums">Förbereder… {percent} %</span>
+        <span className="shrink-0 tabular-nums">Preparing… {percent} %</span>
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation()
             cancelImport(card.path)
           }}
-          title="Avbryter importen av den här filen (det som hunnit kopieras tas bort); de andra filerna fortsätter"
+          title="Cancels the import of this file (what has been copied so far is removed); the other files go on"
           className="ml-auto shrink-0 rounded px-1.5 py-0.5 transition hover:bg-raised hover:text-text"
         >
-          Avbryt
+          Cancel
         </button>
       </div>
       <div className="h-1 w-full overflow-hidden rounded bg-raised">
@@ -210,7 +210,7 @@ export function ImportCardView({ card, compact = false }: { card: ImportCard; co
 
 // ── The flow: look, ask when there is something to decide, import ───────────
 
-/** What the view importing into a sequence knows about it (for "Passa in eller beskär"). */
+/** What the view importing into a sequence knows about it (for "Fit or crop"). */
 export interface ImportContext {
   /** The sequence's shape, "16:9" (its first clip's take, else its defaults). */
   sequenceAspect?: string
@@ -219,9 +219,9 @@ export interface ImportContext {
 /** What came of an import, for the view to show: what went wrong, and what was reused. */
 export interface ImportOutcome {
   result?: ImportResult
-  /** Swedish lines: refusals, failures. */
+  /** Lines to show: refusals, failures. */
   errors: string[]
-  /** Swedish lines worth knowing: "x.mov: Redan importerad – används igen." */
+  /** Lines worth knowing: "x.mov: Already imported – used again." */
   notes: string[]
 }
 
@@ -255,8 +255,8 @@ export function useImportFlow(): {
 
   const run = useCallback(async (infos: VideoFileInfo[], target: ImportTarget): Promise<ImportOutcome> => {
     const ok = infos.filter((i) => i.ok)
-    const errors = infos.filter((i) => !i.ok).map((i) => i.error ?? `${i.name}: Filen kan inte läsas.`)
-    const notes = ok.filter((i) => i.duplicateOf).map((i) => `${i.name}: Redan importerad – används igen.`)
+    const errors = infos.filter((i) => !i.ok).map((i) => i.error ?? `${i.name}: The file can’t be read.`)
+    const notes = ok.filter((i) => i.duplicateOf).map((i) => `${i.name}: Already imported – used again.`)
     if (!ok.length) return { errors, notes }
     announce(ok, target)
     try {
@@ -264,10 +264,10 @@ export function useImportFlow(): {
         ok.map((i) => i.path),
         target
       )
-      // A file stopped by Avbryt isn't a failure to report: the user asked for it.
+      // A file stopped by Cancel isn't a failure to report: the user asked for it.
       return {
         result,
-        errors: [...errors, ...result.errors.filter((e) => !/avbröts/i.test(e.message)).map((e) => e.message)],
+        errors: [...errors, ...result.errors.filter((e) => !/cancell?ed/i.test(e.message)).map((e) => e.message)],
         notes
       }
     } catch (e) {
@@ -358,11 +358,11 @@ function ImportDialog({
       title={
         !ok.length
           ? infos.length === 1
-            ? 'Filen kan inte importeras'
-            : 'Filerna kan inte importeras'
+            ? 'The file can’t be imported'
+            : 'The files can’t be imported'
           : ok.length === 1
-            ? 'Importera eget klipp'
-            : `Importera ${ok.length} egna klipp`
+            ? 'Import own clip'
+            : `Import ${ok.length} own clips`
       }
       onClose={() => onClose(false)}
       maxWidth={500}
@@ -374,7 +374,7 @@ function ImportDialog({
               onClick={() => onClose(false)}
               className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised"
             >
-              Avbryt
+              Cancel
             </button>
             <button
               type="button"
@@ -382,7 +382,7 @@ function ImportDialog({
               onClick={() => onClose(true)}
               className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover"
             >
-              {ok.length === 1 ? 'Importera' : `Importera ${ok.length}`}
+              {ok.length === 1 ? 'Import' : `Import ${ok.length}`}
             </button>
           </>
         ) : (
@@ -392,7 +392,7 @@ function ImportDialog({
             onClick={() => onClose(false)}
             className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised"
           >
-            Stäng
+            Close
           </button>
         )
       }
@@ -401,7 +401,7 @@ function ImportDialog({
         {refused.length > 0 && (
           <ul className="space-y-1 text-[#ffb3b5]">
             {refused.map((i) => (
-              <li key={i.path}>{i.error ?? `${i.name}: Filen kan inte läsas.`}</li>
+              <li key={i.path}>{i.error ?? `${i.name}: The file can’t be read.`}</li>
             ))}
           </ul>
         )}
@@ -417,12 +417,12 @@ function ImportDialog({
                   <span className="shrink-0 text-muted tabular-nums">{formatBytes(i.bytes)}</span>
                 </div>
                 {i.duplicateOf ? (
-                  <p className="text-muted">Redan importerad – används igen.</p>
+                  <p className="text-muted">Already imported – used again.</p>
                 ) : (
                   <>
                     {!i.cloneable && i.bytes > LARGE_COPY_BYTES && (
                       <p className="text-amber-200">
-                        {i.name} är {formatBytes(i.bytes)} och kopieras in i biblioteket. Fortsätt?
+                        {i.name} is {formatBytes(i.bytes)} and is copied into the library. Continue?
                       </p>
                     )}
                     {i.workingCopy.length > 0 && <p className="text-muted">{workingCopySentence(i.workingCopy)}</p>}
@@ -437,22 +437,22 @@ function ImportDialog({
           <fieldset className="space-y-2 rounded-md border border-line p-3">
             <legend className="px-1 text-text">
               {odd.length === 1
-                ? `Filmen är ${shapeWord(firstAspect)} (${first.aspect}) och sekvensen ${shapeWord(sequenceAspect)} (${context.sequenceAspect}).`
-                : `${odd.length} av filmerna har ett annat format än sekvensen (${context.sequenceAspect}).`}
+                ? `The film is ${shapeWord(firstAspect)} (${first.aspect}) and the sequence ${shapeWord(sequenceAspect)} (${context.sequenceAspect}).`
+                : `${odd.length} of the films have a different shape than the sequence (${context.sequenceAspect}).`}
             </legend>
             <FitChoice
               checked={fit === 'pad'}
               onChange={() => onFit('pad')}
-              label="Passa in med kanter"
-              text="Ingen ändring: exporten lägger till kanter runt filmen."
+              label="Fit with borders"
+              text="No change: the export adds borders around the film."
             />
             <FitChoice
               checked={fit === 'crop'}
               onChange={() => onFit('crop')}
-              label="Fyll bilden (beskär)"
-              text="Arbetskopian beskärs till sekvensens format. Originalet sparas bredvid."
+              label="Fill the frame (crop)"
+              text="The working copy is cropped to the sequence’s shape. The original is kept alongside."
             />
-            <p className="text-muted">Med kanter fortsätter nästa AI-klipp i filmens eget format.</p>
+            <p className="text-muted">With borders, the next AI clip continues in the film’s own shape.</p>
           </fieldset>
         )}
       </div>

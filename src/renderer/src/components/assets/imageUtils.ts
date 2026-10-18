@@ -20,7 +20,7 @@ export interface ImageIssue {
   detail: string
 }
 
-const decimal = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 2 })
+const decimal = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 })
 
 /** Reasons Venice is likely to reject the image as a reference; empty when it looks fine. */
 export function imageIssues({ width, height }: Size): ImageIssue[] {
@@ -29,15 +29,15 @@ export function imageIssues({ width, height }: Size): ImageIssue[] {
   const shortSide = Math.min(width, height)
   if (shortSide < MIN_SHORT_SIDE) {
     issues.push({
-      label: 'Låg upplösning',
-      detail: `Kortaste sidan är ${shortSide} px – Venice kräver minst ${MIN_SHORT_SIDE} px.`
+      label: 'Low resolution',
+      detail: `The shortest side is ${shortSide} px – Venice needs at least ${MIN_SHORT_SIDE} px.`
     })
   }
   const ratio = width / height
   if (ratio < MIN_RATIO || ratio > MAX_RATIO) {
     issues.push({
-      label: 'Fel format',
-      detail: `Sidförhållandet ${decimal.format(ratio)} ligger utanför ${decimal.format(MIN_RATIO)}–${decimal.format(MAX_RATIO)}, som Venice godtar.`
+      label: 'Odd aspect ratio',
+      detail: `The aspect ratio ${decimal.format(ratio)} is outside the ${decimal.format(MIN_RATIO)}–${decimal.format(MAX_RATIO)} that Venice accepts.`
     })
   }
   return issues
@@ -102,7 +102,7 @@ export function sortFiles(paths: string[], acceptsAudio: boolean): SortedFiles {
   }
 }
 
-const IMAGE_FORMATS = 'JPG, PNG eller WebP'
+const IMAGE_FORMATS = 'JPG, PNG or WebP'
 
 /** What to say about files that were left out; undefined when every file was taken. */
 export function sortedFilesNotice(files: SortedFiles, acceptsAudio: boolean): string | undefined {
@@ -111,14 +111,14 @@ export function sortedFilesNotice(files: SortedFiles, acceptsAudio: boolean): st
   const taken = files.images.length + files.audio.length
   if (!acceptsAudio && files.audioRefused && !files.other) {
     return taken
-      ? `${skipped === 1 ? 'Ljudfilen hoppades över' : 'Ljudfilerna hoppades över'} – ljud kan bara läggas till på karaktärer (röst) och miljöer (ljudmiljö).`
-      : 'Ljud kan bara läggas till på karaktärer (röst) och miljöer (ljudmiljö). Här går det att lägga till bilder.'
+      ? `${skipped === 1 ? 'The audio file was skipped' : 'The audio files were skipped'} – sound can only be added to characters (voice) and environments (soundscape).`
+      : 'Sound can only be added to characters (voice) and environments (soundscape). Here you can add images.'
   }
   const accepted = acceptsAudio
-    ? `bilder i ${IMAGE_FORMATS} och ljud i ${AUDIO_FORMATS}`
-    : `bilder i ${IMAGE_FORMATS}`
-  if (!taken) return `Bara ${accepted} kan läggas till.`
-  return `${skipped} ${skipped === 1 ? 'fil' : 'filer'} hoppades över – bara ${accepted} stöds.`
+    ? `images in ${IMAGE_FORMATS} and sound in ${AUDIO_FORMATS}`
+    : `images in ${IMAGE_FORMATS}`
+  if (!taken) return `Only ${accepted} can be added.`
+  return `${skipped} ${skipped === 1 ? 'file was' : 'files were'} skipped – only ${accepted} are supported.`
 }
 
 /** Where a dragged list entry is dropped: before or after the entry with this id. */
@@ -143,6 +143,6 @@ export function insertIndex(
 }
 
 export function imageCountLabel(n: number): string {
-  if (n === 0) return 'Inga bilder'
-  return `${n} ${n === 1 ? 'bild' : 'bilder'}`
+  if (n === 0) return 'No images'
+  return `${n} ${n === 1 ? 'image' : 'images'}`
 }

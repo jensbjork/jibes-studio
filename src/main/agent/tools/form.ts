@@ -134,7 +134,7 @@ export function referenceLimits(modelId: string, models?: readonly VideoModel[])
 
 /**
  * The form's reference images in order, including those past the model's limit: the window reports the sent
- * ones as params (what a generation would send) and the rest apart, so the user's "skickas inte" pictures are
+ * ones as params (what a generation would send) and the rest apart, so the user's "not sent" pictures are
  * there for an agent to see and move forward.
  */
 function formImages(state: AgentFormState): string[] {
@@ -197,25 +197,25 @@ const samePaths = (a: readonly string[], b: readonly string[]): boolean =>
 /** What set_form changed, for the activity log. */
 function formChanges(args: Record<string, unknown>): string {
   const labels: [string, string][] = [
-    ['mode', 'läge'],
-    ['model', 'modell'],
-    ['duration', 'längd'],
-    ['resolution', 'upplösning'],
-    ['aspect_ratio', 'bildformat'],
-    ['audio', 'ljud'],
-    ['negative_prompt', 'negativ prompt'],
-    ['start_image', 'startbild'],
-    ['end_image', 'slutbild'],
-    ['include_descriptions', 'beskrivningarna'],
-    ['excluded_description_asset_ids', 'beskrivningarna'],
-    ['outfit_wearers', 'vem som bär kläderna']
+    ['mode', 'mode'],
+    ['model', 'model'],
+    ['duration', 'length'],
+    ['resolution', 'resolution'],
+    ['aspect_ratio', 'aspect ratio'],
+    ['audio', 'sound'],
+    ['negative_prompt', 'negative prompt'],
+    ['start_image', 'start image'],
+    ['end_image', 'end image'],
+    ['include_descriptions', 'descriptions'],
+    ['excluded_description_asset_ids', 'descriptions'],
+    ['outfit_wearers', 'who wears the outfits']
   ]
   const others = [...new Set(labels.filter(([key]) => args[key] !== undefined).map(([, label]) => label))]
   const prompt = args.prompt !== undefined
-  if (prompt && others.length) return `satte prompten och ändrade ${others.join(', ')}`
-  if (prompt) return 'satte prompten'
-  if (others.length) return `ändrade ${others.join(', ')} i formuläret`
-  return 'tittade på formuläret'
+  if (prompt && others.length) return `set the prompt and changed ${others.join(', ')}`
+  if (prompt) return 'set the prompt'
+  if (others.length) return `changed ${others.join(', ')} in the form`
+  return 'looked at the form'
 }
 
 /** The library view of each asset kind (the renderer's View ids). */
@@ -228,23 +228,23 @@ const ASSET_VIEWS: Record<AssetKind, AssetViewId> = {
 }
 
 /**
- * open for the Mediabank: a tab (none: the one it last showed), and the clip (Videor's drawer), picture (Bilder) or
- * film (Filmer) to open in it. The window answers with the tab on screen (agentBridge's applyOpen).
+ * open for Media: a tab (none: the one it last showed), and the clip (Videos' drawer), picture (Images) or
+ * film (Films) to open in it. The window answers with the tab on screen (agentBridge's applyOpen).
  */
 type MediaOpenArgs = AgentOpenArgs & { view: 'media' }
 
 /** open_in_studio's line in the activity log, by view. */
 const OPENED = {
-  generate: 'visade Generera',
-  media: 'visade Mediabanken',
-  sequence: 'visade en sekvens',
-  storyboard: 'visade en storyboard',
-  editor: 'visade Redigera',
-  asset: 'visade en tillgång',
-  prompts: 'visade promptbiblioteket'
+  generate: 'showed Generate',
+  media: 'showed Media',
+  sequence: 'showed a sequence',
+  storyboard: 'showed a storyboard',
+  editor: 'showed the Editor',
+  asset: 'showed an asset',
+  prompts: 'showed the prompt library'
 } as const
 
-/** The tab an item of the Mediabank is in. */
+/** The tab an item of Media is in. */
 const MEDIA_TAB_OF = { generation_id: 'videos', still_id: 'pictures', export_id: 'films' } as const satisfies Record<
   string,
   MediaTab
@@ -264,7 +264,7 @@ type FormPictureInput = z.infer<typeof formPictureInput>
 
 /**
  * The file a form picture names: a library photo (its cover unless image_id), a still, or an upload – made a still in
- * Referensbilder first, so the form (and every generation made from it) never points into the scratch folder. null
+ * "Referensbilder" first, so the form (and every generation made from it) never points into the scratch folder. null
  * clears the slot.
  */
 async function formPicture(
@@ -286,16 +286,16 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get workspace',
       description:
-        "What the user is looking at in Studio right now (the view – generate, media (the Mediabank: everything made, with media_tab – videos, pictures or films – the tab on screen), sequences, storyboards, editor, prompts, settings or a library view: characters, environments, products, outfits, poses – and the sequence and clip open in the sequence editor, the storyboard open in Storyboards, or the edit open in Redigera – view \"editor\", edit_id) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included), whether it is in composed_prompt now (sent) and for an outfit who wears it (worn_by); include_descriptions, excluded_description_asset_ids and who wears what are the form's choices, changed with set_form). Issues warn about references the prompt never mentions only when the legend doesn't explain them either. Start here to see what the user is working on.",
+        "What the user is looking at in Studio right now (the view – generate, media (Media: everything made, with media_tab – videos, pictures or films – the tab on screen), sequences, storyboards, editor, prompts, settings or a library view: characters, environments, products, outfits, poses – and the sequence and clip open in the sequence editor, the storyboard open in Storyboards, or the edit open in the Editor – view \"editor\", edit_id) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included), whether it is in composed_prompt now (sent) and for an outfit who wears it (worn_by); include_descriptions, excluded_description_asset_ids and who wears what are the form's choices, changed with set_form). Issues warn about references the prompt never mentions only when the legend doesn't explain them either. Start here to see what the user is working on.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'tittade på arbetsytan'
+      summary: () => 'looked at the workspace'
     },
     async () => {
       requireLibrary()
       const state: AgentFormState = await readForm(ctx)
       const index = await AssetIndex.load()
-      // The edit open in Redigera, named, so the agent knows which film the user is looking at.
+      // The edit open in the Editor, named, so the agent knows which film the user is looking at.
       const edit = state.editId
         ? await callService<Edit>('edits:get', state.editId).catch(() => undefined)
         : undefined
@@ -338,7 +338,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       },
       annotations: WRITE,
       summary: ({ items, mode }) =>
-        !items.length && mode === 'replace' ? 'tömde referenserna' : `${mode === 'append' ? 'lade till' : 'satte'} referenserna`
+        !items.length && mode === 'replace' ? 'cleared the references' : `${mode === 'append' ? 'added' : 'set'} the references`
     },
     async ({ items, mode }) => {
       const index = await AssetIndex.load()
@@ -359,7 +359,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         ...resolved.skippedAudio,
         ...audioTokenMap(droppedAudio, index).map(({ token: _, ...rest }) => ({
           ...rest,
-          reason: 'Studio-fönstret lade inte till ljudklippet (modellens gräns eller läge).'
+          reason: 'The Studio window didn\'t add the audio clip (the model\'s limit or mode).'
         }))
       ]
       const names = [
@@ -382,7 +382,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           ...(notes.length ? { notes } : {})
         },
         summary: names.length
-          ? `${mode === 'append' ? 'lade till' : 'satte'} referenserna (${names.join(', ')}${audioNow.length ? `, ${audioNow.length} ljud` : ''})`
+          ? `${mode === 'append' ? 'added' : 'set'} the references (${names.join(', ')}${audioNow.length ? `, ${audioNow.length} ${audioNow.length === 1 ? 'sound' : 'sounds'}` : ''})`
           : undefined
       }
     }
@@ -446,7 +446,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           modelId = requireModel(models, input.model).id
           const kind = kindOfModelId(modelId)
           if (input.mode && input.mode !== kind) {
-            throw new Error(`Modellen ${modelId} är för läget ${kind}, inte ${input.mode}.`)
+            throw new Error(`The model ${modelId} is for ${kind} mode, not ${input.mode}.`)
           }
         } else {
           // A start (or end) image alone means image-to-video, as choosing one in the form does.
@@ -464,11 +464,11 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         }
         const mode: Kind = kindOfModelId(modelId)
         if (input.start_image && mode !== 'image-to-video') {
-          throw new Error(`start_image används bara i läget image-to-video, men modellen ${modelId} är ${mode}.`)
+          throw new Error(`start_image is only used in image-to-video mode, but the model ${modelId} is ${mode}.`)
         }
         if (input.end_image && (mode !== 'image-to-video' || !supportsEndImage(modelId))) {
           throw new Error(
-            `${modelId} tar ingen slutbild. Välj en bild-till-video-modell med supports_end_image i list_models, eller lämna end_image.`
+            `${modelId} takes no end image. Choose an image-to-video model with supports_end_image in list_models, or leave out end_image.`
           )
         }
         if (modelId !== current.params.model || input.mode !== undefined || input.model !== undefined) {
@@ -501,13 +501,13 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       // The switches only matter if the window took them; an agent must not believe a description is left out
       // (or sent) when it isn't.
       if (input.include_descriptions !== undefined && includesDescriptions(state.params) !== input.include_descriptions) {
-        notes.push('Studio-fönstret ändrade inte ”Ta med beskrivningar” – kontrollera include_descriptions i svaret.')
+        notes.push('The Studio window didn\'t change "Include descriptions" – check include_descriptions in the answer.')
       }
       if (excluded !== undefined && !sameIds(state.params.excludedDescriptionAssetIds, excluded)) {
-        notes.push('Studio-fönstret ändrade inte vilka beskrivningar som är avslagna – kontrollera description_entries i svaret.')
+        notes.push('The Studio window didn\'t change which descriptions are switched off – check description_entries in the answer.')
       }
       if (input.outfit_wearers !== undefined && !sameWearers(state.params.outfitWearers, wearers)) {
-        notes.push('Studio-fönstret ändrade inte vem som bär kläderna – kontrollera worn_by i description_entries i svaret.')
+        notes.push('The Studio window didn\'t change who wears the outfits – check worn_by in description_entries in the answer.')
       }
       return {
         data: {
@@ -526,7 +526,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Validate prompt',
       description:
-        "Checks a prompt's @ImageN and @AudioN tokens against a set of references without changing anything – the same check Studio applies before every paid generation (tokens that point at nothing or past the model's limits, malformed ones like \"@Image 3\" or \"@Voice1\", audio with a model that takes none, audio without any reference image, more than 15 s of audio in total, references neither mentioned nor explained by the References legend). By default (use_form: true) it uses the Generate form's references, model, description switches and who wears what; pass reference_asset_ids (all photos of each asset, in order, plus characters' voices) or references (items like set_references) to check against another set, e.g. a planned sequence clip, and model or mode to check for another mode. Returns ok (no errors), the issues (Swedish messages, errors block generation, warnings are advice), the token maps with which references the prompt mentions, the prompt with tokens normalised, and composed_prompt: the prompt as it would be sent, with the descriptions of the referenced assets appended as a References legend (description_entries, with worn_by for an outfit somebody wears; include_descriptions / excluded_description_asset_ids change it like set_form's), measured against the model's prompt_character_limit.",
+        "Checks a prompt's @ImageN and @AudioN tokens against a set of references without changing anything – the same check Studio applies before every paid generation (tokens that point at nothing or past the model's limits, malformed ones like \"@Image 3\" or \"@Voice1\", audio with a model that takes none, audio without any reference image, more than 15 s of audio in total, references neither mentioned nor explained by the References legend). By default (use_form: true) it uses the Generate form's references, model, description switches and who wears what; pass reference_asset_ids (all photos of each asset, in order, plus characters' voices) or references (items like set_references) to check against another set, e.g. a planned sequence clip, and model or mode to check for another mode. Returns ok (no errors), the issues (errors block generation, warnings are advice), the token maps with which references the prompt mentions, the prompt with tokens normalised, and composed_prompt: the prompt as it would be sent, with the descriptions of the referenced assets appended as a References legend (description_entries, with worn_by for an outfit somebody wears; include_descriptions / excluded_description_asset_ids change it like set_form's), measured against the model's prompt_character_limit.",
       input: {
         prompt: z.string(),
         negative_prompt: z.string().optional(),
@@ -547,7 +547,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         excluded_description_asset_ids: excludedDescriptionsInput
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'kontrollerade en prompt'
+      summary: () => 'checked a prompt'
     },
     async (input) => {
       const index = await AssetIndex.load()
@@ -613,7 +613,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           ...descriptionInfo({ ...params, prompt: normalized }, index),
           ...(notes.length ? { notes } : {})
         },
-        summary: errors ? `kontrollerade en prompt – ${errors} fel` : 'kontrollerade en prompt – inga fel'
+        summary: errors ? `checked a prompt – ${errors} ${errors === 1 ? 'error' : 'errors'}` : 'checked a prompt – no errors'
       }
     }
   )
@@ -642,11 +642,11 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       },
       annotations: { ...WRITE, idempotentHint: false },
       summary: ({ target }) =>
-        target === 'form' ? 'ändrade ordningen på referenserna' : 'ändrade ordningen på ett klipps referenser'
+        target === 'form' ? 'reordered the references' : 'reordered a clip\'s references'
     },
     async ({ target, images, audios }) => {
       if (!images?.length && !audios?.length) {
-        throw new Error('Ange images och/eller audios: referenserna i den ordning de ska ha.')
+        throw new Error('Give images and/or audios: the references in the order they should have.')
       }
       if (target !== 'form') return reorderClipReferences(target.segment_id, images, audios)
       const index = await AssetIndex.load()
@@ -655,14 +655,14 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       const kind = kindOfModelId(params.model)
       if (kind !== 'reference-to-video') {
         throw new Error(
-          `Formuläret är i läget ${kind} och skickar inga referenser, så det finns inget att ordna om. Byt till reference-to-video med set_form först.`
+          `The form is in ${kind} mode and sends no references, so there is nothing to reorder. Switch to reference-to-video with set_form first.`
         )
       }
       const paths = formImages(before)
       const clips = params.referenceAudios ?? []
-      const imageOrder = images?.length ? newOrder('image', images, paths, index, 'formuläret') : undefined
+      const imageOrder = images?.length ? newOrder('image', images, paths, index, 'the form') : undefined
       const audioOrder = audios?.length
-        ? newOrder('audio', audios, clips.map((a) => a.path), index, 'formuläret')
+        ? newOrder('audio', audios, clips.map((a) => a.path), index, 'the form')
         : undefined
       const imagesMove = !!imageOrder && !unchanged(imageOrder)
       const audiosMove = !!audioOrder && !unchanged(audioOrder)
@@ -671,9 +671,9 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           data: {
             target: 'form',
             ...reorderAnswer({ ...params, referenceImages: paths }, index, { images: [], audios: [] }),
-            notes: ['Referenserna låg redan i den ordningen, så inget ändrades.']
+            notes: ['The references were already in that order, so nothing changed.']
           },
-          summary: 'tittade på ordningen på referenserna (oförändrad)'
+          summary: 'looked at the order of the references (unchanged)'
         }
       }
       // The references the agent named, by path, so the window moves the very pictures and clips named even if the
@@ -681,7 +681,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       // others keep the order the form has then. Tokens only when a path is in the list twice. The window renumbers
       // the prompt with the same shared helper Studio's own drag and drop uses, in one change of the form.
       const leading = (kind: ReferenceKind, wanted: readonly string[], list: readonly string[]): string[] => {
-        const first = namedPositions(kind, wanted, list, index, 'formuläret')
+        const first = namedPositions(kind, wanted, list, index, 'the form')
         if (new Set(list).size === list.length) return inOrder(list, first)
         return first.map((i) => (kind === 'image' ? imageToken(i + 1) : audioToken(i + 1)))
       }
@@ -694,7 +694,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         // A picture or clip named by path that the window no longer has: the user removed it meanwhile.
         if (byPath.some((path) => errorText(err).includes(path))) {
           throw new Error(
-            'Inget ändrades: formuläret ändrades samtidigt, så en av referenserna du nämnde finns inte längre där. Läs formuläret igen med get_workspace.'
+            'Nothing changed: the form was changed at the same time, so one of the references you named is no longer there. Read the form again with get_workspace.'
           )
         }
         throw err
@@ -708,7 +708,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       // The user may have changed the form at the same moment; the agent hears what it is now, not what it asked.
       if (!samePaths(gotImages, wantedImages) || !samePaths(gotAudios, wantedAudios)) {
         notes.push(
-          'Referenserna i formuläret blev inte exakt i den ordning du bad om (formuläret ändrades kanske samtidigt) – se references i svaret.'
+          'The references in the form didn\'t end up exactly in the order you asked for (the form may have changed at the same time) – see references in the answer.'
         )
       }
       const moved = {
@@ -721,7 +721,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           ...reorderAnswer({ ...after, referenceImages: gotImages }, index, moved),
           ...(notes.length ? { notes } : {})
         },
-        summary: `ändrade ordningen på referenserna${movedSummary(moved)}`
+        summary: `reordered the references${movedSummary(moved)}`
       }
     }
   )
@@ -760,7 +760,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       },
       annotations: { ...WRITE, idempotentHint: false },
       summary: ({ target, whole_asset }) =>
-        `bytte ${whole_asset ? 'en tillgång bland referenserna' : 'en referensbild'}${target === 'form' ? '' : ' i ett klipp'}`
+        `swapped ${whole_asset ? 'an asset among the references' : 'a reference image'}${target === 'form' ? '' : ' in a clip'}`
     },
     async ({ target, image, with: replacement, whole_asset }) => {
       const input: SwapInput = { image, with: replacement, whole_asset }
@@ -771,13 +771,13 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       const kind = kindOfModelId(params.model)
       if (kind !== 'reference-to-video') {
         throw new Error(
-          `Formuläret är i läget ${kind} och skickar inga referenser, så det finns inget att byta. Byt till reference-to-video med set_form först.`
+          `The form is in ${kind} mode and sends no references, so there is nothing to swap. Switch to reference-to-video with set_form first.`
         )
       }
       const paths = formImages(before)
       const clips = params.referenceAudios ?? []
       const all: GenerationParams = { ...params, referenceImages: paths }
-      const asked = await planSwap(input, paths, index, 'formuläret')
+      const asked = await planSwap(input, paths, index, 'the form')
       if (!('uploadId' in asked) && swapsNothing(asked, paths)) {
         return {
           data: {
@@ -785,7 +785,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             ...referencesAnswer(all, index, swappedInfo({ images: [], audios: [] })),
             notes: [unchangedNote(asked)]
           },
-          summary: 'tittade på referenserna (oförändrade)'
+          summary: 'looked at the references (unchanged)'
         }
       }
       // Last: an upload becomes a still only once everything else is known to be right.
@@ -807,7 +807,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         after.prompt !== expected.prompt
       ) {
         notes.push(
-          'Referenserna i formuläret blev inte exakt som du bad om (formuläret ändrades kanske samtidigt) – se references och prompt i svaret.'
+          'The references in the form didn\'t end up exactly as you asked (the form may have changed at the same time) – see references and prompt in the answer.'
         )
       }
       const swapped = swappedTokens({ images: paths, audios: clips }, { images: gotImages, audios: gotAudios }, index)
@@ -830,7 +830,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Open in Studio',
       description:
-        "Brings a place in Studio to the front so the user sees it: the Generate view (with generation_id: that clip opened in its drawer – Generera's list only holds this session's clips, so an older one opens in the Mediabank instead and the answer says so), the Mediabank (view \"media\": everything made – tab \"videos\" with generation_id: that clip in its drawer, \"pictures\" with still_id: that picture, \"films\" with export_id: that exported film; an id picks its tab), a sequence (optionally with one clip selected), a storyboard (with transition_id: that transition opened in the transition editor), an edit in Redigera (view \"editor\" with edit_id; with version_id: that version in the player; without either the list of edits), an asset (view \"asset\" with asset_id: its library view – Karaktärer, Miljöer, Produkter, Kläder or Poser – with the asset open) or the prompt library (view \"prompts\"). Use it when you want the user to look at something you prepared. Opening something doesn't count as the user having seen it.",
+        "Brings a place in Studio to the front so the user sees it: the Generate view (with generation_id: that clip opened in its drawer – Generate's list only holds this session's clips, so an older one opens in Media instead and the answer says so), Media (view \"media\": everything made – tab \"videos\" with generation_id: that clip in its drawer, \"pictures\" with still_id: that picture, \"films\" with export_id: that exported film; an id picks its tab), a sequence (optionally with one clip selected), a storyboard (with transition_id: that transition opened in the transition editor), an edit in the Editor (view \"editor\" with edit_id; with version_id: that version in the player; without either the list of edits), an asset (view \"asset\" with asset_id: its library view – Characters, Environments, Products, Outfits or Poses – with the asset open) or the prompt library (view \"prompts\"). Use it when you want the user to look at something you prepared. Opening something doesn't count as the user having seen it.",
       input: {
         view: z.enum(['generate', 'media', 'sequence', 'storyboard', 'editor', 'asset', 'prompts']),
         sequence_id: z.string().optional().describe('For view "sequence".'),
@@ -848,14 +848,14 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         generation_id: z
           .string()
           .optional()
-          .describe('For view "generate" or "media": the clip to open in its drawer (in the Mediabank: its Videor tab).'),
+          .describe('For view "generate" or "media": the clip to open in its drawer (in Media: its Videos tab).'),
         asset_id: z.string().optional().describe('For view "asset": the asset to open.'),
         tab: z
           .enum(['videos', 'pictures', 'films'] as const satisfies readonly MediaTab[])
           .optional()
           .describe('For view "media": the tab to show (default: the one an id belongs to, else the one last shown).'),
-        still_id: z.string().optional().describe('For view "media": a picture to open in Bilder (list_stills).'),
-        export_id: z.string().optional().describe('For view "media": an exported film to open in Filmer (list_exports).')
+        still_id: z.string().optional().describe('For view "media": a picture to open in Images (list_stills).'),
+        export_id: z.string().optional().describe('For view "media": an exported film to open in Films (list_exports).')
       },
       annotations: { ...WRITE, idempotentHint: true },
       summary: ({ view }) => OPENED[view]
@@ -881,7 +881,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         ctx.bridge.showWindow()
         return shown
       }
-      /** The Mediabank on a tab, with a clip, picture or film open in it. */
+      /** Media on a tab, with a clip, picture or film open in it. */
       const openMedia = async (args: MediaOpenArgs, note?: string): Promise<ToolOutput> => {
         const shown: Partial<AgentOpenResult> = (await ctx.bridge.send<AgentOpenResult | undefined>('open', args)) ?? {}
         ctx.bridge.showWindow()
@@ -896,28 +896,28 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             ...(notes.length ? { note: notes.join(' ') } : {})
           },
           summary: args.generationId
-            ? 'visade ett klipp i Mediabanken'
+            ? 'showed a clip in Media'
             : args.stillId
-              ? 'visade en bild i Mediabanken'
+              ? 'showed an image in Media'
               : args.exportId
-                ? 'visade en film i Mediabanken'
-                : 'visade Mediabanken'
+                ? 'showed a film in Media'
+                : 'showed Media'
         }
       }
       if (view === 'media') {
         const named = (['generation_id', 'still_id', 'export_id'] as const).filter((key) => input[key])
-        if (named.length > 1) throw new Error('Ange bara ett av generation_id, still_id och export_id.')
+        if (named.length > 1) throw new Error('Give only one of generation_id, still_id and export_id.')
         const key = named[0]
         if (key && tab && tab !== MEDIA_TAB_OF[key]) {
-          throw new Error(`${key} öppnas i fliken "${MEDIA_TAB_OF[key]}", inte "${tab}". Utelämna tab eller ändra den.`)
+          throw new Error(`${key} opens in the tab "${MEDIA_TAB_OF[key]}", not "${tab}". Leave out tab or change it.`)
         }
         // Checked here first, as the neighbouring views do, so a wrong id gets a message that says where to look.
         if (generation_id && !db.getGeneration(generation_id)) {
-          throw new Error(`Genereringen ${generation_id} finns inte (längre). list_generations visar vilka som finns.`)
+          throw new Error(`The generation ${generation_id} doesn't exist (any more). list_generations lists the ones there are.`)
         }
         if (still_id) (await StillIndex.load()).require(still_id)
         if (export_id && !(await callService<ExportSummary[]>('exports:list')).some((e) => e.id === export_id)) {
-          throw new Error(`Det finns ingen exporterad film med id ${export_id}. Använd list_exports för att se vilka som finns.`)
+          throw new Error(`There is no exported film with id ${export_id}. Use list_exports to see the ones there are.`)
         }
         return openMedia({
           view: 'media',
@@ -929,7 +929,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         })
       }
       if (view === 'asset') {
-        if (!asset_id) throw new Error('Ange asset_id för att visa en tillgång.')
+        if (!asset_id) throw new Error('Give asset_id to show an asset.')
         const asset = (await AssetIndex.load()).require(asset_id)
         const shown = await open({ view: ASSET_VIEWS[asset.kind], assetId: asset.id })
         return {
@@ -940,21 +940,21 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             kind: asset.kind,
             ...(shown.note ? { note: shown.note } : {})
           },
-          summary: `visade ${q(asset.name)}`
+          summary: `showed ${q(asset.name)}`
         }
       }
       if (view === 'prompts') {
         await open({ view: 'prompts' })
-        return { data: { shown: 'prompts' }, summary: 'visade promptbiblioteket' }
+        return { data: { shown: 'prompts' }, summary: 'showed the prompt library' }
       }
       if (view === 'editor') {
         let editId = edit_id
         if (version_id) {
           const version = db.getGeneration(version_id)
           if (!version?.editId) {
-            throw new Error('Det finns ingen version i Redigera med det id:t. get_edit visar en redigerings versioner.')
+            throw new Error('There is no version in the Editor with that id. get_edit shows an edit\'s versions.')
           }
-          if (editId && editId !== version.editId) throw new Error('Versionen hör inte till den redigeringen.')
+          if (editId && editId !== version.editId) throw new Error('The version doesn\'t belong to that edit.')
           editId = version.editId
         }
         // Checked here first, so a wrong id gets the service's own message rather than the window's.
@@ -971,19 +971,19 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             ...(shown.versionId ? { version_id: shown.versionId } : {}),
             ...(shown.note ? { note: shown.note } : {})
           },
-          summary: edit ? `visade redigeringen ${q(edit.name)}` : 'visade Redigera'
+          summary: edit ? `showed the edit ${q(edit.name)}` : 'showed the Editor'
         }
       }
       if (view === 'generate') {
         const g = generation_id ? db.getGeneration(generation_id) : undefined
         if (generation_id && !g) {
-          throw new Error(`Genereringen ${generation_id} finns inte (längre). list_generations visar vilka som finns.`)
+          throw new Error(`The generation ${generation_id} doesn't exist (any more). list_generations lists the ones there are.`)
         }
-        // Generera's list holds only this session's clips (shared/session.ts): any other is in the Mediabank's Videor.
+        // Generate's list holds only this session's clips (shared/session.ts): any other is in Media's Videos.
         if (g && !inGenerateSession(g, currentSession())) {
           return openMedia(
             { view: 'media', tab: 'videos', generationId: g.id },
-            'Klippet finns inte i Genereras lista (den visar bara klipp från den här sessionen), så det öppnades i Mediabanken.'
+            'The clip isn\'t in Generate\'s list (it only shows clips from this session), so it was opened in Media.'
           )
         }
         const shown = await open({ view: 'generate', ...(generation_id ? { generationId: generation_id } : {}) })
@@ -993,23 +993,23 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             ...(shown.generationId ? { generation_id: shown.generationId } : {}),
             ...(shown.note ? { note: shown.note } : {})
           },
-          summary: generation_id ? 'visade ett klipp i Generera' : 'visade Generera'
+          summary: generation_id ? 'showed a clip in Generate' : 'showed Generate'
         }
       }
       let sequenceId = sequence_id
       let transitionId = transition_id
       if (transitionId) {
         const row = store.getSegmentRow(transitionId)
-        if (!row || !isStoryboardId(row.sequence_id)) throw new Error('Det finns ingen övergång med det id:t (längre).')
+        if (!row || !isStoryboardId(row.sequence_id)) throw new Error('There is no transition with that id (any more).')
         if (storyboard_id && storyboard_id !== row.sequence_id) {
-          throw new Error('Övergången hör inte till den storyboarden.')
+          throw new Error('The transition doesn\'t belong to that storyboard.')
         }
         sequenceId = row.sequence_id
       }
       if (segment_id) {
         const row = store.getSegmentRow(segment_id)
-        if (!row) throw new Error('Klippet finns inte längre.')
-        if (sequenceId && sequenceId !== row.sequence_id) throw new Error('Klippet hör inte till den sekvensen.')
+        if (!row) throw new Error('The clip no longer exists.')
+        if (sequenceId && sequenceId !== row.sequence_id) throw new Error('The clip doesn\'t belong to that sequence.')
         sequenceId = row.sequence_id
         // A storyboard's transition given as a clip opens as the transition it is.
         if (isStoryboardId(row.sequence_id)) transitionId ??= segment_id
@@ -1017,12 +1017,12 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       // A storyboard named as a sequence (or a transition as a clip) is opened where it lives: in Storyboards.
       const storyboardId = view === 'storyboard' ? (storyboard_id ?? sequenceId) : isStoryboardId(sequenceId) ? sequenceId : undefined
       if (view === 'storyboard' || storyboardId) {
-        if (!storyboardId) throw new Error('Ange storyboard_id för att visa en storyboard.')
+        if (!storyboardId) throw new Error('Give storyboard_id to show a storyboard.')
         if (!isStoryboardId(storyboardId)) {
           throw new Error(
             store.getSequenceRow(storyboardId)
-              ? 'Det här är en sekvens, inte en storyboard. Visa den med view "sequence".'
-              : 'Storyboarden finns inte längre.'
+              ? 'This is a sequence, not a storyboard. Show it with view "sequence".'
+              : 'The storyboard no longer exists.'
           )
         }
         const storyboard = await callService<Storyboard>('storyboards:get', storyboardId)
@@ -1036,11 +1036,11 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             ...(shown.note ? { note: shown.note } : {})
           },
           summary: number
-            ? `visade övergång ${number} i storyboarden ${q(storyboard.name)}`
-            : `visade storyboarden ${q(storyboard.name)}`
+            ? `showed transition ${number} in the storyboard ${q(storyboard.name)}`
+            : `showed the storyboard ${q(storyboard.name)}`
         }
       }
-      if (!sequenceId) throw new Error('Ange sequence_id eller segment_id för att visa en sekvens.')
+      if (!sequenceId) throw new Error('Give sequence_id or segment_id to show a sequence.')
       const sequence = await callService<Sequence>('sequences:get', sequenceId)
       const clip = segment_id ? sequence.segments.findIndex((s) => s.id === segment_id) + 1 : 0
       // The window answers with the clip it actually shows (and a note when that isn't the one asked for).
@@ -1055,7 +1055,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           clip_number: shownClip || undefined,
           ...(shown.note ? { note: shown.note } : {})
         },
-        summary: shownClip ? `visade klipp ${shownClip} i ${q(sequence.name)}` : `visade sekvensen ${q(sequence.name)}`
+        summary: shownClip ? `showed clip ${shownClip} in ${q(sequence.name)}` : `showed the sequence ${q(sequence.name)}`
       }
     }
   )

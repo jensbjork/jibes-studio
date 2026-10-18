@@ -43,8 +43,8 @@ export function pendingTake(segment: Segment): Generation | undefined {
 }
 
 /**
- * The take is an own clip: the user's own film or a version from Redigera, not a Venice generation (an AI take made
- * in Redigera counts as Venice's).
+ * The take is an own clip: the user's own film or a version from the Editor, not a Venice generation (an AI take made
+ * in the Editor counts as Venice's).
  */
 export function isOwnTake(take: Pick<Generation, 'source'> | undefined): boolean {
   return !!take && take.source !== undefined && take.source !== 'generated'
@@ -52,7 +52,7 @@ export function isOwnTake(take: Pick<Generation, 'source'> | undefined): boolean
 
 /**
  * The shape a sequence's film has ("16:9"): its first clip's selected take, else its defaults, else 16:9. What an own
- * film of another shape is compared with ("Passa in eller beskär"), the way main crops to it.
+ * film of another shape is compared with ("Fit or crop"), the way main crops to it.
  */
 export function sequenceAspect(sequence: Sequence): string {
   const first = sequence.segments[0]
@@ -65,7 +65,7 @@ export function sequenceAspect(sequence: Sequence): string {
 }
 
 /**
- * A clip nobody has done anything with yet: no takes, no prompt, no keyframes, no notes (the empty Klipp 1 a new
+ * A clip nobody has done anything with yet: no takes, no prompt, no keyframes, no notes (the empty Clip 1 a new
  * sequence starts with). A first own film brought into a sequence of only such clips takes their place.
  */
 export function isUntouchedClip(segment: Segment): boolean {
@@ -117,10 +117,11 @@ export function continues(segment: Segment, index: number): boolean {
  * model and the references it carries – its own, or the clip's it continues from, so `sequence` is needed for those
  * (the previous clip's last frame goes after them when the take is made); a clip that otherwise takes a frame from a
  * neighbour gets the image-to-video sibling of its model and no references. `segment` stands in for the sequence's
- * clip at `index` (the editor's draft). Not the end-capable model: main switches to one when "Slutbild från nästa
- * klipp" is turned on (and patchSegmentLocally does until its answer arrives), but a model the user picks afterwards
- * is theirs, and one that can't take an end image is refused (clipBlocked says so) rather than priced as another
- * model. Without `sequence` only the clip's own references are known (an inheriting clip is then shown exactly).
+ * clip at `index` (the editor's draft). Not the end-capable model: main switches to one when "End on the next
+ * clip's first frame" is turned on (and patchSegmentLocally does until its answer arrives), but a model the user
+ * picks afterwards is theirs, and one that can't take an end image is refused (clipBlocked says so) rather than
+ * priced as another model. Without `sequence` only the clip's own references are known (an inheriting clip is then
+ * shown exactly).
  */
 export function effectiveParams(segment: Segment, index: number, sequence?: Sequence): GenerationParams {
   if (!continues(segment, index) && !segment.endFromNext) return segment.params
@@ -218,17 +219,17 @@ export function endMismatch(segment: Segment, next: Segment | undefined): boolea
 }
 
 /**
- * What "Gör om mellan grannarna" will do for the clip at `index` of `count`, or undefined when it has no neighbour
+ * What "Redo between neighbours" will do for the clip at `index` of `count`, or undefined when it has no neighbour
  * to work between (a sequence of one clip). Shared by the timeline cards and the editor's keyframe box.
  */
 export function bridgeDescription(index: number, count: number): string | undefined {
   const before = index > 0
   const after = index < count - 1
   if (before && after) {
-    return `Gör om klippet så att det börjar exakt där klipp ${index} slutar och slutar exakt där klipp ${index + 2} börjar. Grannarna rörs inte, och den gamla tagningen finns kvar.`
+    return `Redo the clip so it starts exactly where clip ${index} ends and ends exactly where clip ${index + 2} starts. The neighbours aren't touched, and the old take is kept.`
   }
-  if (before) return `Gör om klippet så att det börjar exakt där klipp ${index} slutar. Den gamla tagningen finns kvar.`
-  if (after) return `Gör om klippet så att det slutar exakt där klipp ${index + 2} börjar. Den gamla tagningen finns kvar.`
+  if (before) return `Redo the clip so it starts exactly where clip ${index} ends. The old take is kept.`
+  if (after) return `Redo the clip so it ends exactly where clip ${index + 2} starts. The old take is kept.`
   return undefined
 }
 
@@ -350,7 +351,7 @@ export function stableJson(value: unknown): string {
 /**
  * A take's list as the clip's: the pictures (or clips) the take had that the clip no longer has by that path are
  * paired, in order, with the clip's own that the take didn't have – an outside file the take sent as its copy in
- * Referensbilder, a picture swapped since – so their tokens keep their place as before. The rest are matched by
+ * "Referensbilder", a picture swapped since – so their tokens keep their place as before. The rest are matched by
  * path; one left over has left the clip.
  */
 function takeListAsClips(take: readonly string[], clip: readonly string[]): string[] {
@@ -361,7 +362,7 @@ function takeListAsClips(take: readonly string[], clip: readonly string[]): stri
 }
 
 /**
- * A take's prompts as they read with the clip's references now ("Använd prompt"): every @ImageN / @AudioN token
+ * A take's prompts as they read with the clip's references now ("Use prompt"): every @ImageN / @AudioN token
  * renumbered from the take's reference lists to the clip's (remapPromptReferences), so after the references were
  * reordered or one removed the take's words come back naming the same pictures and clips, not whatever holds
  * their old numbers now. A token whose picture or clip has left the clip goes.
@@ -382,7 +383,7 @@ export function takePromptsFor(
   return { prompt: remapPromptReferences(take.prompt, images, audios), negativePrompt: negative || undefined }
 }
 
-/** Finds a consent request in an error message, also when it is wrapped (e.g. "Klipp 2: NEEDS_CONSENT:{…}"). */
+/** Finds a consent request in an error message, also when it is wrapped (e.g. "Clip 2: NEEDS_CONSENT:{…}"). */
 export function parseConsent(message: string | undefined): ConsentRequest | undefined {
   if (!message) return undefined
   const i = message.indexOf(NEEDS_CONSENT)
@@ -398,20 +399,20 @@ export function round2(v: number): number {
   return Math.round(v * 100) / 100
 }
 
-const decimal = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 1 })
+const decimal = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 })
 
-/** "7,4 s" or "1 min 23 s". */
+/** "7.4 s" or "1 min 23 s". */
 export function formatLength(seconds: number): string {
   if (seconds < 59.95) return `${decimal.format(seconds)} s`
   const total = Math.round(seconds)
   return `${Math.floor(total / 60)} min ${total % 60} s`
 }
 
-/** "0:07,5": where in a clip a frame sits, to a tenth of a second. */
+/** "0:07.5": where in a clip a frame sits, to a tenth of a second. */
 export function formatFrameTime(seconds: number): string {
   const tenths = Math.max(0, Math.round(seconds * 10))
   const s = Math.floor(tenths / 10)
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')},${tenths % 10}`
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}.${tenths % 10}`
 }
 
 /** "1:07" for player clocks. */
@@ -424,8 +425,8 @@ export function formatTakeTime(ms: number): string {
   const d = new Date(ms)
   const today = new Date().toDateString() === d.toDateString()
   return today
-    ? d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    ? d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
 export function fileName(path: string): string {

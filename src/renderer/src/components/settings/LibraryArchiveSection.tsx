@@ -5,7 +5,7 @@ import { ipcErrorMessage } from '../../lib/hooks'
 import { readRememberedParams, rememberAfterSwitch } from '../../lib/library'
 import SwitchingOverlay from '../library/SwitchingOverlay'
 
-// Inställningar → Export och import: the whole library to one zip file, and such a zip opened as the library (main's
+// Settings → Export & import: the whole library to one zip file, and such a zip opened as the library (main's
 // library-archive.ts does the work). What runs is kept here, outside the component, so it is still shown after the
 // user has been elsewhere in the app while a long export ran.
 
@@ -126,21 +126,21 @@ async function cancel(): Promise<void> {
 const secondary = 'rounded-md border border-line px-4 py-2 transition hover:bg-raised disabled:opacity-40'
 
 const PHASE_TEXT: Record<ArchiveProgress['phase'], string> = {
-  preparing: 'Förbereder…',
-  packing: 'Packar filerna…',
-  unpacking: 'Packar upp…',
-  checking: 'Kontrollerar…',
-  opening: 'Öppnar biblioteket…',
-  done: 'Klart.',
-  failed: 'Det gick inte.',
-  cancelled: 'Avbrutet.'
+  preparing: 'Preparing…',
+  packing: 'Packing the files…',
+  unpacking: 'Unpacking…',
+  checking: 'Checking…',
+  opening: 'Opening the library…',
+  done: 'Done.',
+  failed: 'It didn’t work.',
+  cancelled: 'Cancelled.'
 }
 
 const MB = 1024 ** 2
 
-/** "1,2 GB", "820 MB", "0 MB". */
+/** "1.2 GB", "820 MB", "0 MB". */
 function sizeText(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toLocaleString('sv-SE', { maximumFractionDigits: 1 })} GB`
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toLocaleString('en-GB', { maximumFractionDigits: 1 })} GB`
   return `${Math.round(bytes / MB)} MB`
 }
 
@@ -150,12 +150,13 @@ function fileName(path: string): string {
 
 function countsTitle(c: ArchiveResult['counts']): string {
   return (
-    `${c.generations} klipp, ${c.assets} karaktärer, miljöer, produkter, kläder och poser, ` +
-    `${c.sequences} sekvenser och storyboards, ${c.edits} redigeringar`
+    `${c.generations} ${c.generations === 1 ? 'clip' : 'clips'}, ` +
+    `${c.assets} characters, environments, products, outfits and poses, ` +
+    `${c.sequences} sequences and storyboards, ${c.edits} ${c.edits === 1 ? 'edit' : 'edits'}`
   )
 }
 
-/** Export och import (no heading of its own: Inställningar puts it under one). */
+/** Export & import (no heading of its own: Settings puts it under one). */
 export default function LibraryArchiveSection() {
   const s = useSyncExternalStore(subscribe, snapshot, snapshot)
 
@@ -167,21 +168,21 @@ export default function LibraryArchiveSection() {
   return (
     <div>
       <p className="mb-3 text-muted">
-        Packa ner hela biblioteket – databasen och alla filer – i en zip-fil, till exempel för att flytta det till en
-        annan dator. API-nyckeln och agentens token följer inte med.
+        Pack the whole library – the database and every file – into a zip file, for example to move it to another
+        computer. The API key and the agent’s token aren’t included.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => void start('export')} disabled={busy} className={secondary}>
-          Exportera biblioteket…
+          Export library…
         </button>
         <button onClick={() => void start('import')} disabled={busy} className={secondary}>
-          Importera ett bibliotek…
+          Import a library…
         </button>
       </div>
       <p className="mt-2 text-[11px] leading-relaxed text-muted">
-        Importen packar upp zip-filen i en ny mapp och öppnar biblioteket i den. Det bibliotek du har öppet nu ligger
-        kvar där det är, och du kan byta tillbaka under Bibliotek.
+        The import unpacks the zip file into a new folder and opens the library in it. The library you have open now
+        stays where it is, and you can switch back under Library.
       </p>
 
       {progress && <ProgressBox progress={progress} cancelling={!!running?.cancelling} />}
@@ -191,15 +192,15 @@ export default function LibraryArchiveSection() {
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
             <span className="min-w-0 select-text" title={countsTitle(s.exported.result.counts)}>
-              Exporterat: {fileName(s.exported.result.path)} · {sizeText(Math.max(s.exported.result.bytes, MB))}
+              Exported: {fileName(s.exported.result.path)} · {sizeText(Math.max(s.exported.result.bytes, MB))}
               {' · '}
-              {s.exported.result.counts.generations} klipp
+              {s.exported.result.counts.generations} {s.exported.result.counts.generations === 1 ? 'clip' : 'clips'}
             </span>
             <button
               onClick={() => void window.studio.revealFile(s.exported!.result.path)}
               className="text-muted transition hover:text-text"
             >
-              Visa i Finder
+              Show in Finder
             </button>
           </p>
           {s.exported.note && <p className="mt-1 pl-4 leading-relaxed text-muted select-text">{s.exported.note}</p>}
@@ -209,8 +210,8 @@ export default function LibraryArchiveSection() {
       {!running && s.cancelled && (
         <p className="mt-3 text-[12px] text-muted">
           {s.cancelled === 'export'
-            ? 'Exporten avbröts. Ingen zip-fil sparades.'
-            : 'Importen avbröts. Det som hunnit packas upp togs bort.'}
+            ? 'The export was cancelled. No zip file was saved.'
+            : 'The import was cancelled. What had been unpacked was removed.'}
         </p>
       )}
 
@@ -234,12 +235,12 @@ function ProgressBox({ progress, cancelling }: { progress: ArchiveProgress; canc
     <div className="mt-3 rounded-md border border-line bg-raised px-3 py-2.5" aria-live="polite">
       <div className="flex items-center gap-3">
         <span className="min-w-0 flex-1 truncate">
-          <span className="font-medium">{isExport ? 'Exporterar' : 'Importerar'}</span>
+          <span className="font-medium">{isExport ? 'Exporting' : 'Importing'}</span>
           <span className="text-muted"> · {progress.message ?? PHASE_TEXT[progress.phase]}</span>
         </span>
         {known && (
           <span className="shrink-0 text-[11px] tabular-nums text-muted">
-            {sizeText(progress.done!)} av {sizeText(progress.total!)}
+            {sizeText(progress.done!)} of {sizeText(progress.total!)}
           </span>
         )}
         {cancellable && (
@@ -248,7 +249,7 @@ function ProgressBox({ progress, cancelling }: { progress: ArchiveProgress; canc
             disabled={cancelling}
             className="shrink-0 text-[12px] text-muted transition hover:text-text disabled:opacity-40"
           >
-            {cancelling ? 'Avbryter…' : 'Avbryt'}
+            {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>
         )}
       </div>
@@ -260,8 +261,8 @@ function ProgressBox({ progress, cancelling }: { progress: ArchiveProgress; canc
       </div>
       {isExport && (
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-          Du kan fortsätta arbeta under tiden. Att byta bibliotek eller städa upp mappstrukturen får vänta tills
-          exporten är klar.
+          You can keep working meanwhile. Switching libraries or tidying up the folder structure has to wait until
+          the export is done.
         </p>
       )}
     </div>

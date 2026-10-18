@@ -1,4 +1,4 @@
-// Pure helpers for the take strip and the status marks of Sekvenser and Storyboards: the order and size of the
+// Pure helpers for the take strip and the status marks of Sequences and Storyboards: the order and size of the
 // tiles, the one-line description under the strip, the words a screen reader hears, and the tooltips of the list
 // rows. No React and no window.studio here, so they can be tested on their own.
 
@@ -31,24 +31,24 @@ export function tileWidth(height: number, aspect: number): number {
   return Math.round(Math.min(height * (16 / 9), Math.max(height * 0.78, height * ratio)))
 }
 
-const oneDecimal = new Intl.NumberFormat('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+const oneDecimal = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 
-/** "5,0 s": a take's length, always with one decimal, so lengths line up in the strip. */
+/** "5.0 s": a take's length, always with one decimal, so lengths line up in the strip. */
 export function formatTakeLength(seconds: number): string {
   return `${oneDecimal.format(Math.max(0, seconds))} s`
 }
 
-/** "Genererar 40 %", "I kö", "Genererar" – the short phase on a pending tile. */
+/** "Generating 40%", "Queued", "Generating" – the short phase on a pending tile. */
 export function pendingPhase(take: Generation): string {
-  if (take.status === 'queued') return 'I kö'
+  if (take.status === 'queued') return 'Queued'
   const progress = takeProgress(take)
-  return progress !== undefined ? `Genererar ${Math.round(progress * 100)} %` : 'Genererar'
+  return progress !== undefined ? `Generating ${Math.round(progress * 100)}%` : 'Generating'
 }
 
-/** A version's title "Intervju v3" as ”Intervju” v3; any other title in quotes. */
+/** A version's title "Interview v3" as “Interview” v3; any other title in quotes. */
 function quotedVersion(title: string): string {
   const m = /^(.*\S)\s+(v\d+)$/.exec(title)
-  return m ? `”${m[1]}” ${m[2]}` : `”${title}”`
+  return m ? `“${m[1]}” ${m[2]}` : `“${title}”`
 }
 
 /** What kind of take it is, for the words around it. */
@@ -61,67 +61,67 @@ export function takeKind(take: Pick<Generation, 'source' | 'editId'>): TakeKind 
 
 /**
  * The line under the strip for one take (hovered, else focused, else the active one), without its buttons:
- * "14:02 · 5,0 s · $0.35 · Seedance 2.5 · ”A woman walks along the pier…”", "Eget klipp · IMG_2041.mov · 0:31",
- * "Redigerad film · ”Intervju” v3", "I kö…", "Genererar 40 % · 1:12 av ~3:00", or the error of a failed one
+ * "14:02 · 5.0 s · $0.35 · Seedance 2.5 · “A woman walks along the pier…”", "Own clip · IMG_2041.mov · 0:31",
+ * "Edited film · “Interview” v3", "Queued…", "Generating 40% · 1:12 of ~3:00", or the error of a failed one
  * (`tone: 'error'`).
  */
 export function takeInfo(take: Generation, modelName: string): { text: string; tone: 'muted' | 'error' } {
-  if (take.status === 'failed') return { text: take.error?.trim() || 'Tagningen misslyckades.', tone: 'error' }
-  if (take.status === 'queued') return { text: 'I kö…', tone: 'muted' }
+  if (take.status === 'failed') return { text: take.error?.trim() || 'The take failed.', tone: 'error' }
+  if (take.status === 'queued') return { text: 'Queued…', tone: 'muted' }
   if (take.status === 'processing') {
     const progress = takeProgress(take)
-    const head = progress !== undefined ? `Genererar ${Math.round(progress * 100)} %` : 'Genererar…'
+    const head = progress !== undefined ? `Generating ${Math.round(progress * 100)}%` : 'Generating…'
     const elapsed = take.executionDuration !== undefined ? formatClock(take.executionDuration / 1000) : undefined
     const typical = take.averageExecutionTime ? formatClock(take.averageExecutionTime / 1000) : undefined
-    const time = elapsed && typical ? `${elapsed} av ~${typical}` : elapsed
+    const time = elapsed && typical ? `${elapsed} of ~${typical}` : elapsed
     return { text: time ? `${head} · ${time}` : head, tone: 'muted' }
   }
   const kind = takeKind(take)
   const title = generationTitle(take)
   if (take.fileMissing) {
     const when = formatTakeTime(take.createdAt)
-    return { text: `${when} · Videofilen finns inte längre (flyttad eller raderad i Finder).`, tone: 'muted' }
+    return { text: `${when} · The video file is gone (moved or deleted in Finder).`, tone: 'muted' }
   }
   if (kind === 'own') {
-    const parts = ['Eget klipp', title]
+    const parts = ['Own clip', title]
     if (take.videoDuration) parts.push(formatClock(take.videoDuration))
     return { text: parts.join(' · '), tone: 'muted' }
   }
-  if (kind === 'version') return { text: `Redigerad film · ${quotedVersion(title)}`, tone: 'muted' }
+  if (kind === 'version') return { text: `Edited film · ${quotedVersion(title)}`, tone: 'muted' }
   const parts = [formatTakeTime(take.createdAt), formatTakeLength(takeDuration(take)), formatUsd(take.quote)]
   if (modelName) parts.push(modelName)
-  parts.push(take.prompt.trim() ? `”${generationTitle(take, 70)}”` : 'Ingen prompt')
+  parts.push(take.prompt.trim() ? `“${generationTitle(take, 70)}”` : 'No prompt')
   return { text: parts.join(' · '), tone: 'muted' }
 }
 
-/** Whether "Använd tagningens prompt" can put the take's words back: a Venice take made from a prompt. */
+/** Whether "Use the take’s prompt" can put the take's words back: a Venice take made from a prompt. */
 export function hasReusablePrompt(take: Generation): boolean {
   return !!take.prompt.trim() && canUseAgain(take)
 }
 
 /**
- * What a screen reader hears for a tile: "Tagning 14:02, 5,0 sekunder, vald, ny" (only the parts that apply);
- * "Tagning, genereras 40 procent" while it is being made.
+ * What a screen reader hears for a tile: "Take 14:02, 5.0 seconds, selected, new" (only the parts that apply);
+ * "Take, generating 40 percent" while it is being made.
  */
 export function takeAriaLabel(
   take: Generation,
   flags: { active: boolean; fresh: boolean; previewed?: boolean }
 ): string {
   if (isPending(take)) {
-    if (take.status === 'queued') return 'Tagning, i kö'
+    if (take.status === 'queued') return 'Take, queued'
     const progress = takeProgress(take)
-    return progress !== undefined ? `Tagning, genereras ${Math.round(progress * 100)} procent` : 'Tagning, genereras'
+    return progress !== undefined ? `Take, generating ${Math.round(progress * 100)} percent` : 'Take, generating'
   }
-  const parts = [`Tagning ${formatTakeTime(take.createdAt)}`]
-  if (take.status === 'failed') parts.push('misslyckades')
-  else if (take.fileMissing) parts.push('filen saknas')
-  else parts.push(formatTakeLength(takeDuration(take)).replace(/ s$/, ' sekunder'))
+  const parts = [`Take ${formatTakeTime(take.createdAt)}`]
+  if (take.status === 'failed') parts.push('failed')
+  else if (take.fileMissing) parts.push('file missing')
+  else parts.push(formatTakeLength(takeDuration(take)).replace(/ s$/, ' seconds'))
   const kind = takeKind(take)
-  if (kind === 'own') parts.push('eget klipp')
-  if (kind === 'version') parts.push('redigerad film')
-  if (flags.active) parts.push('vald')
-  if (flags.previewed) parts.push('förhandsvisas')
-  if (flags.fresh) parts.push('ny')
+  if (kind === 'own') parts.push('own clip')
+  if (kind === 'version') parts.push('edited film')
+  if (flags.active) parts.push('selected')
+  if (flags.previewed) parts.push('previewing')
+  if (flags.fresh) parts.push('new')
   return parts.join(', ')
 }
 
@@ -131,8 +131,8 @@ export function takeAriaLabel(
  */
 export function pendingTitle(autoSelects: boolean): string {
   return autoSelects
-    ? 'Genereras. Den väljs automatiskt när den är klar.'
-    : 'Genereras. Klicka på den när den är klar för att använda den.'
+    ? 'Generating. It’s selected automatically when it’s done.'
+    : 'Generating. Click it when it’s done to use it.'
 }
 
 // ── Status of a whole sequence or storyboard (list rows) ─────────────────────
@@ -146,8 +146,8 @@ function count(n: number, one: string, many: string): string {
 
 /**
  * A list row's tooltip in words, from what runs and what is new for that sequence or storyboard:
- * "2 tagningar genereras · 1 ny tagning att titta på", "Generera saknade pågår", "Exporterar 62 %",
- * "1 övergång genereras · 2 nya övergångar", "… · 1 misslyckades". Undefined when there is nothing to say.
+ * "2 takes generating · 1 new take to look at", "Generate missing is running", "Exporting 62%",
+ * "1 transition generating · 2 new transitions", "… · 1 failed". Undefined when there is nothing to say.
  * `unseen` may be cut short (the summary lists at most 200); `counts` are exact, so what the list doesn't explain
  * is counted as takes.
  */
@@ -162,18 +162,18 @@ export function ownerStatusText(
   if (takes) {
     parts.push(
       kind === 'storyboard'
-        ? `${count(takes, 'övergång', 'övergångar')} genereras`
-        : `${count(takes, 'tagning', 'tagningar')} genereras`
+        ? `${count(takes, 'transition', 'transitions')} generating`
+        : `${count(takes, 'take', 'takes')} generating`
     )
   }
-  if (running.some((w) => w.kind === 'run')) parts.push('Generera saknade pågår')
+  if (running.some((w) => w.kind === 'run')) parts.push('Generate missing is running')
   const stills = running.filter((w) => w.kind === 'still').length
-  if (stills) parts.push(`${count(stills, 'bild', 'bilder')} skapas`)
+  if (stills) parts.push(`Creating ${count(stills, 'image', 'images')}`)
   const imports = running.filter((w) => w.kind === 'import').length
-  if (imports) parts.push(`${count(imports, 'egen film', 'egna filmer')} importeras`)
+  if (imports) parts.push(`Importing ${count(imports, 'own film', 'own films')}`)
   const exporting = running.find((w) => w.kind === 'export')
   if (exporting) {
-    parts.push(exporting.progress !== undefined ? `Exporterar ${Math.round(exporting.progress * 100)} %` : 'Exporterar')
+    parts.push(exporting.progress !== undefined ? `Exporting ${Math.round(exporting.progress * 100)}%` : 'Exporting')
   }
 
   const fresh = unseen.filter((w) => w.status === 'completed')
@@ -184,13 +184,13 @@ export function ownerStatusText(
   if (freshTakes) {
     parts.push(
       kind === 'storyboard'
-        ? count(freshTakes, 'ny övergång', 'nya övergångar')
-        : `${count(freshTakes, 'ny tagning', 'nya tagningar')} att titta på`
+        ? count(freshTakes, 'new transition', 'new transitions')
+        : `${count(freshTakes, 'new take', 'new takes')} to look at`
     )
   }
-  if (freshStills) parts.push(count(freshStills, 'ny bild', 'nya bilder'))
-  if (freshExports) parts.push(freshExports === 1 ? 'Filmen är exporterad' : `${freshExports} nya exporter`)
-  if (counts.failed) parts.push(`${counts.failed} misslyckades`)
+  if (freshStills) parts.push(count(freshStills, 'new image', 'new images'))
+  if (freshExports) parts.push(freshExports === 1 ? 'The film was exported' : `${freshExports} new exports`)
+  if (counts.failed) parts.push(`${counts.failed} failed`)
   return parts.length ? parts.join(' · ') : undefined
 }
 
@@ -215,7 +215,7 @@ export function newsBySegment(unseen: readonly FinishedWork[]): Map<string, Segm
   return out
 }
 
-/** "Ny tagning", "3 nya tagningar". */
+/** "New take", "3 new takes". */
 export function freshTakesLabel(n: number): string {
-  return n === 1 ? 'Ny tagning' : `${n} nya tagningar`
+  return n === 1 ? 'New take' : `${n} new takes`
 }

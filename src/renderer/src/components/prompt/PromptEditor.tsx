@@ -80,7 +80,7 @@ interface Props {
   maxImages: number
   /** The library assets among the references, and what naming them inserts. */
   groups: AssetGroup[]
-  /** The whole library, for "Lägg till från biblioteket" in the "@" menu. */
+  /** The whole library, for "Add from the library" in the "@" menu. */
   library: Asset[]
   /**
    * Adds an asset's photos (and a character's default outfit) to the references, as many as fit. Returns
@@ -96,11 +96,11 @@ interface Props {
   /** Switches to a reference model that takes audio (named `audioModelName`); offered when this one doesn't. */
   onUseAudioModel?: () => void
   audioModelName?: string
-  /** Prompt language: the words between a character and its voice and clothes ("voice"/"röst", "wearing"/"i"). */
+  /** Prompt language: the words between a character and its voice and clothes ("voice", "wearing", or the Swedish words). */
   language: PromptLanguage
   /** Shown right under the text field. */
   belowInput?: ReactNode
-  /** Inside fokusläge (internal): the same editor, large. */
+  /** Inside focus mode (internal): the same editor, large. */
   inFocus?: boolean
 }
 
@@ -120,7 +120,7 @@ interface MenuState {
   tail: boolean
 }
 
-/** How long "Ångra" is offered after the prompt was replaced from outside while the user was typing. */
+/** How long "Undo" is offered after the prompt was replaced from outside while the user was typing. */
 const REPLACED_UNDO_MS = 30_000
 
 /** The reference pictures and clips (paths, in @ImageN / @AudioN order) a text was written against. */
@@ -208,7 +208,7 @@ export default function PromptEditor(props: Props) {
   const [seenValue, setSeenValue] = useState(value)
   const sent = useRef<string[]>([])
   /**
-   * The text replaced from outside while the user was typing in the field, for one "Ångra". It stays offered
+   * The text replaced from outside while the user was typing in the field, for one "Undo". It stays offered
    * for a while even if they go on typing: the first keys after the switch are usually typed without noticing it.
    */
   const [replaced, setReplaced] = useState<ReplacedText>()
@@ -219,7 +219,7 @@ export default function PromptEditor(props: Props) {
     return () => clearTimeout(t)
   }, [replaced])
   // The lists as last shown, which the text in the field was written against. An outside change can move the
-  // references and renumber the prompt in one go (an agent's reorder_references), so the text "Ångra" brings
+  // references and renumber the prompt in one go (an agent's reorder_references), so the text "Undo" brings
   // back must be renumbered to the lists as they are then, or its tokens would name other pictures.
   const reference = kind === 'reference-to-video'
   const lists = useMemo<ShownLists | undefined>(
@@ -230,7 +230,7 @@ export default function PromptEditor(props: Props) {
   useLayoutEffect(() => {
     shownLists.current = lists
   })
-  /** What "Ångra" puts back: the replaced text, its tokens following their pictures and clips to the lists now. */
+  /** What "Undo" puts back: the replaced text, its tokens following their pictures and clips to the lists now. */
   const restored = useMemo(() => {
     if (!replaced) return undefined
     const was = replaced.lists
@@ -373,8 +373,8 @@ export default function PromptEditor(props: Props) {
     if (value === sent.current[sent.current.length - 1]) sent.current = []
     const next = normalizeBreaks(value)
     if (!echo && next !== text) {
-      // Replaced from outside (an agent's set_form, "Använd igen"). The menu's offsets belonged to the old text,
-      // and what the user was typing is gone from the undo history, so it is kept for one "Ångra" – with the
+      // Replaced from outside (an agent's set_form, "Use again"). The menu's offsets belonged to the old text,
+      // and what the user was typing is gone from the undo history, so it is kept for one "Undo" – with the
       // lists it was written against, which the same change may have reordered.
       if (focused.current && text.trim()) setReplaced({ text, lists: shownLists.current })
       setText(next)
@@ -531,7 +531,7 @@ export default function PromptEditor(props: Props) {
     focus: () => textarea.current?.focus()
   }))
 
-  // ── Writing help: grows with the text, building blocks ("/" and chips), fokusläge ─────────────────────────
+  // ── Writing help: grows with the text, building blocks ("/" and chips), focus mode ─────────────────────────
   useAutoGrow(textarea, text, rows, 18, inFocus)
   const blocks = useBlockMenu({
     context: 'video',
@@ -542,7 +542,7 @@ export default function PromptEditor(props: Props) {
     },
     measure: (index) => (mirror.current ? textRect(mirror.current, index, index + 1) : undefined)
   })
-  // Fokusläge opens with the caret at the end of the text, ready to go on writing.
+  // Focus mode opens with the caret at the end of the text, ready to go on writing.
   useEffect(() => {
     const el = textarea.current
     if (!inFocus || !el) return
@@ -781,7 +781,7 @@ export default function PromptEditor(props: Props) {
 
       {restored !== undefined && restored !== text && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted">
-          <span className="min-w-0 truncate">Prompten ersattes medan du skrev (av agenten eller Studio).</span>
+          <span className="min-w-0 truncate">The prompt was replaced while you were typing (by the agent or Studio).</span>
           <button
             onClick={() => {
               setReplaced(undefined)
@@ -789,7 +789,7 @@ export default function PromptEditor(props: Props) {
             }}
             className="ml-auto shrink-0 text-text hover:underline"
           >
-            Ångra
+            Undo
           </button>
         </div>
       )}
@@ -836,7 +836,7 @@ export default function PromptEditor(props: Props) {
       {expanded && !inFocus && (
         <FocusDialog
           title="Prompt"
-          subtitle="Beskriv scenen, rörelsen och kameran. Skriv @ för en referens och / för en byggsten. Allt sparas medan du skriver."
+          subtitle="Describe the scene, the motion and the camera. Type @ for a reference and / for a building block. Everything is saved as you type."
           onClose={collapse}
         >
           <PromptEditor {...props} ref={undefined} id={undefined} inFocus />

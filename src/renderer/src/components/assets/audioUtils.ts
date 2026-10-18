@@ -2,11 +2,11 @@ import { MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
 import type { AssetAudio } from '@shared/types'
 
 // Pure helpers for an asset's sound clips: which files count as audio, the reference window (the part of a
-// clip that is sent to Venice) and how times are written and read in Swedish.
+// clip that is sent to Venice) and how times are written and read.
 
 /** The formats main accepts for voices and soundscapes; it converts the window to MP3 when sending. */
 export const AUDIO_EXT = /\.(mp3|wav|m4a|aac|aiff?|flac|ogg)$/i
-export const AUDIO_FORMATS = 'MP3, WAV, M4A, AAC, AIFF, FLAC eller OGG'
+export const AUDIO_FORMATS = 'MP3, WAV, M4A, AAC, AIFF, FLAC or OGG'
 
 /** Longer recordings work, but then the window matters: only it is sent. */
 export const LONG_AUDIO_SECONDS = 60
@@ -67,10 +67,10 @@ export function resizeEnd(w: ClipWindow, end: number, duration: number): ClipWin
   return clampWindow({ start: w.start, length: clamp(end - w.start, min, max) }, duration)
 }
 
-const tenths = new Intl.NumberFormat('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-const upToTenths = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 1 })
+const tenths = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+const upToTenths = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 })
 
-/** A position in a clip: "0:05,2", "2:31,0". */
+/** A position in a clip: "0:05.2", "2:31.0". */
 export function formatPosition(seconds: number): string {
   const t = Math.max(0, Math.round(seconds * 10) / 10)
   const minutes = Math.floor(t / 60)
@@ -78,7 +78,7 @@ export function formatPosition(seconds: number): string {
   return `${minutes}:${rest < 10 ? '0' : ''}${tenths.format(rest)}`
 }
 
-/** A length: "10 s", "7,5 s", "2 min 31 s". */
+/** A length: "10 s", "7.5 s", "2 min 31 s". */
 export function formatDuration(seconds: number): string {
   if (seconds < 59.95) return `${upToTenths.format(Math.round(seconds * 10) / 10)} s`
   const total = Math.round(seconds)
@@ -86,19 +86,19 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(total / 60)} min${s ? ` ${s} s` : ''}`
 }
 
-/** A length for an input field: "10,0". */
+/** A length for an input field: "10.0". */
 export function formatSecondsField(seconds: number): string {
   return tenths.format(Math.round(seconds * 10) / 10)
 }
 
 /**
- * Reads a time typed by hand: seconds ("5", "5,5", "5.5", "12 s") or minutes and seconds ("1:05", "1:05,5").
- * Undefined when it isn't one.
+ * Reads a time typed by hand: seconds ("5", "5.5", "5,5", "12 s", "12 sec") or minutes and seconds ("1:05",
+ * "1:05.5"). A decimal comma and the Swedish units are still understood. Undefined when it isn't one.
  */
 export function parseTime(text: string): number | undefined {
   const t = text
     .trim()
-    .replace(/\s*(s|sek|sekunder)$/i, '')
+    .replace(/\s*(s|secs?|seconds?|sek|sekunder)$/i, '')
     .replace(',', '.')
   const m = /^(?:(\d+):)?(\d+(?:\.\d*)?|\.\d+)$/.exec(t)
   if (!m) return undefined

@@ -142,7 +142,7 @@ interface Props {
   /** The window that is played: the part of the file sent to Venice. */
   start: number
   length: number
-  /** What the clip is, for the button's label ("Anna · röst"). */
+  /** What the clip is, for the button's label ("Anna · voice"). */
   label: string
   /** Size and colour; defaults to a small round button. */
   className?: string
@@ -174,10 +174,10 @@ export default function AudioPlayButton({
     [path, start, length, keepPlaying]
   )
   const title = state.failed
-    ? `Filen går inte att spela upp: ${path.split('/').pop() ?? path}`
+    ? `The file can’t be played: ${path.split('/').pop() ?? path}`
     : playingNow
-      ? `Stoppa ${label}`
-      : `Lyssna på ${label}`
+      ? `Stop ${label}`
+      : `Listen to ${label}`
   const ring = `conic-gradient(currentColor ${Math.round(state.progress * 360)}deg, transparent 0deg)`
   return (
     <button

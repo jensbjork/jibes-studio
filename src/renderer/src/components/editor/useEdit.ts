@@ -8,7 +8,7 @@ import { ipcErrorMessage } from '../../lib/hooks'
 
 /** Main's wording when an edit no longer exists (deleted elsewhere, or the library was switched). */
 function isMissing(message: string): boolean {
-  return /finns inte|hittades inte|not found/i.test(message)
+  return /no longer exists|does not exist|not found/i.test(message)
 }
 
 export function useEdit(editId: string, onMissing: (id: string) => void) {
@@ -90,7 +90,7 @@ export function useEdit(editId: string, onMissing: (id: string) => void) {
   return { edit, error, progress, refresh, setEdit }
 }
 
-// Timelines are per version, and a version never changes once made: keep a few, so ⌘Z and Jämför are instant.
+// Timelines are per version, and a version never changes once made: keep a few, so ⌘Z and Compare are instant.
 const timelineCache = new Map<string, EditTimeline>()
 const TIMELINE_CACHE_SIZE = 8
 

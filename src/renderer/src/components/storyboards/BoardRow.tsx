@@ -57,7 +57,7 @@ interface Props {
   editorId?: string
   /** Transitions being sent to Venice right now. */
   submitting: Record<string, boolean>
-  /** Per transition: its takes that finished or failed and haven't been looked at (Pågår och klart). */
+  /** Per transition: its takes that finished or failed and haven't been looked at (Activity). */
   news: Map<string, SegmentNews>
   /** What finished in this storyboard and hasn't been looked at: new and failed board pictures among it. */
   unseen: FinishedWork[]
@@ -78,14 +78,14 @@ interface Props {
   onSetImage: (boardId: string, source: BoardImageSource | null) => void
   onCreateImage: (boardId: string) => void
   onPickFrame: (boardId: string) => void
-  /** One of the storyboard's pictures full size, opened from this board's menu (where "Använd" puts it). */
+  /** One of the storyboard's pictures full size, opened from this board's menu (where "Use on board" puts it). */
   onViewStill: (boardId: string, still: Still) => void
   onDeleteBoard: (boardId: string) => void
   /** False when the move waits for the user's yes (it would remove transitions with work in them). */
   onMoveBoard: (boardId: string, toIndex: number) => boolean
   /** A new board: before or after another one (none: at the end), with a picture when one was dropped. */
   onAddBoard: (init: { afterBoardId?: string; beforeBoardId?: string; image?: BoardImageSource }) => void
-  /** Several pictures dropped on "Ny ruta": a new board for each, in order. */
+  /** Several pictures dropped on "New board": a new board for each, in order. */
   onAddFiles: (paths: string[]) => void
   onOpenTransition: (transitionId: string) => void
   onGenerate: (transitionId: string) => void
@@ -97,7 +97,7 @@ interface Props {
  * The storyboard's boards as one row of large pictures in film order, with the clip between every two of them
  * on the arrow that joins them. Scrolls sideways (also with an ordinary scroll wheel); the pictures fit the
  * window's height. Boards are reordered by dragging or with ⌥← / ⌥→ (useReorder); + before, between and after
- * them adds one, and pictures dropped on "Ny ruta" become new boards.
+ * them adds one, and pictures dropped on "New board" become new boards.
  */
 export default function BoardRow({
   storyboard,
@@ -142,7 +142,7 @@ export default function BoardRow({
     fitWidth > 0 ? Math.max(IMAGE_MIN_WIDTH, Math.min(IMAGE_MAX_WIDTH, twoBoards)) : IMAGE_DEFAULT_WIDTH
   const image = fitBox(storyboard.aspectRatio, imageWidth, imageHeight)
 
-  // Board pictures from Pågår och klart: one being made (also after its dialog closed, or by an agent), and one that
+  // Board pictures from Activity: one being made (also after its dialog closed, or by an agent), and one that
   // couldn't be made. A take on its way to Venice counts as being made for its transition.
   const boardWork = useMemo(() => {
     const making = new Set<string>()
@@ -168,7 +168,7 @@ export default function BoardRow({
       moveAsked.current = !onMoveBoard(boards[from].id, to)
     },
     describeMove: (from, to) =>
-      moveAsked.current ? '' : `Ruta ${from + 1} är nu ruta ${to + 1} av ${boards.length}.`
+      moveAsked.current ? '' : `Board ${from + 1} is now board ${to + 1} of ${boards.length}.`
   })
 
   // ── Scrolling things into view ─────────────────────────────────────────────
@@ -225,8 +225,8 @@ export default function BoardRow({
                 type="button"
                 onClick={() => onAddBoard({ beforeBoardId: boards[0].id })}
                 disabled={adding}
-                title="Lägg till en ruta först"
-                aria-label="Lägg till en ruta först"
+                title="Add a board at the start"
+                aria-label="Add a board at the start"
                 className="flex h-6 w-6 items-center justify-center rounded-full border border-line text-muted opacity-50 transition hover:border-muted hover:text-text hover:opacity-100 focus-visible:opacity-100 disabled:opacity-20"
               >
                 <PlusIcon size={11} />
@@ -318,7 +318,7 @@ function DropMarker() {
   return <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-accent" aria-hidden />
 }
 
-/** "Ny ruta" after the last board, as large as a board's picture; pictures dropped on it become new boards. */
+/** "New board" after the last board, as large as a board's picture; pictures dropped on it become new boards. */
 function AddCard({
   width,
   height,
@@ -368,18 +368,18 @@ function AddCard({
           const { paths, other } = droppedImagePaths(e)
           if (paths.length) onAddFiles(paths)
           if (other) {
-            onError(paths.length ? 'Bara bilderna lades till – släpp JPG-, PNG- eller WebP-filer.' : DROP_ONLY_IMAGES)
+            onError(paths.length ? 'Only the images were added – drop JPG, PNG or WebP files.' : DROP_ONLY_IMAGES)
           }
         }}
-        title="Lägg till en ruta sist – eller släpp en eller flera bilder här, så blir varje bild en ny ruta"
+        title="Add a board at the end – or drop one or more images here, and each image becomes a new board"
         className={`flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-muted transition hover:border-muted hover:text-text disabled:opacity-40 ${
           over ? 'border-accent bg-accent/5 text-text' : 'border-line'
         }`}
         style={{ height }}
       >
         <PlusIcon size={18} />
-        <span>{first ? 'Första rutan' : 'Ny ruta'}</span>
-        <span className="text-[11px] text-muted/70">eller släpp bilder här</span>
+        <span>{first ? 'First board' : 'New board'}</span>
+        <span className="text-[11px] text-muted/70">or drop images here</span>
       </button>
     </div>
   )

@@ -5,7 +5,7 @@ const offPagePlayers = new Map<HTMLMediaElement, () => void>()
 
 /**
  * A player that plays without being in the document, so pauseOthers can't find it by querying the page. Its
- * events never reach the document either, so it also gets Pågår och klart's playback rule: playing a new clip
+ * events never reach the document either, so it also gets Activity's playback rule: playing a new clip
  * through it for a second marks it seen, as in any player on the page.
  */
 export function registerOffPagePlayer(el: HTMLMediaElement, stop: () => void): void {

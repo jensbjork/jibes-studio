@@ -63,50 +63,50 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
 
           {missing && status.error ? (
             <>
-              <h1 className="text-xl font-semibold">Biblioteket kunde inte öppnas</h1>
+              <h1 className="text-xl font-semibold">The library couldn't be opened</h1>
               <p className="mt-2 leading-relaxed text-muted">
-                Studio hittar mappen{' '}
+                Studio finds the folder{' '}
                 <span className="break-all font-mono text-[12px] text-text select-text">
                   {status.root ? displayPath(status.root) : '–'}
                 </span>{' '}
-                men kunde inte öppna biblioteket i den:
+                but couldn't open the library in it:
               </p>
               <p className="mt-2 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[12px] leading-relaxed text-[#ffb3b5] select-text">
                 {status.error}
               </p>
               <p className="mt-2 leading-relaxed text-muted">
-                Inget har raderats. Försök igen, eller välj en annan mapp så länge.
+                Nothing has been deleted. Try again, or choose another folder for now.
               </p>
             </>
           ) : missing ? (
             <>
-              <h1 className="text-xl font-semibold">Biblioteksmappen hittas inte</h1>
+              <h1 className="text-xl font-semibold">The library folder can't be found</h1>
               <p className="mt-2 leading-relaxed text-muted">
-                Biblioteksmappen hittas inte:{' '}
+                The library folder can't be found:{' '}
                 <span className="break-all font-mono text-[12px] text-text select-text">
                   {status.root ? displayPath(status.root) : '–'}
                 </span>
               </p>
               <p className="mt-2 leading-relaxed text-muted">
-                Ligger den på en extern disk, anslut disken och försök igen. Har du flyttat eller döpt om mappen i
-                Finder kan du välja den där den ligger nu.
+                If it's on an external disk, connect the disk and try again. If you moved or renamed the folder in
+                Finder, you can choose it where it is now.
               </p>
             </>
           ) : (
             <>
-              <h1 className="text-xl font-semibold">Var ska Studio spara allt?</h1>
+              <h1 className="text-xl font-semibold">Where should Studio save everything?</h1>
               <p className="mt-2 leading-relaxed text-muted">
-                Välj en grundmapp på datorn. Där samlar Studio karaktärer, miljöer, produkter, kläder, poser,
-                referensbilder, genererade videor, egna klipp, sekvenser, storyboards och redigeringar i tydligt
-                namngivna mappar, så att du kan gå in och titta i Finder när du vill.
+                Choose a library folder on your computer. Studio keeps characters, environments, products, outfits,
+                poses, reference images, generated videos, own clips, sequences, storyboards and edits there in
+                clearly named folders, so you can look around in Finder whenever you like.
               </p>
               {legacy && (
                 <p className="mt-3 rounded-md border border-line bg-panel px-3 py-2 text-[12px] leading-relaxed text-muted">
-                  {legacy.oldLayout ? 'Studio hittade ditt bibliotek från en tidigare version i' : 'Studio hittade ditt bibliotek i'}{' '}
+                  {legacy.oldLayout ? 'Studio found your library from an earlier version in' : 'Studio found your library in'}{' '}
                   <span className="font-mono text-text">{displayPath(legacy.path)}</span>.{' '}
                   {legacy.oldLayout
-                    ? 'Det följer med till mappen du väljer och sorteras in i de nya mapparna.'
-                    : 'Det följer med till mappen du väljer.'}
+                    ? 'It comes along to the folder you choose and is sorted into the new folders.'
+                    : 'It comes along to the folder you choose.'}
                 </p>
               )}
             </>
@@ -128,11 +128,11 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
                 />
                 <div className="mt-4 flex items-center gap-4">
                   <button onClick={chooseOther} disabled={busy || choice.checking} className={link}>
-                    Välj en annan mapp…
+                    Choose another folder…
                   </button>
                   {missing && (
                     <button onClick={() => void retry()} disabled={busy || retrying} className={link}>
-                      {retrying ? 'Letar…' : 'Leta efter den gamla mappen igen'}
+                      {retrying ? 'Looking…' : 'Look for the old folder again'}
                     </button>
                   )}
                 </div>
@@ -140,10 +140,10 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
             ) : missing ? (
               <div className="flex flex-wrap items-center gap-2">
                 <button onClick={() => void retry()} disabled={retrying || choice.checking} className={primary}>
-                  {retrying ? 'Letar…' : 'Försök igen'}
+                  {retrying ? 'Looking…' : 'Try again'}
                 </button>
                 <button onClick={chooseOther} disabled={retrying || choice.checking} className={secondary}>
-                  Välj en annan mapp…
+                  Choose another folder…
                 </button>
               </div>
             ) : (
@@ -154,18 +154,18 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
                   title={status.suggested}
                   className={primary}
                 >
-                  Använd {displayPath(status.suggested)}
+                  Use {displayPath(status.suggested)}
                 </button>
                 <button onClick={chooseOther} disabled={choice.checking} className={secondary}>
-                  Välj mapp…
+                  Choose folder…
                 </button>
               </div>
             )}
 
-            {choice.checking && <p className="mt-3 text-[12px] text-muted">Kontrollerar mappen…</p>}
+            {choice.checking && <p className="mt-3 text-[12px] text-muted">Checking the folder…</p>}
             {stillMissing && !retrying && (
               <p className="mt-3 text-[12px] text-amber-200">
-                {status.error ? 'Biblioteket går fortfarande inte att öppna.' : 'Mappen går fortfarande inte att nå.'}
+                {status.error ? "The library still can't be opened." : "The folder still can't be reached."}
               </p>
             )}
             {choice.error && <p className="mt-3 text-[12px] text-accent select-text">{choice.error}</p>}
@@ -174,8 +174,8 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
           <ImportArchive disabled={busy || choice.checking} />
 
           <p className="mt-8 text-[11px] leading-relaxed text-muted">
-            Du kan byta mapp senare under Inställningar. Allt du gör sparas i grundmappen, så den går att
-            säkerhetskopiera eller flytta i ett stycke.
+            You can change the folder later in Settings. Everything you do is saved in the library folder, so it can
+            be backed up or moved in one piece.
           </p>
         </div>
       </div>
@@ -185,8 +185,8 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
 }
 
 /**
- * "Har du ett exporterat bibliotek?": on a new Mac the zip from Inställningar → Export och import is opened from here,
- * since the rest of the app (and Inställningar) waits for a library. Main unpacks it into a folder the user chooses
+ * "Have an exported library?": on a new Mac the zip from Settings → Export & import is opened from here,
+ * since the rest of the app (and Settings) waits for a library. Main unpacks it into a folder the user chooses
  * and opens it; the window reloads into the library.
  */
 function ImportArchive({ disabled }: { disabled: boolean }) {
@@ -212,21 +212,21 @@ function ImportArchive({ disabled }: { disabled: boolean }) {
   return (
     <div className="mt-6 rounded-lg border border-line px-4 py-3">
       <p className="text-[12px] leading-relaxed text-muted">
-        Har du ett bibliotek som du exporterat från Studio på en annan dator (en zip-fil)? Öppna det här i stället.
+        Do you have a library you exported from Studio on another computer (a zip file)? Open it here instead.
       </p>
       {running ? (
         <div className="mt-2 flex items-center gap-3 text-[12px]">
           <span className="min-w-0 flex-1 truncate text-muted">
-            {progress?.message ?? 'Importerar…'}
-            {percent !== undefined && ` · ${percent} %`}
+            {progress?.message ?? 'Importing…'}
+            {percent !== undefined && ` · ${percent}%`}
           </span>
           <button onClick={() => void window.studio.cancelLibraryArchive()} className={link}>
-            Avbryt
+            Cancel
           </button>
         </div>
       ) : (
         <button onClick={() => void start()} disabled={disabled} className={`mt-2 ${link} text-text underline-offset-2 hover:underline`}>
-          Importera ett bibliotek…
+          Import a library…
         </button>
       )}
       {error && <p className="mt-2 text-[12px] text-accent select-text">{error}</p>}

@@ -58,7 +58,7 @@ export interface PromptIssue {
   /** Errors block a submission; warnings are advice. */
   severity: 'error' | 'warning'
   code: PromptIssueCode
-  /** Swedish, user-facing, e.g. "@Image7 finns inte – bara 5 bilder är valda." */
+  /** User-facing, e.g. "@Image7 doesn't exist – only 5 images are chosen." */
   message: string
   /** The offending text in the prompt the issue was found in, when it is about one place. */
   start?: number
@@ -111,13 +111,13 @@ export interface ValidateOptions {
   /** How many audio clips the model takes (maxReferenceAudios); later ones are not sent. Default 3. */
   maxAudios?: number
   /**
-   * Reference videos sent with the prompt (Seedance reference-to-video edits from Redigera, named <Video 1>…).
+   * Reference videos sent with the prompt (Seedance reference-to-video edits from the Editor, named <Video 1>…).
    * They are references too, so a prompt with videos but no images is not missing its references. Default 0.
    */
   referenceVideos?: number
   /**
    * The @ImageN / @AudioN numbers the References legend explains (prompt-compose.ts explainedReferences: an asset whose
-   * description – or, for an outfit, who wears it – Studio appends when "Ta med beskrivningar" is on for it). Those are
+   * description – or, for an outfit, who wears it – Studio appends when "Include descriptions" is on for it). Those are
    * not reported as unmentioned: the legend tells the model what they are.
    */
   explained?: { images?: readonly number[]; audios?: readonly number[] }
@@ -575,13 +575,13 @@ export function audioToken(index: number): string {
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-/** "A", "A och B", "A, B och C". */
-function swedishList(items: readonly string[]): string {
+/** "A", "A and B", "A, B and C". */
+function andList(items: readonly string[]): string {
   if (items.length <= 1) return items[0] ?? ''
-  return `${items.slice(0, -1).join(', ')} och ${items[items.length - 1]}`
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
-/** "@Image2", "@Image2 och @Image4", "@Image5–@Image9" for listing numbers in a message. */
+/** "@Image2", "@Image2 and @Image4", "@Image5–@Image9" for listing numbers in a message. */
 function describeNumbers(numbers: readonly number[], ref: ReferenceKind = 'image'): string {
   const runs: [number, number][] = []
   for (const n of [...new Set(numbers)].sort((a, b) => a - b)) {
@@ -592,41 +592,43 @@ function describeNumbers(numbers: readonly number[], ref: ReferenceKind = 'image
   const parts = runs.flatMap(([a, b]) =>
     a === b ? [token(ref, a)] : b === a + 1 ? [token(ref, a), token(ref, b)] : [`${token(ref, a)}–${token(ref, b)}`]
   )
-  return swedishList(parts)
+  return andList(parts)
 }
 
-const quoted = (raw: string): string => `”${raw.replace(INVISIBLE_ALL, '')}”`
+const quoted = (raw: string): string => `“${raw.replace(INVISIBLE_ALL, '')}”`
 
 /** Why a reference image gives way in a continuation sent in reference mode (see ValidateOptions.continuationFrame). */
-const FRAME_PLACE = 'plats behövs för startbilden (sista bildrutan i föregående klipp)'
+const FRAME_PLACE = 'room is needed for the start image (the last frame of the previous clip)'
 
 /**
- * "Referensbild 9 skickas inte – plats behövs för startbilden (…)": the reference images (1-based numbers) a
+ * "Reference image 9 is not sent – room is needed for the start image (…)": the reference images (1-based numbers) a
  * continuation in reference mode leaves out to make room for the previous clip's last frame.
  */
 export function droppedForFrameMessage(numbers: readonly number[]): string {
   const sorted = [...new Set(numbers)].sort((a, b) => a - b).map(String)
-  return `Referensbild ${swedishList(sorted)} skickas inte – ${FRAME_PLACE}.`
+  return sorted.length === 1
+    ? `Reference image ${sorted[0]} is not sent – ${FRAME_PLACE}.`
+    : `Reference images ${andList(sorted)} are not sent – ${FRAME_PLACE}.`
 }
 
 function images(n: number): string {
-  return n === 1 ? '1 bild' : `${n} bilder`
+  return n === 1 ? '1 image' : `${n} images`
 }
 
 function clips(n: number): string {
-  return `${n} ljudklipp`
+  return n === 1 ? '1 audio clip' : `${n} audio clips`
 }
 
 /** Margin for window lengths that are sums or slider values (10 + 5 must not count as more than 15). */
 const SECONDS_EPSILON = 0.005
 
-/** "1,5 s", "18 s": rounded to tenths, or finer when that would make it read as `limit` itself. */
+/** "1.5 s", "18 s": rounded to tenths, or finer when that would make it read as `limit` itself. */
 function seconds(value: number, limit?: number): string {
   let text = ''
   for (const decimals of [1, 2, 3]) {
     const f = 10 ** decimals
     const rounded = Math.round(value * f) / f
-    text = `${String(rounded).replace('.', ',')} s`
+    text = `${String(rounded)} s`
     if (limit === undefined || rounded !== limit) break
   }
   return text
@@ -638,84 +640,85 @@ function malformedMessage(s: ScannedMalformed): string {
     switch (s.reason) {
       case 'no-number':
         return /^@audio$/i.test(s.raw)
-          ? `${raw} saknar nummer – skriv t.ex. @Audio1.`
-          : `${raw} är ingen giltig ljudreferens – skriv @Audio följt av ljudklippets nummer, t.ex. @Audio1.`
+          ? `${raw} has no number – write e.g. @Audio1.`
+          : `${raw} is not a valid audio reference – write @Audio followed by the audio clip's number, e.g. @Audio1.`
       case 'zero':
-        return `${raw} finns inte – ljudklippen numreras från @Audio1.`
+        return `${raw} doesn't exist – audio clips are numbered from @Audio1.`
       case 'range':
         return s.suggestion
-          ? `${raw} läses inte som flera ljudklipp – skriv ut vart och ett: ${s.suggestion}.`
-          : `${raw} läses inte som flera ljudklipp – skriv ut vart och ett, t.ex. @Audio1, @Audio2.`
+          ? `${raw} isn't read as several audio clips – write out each one: ${s.suggestion}.`
+          : `${raw} isn't read as several audio clips – write out each one, e.g. @Audio1, @Audio2.`
       case 'hidden':
-        return `${raw} innehåller ett osynligt tecken (t.ex. från inklistrad text) och känns inte igen – skriv om den som ${s.suggestion}.`
+        return `${raw} contains an invisible character (e.g. from pasted text) and isn't recognised – write it again as ${s.suggestion}.`
       case 'glued':
       case 'typo':
-        return `${raw} är ingen giltig ljudreferens – menade du ${s.suggestion}?`
+        return `${raw} is not a valid audio reference – did you mean ${s.suggestion}?`
     }
   }
   switch (s.reason) {
     case 'no-number':
       return /^@image$/i.test(s.raw)
-        ? `${raw} saknar nummer – skriv t.ex. @Image1.`
-        : `${raw} är ingen giltig bildreferens – skriv @Image följt av bildens nummer, t.ex. @Image1.`
+        ? `${raw} has no number – write e.g. @Image1.`
+        : `${raw} is not a valid image reference – write @Image followed by the image's number, e.g. @Image1.`
     case 'zero':
-      return `${raw} finns inte – bilderna numreras från @Image1.`
+      return `${raw} doesn't exist – images are numbered from @Image1.`
     case 'range':
       return s.suggestion
-        ? `${raw} läses inte som flera bilder – skriv ut varje bild: ${s.suggestion}.`
-        : `${raw} läses inte som flera bilder – skriv ut varje bild, t.ex. @Image1, @Image2.`
+        ? `${raw} isn't read as several images – write out each image: ${s.suggestion}.`
+        : `${raw} isn't read as several images – write out each image, e.g. @Image1, @Image2.`
     case 'hidden':
-      return `${raw} innehåller ett osynligt tecken (t.ex. från inklistrad text) och känns inte igen – skriv om den som ${s.suggestion}.`
+      return `${raw} contains an invisible character (e.g. from pasted text) and isn't recognised – write it again as ${s.suggestion}.`
     case 'glued':
     case 'typo':
-      return `${raw} är ingen giltig bildreferens – menade du ${s.suggestion}?`
+      return `${raw} is not a valid image reference – did you mean ${s.suggestion}?`
   }
 }
 
+/** The mode as the form's tabs name it, quoted: "“Start image”". */
 function modeLabel(kind: Kind): string {
-  return KINDS.find((k) => k.id === kind)?.label ?? kind
+  return `“${KINDS.find((k) => k.id === kind)?.label ?? kind}”`
 }
 
 /** Which prompt a message is about: the main prompt, or the negative prompt (prefixed so it is clear). */
 type Field = 'prompt' | 'negative'
 
-/** "@Image1 och ”@img2”", or the first three "med flera" when there are many. */
+/** "@Image1 and “@img2”", or the first three "and more" when there are many. */
 function namedList(named: readonly ScannedReference[]): { shown: string; count: number } {
   const names = [...new Set(named.map((s) => (s.type === 'token' ? canonicalText(s) : quoted(s.raw))))]
-  const shown = names.length > 4 ? `${names.slice(0, 3).join(', ')} med flera` : swedishList(names)
+  const shown = names.length > 4 ? `${names.slice(0, 3).join(', ')} and more` : andList(names)
   return { shown, count: names.length }
 }
 
 function notReferenceModeMessage(kind: Kind, named: readonly ScannedReference[], field: Field): string {
   const { shown, count } = namedList(named)
-  const subject = field === 'prompt' ? 'Prompten' : 'Den negativa prompten'
+  const subject = field === 'prompt' ? 'The prompt' : 'The negative prompt'
   const sends =
     kind === 'image-to-video'
-      ? `läget ${modeLabel(kind)} skickar inga referensbilder, bara start- och slutbild`
-      : `läget ${modeLabel(kind)} skickar inga bilder`
-  const them = count === 1 ? 'hänvisningen' : 'hänvisningarna'
-  return `${subject} hänvisar till ${shown}, men ${sends}. Ta bort ${them} eller byt till läget ${modeLabel('reference-to-video')}.`
+      ? `the ${modeLabel(kind)} mode sends no reference images, only a start and an end image`
+      : `the ${modeLabel(kind)} mode sends no images`
+  const them = count === 1 ? 'the reference' : 'the references'
+  return `${subject} refers to ${shown}, but ${sends}. Remove ${them} or switch to the ${modeLabel('reference-to-video')} mode.`
 }
 
 /** Audio named in text-to-video or image-to-video, which send no audio clips. */
 function audioModeMessage(kind: Kind, named: readonly ScannedReference[], field: Field): string {
   const { shown, count } = namedList(named)
-  const subject = field === 'prompt' ? 'Prompten' : 'Den negativa prompten'
-  const them = count === 1 ? 'hänvisningen' : 'hänvisningarna'
+  const subject = field === 'prompt' ? 'The prompt' : 'The negative prompt'
+  const them = count === 1 ? 'the reference' : 'the references'
   return (
-    `${subject} hänvisar till ${shown}, men läget ${modeLabel(kind)} skickar inga ljudklipp. Ta bort ${them} ` +
-    `eller byt till läget ${modeLabel('reference-to-video')}.`
+    `${subject} refers to ${shown}, but the ${modeLabel(kind)} mode sends no audio clips. Remove ${them} ` +
+    `or switch to the ${modeLabel('reference-to-video')} mode.`
   )
 }
 
 /** Audio named with a reference model that takes no reference audio. */
 function audioModelMessage(named: readonly ScannedReference[], field: Field): string {
   const { shown, count } = namedList(named)
-  const subject = field === 'prompt' ? 'Prompten' : 'Den negativa prompten'
-  const them = count === 1 ? 'hänvisningen' : 'hänvisningarna'
+  const subject = field === 'prompt' ? 'The prompt' : 'The negative prompt'
+  const them = count === 1 ? 'the reference' : 'the references'
   return (
-    `${subject} hänvisar till ${shown}, men modellen tar inte emot ljudreferenser. Ta bort ${them} eller ` +
-    `byt till en modell som tar emot ljud (t.ex. Seedance).`
+    `${subject} refers to ${shown}, but the model doesn't take audio references. Remove ${them} or ` +
+    `switch to a model that takes audio (e.g. Seedance).`
   )
 }
 
@@ -728,7 +731,7 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
   const scanned = scan(text)
   const tokens = scanned.filter(isToken('image'))
   const malformed = scanned.filter(isMalformed('image'))
-  const prefix = field === 'negative' ? 'Negativ prompt: ' : ''
+  const prefix = field === 'negative' ? 'Negative prompt: ' : ''
 
   const general: PromptIssue[] = []
   const placed: PromptIssue[] = []
@@ -751,7 +754,7 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
         general.push({
           severity: 'error',
           code: 'not-reference-mode',
-          message: continuationReferencesMessage(text, field === 'prompt' ? 'prompten' : 'den negativa prompten'),
+          message: continuationReferencesMessage(text, field === 'prompt' ? 'the prompt' : 'the negative prompt'),
           ...at(named[0]),
           ...(imagesNamed.length ? {} : { ref: 'audio' as const })
         })
@@ -790,10 +793,10 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
         severity: 'error',
         code: 'no-references',
         message: tokens.length
-          ? `Inga referensbilder är valda – lägg till bilderna som prompten hänvisar till (${swedishList([...new Set(tokens.map(canonicalText))])}).`
+          ? `No reference images are chosen – add the images the prompt refers to (${andList([...new Set(tokens.map(canonicalText))])}).`
           : audioOnly
-            ? 'Ljudreferenser skickas bara tillsammans med minst en referensbild – lägg till en bild, t.ex. på personen vars röst det är.'
-            : 'Lägg till minst en referensbild.',
+            ? 'Audio references are only sent together with at least one reference image – add an image, e.g. of the person whose voice it is.'
+            : 'Add at least one reference image.',
         ...(audioOnly ? { ref: 'audio' as const } : {})
       })
     }
@@ -806,22 +809,22 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
             severity: 'error',
             code: 'out-of-range',
             message: frame
-              ? `${prefix}${canonicalText(t)} finns inte – klippet skickar ${count ? `${images(count)} och ` : ''}startbilden (${imageToken(Math.min(count, room) + 1)}).`
-              : `${prefix}${canonicalText(t)} finns inte – bara ${images(count)} ${count === 1 ? 'är vald' : 'är valda'}.`,
+              ? `${prefix}${canonicalText(t)} doesn't exist – the clip sends ${count ? `${images(count)} and ` : ''}the start image (${imageToken(Math.min(count, room) + 1)}).`
+              : `${prefix}${canonicalText(t)} doesn't exist – only ${images(count)} ${count === 1 ? 'is' : 'are'} chosen.`,
             ...at(t)
           })
         } else if (frame && t.index > room) {
           placed.push({
             severity: 'error',
             code: 'over-model-limit',
-            message: `${prefix}${canonicalText(t)} skickas inte – ${FRAME_PLACE}.`,
+            message: `${prefix}${canonicalText(t)} is not sent – ${FRAME_PLACE}.`,
             ...at(t)
           })
         } else if (t.index > max) {
           placed.push({
             severity: 'error',
             code: 'over-model-limit',
-            message: `${prefix}${canonicalText(t)} skickas inte – modellen tar max ${images(max)}.`,
+            message: `${prefix}${canonicalText(t)} is not sent – the model takes at most ${images(max)}.`,
             ...at(t)
           })
         }
@@ -832,7 +835,7 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
         placed.push({
           severity: 'error',
           code: 'out-of-range',
-          message: `${prefix}${canonicalText(t)} finns inte – inga bilder är valda.`,
+          message: `${prefix}${canonicalText(t)} doesn't exist – no images are chosen.`,
           ...at(t)
         })
       }
@@ -854,10 +857,10 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
           code: 'unused-reference',
           message:
             unused.length === sent && sent > 1 && !tokens.length
-              ? 'Ingen av bilderna nämns i prompten – skriv @Image1, @Image2 … där de ska användas, så att modellen vet vad varje bild föreställer.'
+              ? 'None of the images is mentioned in the prompt – write @Image1, @Image2 … where they are to be used, so the model knows what each image shows.'
               : unused.length === 1
-                ? `${imageToken(unused[0])} nämns inte i prompten, så modellen vet inte vad bilden ska användas till.`
-                : `${describeNumbers(unused)} nämns inte i prompten, så modellen vet inte vad bilderna ska användas till.`
+                ? `${imageToken(unused[0])} isn't mentioned in the prompt, so the model doesn't know what the image is for.`
+                : `${describeNumbers(unused)} aren't mentioned in the prompt, so the model doesn't know what the images are for.`
         })
       }
       // A picture whose place the continuation frame takes is not sent (a token naming it is an error above).
@@ -873,7 +876,7 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
         advice.push({
           severity: 'warning',
           code: 'over-model-limit',
-          message: `Modellen tar max ${images(max)} – ${describeNumbers(dropped)} skickas inte.`
+          message: `The model takes at most ${images(max)} – ${describeNumbers(dropped)} ${dropped.length === 1 ? 'is' : 'are'} not sent.`
         })
       }
     }
@@ -888,10 +891,10 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
       severity: 'warning',
       code: 'malformed',
       message: aboutAudio
-        ? `${prefix}${quoted(s.raw)} är ingen ljudreferens och skickas som vanlig text – hänvisa till ljudklipp med @Audio och numret, t.ex. @Audio1.`
+        ? `${prefix}${quoted(s.raw)} is not an audio reference and is sent as plain text – refer to audio clips with @Audio and the number, e.g. @Audio1.`
         : opts.kind === 'reference-to-video'
-          ? `${prefix}${quoted(s.raw)} är ingen bildreferens och skickas som vanlig text – hänvisa till bilder med @Image och numret, t.ex. ”${s.name} (@Image1)”.`
-          : `${prefix}${quoted(s.raw)} är ingen bildreferens och skickas som vanlig text.`,
+          ? `${prefix}${quoted(s.raw)} is not an image reference and is sent as plain text – refer to images with @Image and the number, e.g. “${s.name} (@Image1)”.`
+          : `${prefix}${quoted(s.raw)} is not an image reference and is sent as plain text.`,
       ...at(s),
       ...(aboutAudio ? { ref: 'audio' as const } : {})
     })
@@ -916,7 +919,7 @@ function validateAudio(
 ): void {
   const tokens = scanned.filter(isToken('audio'))
   const malformed = scanned.filter(isMalformed('audio'))
-  const prefix = field === 'negative' ? 'Negativ prompt: ' : ''
+  const prefix = field === 'negative' ? 'Negative prompt: ' : ''
   const at = (s: { start: number; end: number }): { start: number; end: number } => ({ start: s.start, end: s.end })
 
   if (opts.audioInput === false) {
@@ -934,7 +937,7 @@ function validateAudio(
       out.advice.push({
         severity: 'warning',
         code: 'audio-not-supported',
-        message: 'Modellen tar inte emot ljudreferenser – ljudklippen skickas inte.',
+        message: "The model doesn't take audio references – the audio clips are not sent.",
         ref: 'audio'
       })
     }
@@ -947,8 +950,8 @@ function validateAudio(
         severity: 'error',
         code: 'audio-out-of-range',
         message: count
-          ? `${prefix}${canonicalText(t)} finns inte – bara ${clips(count)} ${count === 1 ? 'är valt' : 'är valda'}.`
-          : `${prefix}${canonicalText(t)} finns inte – inga ljudklipp är valda.`,
+          ? `${prefix}${canonicalText(t)} doesn't exist – only ${clips(count)} ${count === 1 ? 'is' : 'are'} chosen.`
+          : `${prefix}${canonicalText(t)} doesn't exist – no audio clips are chosen.`,
         ...at(t),
         ref: 'audio'
       })
@@ -956,7 +959,7 @@ function validateAudio(
       out.placed.push({
         severity: 'error',
         code: 'audio-over-limit',
-        message: `${prefix}${canonicalText(t)} skickas inte – modellen tar max ${clips(max)}.`,
+        message: `${prefix}${canonicalText(t)} is not sent – the model takes at most ${clips(max)}.`,
         ...at(t),
         ref: 'audio'
       })
@@ -981,7 +984,7 @@ function validateAudio(
       out.general.push({
         severity: 'error',
         code: 'audio-length',
-        message: `${audioToken(i + 1)} är bara ${seconds(Math.max(0, length), MIN_AUDIO_CLIP_SECONDS)} – ett ljudklipp måste vara minst ${MIN_AUDIO_CLIP_SECONDS} s.`,
+        message: `${audioToken(i + 1)} is only ${seconds(Math.max(0, length), MIN_AUDIO_CLIP_SECONDS)} – an audio clip must be at least ${MIN_AUDIO_CLIP_SECONDS} s.`,
         ref: 'audio'
       })
     } else if (length > MAX_AUDIO_CLIP_SECONDS + SECONDS_EPSILON) {
@@ -989,7 +992,7 @@ function validateAudio(
       out.general.push({
         severity: 'error',
         code: 'audio-length',
-        message: `${audioToken(i + 1)} är ${seconds(length, MAX_AUDIO_CLIP_SECONDS)} – ett ljudklipp får vara högst ${MAX_AUDIO_CLIP_SECONDS} s.`,
+        message: `${audioToken(i + 1)} is ${seconds(length, MAX_AUDIO_CLIP_SECONDS)} – an audio clip may be at most ${MAX_AUDIO_CLIP_SECONDS} s.`,
         ref: 'audio'
       })
     }
@@ -999,7 +1002,7 @@ function validateAudio(
     out.general.push({
       severity: 'error',
       code: 'audio-too-long',
-      message: `Ljudreferenserna är ${seconds(total, MAX_REFERENCE_AUDIO_SECONDS)} – max ${MAX_REFERENCE_AUDIO_SECONDS} s totalt.`,
+      message: `The audio references are ${seconds(total, MAX_REFERENCE_AUDIO_SECONDS)} – at most ${MAX_REFERENCE_AUDIO_SECONDS} s in total.`,
       ref: 'audio'
     })
   }
@@ -1014,10 +1017,10 @@ function validateAudio(
       code: 'unused-audio',
       message:
         unused.length === sent && sent > 1 && !tokens.length
-          ? 'Inget av ljudklippen nämns i prompten – skriv @Audio1, @Audio2 … där de ska användas (t.ex. efter personen vars röst det är), så att modellen vet vad varje ljudklipp är.'
+          ? 'None of the audio clips is mentioned in the prompt – write @Audio1, @Audio2 … where they are to be used (e.g. after the person whose voice it is), so the model knows what each audio clip is.'
           : unused.length === 1
-            ? `${audioToken(unused[0])} nämns inte i prompten, så modellen vet inte vad ljudklippet ska användas till.`
-            : `${describeNumbers(unused, 'audio')} nämns inte i prompten, så modellen vet inte vad ljudklippen ska användas till.`,
+            ? `${audioToken(unused[0])} isn't mentioned in the prompt, so the model doesn't know what the audio clip is for.`
+            : `${describeNumbers(unused, 'audio')} aren't mentioned in the prompt, so the model doesn't know what the audio clips are for.`,
       ref: 'audio'
     })
   }
@@ -1028,7 +1031,7 @@ function validateAudio(
     out.advice.push({
       severity: 'warning',
       code: 'audio-over-limit',
-      message: `Modellen tar max ${clips(max)} – ${describeNumbers(dropped, 'audio')} skickas inte.`,
+      message: `The model takes at most ${clips(max)} – ${describeNumbers(dropped, 'audio')} ${dropped.length === 1 ? 'is' : 'are'} not sent.`,
       ref: 'audio'
     })
   }
@@ -1049,7 +1052,7 @@ export function validatePromptReferences(prompt: string, referenceCount: number,
 }
 
 /**
- * The same checks for the negative prompt, errors only and marked as being about it ("Negativ prompt: …");
+ * The same checks for the negative prompt, errors only and marked as being about it ("Negative prompt: …");
  * start/end point into the negative prompt. Correct tokens are allowed there but don't count as mentioning
  * an image or a clip, and the clips' lengths are checked with the main prompt only.
  */
@@ -1116,7 +1119,7 @@ export function validateGenerationParams(
 }
 
 /**
- * Why the params must not be sent, in Swedish (the first blocking issue, and how many more there are), or
+ * Why the params must not be sent (the first blocking issue, and how many more there are), or
  * undefined when nothing blocks. What the main process refuses a submission with.
  */
 export function blockingPromptError(
@@ -1128,29 +1131,29 @@ export function blockingPromptError(
   if (!errors.length) return undefined
   const more = errors.length - 1
   if (!more) return errors[0].message
-  return `${errors[0].message} Prompten har ${more === 1 ? 'ett fel' : `${more} fel`} till.`
+  return `${errors[0].message} The prompt has ${more === 1 ? 'one more error' : `${more} more errors`}.`
 }
 
 /**
  * A continuing clip's text names reference images or audio, which it doesn't send: which ones, and what to do.
- * `referencesPossible`: the clip could be sent with references instead ("Med referensbilder"), so that is offered.
+ * `referencesPossible`: the clip could be sent with references instead ("With references"), so that is offered.
  */
 function continuationReferencesMessage(text: string, where: string, referencesPossible = false): string {
   const named = scan(text).filter(isReference)
   const { shown } = namedList(named)
-  const sends = named.some((s) => s.ref === 'audio') ? 'inga referensbilder eller ljudklipp' : 'inga referensbilder'
+  const sends = named.some((s) => s.ref === 'audio') ? 'no reference images or audio clips' : 'no reference images'
   const instead = referencesPossible
-    ? 'eller välj ”Med referensbilder” för klippet'
-    : 'eller slå av ”Fortsätt från föregående klipp”'
+    ? 'or choose “With references” for the clip'
+    : "or turn off “Start on the previous clip's last frame”"
   return (
-    `Klippet fortsätter från sista bildrutan i föregående klipp och skickar ${sends} – ta bort ` +
-    `${shown} ur ${where}, ${instead}.`
+    `The clip continues from the last frame of the previous clip and sends ${sends} – remove ` +
+    `${shown} from ${where}, ${instead}.`
   )
 }
 
 /**
- * blockingPromptError for a sequence clip that continues from the previous clip with an exact start frame ("Exakt
- * startbild"): it is generated image-to-video from that clip's last frame and sends no reference images or audio. Its
+ * blockingPromptError for a sequence clip that continues from the previous clip with an exact start frame ("Exact
+ * start frame"): it is generated image-to-video from that clip's last frame and sends no reference images or audio. Its
  * mode is fixed, so references in it are reported with what can be done about them there, rather than "switch to
  * reference mode". `referencesPossible`: the clip could continue in reference mode instead, which the message offers.
  */
@@ -1162,9 +1165,9 @@ export function blockingContinuationError(
   const { prompt, negativePrompt } = validateGenerationParams(sent)
   const isModeIssue = (i: PromptIssue): boolean => i.code === 'not-reference-mode' || i.code === 'audio-not-supported'
   const possible = !!opts.referencesPossible
-  if (prompt.some(isModeIssue)) return continuationReferencesMessage(sent.prompt, 'prompten', possible)
+  if (prompt.some(isModeIssue)) return continuationReferencesMessage(sent.prompt, 'the prompt', possible)
   if (negativePrompt.some(isModeIssue)) {
-    return continuationReferencesMessage(sent.negativePrompt ?? '', 'den negativa prompten', possible)
+    return continuationReferencesMessage(sent.negativePrompt ?? '', 'the negative prompt', possible)
   }
   return blockingPromptError(sent)
 }

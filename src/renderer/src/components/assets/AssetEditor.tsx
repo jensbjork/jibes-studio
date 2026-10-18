@@ -36,7 +36,7 @@ interface Props {
   onError: (message: string) => void
 }
 
-const createdFormat = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })
+const createdFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 
 /**
  * Name, description, actions and reference images of one character, environment, product, outfit or pose (plus a
@@ -88,7 +88,7 @@ export default function AssetEditor({
       await navigator.clipboard.writeText(draft.description.trim())
       setCopied(true)
     } catch {
-      onError('Kunde inte kopiera till urklipp.')
+      onError("Couldn't copy to the clipboard.")
     }
   }
 
@@ -129,7 +129,7 @@ export default function AssetEditor({
     if (paths.length) onAddFiles(paths)
   }
 
-  // Generera reads the asset from the library, so photos and clips still being copied, a just-picked outfit
+  // Generate reads the asset from the library, so photos and clips still being copied, a just-picked outfit
   // (or name) and a just-moved voice window still being saved must land first, or the form would get the
   // asset as it was. A click meanwhile is kept and carried out once they have.
   const [generateWaiting, setGenerateWaiting] = useState(false)
@@ -141,9 +141,9 @@ export default function AssetEditor({
   }, [generateWaiting, settling])
 
   const generateTitle = !imageCount
-    ? 'Lägg till minst en bild först'
-    : `Öppnar Generera i referensläget med ${copy.possessive} bilder${outfit ? ` och ${outfit.name}` : ''}` +
-      (isCharacter && audioCount ? ' – och rösten, om modellen tar emot ljud' : '')
+    ? 'Add at least one image first'
+    : `Opens Generate in reference mode with ${copy.possessive} images${outfit ? ` and ${outfit.name}` : ''}` +
+      (isCharacter && audioCount ? ' – and the voice, if the model takes audio' : '')
 
   return (
     <div
@@ -170,14 +170,14 @@ export default function AssetEditor({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') e.currentTarget.blur()
                 }}
-                placeholder="Namn"
-                aria-label="Namn"
+                placeholder="Name"
+                aria-label="Name"
                 spellCheck={false}
                 className="-ml-2 w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-xl font-semibold outline-none hover:border-line focus:border-muted focus:bg-raised"
               />
               <p className="mt-0.5 text-muted">
                 {imageCountLabel(imageCount)}
-                {audioLabel && audioCount > 0 && ` · ${audioLabel}`} · Skapad {createdFormat.format(asset.createdAt)}
+                {audioLabel && audioCount > 0 && ` · ${audioLabel}`} · Created {createdFormat.format(asset.createdAt)}
               </p>
             </div>
           </header>
@@ -189,19 +189,19 @@ export default function AssetEditor({
               title={generateTitle}
               className="rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
             >
-              {generateWaiting ? 'Sparar…' : `Generera ${copy.generatePhrase}`}
+              {generateWaiting ? 'Saving…' : `Generate ${copy.generatePhrase}`}
             </button>
             <button
               onClick={copyDescription}
               disabled={!draft.description.trim()}
               className="rounded-md border border-line px-4 py-2 hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              {copied ? 'Kopierat ✓' : 'Kopiera beskrivning'}
+              {copied ? 'Copied ✓' : 'Copy description'}
             </button>
             <OpenFolderButton
               target={ASSET_FOLDER[asset.kind]}
               id={asset.id}
-              title={`Visa ${copy.possessive} mapp med bilderna och beskrivningen i Finder`}
+              title={`Show ${copy.possessive} folder with the images and the description in Finder`}
               onError={onError}
               className="rounded-md border border-line px-4 py-2 hover:bg-raised disabled:opacity-40"
             />
@@ -218,7 +218,7 @@ export default function AssetEditor({
           <section className="mt-8">
             <label className="block">
               <span className="mb-1.5 flex items-baseline justify-between gap-4">
-                <span className="font-medium">Beskrivning</span>
+                <span className="font-medium">Description</span>
                 <span className="text-[11px] text-muted">{copy.descriptionHint}</span>
               </span>
               <PromptField
@@ -228,7 +228,7 @@ export default function AssetEditor({
                 minRows={4}
                 maxRows={14}
                 showCount
-                title="Beskrivning"
+                title="Description"
                 focusHint={copy.descriptionHint}
                 placeholder={copy.descriptionPlaceholder}
               />
@@ -238,9 +238,9 @@ export default function AssetEditor({
           {isCharacter && (
             <section className="mt-8">
               <div className="mb-1.5 flex items-baseline justify-between gap-4">
-                <h2 className="font-medium">Standardklädsel</h2>
+                <h2 className="font-medium">Default outfit</h2>
                 <span className="text-[11px] text-muted">
-                  Följer med när du lägger till karaktären i en generering
+                  Comes along when you add the character to a generation
                 </span>
               </div>
               <DefaultOutfitPicker
@@ -256,7 +256,7 @@ export default function AssetEditor({
 
           {copy.usage && (
             <section className="mt-6 rounded-lg border border-line bg-panel px-4 py-3">
-              <h2 className="mb-1 font-medium">Så används {copy.definite}</h2>
+              <h2 className="mb-1 font-medium">How {copy.definite} is used</h2>
               <p className="text-[12px] leading-relaxed text-muted">{copy.usage}</p>
             </section>
           )}
@@ -299,18 +299,18 @@ export default function AssetEditor({
   )
 }
 
-/** "Standardklädsel för Anna, Kalle": the characters that wear this outfit unless told otherwise. */
+/** "Default outfit for Anna, Kalle": the characters that wear this outfit unless told otherwise. */
 function Wearers({ wearers, onOpen }: { wearers: Asset[]; onOpen: (characterId: string) => void }) {
   return (
     <section className="mt-8">
-      <h2 className="mb-1.5 font-medium">Standardklädsel för</h2>
+      <h2 className="mb-1.5 font-medium">Default outfit for</h2>
       {wearers.length ? (
         <div className="flex flex-wrap gap-2">
           {wearers.map((c) => (
             <button
               key={c.id}
               onClick={() => onOpen(c.id)}
-              title={`Visa ${c.name} under Karaktärer`}
+              title={`Show ${c.name} under Characters`}
               className="flex max-w-60 items-center gap-2 rounded-full border border-line bg-raised py-1 pl-1 pr-3 transition hover:border-muted"
             >
               <AssetAvatar asset={c} className="h-6 w-6 rounded-full text-[10px]" />
@@ -320,8 +320,8 @@ function Wearers({ wearers, onOpen }: { wearers: Asset[]; onOpen: (characterId: 
         </div>
       ) : (
         <p className="text-[12px] text-muted">
-          Ingen karaktär än. Välj klädseln som standardklädsel hos en karaktär under Karaktärer, så följer den med
-          karaktären när du genererar.
+          No character yet. Pick the outfit as a character's default outfit under Characters, and it comes along
+          with the character when you generate.
         </p>
       )}
     </section>
@@ -329,12 +329,12 @@ function Wearers({ wearers, onOpen }: { wearers: Asset[]; onOpen: (characterId: 
 }
 
 function SaveIndicator({ state }: { state: SaveState }) {
-  if (state.kind === 'saving') return <span className="text-[11px] text-muted">Sparar…</span>
-  if (state.kind === 'saved') return <span className="text-[11px] text-muted">Sparat</span>
+  if (state.kind === 'saving') return <span className="text-[11px] text-muted">Saving…</span>
+  if (state.kind === 'saved') return <span className="text-[11px] text-muted">Saved</span>
   if (state.kind === 'error') {
     return (
       <span className="no-drag max-w-md truncate text-[11px] text-accent select-text" title={state.message}>
-        Kunde inte spara: {state.message}
+        Couldn't save: {state.message}
       </span>
     )
   }
@@ -348,7 +348,7 @@ function DeleteControl({
   note,
   onConfirm
 }: {
-  /** "Radera ”Anna” och 3 bilder?" */
+  /** "Delete “Anna” and 3 images?" */
   question: string
   /** Where the files go, on hover. */
   filesNote: string
@@ -371,7 +371,7 @@ function DeleteControl({
         onClick={() => setConfirming(true)}
         className="rounded-md px-3 py-2 text-muted hover:bg-raised hover:text-accent"
       >
-        Radera
+        Delete
       </button>
     )
   }
@@ -397,14 +397,14 @@ function DeleteControl({
         disabled={busy}
         className="rounded-md bg-accent px-3 py-2 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
       >
-        {busy ? 'Raderar…' : 'Ja, radera'}
+        {busy ? 'Deleting…' : 'Yes, delete'}
       </button>
       <button
         onClick={() => setConfirming(false)}
         disabled={busy}
         className="rounded-md border border-line px-3 py-2 hover:bg-raised disabled:opacity-40"
       >
-        Avbryt
+        Cancel
       </button>
     </div>
   )

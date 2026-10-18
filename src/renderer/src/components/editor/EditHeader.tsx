@@ -11,7 +11,7 @@ import SendMenu, { type SentTo } from './SendMenu'
 import { PruneConfirm, usePrune } from './VersionsPanel'
 
 // The edit's header, in the window's drag bar: back to the list, the name (click to rename), where the film came
-// from, Visa i Finder, Skicka till ▾ and the rarer actions under ⋯.
+// from, Show in Finder, Send to ▾ and the rarer actions under ⋯.
 
 interface Props {
   edit: Edit
@@ -55,32 +55,32 @@ export default function EditHeader({
       <button
         type="button"
         onClick={onBack}
-        title="Alla redigeringar"
-        aria-label="Tillbaka till redigeringarna"
+        title="All edits"
+        aria-label="Back to the edits"
         className="no-drag flex h-8 shrink-0 items-center gap-1 rounded-md px-1.5 text-muted transition hover:bg-raised hover:text-text"
       >
         <BackIcon size={14} />
-        <span className="hidden text-[12px] @min-[67rem]/main:inline">Redigeringar</span>
+        <span className="hidden text-[12px] @min-[67rem]/main:inline">Edits</span>
       </button>
       <NameInput name={edit.name} onRename={onRename} focus={renaming} onFocused={() => setRenaming(false)} />
       <span
-        title={edit.origin.missing ? 'Filmen redigeringen gjordes från finns inte längre' : undefined}
+        title={edit.origin.missing ? 'The film this edit was made from is gone' : undefined}
         className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line px-2 py-0.5 text-[11px] text-muted @min-[51rem]/main:flex"
       >
         {edit.origin.kind === 'import' && <CameraIcon size={11} />}
         {originLabel(edit.origin)}
-        {edit.origin.missing && ' (borta)'}
+        {edit.origin.missing && ' (gone)'}
       </span>
 
       <div className="no-drag ml-auto flex shrink-0 items-center gap-2">
         <button
           type="button"
           onClick={() => void reveal()}
-          title="Visa redigeringens mapp med versionerna i Finder"
+          title="Show the edit’s folder with its versions in Finder"
           className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-muted transition hover:bg-raised hover:text-text"
         >
           <FolderIcon size={13} />
-          <span className="hidden @min-[67rem]/main:inline">Visa i Finder</span>
+          <span className="hidden @min-[67rem]/main:inline">Show in Finder</span>
         </button>
         <button
           ref={sendAnchor}
@@ -88,13 +88,13 @@ export default function EditHeader({
           onClick={() => setSendOpen((o) => !o)}
           aria-haspopup="menu"
           aria-expanded={sendOpen}
-          title={`Skicka v${current.number} till en sekvens`}
+          title={`Send v${current.number} to a sequence`}
           className={secondaryButton}
         >
-          Skicka till
+          Send to
           <ChevronDownIcon size={12} />
         </button>
-        <Popover anchorRef={sendAnchor} open={sendOpen} onClose={() => setSendOpen(false)} align="end" width={300} label="Skicka till">
+        <Popover anchorRef={sendAnchor} open={sendOpen} onClose={() => setSendOpen(false)} align="end" width={300} label="Send to">
           {sendOpen && (
             <SendMenu
               versionId={current.id}
@@ -192,20 +192,20 @@ function MoreMenu({
         onClick={() => setView((v) => (v ? undefined : 'menu'))}
         aria-haspopup="menu"
         aria-expanded={!!view}
-        aria-label="Fler val"
-        title="Fler val"
+        aria-label="More options"
+        title="More options"
         className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
       >
         <MoreIcon size={14} />
       </button>
-      <Popover anchorRef={anchor} open={!!view} onClose={close} align="end" width={300} label="Fler val">
+      <Popover anchorRef={anchor} open={!!view} onClose={close} align="end" width={300} label="More options">
         {view === 'prune' && prune.found ? (
-          <SubView title="Rensa versioner" onBack={() => setView('menu')}>
+          <SubView title="Clean up versions" onBack={() => setView('menu')}>
             <PruneConfirm found={prune.found} busy={prune.busy} onCancel={close} onPrune={() => void prune.prune()} />
           </SubView>
         ) : view === 'delete' ? (
           <div className="p-3">
-            <p className="mb-1 truncate">Radera ”{edit.name}”?</p>
+            <p className="mb-1 truncate">Delete “{edit.name}”?</p>
             <p className="mb-3 text-[12px] leading-relaxed text-muted">{DELETE_EDIT_TEXT}</p>
             <div className="flex justify-end gap-1.5">
               <button
@@ -213,7 +213,7 @@ function MoreMenu({
                 onClick={() => setView('menu')}
                 className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
               >
-                Avbryt
+                Cancel
               </button>
               <button
                 type="button"
@@ -222,12 +222,12 @@ function MoreMenu({
                 onClick={() => void remove()}
                 className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
               >
-                {deleting ? 'Raderar…' : 'Radera'}
+                {deleting ? 'Deleting…' : 'Delete'}
               </button>
             </div>
           </div>
         ) : (
-          <div role="menu" aria-label="Fler val" onKeyDown={onMenuKeyDown} className="p-1">
+          <div role="menu" aria-label="More options" onKeyDown={onMenuKeyDown} className="p-1">
             <button
               type="button"
               role="menuitem"
@@ -239,7 +239,7 @@ function MoreMenu({
               }}
               className={menuRow}
             >
-              Byt namn
+              Rename
             </button>
             <button
               type="button"
@@ -247,10 +247,10 @@ function MoreMenu({
               data-menu-item
               disabled={!hasTranscript}
               onClick={() => void saveSrt()}
-              title={hasTranscript ? undefined : 'Transkribera filmen först (Röst → Transkribera)'}
+              title={hasTranscript ? undefined : 'Transcribe the film first (Voice → Transcribe)'}
               className={menuRow}
             >
-              Spara undertexter (.srt)
+              Save subtitles (.srt)
             </button>
             <button
               type="button"
@@ -260,7 +260,7 @@ function MoreMenu({
               onClick={() => void prune.check().then((ok) => ok && setView('prune'))}
               className={menuRow}
             >
-              Rensa versioner…
+              Clean up versions…
             </button>
             <div className="mx-2 my-1 border-t border-line" />
             <button
@@ -270,7 +270,7 @@ function MoreMenu({
               onClick={() => setView('delete')}
               className={`${menuRow} text-muted hover:text-accent`}
             >
-              Radera redigeringen…
+              Delete the edit…
             </button>
           </div>
         )}
@@ -332,9 +332,9 @@ function NameInput({
         }
       }}
       spellCheck={false}
-      placeholder="Namnlös redigering"
-      title="Byt namn"
-      aria-label="Redigeringens namn"
+      placeholder="Untitled edit"
+      title="Rename"
+      aria-label="The edit’s name"
       className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised @min-[67rem]/main:min-w-28"
     />
   )

@@ -57,9 +57,9 @@ import { URL_WAIT_MS, stageFiles, uploadSource, urlSource } from './sources'
 export async function loadStoryboard(storyboardId: string): Promise<Storyboard> {
   requireLibrary()
   const kind = sequenceKind(storyboardId)
-  if (!kind) throw new Error('Det finns ingen storyboard med det id:t. list_storyboards visar vilka som finns.')
+  if (!kind) throw new Error('There is no storyboard with that id. list_storyboards lists the ones there are.')
   if (kind !== 'storyboard') {
-    throw new Error('Det här är en sekvens, inte en storyboard. Använd get_sequence (list_sequences visar sekvenserna).')
+    throw new Error('This is a sequence, not a storyboard. Use get_sequence (list_sequences lists the sequences).')
   }
   return callService<Storyboard>('storyboards:get', storyboardId)
 }
@@ -73,7 +73,7 @@ export async function loadTransition(
   if (!row) throw new Error(TRANSITION_GONE)
   if (!isStoryboardId(row.sequence_id)) {
     throw new Error(
-      'Det här är ett klipp i en sekvens, inte en övergång i en storyboard. Använd update_segment och request_segment_generation (get_sequence visar klippen).'
+      'This is a clip in a sequence, not a transition in a storyboard. Use update_segment and request_segment_generation (get_sequence lists the clips).'
     )
   }
   const storyboard = await callService<Storyboard>('storyboards:get', row.sequence_id)
@@ -83,7 +83,7 @@ export async function loadTransition(
 }
 
 const TRANSITION_GONE =
-  'Övergången finns inte längre (rutorna kan ha flyttats eller tagits bort). get_storyboard visar storyboardens övergångar som de är nu.'
+  'The transition no longer exists (the boards may have been moved or removed). get_storyboard shows the storyboard\'s transitions as they are now.'
 
 /** A board with its storyboard and its 0-based place. */
 export async function loadBoard(
@@ -98,16 +98,16 @@ export async function loadBoard(
   return { storyboard, index, board: storyboard.boards[index] }
 }
 
-const BOARD_GONE = 'Det finns ingen ruta med det id:t (längre). get_storyboard visar storyboardens rutor.'
+const BOARD_GONE = 'There is no board with that id (any more). get_storyboard shows the storyboard\'s boards.'
 
 /**
- * Nothing in a storyboard is changed by an agent while "Generera saknade" runs for it: the run reads the
+ * Nothing in a storyboard is changed by an agent while "Generate missing" runs for it: the run reads the
  * transitions as it goes, so a change made meanwhile would be paid for without the user having seen it.
  */
 export function assertStoryboardIdle(storyboard: Storyboard): void {
   if (storyboard.running) {
     throw new Error(
-      `”Generera saknade” pågår för storyboarden ${q(storyboard.name)}. Vänta tills körningen är klar (eller stoppa den med stop_generation_run) innan du ändrar den.`
+      `"Generate missing" is running for the storyboard ${q(storyboard.name)}. Wait until the run is done (or stop it with stop_generation_run) before you change it.`
     )
   }
 }
@@ -135,20 +135,20 @@ export function boardNumbers(storyboard: Storyboard, t: StoryboardTransition): {
   }
 }
 
-/** "övergång 2 (ruta 2 → 3)", for messages and the activity log. */
+/** "transition 2 (board 2 → 3)", for messages and the activity log. */
 export function transitionLabel(storyboard: Storyboard, index: number): string {
   const { from, to } = boardNumbers(storyboard, storyboard.transitions[index])
-  return `övergång ${index + 1} (ruta ${from || '?'} → ${to || '?'})`
+  return `transition ${index + 1} (board ${from || '?'} → ${to || '?'})`
 }
 
-/** The boards a transition needs a picture in, by number ("ruta 2 och 3"). */
+/** The boards a transition needs a picture in, by number ("boards 2 and 3 have no pictures yet"). */
 export function missingImagesText(storyboard: Storyboard, t: StoryboardTransition): string {
   const empty = [t.fromBoardId, t.toBoardId]
     .map((id) => storyboard.boards.findIndex((b) => b.id === id))
     .filter((i) => i >= 0 && !storyboard.boards[i].imagePath)
     .map((i) => i + 1)
-  if (!empty.length) return 'rutornas bilder saknas'
-  return empty.length === 1 ? `ruta ${empty[0]} har ingen bild än` : `ruta ${empty[0]} och ${empty[1]} har inga bilder än`
+  if (!empty.length) return 'the boards\' pictures are missing'
+  return empty.length === 1 ? `board ${empty[0]} has no picture yet` : `boards ${empty[0]} and ${empty[1]} have no pictures yet`
 }
 
 /** A board's picture as the tools show it: which still or library photo it is, or that the file is gone. */
@@ -191,7 +191,7 @@ function boardRef(storyboard: Storyboard, boardId: string): Record<string, unkno
 const LISTED_TAKES = 8
 
 /**
- * What stops a transition from being generated as it stands (Swedish): the storyboard service's problems (a board
+ * What stops a transition from being generated as it stands: the storyboard service's problems (a board
  * without a picture, no prompt, a model without an end image …), else the checks every generation gets.
  */
 export function transitionProblems(t: StoryboardTransition): string[] {
@@ -227,7 +227,7 @@ export function transitionInfo(storyboard: Storyboard, index: number): Record<st
           ...(take.error ? { error: take.error } : {}),
           ...(take.videoDuration !== undefined ? { video_seconds: seconds(take.videoDuration) } : {}),
           ...(take.fileMissing ? { file_missing: true } : {}),
-          // The user's grade: -1 = tumme ner, 1–3 = stars.
+          // The user's grade: -1 = thumbs down, 1–3 = stars.
           ...(take.rating !== undefined ? { rating: take.rating } : {}),
           // Made before a board's picture changed: it doesn't go from today's picture to today's picture.
           ...(t.staleTake ? { made_from_earlier_pictures: true } : {})
@@ -277,7 +277,7 @@ async function storyboardImages(storyboard: Storyboard): Promise<{ images: Label
   for (const [i, board] of storyboard.boards.slice(0, MAX_BOARD_IMAGES).entries()) {
     if (!board.imagePath) continue
     const image = await imageBlock(board.imagePath, THUMB_SIDE)
-    if (image) images.push({ label: `Board ${i + 1}${board.note.trim() ? ` – ”${excerpt(board.note, 80)}”` : ''}`, image })
+    if (image) images.push({ label: `Board ${i + 1}${board.note.trim() ? ` – "${excerpt(board.note, 80)}"` : ''}`, image })
   }
   for (const [i, t] of storyboard.transitions.slice(0, MAX_TAKE_POSTERS).entries()) {
     const take = selectedTakeOf(t)
@@ -328,7 +328,7 @@ async function boardImageSource(
   }
   if ('still_id' in input) {
     const still = stills.require(input.still_id)
-    if (!existsSync(still.path)) throw new Error('Stillbildens fil finns inte längre på disken.')
+    if (!existsSync(still.path)) throw new Error('The still image\'s file is no longer on disk.')
     return { kind: 'still', stillId: still.id }
   }
   if ('asset_image_id' in input) {
@@ -336,9 +336,9 @@ async function boardImageSource(
     return { kind: 'asset-image', imageId: photo.imageId }
   }
   const g = db.getGeneration(input.generation_id)
-  if (!g) throw new Error(`Det finns ingen generering med id ${input.generation_id}.`)
+  if (!g) throw new Error(`There is no generation with id ${input.generation_id}.`)
   if (g.status !== 'completed' || !g.filePath || !existsSync(g.filePath)) {
-    throw new Error('Genereringen har ingen färdig video att ta en bildruta ur.')
+    throw new Error('The generation has no finished video to take a frame from.')
   }
   // Agents see frames by input seeking (the first frame at or after a time); the stills service saves the frame a
   // paused player shows. Asked for the moment that frame starts, it saves the frame the agent looked at.
@@ -351,7 +351,7 @@ function storyboardRatio(value: string | undefined): string | undefined {
   const ratio = normalizeAspectRatio(value)
   if (ratio === undefined || ratio === '') return undefined
   if (!(STORYBOARD_ASPECT_RATIOS as readonly string[]).includes(ratio)) {
-    throw new Error(`Bildformatet ${ratio} går inte för en storyboard. Välj något av: ${STORYBOARD_ASPECT_RATIOS.join(', ')}.`)
+    throw new Error(`The aspect ratio ${ratio} doesn't work for a storyboard. Choose one of: ${STORYBOARD_ASPECT_RATIOS.join(', ')}.`)
   }
   return ratio
 }
@@ -372,7 +372,7 @@ function removedTransitions(before: Storyboard, after: Storyboard): Record<strin
 }
 
 const REMOVED_NOTE =
-  'Övergångar mellan rutor som inte längre ligger bredvid varandra togs bort. Deras tagningar finns kvar som vanliga genereringar (list_generations). Nya övergångar har tom prompt: skriv dem med update_transition.'
+  'Transitions between boards that are no longer next to each other were removed. Their takes are still there as ordinary generations (list_generations). New transitions have an empty prompt: write them with update_transition.'
 
 /** The transitions that touch a board, as the tools show them. */
 function touching(storyboard: Storyboard, boardId: string): Record<string, unknown>[] {
@@ -426,7 +426,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
         "The user's storyboards, most recently changed first: films planned as milestone pictures (boards) with a generated transition clip between every two neighbouring boards. Each with its number of boards and transitions and how many transitions have a finished selected take. Storyboards are separate from sequences (list_sequences).",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'listade alla storyboards'
+      summary: () => 'listed all storyboards'
     },
     async () => {
       requireLibrary()
@@ -453,13 +453,13 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Get storyboard',
       description:
-        "One storyboard: its aspect ratio, its boards in order – each with its note (\"Vad visar bilden?\") and its picture (a still or a library photo, null for an empty board; aspect_mismatch when the picture's format differs from the storyboard's) – and its transitions: transition N goes from board N's picture to board N+1's picture. Each transition has its prompt (\"Vad händer?\": the motion from the first picture to the second), model (an image-to-video model that takes an end image), duration, resolution, audio, ready (both boards have pictures and it can be generated), problems, its takes (newest first) and selected take (made_from_earlier_pictures when a board's picture changed after it was made). With include_images (default true) the boards' pictures and the selected takes' poster frames come as images. Free; changes nothing.",
+        "One storyboard: its aspect ratio, its boards in order – each with its note (\"What does the image show?\") and its picture (a still or a library photo, null for an empty board; aspect_mismatch when the picture's format differs from the storyboard's) – and its transitions: transition N goes from board N's picture to board N+1's picture. Each transition has its prompt (\"What happens?\": the motion from the first picture to the second), model (an image-to-video model that takes an end image), duration, resolution, audio, ready (both boards have pictures and it can be generated), problems, its takes (newest first) and selected take (made_from_earlier_pictures when a board's picture changed after it was made). With include_images (default true) the boards' pictures and the selected takes' poster frames come as images. Free; changes nothing.",
       input: {
         storyboard_id: z.string(),
         include_images: z.boolean().default(true)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'tittade på en storyboard'
+      summary: () => 'looked at a storyboard'
     },
     async ({ storyboard_id, include_images }) => {
       const storyboard = await loadStoryboard(storyboard_id)
@@ -468,7 +468,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       return {
         data: { ...storyboardInfo(storyboard, assets, stills), ...(pictures.note ? { note: pictures.note } : {}) },
         images: pictures.images,
-        summary: `tittade på storyboarden ${q(storyboard.name)}`
+        summary: `looked at the storyboard ${q(storyboard.name)}`
       }
     }
   )
@@ -480,9 +480,9 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Create storyboard',
       description:
-        `Creates a storyboard: a film planned as milestone pictures (boards) with a transition clip generated between every two neighbouring boards. It starts with two empty boards; board_notes sets the boards' notes in order ("Vad visar bilden?": what the picture shows – one milestone of the film each) and adds boards until there is one per note. aspect_ratio (default 16:9) is one of ${STORYBOARD_ASPECT_RATIOS.join(', ')}; the pictures are made in it. Next: a picture per board (request_image_generation with assign_to: {board_id}, or add_board / update_board with an existing picture), then a prompt per transition (update_transition).`,
+        `Creates a storyboard: a film planned as milestone pictures (boards) with a transition clip generated between every two neighbouring boards. It starts with two empty boards; board_notes sets the boards' notes in order ("What does the image show?": what the picture shows – one milestone of the film each) and adds boards until there is one per note. aspect_ratio (default 16:9) is one of ${STORYBOARD_ASPECT_RATIOS.join(', ')}; the pictures are made in it. Next: a picture per board (request_image_generation with assign_to: {board_id}, or add_board / update_board with an existing picture), then a prompt per transition (update_transition).`,
       input: {
-        name: z.string().min(1).max(120).describe('e.g. "Morgon vid havet".'),
+        name: z.string().min(1).max(120).describe('e.g. "Morning by the sea".'),
         aspect_ratio: z.string().optional().describe(`One of ${STORYBOARD_ASPECT_RATIOS.join(', ')}; default 16:9.`),
         board_notes: z
           .array(z.string().max(2000))
@@ -491,7 +491,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           .describe('One note per board, in order: what each milestone picture shows (any language).')
       },
       annotations: WRITE,
-      summary: ({ name }) => `skapade storyboarden ${q(name)}`
+      summary: ({ name }) => `created the storyboard ${q(name)}`
     },
     async ({ name, aspect_ratio, board_notes }) => {
       requireLibrary()
@@ -513,7 +513,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           ...storyboardInfo(storyboard, assets, stills),
           next: 'Make a picture for each board (request_image_generation with assign_to: {board_id}), then write each transition\'s prompt (update_transition).'
         },
-        summary: `skapade storyboarden ${q(storyboard.name)} med ${storyboard.boards.length} rutor`
+        summary: `created the storyboard ${q(storyboard.name)} with ${storyboard.boards.length} ${storyboard.boards.length === 1 ? 'board' : 'boards'}`
       }
     }
   )
@@ -531,13 +531,13 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
         aspect_ratio: z.string().optional()
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'ändrade en storyboard'
+      summary: () => 'changed a storyboard'
     },
     async ({ storyboard_id, name, aspect_ratio }) => {
       const before = await loadStoryboard(storyboard_id)
       assertStoryboardIdle(before)
       const ratio = storyboardRatio(aspect_ratio)
-      if (name === undefined && ratio === undefined) throw new Error('Ange name eller aspect_ratio – annars finns inget att ändra.')
+      if (name === undefined && ratio === undefined) throw new Error('Give name or aspect_ratio – otherwise there is nothing to change.')
       const storyboard = await callService<Storyboard>('storyboards:update', before.id, {
         ...(name !== undefined ? { name } : {}),
         ...(ratio !== undefined ? { aspectRatio: ratio } : {})
@@ -554,7 +554,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
             ? { note: `Boards ${mismatched.join(', ')} have pictures of another format than ${storyboard.aspectRatio}.` }
             : {})
         },
-        summary: `ändrade storyboarden ${q(storyboard.name)}`
+        summary: `changed the storyboard ${q(storyboard.name)}`
       }
     }
   )
@@ -565,7 +565,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     'add_board',
     {
       title: 'Add board',
-      description: `Adds a board (one milestone picture of the film) to a storyboard: at the end, or after after_board_id / before before_board_id. note says what the picture shows ("Vad visar bilden?"). image puts a picture in right away: ${BOARD_IMAGE_HELP} Leave it out to plan first and make the picture later (request_image_generation with assign_to: {board_id}). The transitions around the new board are created with empty prompts (write them with update_transition). Adding at the end never removes anything. A board put between two boards replaces the transition between them: that is refused when the transition has a prompt or takes (nothing is added) – add the board last and ask the user to move it there with request_delete({items: [{board_move: {board_id, to_board_number}}]}); an empty transition is simply replaced.`,
+      description: `Adds a board (one milestone picture of the film) to a storyboard: at the end, or after after_board_id / before before_board_id. note says what the picture shows ("What does the image show?"). image puts a picture in right away: ${BOARD_IMAGE_HELP} Leave it out to plan first and make the picture later (request_image_generation with assign_to: {board_id}). The transitions around the new board are created with empty prompts (write them with update_transition). Adding at the end never removes anything. A board put between two boards replaces the transition between them: that is refused when the transition has a prompt or takes (nothing is added) – add the board last and ask the user to move it there with request_delete({items: [{board_move: {board_id, to_board_number}}]}); an empty transition is simply replaced.`,
       input: {
         storyboard_id: z.string(),
         after_board_id: z.string().optional(),
@@ -574,20 +574,20 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
         image: boardImageInput.optional().describe(`The board's picture: ${BOARD_IMAGE_HELP}`)
       },
       annotations: WRITE,
-      summary: () => 'lade till en ruta'
+      summary: () => 'added a board'
     },
     async ({ storyboard_id, after_board_id, before_board_id, note, image }) => {
       const before = await loadStoryboard(storyboard_id)
       assertStoryboardIdle(before)
-      if (after_board_id && before_board_id) throw new Error('Ange after_board_id eller before_board_id, inte båda.')
+      if (after_board_id && before_board_id) throw new Error('Give after_board_id or before_board_id, not both.')
       for (const id of [after_board_id, before_board_id]) {
-        if (id && !before.boards.some((b) => b.id === id)) throw new Error('Den rutan finns inte i den här storyboarden.')
+        if (id && !before.boards.some((b) => b.id === id)) throw new Error('That board isn\'t in this storyboard.')
       }
       // Between two boards, the transition between them goes: never one with a prompt or takes without the user's OK.
       const lost = transitionReplacedBy(before, after_board_id, before_board_id)
       if (lost && valuable(lost.transition)) {
         throw new Error(
-          `Rutan hamnar mellan ruta ${lost.from} och ${lost.to}, och övergång ${lost.number} med prompt eller tagningar försvinner då. Lägg till rutan sist och be om lov att flytta den dit med request_delete {board_move: {board_id: <den nya rutans id>, to_board_number: ${lost.to}}}.`
+          `The board would land between boards ${lost.from} and ${lost.to}, and transition ${lost.number}, which has a prompt or takes, would then go. Add the board last and ask for permission to move it there with request_delete {board_move: {board_id: <the new board's id>, to_board_number: ${lost.to}}}.`
         )
       }
       const [assets, stills] = await Promise.all([AssetIndex.load(), StillIndex.load()])
@@ -610,7 +610,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           ...(index >= 0 ? { transitions: touching(storyboard, storyboard.boards[index].id) } : {}),
           ...(removed.length ? { removed_transitions: removed, note: REMOVED_NOTE } : {})
         },
-        summary: `lade till ruta ${index + 1} i ${q(storyboard.name)}`
+        summary: `added board ${index + 1} to ${q(storyboard.name)}`
       }
     }
   )
@@ -628,12 +628,12 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
         image: boardImageInput.nullable().optional().describe(`The board's picture: ${BOARD_IMAGE_HELP} null empties it.`)
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'ändrade en ruta'
+      summary: () => 'changed a board'
     },
     async ({ board_id, note, image }) => {
       const { storyboard: before } = await loadBoard(board_id)
       assertStoryboardIdle(before)
-      if (note === undefined && image === undefined) throw new Error('Ange note eller image – annars finns inget att ändra.')
+      if (note === undefined && image === undefined) throw new Error('Give note or image – otherwise there is nothing to change.')
       const [assets, stills] = await Promise.all([AssetIndex.load(), StillIndex.load()])
       const source = image ? await boardImageSource(ctx, image, assets, stills) : image
       const storyboard = await callService<Storyboard>('boards:update', board_id, {
@@ -647,7 +647,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           ...(index >= 0 ? boardInfo(storyboard, index, assets, stillsNow) : { board_id }),
           transitions: touching(storyboard, board_id)
         },
-        summary: `ändrade ruta ${index + 1} i ${q(storyboard.name)}`
+        summary: `changed board ${index + 1} in ${q(storyboard.name)}`
       }
     }
   )
@@ -665,7 +665,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
         to_board_number: z.number().int().min(1)
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: ({ to_board_number }) => `flyttade en ruta till plats ${to_board_number}`
+      summary: ({ to_board_number }) => `moved a board to place ${to_board_number}`
     },
     async ({ board_id, to_board_number }) => {
       const { storyboard: before, index: from } = await loadBoard(board_id)
@@ -682,10 +682,10 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           const numbers = lost.map((t) => t.number)
           const which =
             numbers.length === 1
-              ? `övergång ${numbers[0]}`
-              : `övergångarna ${numbers.slice(0, -1).join(', ')} och ${numbers[numbers.length - 1]}`
+              ? `transition ${numbers[0]}`
+              : `transitions ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`
           throw new Error(
-            `Flytten tar bort ${which} med prompt eller tagningar. Be om lov med request_delete {board_move: {board_id: "${board_id}", to_board_number: ${to + 1}}}.`
+            `The move removes ${which}, with a prompt or takes. Ask for permission with request_delete {board_move: {board_id: "${board_id}", to_board_number: ${to + 1}}}.`
           )
         }
       }
@@ -700,7 +700,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           }),
           ...(removed.length ? { removed_transitions: removed, note: REMOVED_NOTE } : {})
         },
-        summary: `flyttade ruta ${from + 1} till plats ${storyboard.boards.findIndex((b) => b.id === board_id) + 1} i ${q(storyboard.name)}`
+        summary: `moved board ${from + 1} to place ${storyboard.boards.findIndex((b) => b.id === board_id) + 1} in ${q(storyboard.name)}`
       }
     }
   )
@@ -712,7 +712,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Update transition',
       description:
-        "Changes a transition – the clip from one board's picture to the next board's picture. Only the fields you pass change. prompt (\"Vad händer?\") describes the motion that leads from the first picture to the second within the duration: who moves where, what the camera does; image-to-video, so no @ tokens – name people in words. model must be an image-to-video model that takes an end image (list_models; Seedance image-to-video by default). duration, resolution and audio must be ones the model offers. selected_take_id chooses which of its finished takes is the transition's take (in the preview, the export and a conversion to a sequence). negative_prompt: empty string clears it. Generating is request_transition_generation.",
+        "Changes a transition – the clip from one board's picture to the next board's picture. Only the fields you pass change. prompt (\"What happens?\") describes the motion that leads from the first picture to the second within the duration: who moves where, what the camera does; image-to-video, so no @ tokens – name people in words. model must be an image-to-video model that takes an end image (list_models; Seedance image-to-video by default). duration, resolution and audio must be ones the model offers. selected_take_id chooses which of its finished takes is the transition's take (in the preview, the export and a conversion to a sequence). negative_prompt: empty string clears it. Generating is request_transition_generation.",
       input: {
         transition_id: z.string(),
         prompt: z.string().max(4000).optional(),
@@ -724,7 +724,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
         selected_take_id: z.string().optional().describe("One of the transition's finished takes (a generation_id).")
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'ändrade en övergång'
+      summary: () => 'changed a transition'
     },
     async ({ transition_id, prompt, negative_prompt, duration, resolution, audio, model, selected_take_id }) => {
       const { storyboard, index, transition } = await loadTransition(transition_id)
@@ -735,7 +735,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
         const text = canonical(prompt) ?? ''
         if (hasTokens(text)) {
           throw new Error(
-            'En övergång genereras från två bilder (bild-till-video) och skickar inga referenser, så prompten kan inte ha @-referenser. Beskriv i ord vad som händer mellan bilderna.'
+            'A transition is generated from two images (image-to-video) and sends no references, so the prompt can\'t have @ references. Describe in words what happens between the images.'
           )
         }
         patch.prompt = text
@@ -750,14 +750,14 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       let models: VideoModel[] | undefined
       if (model !== undefined || outputGiven || patch.prompt !== undefined) models = await modelsIfAvailable()
       if (model !== undefined) {
-        if (!models) throw new Error('Modellistan kunde inte hämtas från Venice just nu, så modellen kan inte bytas. Försök igen om en stund.')
+        if (!models) throw new Error('The model list couldn\'t be fetched from Venice right now, so the model can\'t be changed. Try again in a while.')
         const m = requireModel(models, model)
         if (kindOfModelId(m.id) !== 'image-to-video' || !supportsEndImage(m.id)) {
           const fitting = usableModels(models)
             .filter((x) => x.kind === 'image-to-video' && supportsEndImage(x.id))
             .map((x) => x.id)
           throw new Error(
-            `${m.name} kan inte göra en övergång: den behöver vara en bild-till-video-modell som tar en slutbild.${fitting.length ? ` Välj någon av: ${fitting.join(', ')}.` : ''}`
+            `${m.name} can't make a transition: it must be an image-to-video model that takes an end image.${fitting.length ? ` Choose one of: ${fitting.join(', ')}.` : ''}`
           )
         }
         patch.model = m.id
@@ -771,24 +771,24 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       if (audio !== undefined) patch.audio = audio
       if (selected_take_id !== undefined) {
         const take = transition.takes.find((g) => g.id === selected_take_id)
-        if (!take) throw new Error(`Tagningen ${selected_take_id} hör inte till ${transitionLabel(storyboard, index)}.`)
-        if (!isUsableTake(take)) throw new Error('Bara en färdig tagning (med sin video kvar) kan väljas.')
+        if (!take) throw new Error(`The take ${selected_take_id} doesn't belong to ${transitionLabel(storyboard, index)}.`)
+        if (!isUsableTake(take)) throw new Error('Only a finished take (with its video still there) can be selected.')
         patch.selectedGenerationId = take.id
       }
-      if (!Object.keys(patch).length) throw new Error('Ange något att ändra (prompt, duration, resolution, audio, model eller selected_take_id).')
+      if (!Object.keys(patch).length) throw new Error('Give something to change (prompt, duration, resolution, audio, model or selected_take_id).')
       if (outputGiven && !listed) {
-        notes.push('Modellistan kunde inte hämtas, så längd, upplösning och ljud kontrolleras först när övergången genereras.')
+        notes.push('The model list couldn\'t be fetched, so length, resolution and sound are only checked when the transition is generated.')
       }
       const updated = await callService<Storyboard>('transitions:update', transition.id, patch)
       const at = updated.transitions.findIndex((t) => t.id === transition.id)
       const label = at >= 0 ? transitionLabel(updated, at) : transitionLabel(storyboard, index)
-      const what = Object.keys(patch).length === 1 && patch.selectedGenerationId ? 'valde en tagning för' : 'ändrade'
+      const what = Object.keys(patch).length === 1 && patch.selectedGenerationId ? 'selected a take for' : 'changed'
       return {
         data: {
           ...(at >= 0 ? transitionInfo(updated, at) : { transition_id }),
           ...(notes.length ? { notes } : {})
         },
-        summary: `${what} ${label} i ${q(updated.name)}`
+        summary: `${what} ${label} in ${q(updated.name)}`
       }
     }
   )
@@ -803,7 +803,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
         "The two pictures a transition is generated between – its start (the first board's picture) and its end (the next board's picture) – as images, with the boards' notes, the transition's prompt and settings, whether it can be generated (ready, problems) and its price. Look at both pictures before you write the prompt: it should describe how the first becomes the second. Free; changes nothing.",
       input: { transition_id: z.string() },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'tittade på en övergång'
+      summary: () => 'looked at a transition'
     },
     async ({ transition_id }) => {
       const { storyboard, index, transition } = await loadTransition(transition_id)
@@ -815,7 +815,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
         const image = await imageBlock(board.imagePath)
         if (image) {
           images.push({
-            label: `${which}: board ${number}${board.note.trim() ? ` – ”${excerpt(board.note, 120)}”` : ''}`,
+            label: `${which}: board ${number}${board.note.trim() ? ` – "${excerpt(board.note, 120)}"` : ''}`,
             image
           })
         }
@@ -832,7 +832,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           ...(transition.ready ? { price_usd: priceValue(price) } : {})
         },
         images,
-        summary: `tittade på ${transitionLabel(storyboard, index)} i ${q(storyboard.name)}${transition.ready ? ` (${usd(price)})` : ''}`
+        summary: `looked at ${transitionLabel(storyboard, index)} in ${q(storyboard.name)}${transition.ready ? ` (${usd(price)})` : ''}`
       }
     }
   )
@@ -844,16 +844,16 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     {
       title: 'Convert storyboard to a sequence',
       description:
-        "Makes a new ordinary sequence from a storyboard, named \"<storyboard> (sekvens)\": one clip per transition, in order, each with the transition's selected take as its take (the same settings), so the user can go on editing the film in Sekvenser (trims, more clips, continuations). The storyboard itself stays as it is. Free. Returns the new sequence (see get_sequence).",
+        "Makes a new ordinary sequence from a storyboard, named after it: one clip per transition, in order, each with the transition's selected take as its take (the same settings), so the user can go on editing the film in Sequences (trims, more clips, continuations). The storyboard itself stays as it is. Free. Returns the new sequence (see get_sequence).",
       input: { storyboard_id: z.string() },
       annotations: WRITE,
-      summary: () => 'gjorde om en storyboard till en sekvens'
+      summary: () => 'turned a storyboard into a sequence'
     },
     async ({ storyboard_id }) => {
       const storyboard = await loadStoryboard(storyboard_id)
       assertStoryboardIdle(storyboard)
       if (!storyboard.transitions.length) {
-        throw new Error('Storyboarden har inga övergångar än (den behöver minst två rutor), så det finns inget att göra en sekvens av.')
+        throw new Error('The storyboard has no transitions yet (it needs at least two boards), so there is nothing to make a sequence of.')
       }
       const { sequenceId } = await callService<{ sequenceId: string }>('storyboards:toSequence', storyboard.id)
       const sequence = await callService<Sequence>('sequences:get', sequenceId)
@@ -868,7 +868,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           ...(withoutTake.length ? { clips_without_finished_take: withoutTake } : {}),
           next: 'get_sequence shows the clips; the sequence tools (update_segment, add_segment …) work on it.'
         },
-        summary: `gjorde om storyboarden ${q(storyboard.name)} till sekvensen ${q(sequence.name)}`
+        summary: `turned the storyboard ${q(storyboard.name)} into the sequence ${q(sequence.name)}`
       }
     }
   )

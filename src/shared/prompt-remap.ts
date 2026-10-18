@@ -190,7 +190,7 @@ export interface ListChange<T> {
  * changed (an asset removed with its chip ✕, an outfit swapped, a voice left out, the references reordered):
  * every token gets its new number. A token whose picture or clip left the list goes, and so does a "(…)" left
  * empty; the words around it stay. With `swap`, a group naming only the old outfits' photos is given to the new
- * outfit instead, name included: "Röd klänning (@Image3)" → "Blå jeans (@Image3, @Image4)". Tokens beyond
+ * outfit instead, name included: "Red dress (@Image3)" → "Blue jeans (@Image3, @Image4)". Tokens beyond
  * `before` name nothing and are left as they are, as are @AudioN tokens when `audios` is left out. Tokens are
  * found as the shared rules find them, so "@image3" (which the model reads as @Image3) follows its picture too,
  * and a near miss like "@Image 3", "@Image3rd" or "@Image1-2" keeps naming the pictures its suggested fix would
@@ -378,23 +378,23 @@ const ORDER_TOKEN = /^\s*[@\uFF20](image|audio)\s*0*([1-9][0-9]*)\s*$/i
 
 const WORD: Record<ReferenceKind, string> = { image: 'Image', audio: 'Audio' }
 
-/** "1 referensbild", "3 referensbilder", "2 ljudklipp": how many there are, for the messages. */
+/** "1 reference image", "3 reference images", "2 audio clips": how many there are, for the messages. */
 function countText(kind: ReferenceKind, n: number): string {
-  if (kind === 'audio') return `${n} ljudklipp`
-  return n === 1 ? '1 referensbild' : `${n} referensbilder`
+  if (kind === 'audio') return n === 1 ? '1 audio clip' : `${n} audio clips`
+  return n === 1 ? '1 reference image' : `${n} reference images`
 }
 
 /**
  * The positions (0-based, into the current list) of the references in their new order. Each entry of
  * `newOrder` names one reference: by its token ("@Image3", any letter case; "@Audio2" for audio) or by its
  * path. The ones named come first, in that order; the rest keep their order after them, so a partial list
- * moves only what it names to the front. Throws (Swedish) for an entry that names no reference, one of the
+ * moves only what it names to the front. Throws for an entry that names no reference, one of the
  * other kind, or a reference named twice.
  */
 export function referenceOrder(paths: readonly string[], kind: ReferenceKind, newOrder: readonly string[]): number[] {
   const leading: number[] = []
   for (const entry of newOrder) {
-    if (typeof entry !== 'string' || !entry.trim()) throw new Error('Ordningen innehåller en tom post.')
+    if (typeof entry !== 'string' || !entry.trim()) throw new Error('The order contains an empty entry.')
     const token = ORDER_TOKEN.exec(entry)
     let index: number
     if (token) {
@@ -403,27 +403,27 @@ export function referenceOrder(paths: readonly string[], kind: ReferenceKind, ne
       if (tokenKind !== kind) {
         throw new Error(
           kind === 'image'
-            ? `${shown} är ett ljudklipp – bara referensbilder (@ImageN) kan ordnas här.`
-            : `${shown} är en bild – bara ljudklipp (@AudioN) kan ordnas här.`
+            ? `${shown} is an audio clip – only reference images (@ImageN) can be ordered here.`
+            : `${shown} is an image – only audio clips (@AudioN) can be ordered here.`
         )
       }
       index = Number(token[2]) - 1
       if (index >= paths.length) {
         throw new Error(
           paths.length
-            ? `${shown} finns inte – det finns bara ${countText(kind, paths.length)}.`
-            : `${shown} finns inte – det finns inga ${kind === 'audio' ? 'ljudklipp' : 'referensbilder'}.`
+            ? `${shown} doesn't exist – there ${paths.length === 1 ? 'is' : 'are'} only ${countText(kind, paths.length)}.`
+            : `${shown} doesn't exist – there are no ${kind === 'audio' ? 'audio clips' : 'reference images'}.`
         )
       }
     } else {
       index = paths.indexOf(entry)
       if (index === -1) {
-        const what = kind === 'audio' ? 'ett av ljudklippen' : 'en av referensbilderna'
-        throw new Error(`${entry} är inte ${what} – ange @${WORD[kind]}N eller sökvägen.`)
+        const what = kind === 'audio' ? 'one of the audio clips' : 'one of the reference images'
+        throw new Error(`${entry} is not ${what} – give @${WORD[kind]}N or the path.`)
       }
     }
     if (leading.includes(index)) {
-      throw new Error(`@${WORD[kind]}${index + 1} står mer än en gång i den nya ordningen.`)
+      throw new Error(`@${WORD[kind]}${index + 1} appears more than once in the new order.`)
     }
     leading.push(index)
   }
@@ -438,7 +438,7 @@ export function referenceOrder(paths: readonly string[], kind: ReferenceKind, ne
  * [A, B, C] with "@Image1 hugs @Image3", C dragged first: [C, A, B] and "@Image2 hugs @Image1". `newOrder` names
  * the references by token or path (see referenceOrder); unnamed ones keep their order after the named ones.
  * Everything else – the clips' windows, the description flags – stays as it was. Returns the same object when
- * the order doesn't change. Throws (Swedish) for an entry that names no reference.
+ * the order doesn't change. Throws for an entry that names no reference.
  */
 export function reorderReferences<T extends GenerationParams>(
   params: T,

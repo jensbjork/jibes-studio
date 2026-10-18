@@ -14,9 +14,9 @@ import { fileName, formatClock, segmentsInRange } from './editorUtils'
 import { usePlan } from './useEditOps'
 import { Check, Choice, Field, OpCard, PlanNotes, RunButton, TimeAt, fieldInput, linkButton, textArea } from './ui'
 
-// Röst: what is said and who says it. Transkribera (the lines with their times; needed for the rest), Byt röst
-// (speech-to-speech that keeps the performance, shown only when Venice lists a voice changer), Läs in repliker på
-// nytt (new spoken lines in a preset or cloned voice, laid over the old ones) and Ny replik (a line of its own).
+// Voice: what is said and who says it. Transcribe (the lines with their times; needed for the rest), Change voice
+// (speech-to-speech that keeps the performance, shown only when Venice lists a voice changer), Re-record lines (new
+// spoken lines in a preset or cloned voice, laid over the old ones) and New line (a line of its own).
 
 const DEFAULT_ASR = 'elevenlabs/scribe-v2'
 const DEFAULT_SPEECH = 'elevenlabs-tts-multilingual-v2'
@@ -24,16 +24,16 @@ const CLONE_MODEL = 'tts-chatterbox-hd'
 
 
 export const LANGUAGES: { code: string; label: string }[] = [
-  { code: '', label: 'Automatiskt' },
-  { code: 'sv', label: 'Svenska' },
-  { code: 'en', label: 'Engelska' },
-  { code: 'no', label: 'Norska' },
-  { code: 'da', label: 'Danska' },
-  { code: 'fi', label: 'Finska' },
-  { code: 'de', label: 'Tyska' },
-  { code: 'fr', label: 'Franska' },
-  { code: 'es', label: 'Spanska' },
-  { code: 'it', label: 'Italienska' }
+  { code: '', label: 'Automatic' },
+  { code: 'sv', label: 'Swedish' },
+  { code: 'en', label: 'English' },
+  { code: 'no', label: 'Norwegian' },
+  { code: 'da', label: 'Danish' },
+  { code: 'fi', label: 'Finnish' },
+  { code: 'de', label: 'German' },
+  { code: 'fr', label: 'French' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'it', label: 'Italian' }
 ]
 
 export function languageName(code: string | undefined): string | undefined {
@@ -49,7 +49,7 @@ export default function VoiceTab() {
     <div className="space-y-1">
       {silent && (
         <p className="mx-3 mb-2 rounded-md border border-line px-3 py-2 text-[11px] leading-relaxed text-muted">
-          Filmen har inget ljud. Du kan ändå lägga till nya repliker.
+          The film has no sound. You can still add new lines.
         </p>
       )}
       <TranscribeCard open={open === 'transcribe'} onToggle={() => toggle('transcribe')} />
@@ -69,7 +69,7 @@ interface CardProps {
   onToggle: () => void
 }
 
-// ── Transkribera ─────────────────────────────────────────────────────────────
+// ── Transcribe ───────────────────────────────────────────────────────────────
 
 function TranscribeCard({ open, onToggle }: CardProps) {
   const { edit, current, transcript, audio } = useEditor()
@@ -84,23 +84,23 @@ function TranscribeCard({ open, onToggle }: CardProps) {
   const count = transcript?.segments.length ?? 0
 
   const status = transcript
-    ? `Transkriberad · ${count} ${count === 1 ? 'replik' : 'repliker'}${
+    ? `Transcribed · ${count} ${count === 1 ? 'line' : 'lines'}${
         transcript.language ? ` · ${languageName(transcript.language)}` : ''
       }`
     : transcript === null
-      ? 'Ingen transkription än.'
+      ? 'No transcript yet.'
       : undefined
 
   return (
     <OpCard
-      title="Transkribera"
-      summary={status ?? 'Vad som sägs, med tider. Behövs för att byta repliker.'}
+      title="Transcribe"
+      summary={status ?? 'What is said, with times. Needed to change lines.'}
       open={open}
       onToggle={onToggle}
     >
       {status && <p className="text-[12px] text-muted">{status}</p>}
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Språk">
+        <Field label="Language">
           <select value={language} onChange={(e) => setLanguage(e.target.value)} className={fieldInput}>
             {LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>
@@ -110,7 +110,7 @@ function TranscribeCard({ open, onToggle }: CardProps) {
           </select>
         </Field>
         {models.length > 1 && (
-          <Field label="Modell">
+          <Field label="Model">
             <select value={modelId} onChange={(e) => setModel(e.target.value)} className={fieldInput}>
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -122,23 +122,23 @@ function TranscribeCard({ open, onToggle }: CardProps) {
         )}
       </div>
       <p className="text-[11px] leading-relaxed text-muted">
-        Replikerna hamnar på tidslinjen och under Text, där du kan rätta dem gratis. Venice skiljer inte på vem som
-        pratar.
+        The lines land on the timeline and under Text, where you can correct them for free. Venice doesn’t tell
+        speakers apart.
       </p>
       <PlanNotes plan={plan} error={card.error ?? planError ?? audio.error} />
       <RunButton
-        label={transcript ? 'Transkribera igen' : 'Transkribera'}
+        label={transcript ? 'Transcribe again' : 'Transcribe'}
         plan={plan}
         planning={planning}
         running={card.running}
-        onClick={() => plan && void card.run({ op, plan, label: 'Transkribera' })}
+        onClick={() => plan && void card.run({ op, plan, label: 'Transcribe' })}
       />
       {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
     </OpCard>
   )
 }
 
-// ── Bakgrund (shared by Byt röst and Läs in repliker) ────────────────────────
+// ── Background (shared by Change voice and Re-record lines) ──────────────────
 
 function useBackground(): [BackgroundChoice, (b: BackgroundChoice) => void, boolean] {
   const { separation } = useEditor()
@@ -158,20 +158,20 @@ function BackgroundField({
   separated: boolean
 }) {
   return (
-    <Field label="Bakgrund">
+    <Field label="Background">
       <Choice
         value={value}
         onChange={onChange}
-        label="Bakgrund"
+        label="Background"
         options={
           separated
             ? [
-                { value: 'keep', label: 'Behåll bakgrundsljudet', hint: 'Musik och effekter blir kvar under den nya rösten.' },
-                { value: 'remove', label: 'Ta bort det' }
+                { value: 'keep', label: 'Keep the background sound', hint: 'Music and effects stay under the new voice.' },
+                { value: 'remove', label: 'Remove it' }
               ]
             : [
-                { value: 'duck', label: 'Sänk originalljudet där rösten byts' },
-                { value: 'remove', label: 'Ta bort det' }
+                { value: 'duck', label: 'Lower the original sound where the voice changes' },
+                { value: 'remove', label: 'Remove it' }
               ]
         }
       />
@@ -179,7 +179,7 @@ function BackgroundField({
   )
 }
 
-// ── Byt röst ─────────────────────────────────────────────────────────────────
+// ── Change voice ─────────────────────────────────────────────────────────────
 
 type Scope = 'film' | 'range' | 'lines'
 
@@ -230,45 +230,45 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
 
   if (!audio.catalog) {
     return (
-      <OpCard title="Byt röst" summary="Behåll framförandet, byt rösten." open={open} onToggle={onToggle}>
-        <p className="text-[12px] text-muted">{audio.error ?? 'Hämtar Venice röstmodeller…'}</p>
+      <OpCard title="Change voice" summary="Keep the performance, change the voice." open={open} onToggle={onToggle}>
+        <p className="text-[12px] text-muted">{audio.error ?? 'Loading Venice’s voice models…'}</p>
       </OpCard>
     )
   }
 
   if (!changers.length) {
     return (
-      <OpCard title="Byt röst" summary="Inte tillgängligt hos Venice just nu." open={open} onToggle={onToggle}>
+      <OpCard title="Change voice" summary="Not available from Venice right now." open={open} onToggle={onToggle}>
         <p className="text-[12px] leading-relaxed text-muted">
-          Röstbyte finns inte hos Venice just nu – använd <span className="text-text">Läs in repliker på nytt</span>.
-          Studio visar det här av sig självt när Venice börjar erbjuda det.
+          Venice doesn’t offer voice changing right now – use <span className="text-text">Re-record lines</span>.
+          Studio shows this card by itself once Venice starts offering it.
         </p>
         {!audio.catalog.keyed && (
-          <p className="text-[12px] leading-relaxed text-muted">Lägg till API-nyckeln under Inställningar.</p>
+          <p className="text-[12px] leading-relaxed text-muted">Add the API key in Settings.</p>
         )}
         <button type="button" onClick={audio.refresh} disabled={audio.loading} className={linkButton}>
-          {audio.loading ? 'Kontrollerar…' : 'Kontrollera igen'}
+          {audio.loading ? 'Checking…' : 'Check again'}
         </button>
       </OpCard>
     )
   }
 
   return (
-    <OpCard title="Byt röst" summary="Behåll framförandet, byt rösten – för hela filmen eller en del." open={open} onToggle={onToggle}>
-      <Field label="Vad">
+    <OpCard title="Change voice" summary="Keep the performance, change the voice – for the whole film or a part." open={open} onToggle={onToggle}>
+      <Field label="What">
         <Choice
           value={effectiveScope}
           onChange={setScope}
-          label="Vad"
+          label="What"
           options={[
-            { value: 'film', label: 'Hela filmen' },
-            { value: 'range', label: 'Markeringen', disabled: !selection, title: selection ? undefined : 'Markera ett avsnitt först' },
+            { value: 'film', label: 'The whole film' },
+            { value: 'range', label: 'The selection', disabled: !selection, title: selection ? undefined : 'Mark a section first' },
             {
               value: 'lines',
-              label: 'Valda repliker',
+              label: 'Chosen lines',
               disabled: !transcript?.segments.length,
-              hint: 'För att bara byta en persons röst när två pratar.',
-              title: transcript?.segments.length ? undefined : 'Transkribera filmen först'
+              hint: 'To change only one person’s voice when two people talk.',
+              title: transcript?.segments.length ? undefined : 'Transcribe the film first'
             }
           ]}
         />
@@ -277,7 +277,7 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
         <LinePicker segments={transcript.segments} selected={lineIds} onChange={setLineIds} />
       )}
       {changers.length > 1 && (
-        <Field label="Modell">
+        <Field label="Model">
           <select value={model?.id} onChange={(e) => setModelChoice(e.target.value)} className={fieldInput}>
             {changers.map((m) => (
               <option key={m.id} value={m.id}>
@@ -287,7 +287,7 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
           </select>
         </Field>
       )}
-      <Field label="Ny röst">
+      <Field label="New voice">
         <select
           value={useCustom ? '__custom' : (voiceId ?? '')}
           onChange={(e) => {
@@ -304,13 +304,13 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
               {v}
             </option>
           ))}
-          {model?.customVoiceId && <option value="__custom">Eget röst-ID…</option>}
+          {model?.customVoiceId && <option value="__custom">Own voice ID…</option>}
         </select>
         {useCustom && (
           <input
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
-            placeholder="Röst-ID från leverantören"
+            placeholder="Voice ID from the provider"
             spellCheck={false}
             className={`${fieldInput} mt-1.5`}
           />
@@ -321,28 +321,28 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
         <Check
           checked={!!removeNoise}
           onChange={setNoiseChoice}
-          hint={separated ? undefined : 'Rekommenderas: annars försöker modellen göra om musik och effekter också.'}
+          hint={separated ? undefined : 'Recommended: otherwise the model tries to convert music and effects too.'}
         >
-          Rensa bakgrundsljud först
+          Clean up background noise first
         </Check>
       )}
       <PlanNotes plan={plan} error={card.error ?? planError} />
       <RunButton
-        label="Byt röst"
+        label="Change voice"
         plan={plan}
         planning={planning}
         running={card.running}
         approximate
         disabled={!op}
-        disabledReason={effectiveScope === 'lines' ? 'Välj minst en replik.' : 'Välj en röst.'}
-        onClick={() => plan && op && void card.run({ op, plan, label: 'Byt röst' })}
+        disabledReason={effectiveScope === 'lines' ? 'Choose at least one line.' : 'Choose a voice.'}
+        onClick={() => plan && op && void card.run({ op, plan, label: 'Change voice' })}
       />
       {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
     </OpCard>
   )
 }
 
-/** Checkboxes for transcript lines (Valda repliker). */
+/** Checkboxes for transcript lines (Chosen lines). */
 function LinePicker({
   segments,
   selected,
@@ -359,10 +359,10 @@ function LinePicker({
     <div>
       <div className="mb-1 flex items-center gap-1">
         <button type="button" onClick={() => onChange(segments.map((s) => s.id))} className={linkButton}>
-          Alla
+          All
         </button>
         <button type="button" onClick={() => onChange([])} className={linkButton}>
-          Inga
+          None
         </button>
         {selection && (
           <button
@@ -370,7 +370,7 @@ function LinePicker({
             onClick={() => onChange(segmentsInRange(segments, selection).map((s) => s.id))}
             className={linkButton}
           >
-            De i markeringen
+            Those in the selection
           </button>
         )}
       </div>
@@ -389,7 +389,7 @@ function LinePicker({
   )
 }
 
-// ── Voices for new lines (Läs in repliker, Ny replik) ───────────────────────
+// ── Voices for new lines (Re-record lines, New line) ────────────────────────
 
 interface SpeechVoice {
   mode: 'clone' | 'preset'
@@ -403,13 +403,13 @@ interface SpeechVoice {
 interface ResolvedVoice {
   model?: SpeechModel
   voice?: VoiceChoice
-  /** Why no voice can be used yet (Swedish). */
+  /** Why no voice can be used yet. */
   missing?: string
   /** The clone needs the user's checkbox first. */
   needsConsent?: { audioId: string; name: string }
 }
 
-/** Characters' Röst clips that could be cloned, with the character's name. */
+/** Characters' Voice clips that could be cloned, with the character's name. */
 function useVoiceClips(): { assetName: string; clip: Asset['audio'][number] }[] {
   const assets = useAssets('character')
   return useMemo(
@@ -424,9 +424,9 @@ function useSpeechVoice(value: SpeechVoice, consentOverride: Record<string, bool
   const speech = audio.catalog?.speech ?? []
   if (value.mode === 'clone') {
     const model = speech.find((m) => m.id === CLONE_MODEL) ?? speech.find((m) => m.cloning)
-    if (!model) return { missing: 'Röstkloning finns inte hos Venice just nu.' }
+    if (!model) return { missing: 'Venice doesn’t offer voice cloning right now.' }
     const entry = clips.find((c) => c.clip.id === value.audioId) ?? clips[0]
-    if (!entry) return { model, missing: 'Ingen karaktär har ett röstklipp än (Karaktärer → Röst).' }
+    if (!entry) return { model, missing: 'No character has a voice clip yet (Characters → Voice).' }
     const consent = consentOverride[entry.clip.id] ?? entry.clip.cloneConsent
     return {
       model,
@@ -437,13 +437,13 @@ function useSpeechVoice(value: SpeechVoice, consentOverride: Record<string, bool
   const presets = speech.filter((m) => m.voices.length || m.customVoiceId)
   const model =
     presets.find((m) => m.id === value.model) ?? presets.find((m) => m.id === DEFAULT_SPEECH) ?? presets[0]
-  if (!model) return { missing: audio.error ?? 'Hämtar Venice röstmodeller…' }
+  if (!model) return { missing: audio.error ?? 'Loading Venice’s voice models…' }
   if (value.voice === '__custom') {
     const id = value.custom?.trim()
-    return id ? { model, voice: { kind: 'custom', voiceId: id } } : { model, missing: 'Skriv röst-ID:t.' }
+    return id ? { model, voice: { kind: 'custom', voiceId: id } } : { model, missing: 'Type the voice ID.' }
   }
   const voice = value.voice && model.voices.includes(value.voice) ? value.voice : (model.defaultVoice ?? model.voices[0])
-  return voice ? { model, voice: { kind: 'preset', voice } } : { model, missing: 'Välj en röst.' }
+  return voice ? { model, voice: { kind: 'preset', voice } } : { model, missing: 'Choose a voice.' }
 }
 
 function SpeechVoiceField({
@@ -465,20 +465,20 @@ function SpeechVoiceField({
   const model = resolved.model
   const chosenClip = value.audioId ?? clips[0]?.clip.id
   return (
-    <Field label="Röst">
+    <Field label="Voice">
       <Choice
         value={value.mode}
         onChange={(mode) => onChange({ ...value, mode })}
-        label="Röst"
+        label="Voice"
         options={[
           {
             value: 'clone',
-            label: 'Karaktärens röst',
-            hint: 'Klonas från röstprovet. Svenskan är oprövad – lyssna på första repliken innan du gör hela filmen.',
+            label: 'The character’s voice',
+            hint: 'Cloned from the voice sample. Swedish is untested – listen to the first line before doing the whole film.',
             disabled: !canClone,
-            title: canClone ? undefined : 'Röstkloning finns inte hos Venice just nu.'
+            title: canClone ? undefined : 'Venice doesn’t offer voice cloning right now.'
           },
-          { value: 'preset', label: 'En färdig röst' }
+          { value: 'preset', label: 'A ready-made voice' }
         ]}
       />
       <div className="mt-2 space-y-1.5">
@@ -500,14 +500,14 @@ function SpeechVoiceField({
                 <Check
                   checked={!resolved.needsConsent}
                   onChange={(on) => onConsent((resolved.voice as { audioId: string }).audioId, on)}
-                  hint="Krävs en gång per röstklipp innan rösten klonas. Samma val finns under Karaktärer → Röst."
+                  hint="Needed once per voice clip before the voice is cloned. The same choice is under Characters → Voice."
                 >
-                  Jag har rätt att använda den här rösten
+                  I have the right to use this voice
                 </Check>
               )}
             </>
           ) : (
-            <p className="text-[12px] text-muted">Ingen karaktär har ett röstklipp än (Karaktärer → Röst).</p>
+            <p className="text-[12px] text-muted">No character has a voice clip yet (Characters → Voice).</p>
           )
         ) : (
           <>
@@ -535,14 +535,14 @@ function SpeechVoiceField({
                     {v}
                   </option>
                 ))}
-                {model.customVoiceId && <option value="__custom">Eget röst-ID…</option>}
+                {model.customVoiceId && <option value="__custom">Own voice ID…</option>}
               </select>
             )}
             {value.voice === '__custom' && (
               <input
                 value={value.custom ?? ''}
                 onChange={(e) => onChange({ ...value, custom: e.target.value })}
-                placeholder="Röst-ID från leverantören"
+                placeholder="Voice ID from the provider"
                 spellCheck={false}
                 className={fieldInput}
               />
@@ -553,10 +553,10 @@ function SpeechVoiceField({
           <input
             value={value.style ?? ''}
             onChange={(e) => onChange({ ...value, style: e.target.value })}
-            placeholder="Ton, t.ex. glad, viskande, trött"
+            placeholder="Tone, e.g. happy, whispering, tired"
             spellCheck={false}
             className={fieldInput}
-            aria-label="Ton"
+            aria-label="Tone"
           />
         )}
       </div>
@@ -595,7 +595,7 @@ function useCloneConsent(): {
   return { consent: override, setConsent, saved, error }
 }
 
-// ── Läs in repliker på nytt ──────────────────────────────────────────────────
+// ── Re-record lines ──────────────────────────────────────────────────────────
 
 function SpeakLinesCard({ open, onToggle, onTranscribe }: CardProps & { onTranscribe: () => void }) {
   const { edit, current, transcript, selection } = useEditor()
@@ -639,34 +639,34 @@ function SpeakLinesCard({ open, onToggle, onTranscribe }: CardProps & { onTransc
     setTexts((m) => ({ ...m, [id]: text }))
     setChecked((c) => (c.includes(id) ? c : [...c, id]))
   }
-  const blocked = resolved.missing ?? (resolved.needsConsent ? 'Bocka i att du har rätt att använda rösten.' : undefined)
+  const blocked = resolved.missing ?? (resolved.needsConsent ? 'Tick that you have the right to use the voice.' : undefined)
 
   return (
     <OpCard
-      title="Läs in repliker på nytt"
-      summary="Skriv om repliker och låt en annan röst – eller karaktärens klonade röst – säga dem."
+      title="Re-record lines"
+      summary="Rewrite lines and let another voice – or the character’s cloned voice – say them."
       open={open}
       onToggle={onToggle}
     >
       {!transcript?.segments.length ? (
         <div className="space-y-2">
           <p className="text-[12px] leading-relaxed text-muted">
-            Transkribera filmen först – då kan du välja repliker och skriva om dem.
+            Transcribe the film first – then you can choose lines and rewrite them.
           </p>
           <button type="button" onClick={onTranscribe} className={linkButton}>
-            Till Transkribera
+            Go to Transcribe
           </button>
         </div>
       ) : (
         <>
           <div>
             <div className="mb-1 flex items-center gap-1">
-              <span className="mr-auto text-muted">Repliker</span>
+              <span className="mr-auto text-muted">Lines</span>
               <button type="button" onClick={() => setChecked(segments.map((s) => s.id))} className={linkButton}>
-                Alla
+                All
               </button>
               <button type="button" onClick={() => setChecked([])} className={linkButton}>
-                Inga
+                None
               </button>
               {selection && (
                 <button
@@ -674,7 +674,7 @@ function SpeakLinesCard({ open, onToggle, onTranscribe }: CardProps & { onTransc
                   onClick={() => setChecked(segmentsInRange(segments, selection).map((s) => s.id))}
                   className={linkButton}
                 >
-                  De i markeringen
+                  Those in the selection
                 </button>
               )}
             </div>
@@ -699,7 +699,7 @@ function SpeakLinesCard({ open, onToggle, onTranscribe }: CardProps & { onTransc
                       onChange={(e) => rewrite(s.id, e.target.value)}
                       rows={1}
                       spellCheck={false}
-                      aria-label={`Ny text för repliken vid ${formatClock(s.start)}`}
+                      aria-label={`New text for the line at ${formatClock(s.start)}`}
                       className="mt-1 block w-full resize-none rounded border border-transparent bg-transparent px-1 py-0.5 text-[12px] leading-snug outline-none transition [field-sizing:content] hover:border-line focus:border-muted focus:bg-raised"
                     />
                   </li>
@@ -708,28 +708,28 @@ function SpeakLinesCard({ open, onToggle, onTranscribe }: CardProps & { onTransc
             </ul>
           </div>
           <SpeechVoiceField value={voiceValue} onChange={setVoiceValue} resolved={resolved} onConsent={clone.setConsent} />
-          <Field label="Om repliken blir för lång">
+          <Field label="If a line gets too long">
             <Choice
               value={fit}
               onChange={setFit}
-              label="Om repliken blir för lång"
+              label="If a line gets too long"
               options={[
-                { value: 'tempo', label: 'Anpassa tempot (högst 15 %)' },
-                { value: 'overlap', label: 'Låt den ta plats', hint: 'Den kan gå in i nästa replik.' }
+                { value: 'tempo', label: 'Adjust the tempo (at most 15%)' },
+                { value: 'overlap', label: 'Let it run long', hint: 'It may run into the next line.' }
               ]}
             />
           </Field>
           <BackgroundField value={background} onChange={setBackground} separated={separated} />
           <PlanNotes plan={plan} error={card.error ?? planError ?? clone.error} />
           <RunButton
-            label={`Läs in markerade${lines.length ? ` (${lines.length})` : ''}`}
+            label={`Record checked lines${lines.length ? ` (${lines.length})` : ''}`}
             plan={plan}
             planning={planning}
             running={card.running}
             approximate={resolved.model?.endpoint === 'speech'}
             disabled={!op || !!blocked}
-            disabledReason={!lines.length ? 'Markera minst en replik.' : blocked}
-            onClick={() => plan && op && void card.run({ op, plan, label: `Läs in ${lines.length} ${lines.length === 1 ? 'replik' : 'repliker'}` })}
+            disabledReason={!lines.length ? 'Check at least one line.' : blocked}
+            onClick={() => plan && op && void card.run({ op, plan, label: `Record ${lines.length} ${lines.length === 1 ? 'line' : 'lines'}` })}
           />
           {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
         </>
@@ -738,7 +738,7 @@ function SpeakLinesCard({ open, onToggle, onTranscribe }: CardProps & { onTransc
   )
 }
 
-// ── Ny replik ────────────────────────────────────────────────────────────────
+// ── New line ─────────────────────────────────────────────────────────────────
 
 function NewLineCard({ open, onToggle }: CardProps) {
   const { edit, current, player, transcript } = useEditor()
@@ -769,35 +769,35 @@ function NewLineCard({ open, onToggle }: CardProps) {
       : undefined
   const { plan, planning, error: planError } = usePlan(edit.id, op, current.id, open && !!op, [nonce, clone.saved])
   const card = useCardRun(() => setNonce((n) => n + 1))
-  const blocked = resolved.missing ?? (resolved.needsConsent ? 'Bocka i att du har rätt att använda rösten.' : undefined)
+  const blocked = resolved.missing ?? (resolved.needsConsent ? 'Tick that you have the right to use the voice.' : undefined)
 
   return (
-    <OpCard title="Ny replik" summary="En ny replik där spelhuvudet står." open={open} onToggle={onToggle}>
-      <Field label="Vad ska sägas?">
+    <OpCard title="New line" summary="A new line where the playhead is." open={open} onToggle={onToggle}>
+      <Field label="What should be said?">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={2}
-          placeholder="Vänta! Du glömde nycklarna."
+          placeholder="Wait! You forgot your keys."
           className={textArea}
         />
       </Field>
-      <TimeAt label="Börjar vid" value={at} onChange={setAt} player={player} />
+      <TimeAt label="Starts at" value={at} onChange={setAt} player={player} />
       <SpeechVoiceField value={voiceValue} onChange={setVoiceValue} resolved={resolved} onConsent={clone.setConsent} />
       <PlanNotes
         plan={plan}
         error={card.error ?? planError ?? clone.error}
-        extraNotes={['Ljudet under repliken sänks medan den hörs.']}
+        extraNotes={['The sound under the line is lowered while it plays.']}
       />
       <RunButton
-        label="Lägg till repliken"
+        label="Add the line"
         plan={plan}
         planning={planning}
         running={card.running}
         approximate={resolved.model?.endpoint === 'speech'}
         disabled={!op || !!blocked}
-        disabledReason={!text.trim() ? 'Skriv repliken.' : blocked}
-        onClick={() => plan && op && void card.run({ op, plan, label: 'Ny replik' })}
+        disabledReason={!text.trim() ? 'Write the line.' : blocked}
+        onClick={() => plan && op && void card.run({ op, plan, label: 'New line' })}
       />
       {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
     </OpCard>

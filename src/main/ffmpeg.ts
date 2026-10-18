@@ -7,7 +7,7 @@ import type { AudioLayer, EditRange, FfmpegStatus, GainSpan } from '@shared/type
 
 // Thin wrappers around the ffmpeg/ffprobe binaries (from Homebrew; nothing is bundled).
 
-const NOT_FOUND = 'ffmpeg hittades inte. Installera med: brew install ffmpeg'
+const NOT_FOUND = 'ffmpeg was not found. Install it with: brew install ffmpeg'
 /** Checked before PATH: an app started from Finder doesn't inherit the shell's Homebrew PATH. */
 const KNOWN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
 const MAX_STDERR = 16 * 1024
@@ -58,14 +58,14 @@ async function locate(): Promise<Binaries> {
   if (!ffmpeg) throw new Error(NOT_FOUND)
   // Prefer the ffprobe installed next to this ffmpeg so the two versions match.
   const ffprobe = await findIn([dirname(ffmpeg), ...dirs], 'ffprobe')
-  if (!ffprobe) throw new Error('ffprobe hittades inte (ingår i ffmpeg). Installera med: brew install ffmpeg')
+  if (!ffprobe) throw new Error('ffprobe was not found (it comes with ffmpeg). Install it with: brew install ffmpeg')
   let stdout: string
   try {
     ;({ stdout } = await run(ffmpeg, ['-hide_banner', '-version'], { timeoutMs: 10_000 }))
   } catch (err) {
-    throw new Error(`ffmpeg kunde inte startas: ${errorMessage(err)}`)
+    throw new Error(`ffmpeg could not be started: ${errorMessage(err)}`)
   }
-  const version = /ffmpeg version (\S+)/.exec(stdout)?.[1] ?? 'okänd'
+  const version = /ffmpeg version (\S+)/.exec(stdout)?.[1] ?? 'unknown'
   return { ffmpeg, ffprobe, version }
 }
 
@@ -168,7 +168,7 @@ export function removeLeftoverPartialFiles(dirs: string[]): void {
 }
 
 function abortError(): Error {
-  const err = new Error('Avbrutet.')
+  const err = new Error('Cancelled.')
   err.name = 'AbortError'
   return err
 }
@@ -272,15 +272,15 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
         located = undefined
         finish(new Error(NOT_FOUND))
       } else {
-        finish(new Error(`${name} kunde inte startas: ${err.message}`))
+        finish(new Error(`${name} could not be started: ${err.message}`))
       }
     })
     child.on('close', (code, signal) => {
       if (aborted) return finish(abortError())
-      if (timedOut) return finish(new Error(`${name} svarade inte inom ${Math.round(opts.timeoutMs! / 1000)} s.`))
-      if (tooMuchOutput) return finish(new Error(`${name} gav mer data än väntat.`))
+      if (timedOut) return finish(new Error(`${name} did not answer within ${Math.round(opts.timeoutMs! / 1000)} s.`))
+      if (tooMuchOutput) return finish(new Error(`${name} gave more data than expected.`))
       if (code === 0) return finish()
-      finish(new Error(stderrTail(stderr) || `${name} avslutades oväntat (${code ?? signal}).`))
+      finish(new Error(stderrTail(stderr) || `${name} ended unexpectedly (${code ?? signal}).`))
     })
   })
 }
@@ -344,7 +344,7 @@ function positive(value: string | undefined): number | undefined {
 
 /**
  * ffprobe's streams and format, plus what it logged at `loglevel`; failures become "<failure>: <why>" (e.g.
- * "Kunde inte läsa videofilen: …").
+ * "Could not read the video file: …").
  */
 async function ffprobeJson(
   path: string,
@@ -365,7 +365,7 @@ async function ffprobeJson(
   try {
     return { info: JSON.parse(result.stdout) as FfprobeOutput, log: result.stderr }
   } catch {
-    throw new Error(`${failure}: oväntat svar från ffprobe.`)
+    throw new Error(`${failure}: unexpected answer from ffprobe.`)
   }
 }
 
@@ -378,10 +378,10 @@ function rotationOf(video: FfprobeStream): number {
 function probeResultOf(info: FfprobeOutput): ProbeResult & { video: FfprobeStream } {
   const streams = info.streams ?? []
   const video = streams.find((s) => s.codec_type === 'video' && !s.disposition?.attached_pic)
-  if (!video || !video.width || !video.height) throw new Error('Filen innehåller inget videospår.')
+  if (!video || !video.width || !video.height) throw new Error('The file has no video track.')
 
   const duration = positive(video.duration) ?? positive(info.format?.duration)
-  if (duration === undefined) throw new Error('Kunde inte avgöra videons längd.')
+  if (duration === undefined) throw new Error("Could not tell the video's length.")
 
   const sideways = Math.abs(Math.round(rotationOf(video) / 90)) % 2 === 1
   const audio = streams.find((s) => s.codec_type === 'audio')
@@ -397,7 +397,7 @@ function probeResultOf(info: FfprobeOutput): ProbeResult & { video: FfprobeStrea
 }
 
 export async function probe(path: string): Promise<ProbeResult> {
-  const { info } = await ffprobeJson(path, 'Kunde inte läsa videofilen')
+  const { info } = await ffprobeJson(path, 'Could not read the video file')
   const { video: _video, ...result } = probeResultOf(info)
   return result
 }
@@ -484,7 +484,7 @@ export async function extractFrame(videoPath: string, outPath: string, atSeconds
     // Past the end of the video: the last frame there is.
     if (!ok) ok = await lastFrame()
   }
-  if (!ok) throw new Error('Kunde inte ta ut en bildruta ur videon.')
+  if (!ok) throw new Error('Could not take a frame from the video.')
   return outPath
 }
 
@@ -529,7 +529,7 @@ export async function stillToPng(path: string): Promise<Buffer> {
     ],
     { timeoutMs: IMAGE_TIMEOUT_MS, binaryStdout: { maxBytes: MAX_STILL_PNG_BYTES } }
   )
-  if (!bytes?.length) throw new Error('Kunde inte läsa bilden.')
+  if (!bytes?.length) throw new Error('Could not read the image.')
   return bytes
 }
 
@@ -557,7 +557,7 @@ export async function extractFrameAtOrAfter(videoPath: string, outPath: string, 
     // Nothing from there on (past the last frame): the last frame is the one showing then.
     if (!ok) ok = await writeImage(videoPath, outPath, ['-sseof', '-3'], ['-update', '1', '-q:v', '1'])
   }
-  if (!ok) throw new Error('Kunde inte ta ut en bildruta ur videon.')
+  if (!ok) throw new Error('Could not take a frame from the video.')
   return outPath
 }
 
@@ -573,7 +573,7 @@ export async function extractThumbnail(videoPath: string, outPath: string): Prom
   let ok = await writeImage(videoPath, outPath, ['-ss', secs(at)], output).catch(() => false)
   // Seeking can miss on odd files; the first frame beats no poster.
   if (!ok) ok = await writeImage(videoPath, outPath, [], output)
-  if (!ok) throw new Error('Kunde inte skapa en miniatyrbild.')
+  if (!ok) throw new Error('Could not create a thumbnail.')
   return outPath
 }
 
@@ -660,12 +660,12 @@ export async function concatClips(
   outPath: string,
   opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal; height?: number } = {}
 ): Promise<void> {
-  if (!clips.length) throw new Error('Det finns inga klipp att exportera.')
+  if (!clips.length) throw new Error('There are no clips to export.')
   const { ffmpeg } = await binaries()
   const probes = await Promise.all(
     clips.map((clip, i) =>
       probe(clip.path).catch((err: unknown) => {
-        throw new Error(`Klipp ${i + 1}: ${errorMessage(err)}`)
+        throw new Error(`Clip ${i + 1}: ${errorMessage(err)}`)
       })
     )
   )
@@ -684,7 +684,7 @@ export async function concatClips(
     const p = probes[i]
     const start = clamp(clip.start, 0, p.duration)
     const end = clamp(clip.end, start, p.duration)
-    if (end - start < MIN_CLIP_SECONDS) throw new Error(`Klipp ${i + 1} blir för kort efter trimningen.`)
+    if (end - start < MIN_CLIP_SECONDS) throw new Error(`Clip ${i + 1} is too short after trimming.`)
     // The sound covers exactly the frames the picture keeps (see frameSpan).
     const span = frameSpan(start, end, p.fps > 0 ? p.fps : fps, p.duration)
     total += span.length
@@ -700,7 +700,7 @@ export async function concatClips(
     graph.push(
       p.hasAudio
         ? `[${i}:a:0]atrim=start=${secs(span.start)}:end=${secs(span.end)},asetpts=PTS-STARTPTS,aresample=48000,` +
-            // Mono at full level on both sides (ffmpeg's own upmix lowers it 3 dB), as Redigera plays it.
+            // Mono at full level on both sides (ffmpeg's own upmix lowers it 3 dB), as the Editor plays it.
             `${p.audioChannels === 1 ? 'pan=stereo|c0=c0|c1=c0,' : ''}` +
             `aformat=sample_fmts=fltp:channel_layouts=stereo,apad=whole_dur=${secs(span.length)}[a${i}]`
         : `anullsrc=r=48000:cl=stereo,atrim=duration=${secs(span.length)},` +
@@ -730,19 +730,19 @@ export async function concatClips(
   partialFiles.add(tmp)
   try {
     await run(ffmpeg, args, { signal: opts.signal, onStdout })
-    if (!(await nonEmpty(tmp))) throw new Error('ffmpeg skrev ingen fil.')
+    if (!(await nonEmpty(tmp))) throw new Error('ffmpeg wrote no file.')
     await rename(tmp, out)
   } catch (err) {
     await rm(tmp, { force: true })
     if (isAbortError(err)) throw abortedExport()
-    throw new Error(`Exporten misslyckades: ${errorMessage(err)}`)
+    throw new Error(`Export failed: ${errorMessage(err)}`)
   } finally {
     partialFiles.delete(tmp)
   }
 }
 
 function abortedExport(): Error {
-  const err = new Error('Exporten avbröts.')
+  const err = new Error('The export was cancelled.')
   err.name = 'AbortError'
   return err
 }
@@ -757,14 +757,14 @@ const MIN_AUDIO_SECONDS = 0.05
 /** The longest stretch of a video's sound extractAudioPreview returns (base64 in an MCP reply grows fast). */
 export const MAX_AUDIO_PREVIEW_SECONDS = 300
 
-const NO_AUDIO = 'Filen innehåller inget ljud.'
+const NO_AUDIO = 'The file has no sound.'
 
 /** A failure as the user should read it: "no audio" and "ffmpeg is missing" as they are, the rest prefixed. */
 function audioFailure(err: unknown, prefix: string): Error {
   const message = errorMessage(err)
   // "Stream map '' matches no streams" may fall outside the stderr tail; the line after it names the map.
   if (/matches no streams|value '0:a:0' for option 'map'/i.test(message)) return new Error(NO_AUDIO)
-  if (message === NOT_FOUND || message.startsWith('ffprobe hittades inte')) return new Error(message)
+  if (message === NOT_FOUND || message.startsWith('ffprobe was not found')) return new Error(message)
   return new Error(`${prefix}: ${message}`)
 }
 
@@ -801,15 +801,15 @@ async function encodeMp3(path: string, start: number, length: number, bitrate: s
  */
 export async function encodeAudioClip(path: string, start: number, length: number): Promise<Buffer> {
   if (!Number.isFinite(start) || !Number.isFinite(length) || length < MIN_AUDIO_SECONDS) {
-    throw new Error('Ogiltigt ljudutdrag: start och längd måste vara sekunder.')
+    throw new Error('Invalid audio excerpt: start and length must be seconds.')
   }
   let mp3: Buffer
   try {
     mp3 = await encodeMp3(path, Math.max(0, start), length, '128k')
   } catch (err) {
-    throw audioFailure(err, 'Kunde inte förbereda ljudklippet')
+    throw audioFailure(err, 'Could not prepare the audio clip')
   }
-  if (!mp3.length) throw new Error('Ljudutdraget är tomt: det börjar efter ljudfilens slut.')
+  if (!mp3.length) throw new Error("The audio excerpt is empty: it starts after the audio file's end.")
   return mp3
 }
 
@@ -847,13 +847,13 @@ async function decodedAudioDuration(path: string): Promise<number | undefined> {
  * VBR MP3 without a Xing header: off by a factor of two or ten), the audio is decoded to measure it.
  */
 export async function probeAudio(path: string): Promise<{ duration: number }> {
-  const { info, log } = await ffprobeJson(path, 'Kunde inte läsa ljudfilen', 'warning')
+  const { info, log } = await ffprobeJson(path, 'Could not read the audio file', 'warning')
   const audio = info.streams?.find((s) => s.codec_type === 'audio')
   if (!audio) throw new Error(NO_AUDIO)
   const guessed = /Estimating duration from bitrate/i.test(log)
   const stated = guessed ? undefined : (positive(audio.duration) ?? positive(info.format?.duration))
   const duration = stated ?? (await decodedAudioDuration(path)) ?? positive(info.format?.duration)
-  if (duration === undefined) throw new Error('Kunde inte avgöra hur långt ljudet är.')
+  if (duration === undefined) throw new Error('Could not tell how long the audio is.')
   return { duration }
 }
 
@@ -864,7 +864,7 @@ export async function probeAudio(path: string): Promise<{ duration: number }> {
  */
 export async function extractAudioPreview(videoPath: string, start: number, length: number): Promise<Buffer | null> {
   if (!Number.isFinite(start) || !Number.isFinite(length) || length <= 0) {
-    throw new Error('Ogiltigt ljudutdrag: start och längd måste vara sekunder.')
+    throw new Error('Invalid audio excerpt: start and length must be seconds.')
   }
   const info = await probe(videoPath)
   if (!info.hasAudio) return null
@@ -875,7 +875,7 @@ export async function extractAudioPreview(videoPath: string, start: number, leng
   try {
     mp3 = await encodeMp3(videoPath, from, span, '96k')
   } catch (err) {
-    const failure = audioFailure(err, 'Kunde inte ta ut ljudet ur videon')
+    const failure = audioFailure(err, 'Could not take the audio from the video')
     if (failure.message === NO_AUDIO) return null
     throw failure
   }
@@ -970,9 +970,9 @@ async function frameJpeg(
  */
 export async function extractFrames(videoPath: string, times: number[], width = 512): Promise<VideoFrame[]> {
   if (!Array.isArray(times) || !times.length) return []
-  if (times.length > MAX_FRAMES_PER_CALL) throw new Error(`Högst ${MAX_FRAMES_PER_CALL} bildrutor åt gången.`)
+  if (times.length > MAX_FRAMES_PER_CALL) throw new Error(`At most ${MAX_FRAMES_PER_CALL} frames at a time.`)
   if (times.some((t) => typeof t !== 'number' || !Number.isFinite(t))) {
-    throw new Error('Ogiltig tidpunkt för en bildruta: ange sekunder.')
+    throw new Error('Invalid time for a frame: give seconds.')
   }
   const w = typeof width === 'number' && Number.isFinite(width) ? Math.round(clamp(width, 16, 4096)) : 512
   // Quoted so the comma inside min() isn't read as a filter separator.
@@ -994,16 +994,16 @@ export async function extractFrames(videoPath: string, times: number[], width = 
     const jpeg = grabbed.get(time)
     return jpeg ? [{ time, jpeg }] : []
   })
-  if (!frames.length) throw new Error('Kunde inte ta ut några bildrutor ur videon.')
+  if (!frames.length) throw new Error('Could not take any frames from the video.')
   return frames
 }
 
-// ── Media for own clips and Redigera ─────────────────────────────────────────
+// ── Media for own clips and the Editor ───────────────────────────────────────
 // Everything below writes files rather than returning Buffers (a film's sound can be an hour long), takes an
 // AbortSignal, reports progress from `-progress` where the work is long, and has no fixed timeout: a long film just
 // takes longer. Outputs are written to a temp sibling and renamed into place, so nobody ever sees half a file.
 
-/** Every sound Redigera renders is 48 kHz: sample positions in mixes and chunk plans count at this rate. */
+/** Every sound the Editor renders is 48 kHz: sample positions in mixes and chunk plans count at this rate. */
 export const MIX_RATE = 48_000
 /**
  * The largest upload Studio sends the voice changer in one request. Venice publishes no size limit (a 413 is free,
@@ -1020,7 +1020,7 @@ const MIN_PROXY_BITS_PER_PIXEL = 0.05
 const samplesAt = (seconds: number, rate = MIX_RATE): number => Math.max(0, Math.round(seconds * rate))
 
 /** "22 MB", "300 kB": a size limit as the user reads it. */
-const sizeSv = (bytes: number): string =>
+const sizeLabel = (bytes: number): string =>
   bytes >= 1e6 ? `${Math.round(bytes / 1e6)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} kB`
 
 /** Marks frames as BT.709 limited range, so the encoder tags the stream so (it reads the frames' properties). */
@@ -1059,7 +1059,7 @@ async function ffmpegToFile(
   partialFiles.add(tmp)
   try {
     await run(ffmpeg, args(tmp), { signal: o.signal, onStdout: o.onStdout, onStderr: o.onStderr })
-    if (!(await nonEmpty(tmp))) throw new Error('ffmpeg skrev ingen fil.')
+    if (!(await nonEmpty(tmp))) throw new Error('ffmpeg wrote no file.')
     await rename(tmp, target)
   } catch (err) {
     if (isAbortError(err)) throw abortError()
@@ -1096,7 +1096,7 @@ export async function writeThroughTemp(out: string, write: (tmp: string) => Prom
   partialFiles.add(tmp)
   try {
     await write(tmp)
-    if (!(await nonEmpty(tmp))) throw new Error('Ingen fil skrevs.')
+    if (!(await nonEmpty(tmp))) throw new Error('No file was written.')
     await rename(tmp, target)
   } finally {
     await rm(tmp, { force: true })
@@ -1223,7 +1223,7 @@ function containerOf(path: string, info: FfprobeOutput): string {
     return /^qt/i.test(info.format?.tags?.major_brand?.trim() ?? '') || ext === '.mov' ? 'mov' : 'mp4'
   }
   if (names.includes('matroska') || names.includes('webm')) return ext === '.webm' ? 'webm' : 'matroska'
-  return names[0] ?? (ext.slice(1) || 'okänd')
+  return names[0] ?? (ext.slice(1) || 'unknown')
 }
 
 /** A frame rate as ffprobe states it, without probe()'s sanity cap (a VFR file can say 90000/1). */
@@ -1245,7 +1245,7 @@ async function mediaInfoOf(path: string, info: FfprobeOutput): Promise<MediaInfo
     if (s.codec_type !== 'audio') continue
     audioStreams.push({
       index: s.index ?? audioStreams.length,
-      codec: s.codec_name ?? s.codec_tag_string ?? 'okänd',
+      codec: s.codec_name ?? s.codec_tag_string ?? 'unknown',
       channels: s.channels ?? 0,
       rate: Number(s.sample_rate) || 0,
       decodable: await isDecodable(s.codec_name)
@@ -1264,7 +1264,7 @@ async function mediaInfoOf(path: string, info: FfprobeOutput): Promise<MediaInfo
   const bitrate = Number(info.format?.bit_rate)
   return {
     ...base,
-    codec: video.codec_name ?? 'okänd',
+    codec: video.codec_name ?? 'unknown',
     pixFmt: video.pix_fmt,
     bitDepth: bitDepthOf(video),
     hdr: transfer === 'arib-std-b67' ? 'hlg' : transfer === 'smpte2084' ? 'pq' : false,
@@ -1283,17 +1283,17 @@ async function mediaInfoOf(path: string, info: FfprobeOutput): Promise<MediaInfo
 /**
  * Everything import and the editor need to know about a video: probe()'s display size, length and frame rate, plus
  * codec, bit depth, HDR transfer, rotation, variable frame rate, container, size and the audio streams (with
- * whether this ffmpeg can decode each). Rejects in Swedish ("Filen innehåller inget videospår.").
+ * whether this ffmpeg can decode each). Rejects with "The file has no video track." when it has none.
  */
 export async function probeMedia(path: string): Promise<MediaInfo> {
-  const { info } = await ffprobeJson(path, 'Kunde inte läsa videofilen')
+  const { info } = await ffprobeJson(path, 'Could not read the video file')
   const { colorSpace: _colorSpace, ...media } = await mediaInfoOf(path, info)
   return media
 }
 
 /** The first audio stream of a file (video or audio) ffmpeg can decode, with its length; undefined when none. */
 async function audioInput(path: string): Promise<{ index: number; channels: number; duration?: number } | undefined> {
-  const { info, log } = await ffprobeJson(path, 'Kunde inte läsa ljudfilen', 'warning')
+  const { info, log } = await ffprobeJson(path, 'Could not read the audio file', 'warning')
   for (const s of info.streams ?? []) {
     if (s.codec_type !== 'audio' || !(await isDecodable(s.codec_name))) continue
     // An MP3 without a header (what a provider may send) only has a length guessed from its bitrate: decoded then.
@@ -1336,7 +1336,7 @@ export interface NormalizeOptions {
   maxFps?: number
   /** The audio stream to keep (MediaAudioStream.index); default the first one ffmpeg can decode. */
   audioStream?: number
-  /** Crop (centred) to this width/height ratio, for "Fyll bilden" in a sequence of another shape. */
+  /** Crop (centred) to this width/height ratio, for "Fill the frame (crop)" in a sequence of another shape. */
   crop?: { aspect: number }
   signal?: AbortSignal
   onProgress?: (fraction: number) => void
@@ -1359,7 +1359,7 @@ function workingFps(info: MediaInfo, maxFps: number): string {
  * fast for 4K HEVC); a source it can't decode falls back to software.
  */
 export async function normalizeVideo(input: string, out: string, o: NormalizeOptions): Promise<void> {
-  const { info: raw } = await ffprobeJson(input, 'Kunde inte läsa videofilen')
+  const { info: raw } = await ffprobeJson(input, 'Could not read the video file')
   const info = await mediaInfoOf(input, raw)
   const maxLongSide = o.maxLongSide && o.maxLongSide >= 16 ? o.maxLongSide : 1920
   const fps = workingFps(info, o.maxFps && o.maxFps > 0 ? o.maxFps : 30)
@@ -1406,7 +1406,7 @@ export async function normalizeVideo(input: string, out: string, o: NormalizeOpt
 
   if (o.hdr && !((await hasFilter('zscale')) && (await hasFilter('tonemap')))) {
     throw new Error(
-      'Den här ffmpeg-versionen kan inte göra om HDR-film till vanliga färger (zscale saknas). Installera ffmpeg med: brew install ffmpeg'
+      'This ffmpeg version cannot convert HDR video to standard colours (zscale is missing). Install ffmpeg with: brew install ffmpeg'
     )
   }
   const audio =
@@ -1426,7 +1426,7 @@ export async function normalizeVideo(input: string, out: string, o: NormalizeOpt
     ...(audio
       ? [
           '-af',
-          // Mono goes to both sides at full level (ffmpeg's own upmix would lower it 3 dB), as everywhere in Redigera.
+          // Mono goes to both sides at full level (ffmpeg's own upmix would lower it 3 dB), as everywhere in the Editor.
           [channelFilter(audio.channels, 2) ?? '', `aresample=48000${resampler}:first_pts=0`].filter(Boolean).join(','),
           '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2'
         ]
@@ -1436,7 +1436,7 @@ export async function normalizeVideo(input: string, out: string, o: NormalizeOpt
     '-progress', 'pipe:1', '-nostats',
     '-f', 'mp4', '-y', tmp
   ]
-  const failure = 'Arbetskopian kunde inte göras'
+  const failure = 'The working copy could not be made'
   // One reader for both attempts, so the progress shown never goes backwards.
   const onStdout = progressReader(info.duration, o.onProgress)
   try {
@@ -1454,7 +1454,7 @@ export async function normalizeVideo(input: string, out: string, o: NormalizeOpt
  * [start, end) of a film as an H.264 file small enough to send to Venice inside a JSON body: CRF 23, but capped to a
  * bitrate that keeps the file under `maxBytes`; its shorter side at most `maxHeight` (720 = "720p", also for a
  * portrait film); AAC 128k when `audio`; no metadata (an import without a working copy still has its GPS position,
- * which never leaves the machine); +faststart. Refuses (Swedish) when the stretch can't fit at a picture quality
+ * which never leaves the machine); +faststart. Refuses when the stretch can't fit at a picture quality
  * worth editing (0.05 bits per pixel and frame).
  */
 export async function makeProxy(
@@ -1466,7 +1466,7 @@ export async function makeProxy(
   const start = clamp(o.start, 0, info.duration)
   const end = clamp(o.end, start, info.duration)
   const length = end - start
-  if (length < MIN_CLIP_SECONDS) throw new Error('Avsnittet är för kort för att skickas till Venice.')
+  if (length < MIN_CLIP_SECONDS) throw new Error('The section is too short to send to Venice.')
   const short = Math.min(info.width, info.height)
   const scale = o.maxHeight > 0 && short > o.maxHeight ? o.maxHeight / short : 1
   const w = even(Math.round(info.width * scale))
@@ -1477,7 +1477,7 @@ export async function makeProxy(
   const budget = (o.maxBytes * 8 * 0.96) / length - audioBps
   const minimum = MIN_PROXY_BITS_PER_PIXEL * w * h * info.fps
   const tooBig = (): Error =>
-    new Error(`Avsnittet blir för stort för Venice (högst ~${sizeSv(o.maxBytes)}). Välj en kortare markering.`)
+    new Error(`The section gets too large for Venice (at most ~${sizeLabel(o.maxBytes)}). Select a shorter part.`)
   if (budget < minimum) throw tooBig()
 
   let rate = budget
@@ -1499,7 +1499,7 @@ export async function makeProxy(
         '-movflags', '+faststart',
         '-f', 'mp4', '-y', tmp
       ],
-      { failure: 'Underlaget till Venice kunde inte göras', signal: o.signal }
+      { failure: 'The input for Venice could not be made', signal: o.signal }
     )
     const bytes = (await stat(out)).size
     if (bytes <= o.maxBytes) {
@@ -1534,7 +1534,7 @@ export async function makeStandIn(out: string, o: { seconds: number; width: numb
       '-an', '-map_metadata', '-1', '-movflags', '+faststart',
       '-f', 'mp4', '-y', tmp
     ],
-    { failure: 'Kunde inte förbereda prisförfrågan' }
+    { failure: 'Could not prepare the price request' }
   )
 }
 
@@ -1592,8 +1592,8 @@ async function onTimeline(rate: number): Promise<string> {
 /**
  * The sound of a file (its first audio stream ffmpeg can decode, from a video or an audio file) as an audio file,
  * cut sample-exactly at `rate`: the decoded stream is resampled onto the film's time line from 0 and trimmed by
- * sample number, so a chunk cut from 41.3 s starts on sample round(41.3 · rate) of the whole. Rejects with "Filen
- * innehåller inget ljud." when there is none.
+ * sample number, so a chunk cut from 41.3 s starts on sample round(41.3 · rate) of the whole. Rejects with "The file
+ * has no sound." when there is none.
  */
 export async function extractAudio(input: string, out: string, o: ExtractAudioOptions = {}): Promise<void> {
   const source = await requireAudio(input)
@@ -1603,7 +1603,7 @@ export async function extractAudio(input: string, out: string, o: ExtractAudioOp
   if (hasRange) {
     const from = samplesAt(o.start ?? 0, rate)
     const to = o.end !== undefined ? samplesAt(o.end, rate) : undefined
-    if (to !== undefined && to <= from) throw new Error('Ogiltigt ljudutdrag: slutet ligger före början.')
+    if (to !== undefined && to <= from) throw new Error('Invalid audio excerpt: the end is before the start.')
     filters.push(`atrim=start_sample=${from}${to !== undefined ? `:end_sample=${to}` : ''}`, 'asetpts=PTS-STARTPTS')
   }
   const channels = o.channels ?? (source.channels > 2 || source.channels === 0 ? 2 : (source.channels as 1 | 2))
@@ -1623,7 +1623,7 @@ export async function extractAudio(input: string, out: string, o: ExtractAudioOp
       '-progress', 'pipe:1', '-nostats',
       '-y', tmp
     ],
-    { failure: 'Ljudet kunde inte tas ut', signal: o.signal, onStdout: progressReader(total, o.onProgress) }
+    { failure: 'The audio could not be extracted', signal: o.signal, onStdout: progressReader(total, o.onProgress) }
   )
 }
 
@@ -1642,7 +1642,7 @@ function uploadFormats(formats: readonly string[]): { wav: boolean; mp3: boolean
  * [start, end) of a file's sound as an upload Venice accepts (the voice changer's accepted_audio_formats), written to
  * `out` whatever its extension: mono 48 kHz 16-bit WAV when WAV is accepted and fits `maxBytes` (lossless, and exact
  * to the sample), else MP3 at 192 kb/s, else AAC (128 kb/s, in .m4a when 'mp4' is accepted, else ADTS for 'aac').
- * Rejects (Swedish) when no accepted format fits. The format decides the file name Venice gets.
+ * Rejects when no accepted format fits. The format decides the file name Venice gets.
  */
 export async function encodeUpload(
   input: string,
@@ -1651,10 +1651,10 @@ export async function encodeUpload(
 ): Promise<{ format: 'wav' | 'mp3' | 'm4a' | 'aac'; bytes: number }> {
   const allowed = uploadFormats(o.formats)
   if (!allowed.wav && !allowed.mp3 && !allowed.m4a && !allowed.aac) {
-    throw new Error('Modellen tar inte emot något ljudformat som Studio kan skicka (wav, mp3 eller m4a).')
+    throw new Error('The model accepts no audio format Studio can send (wav, mp3 or m4a).')
   }
   const samples = samplesAt(o.end) - samplesAt(o.start)
-  if (samples <= 0) throw new Error('Ogiltigt ljudutdrag: slutet ligger före början.')
+  if (samples <= 0) throw new Error('Invalid audio excerpt: the end is before the start.')
   const seconds = samples / MIX_RATE
   const source = await requireAudio(input)
   const filters = [
@@ -1681,7 +1681,7 @@ export async function encodeUpload(
         '-map_metadata', '-1', '-map_chapters', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact',
         '-y', tmp
       ],
-      { failure: 'Ljudet kunde inte förberedas för Venice', signal: o.signal }
+      { failure: 'The audio could not be prepared for Venice', signal: o.signal }
     )
     return (await stat(out)).size
   }
@@ -1700,7 +1700,7 @@ export async function encodeUpload(
     if (bytes <= o.maxBytes) return { format, bytes }
   }
   await rm(out, { force: true })
-  throw new Error(`Ljudet är för stort för Venice (högst ~${sizeSv(o.maxBytes)} per del). Välj en kortare del.`)
+  throw new Error(`The audio is too large for Venice (at most ~${sizeLabel(o.maxBytes)} per part). Select a shorter part.`)
 }
 
 // ── Analysing sound ──────────────────────────────────────────────────────────
@@ -1722,7 +1722,7 @@ function lineReader(onLine: (line: string) => void): (chunk: string) => void {
 /**
  * The silent stretches of a file's sound (silencedetect on its mono mix): quieter than `noiseDb` for at least
  * `minSeconds`, in seconds. Run on an isolated voice stem it finds the pauses between lines (on a mix, music hides
- * them). Rejects with "Filen innehåller inget ljud." when there is none.
+ * them). Rejects with "The file has no sound." when there is none.
  */
 export async function silences(
   path: string,
@@ -1756,7 +1756,7 @@ export async function silences(
       { signal: o.signal, onStderr }
     )
   } catch (err) {
-    throw audioFailure(err, 'Pauserna i ljudet kunde inte hittas')
+    throw audioFailure(err, 'The pauses in the audio could not be found')
   }
   // A silence running to the end of the file has no end line.
   if (open !== undefined) found.push({ start: open, end: Math.max(open, source.duration ?? open) })
@@ -1782,14 +1782,14 @@ export async function loudness(path: string, range?: EditRange): Promise<{ lufs:
       '-f', 'null', '-'
     ]))
   } catch (err) {
-    throw audioFailure(err, 'Ljudnivån kunde inte mätas')
+    throw audioFailure(err, 'The loudness could not be measured')
   }
   return parseLoudnorm(stderr)
 }
 
 function parseLoudnorm(stderr: string): { lufs: number; truePeak: number } {
   const json = /\{[^{}]*"input_i"[^{}]*\}/.exec(stderr)?.[0]
-  if (!json) throw new Error('Ljudnivån kunde inte mätas: ffmpeg gav inget mätvärde.')
+  if (!json) throw new Error('The loudness could not be measured: ffmpeg gave no reading.')
   const values = JSON.parse(json) as { input_i?: string; input_tp?: string }
   const num = (v: string | undefined): number => {
     const n = Number(v)
@@ -1803,7 +1803,7 @@ function parseLoudnorm(stderr: string): { lufs: number; truePeak: number } {
  * speech), or atempo when this ffmpeg lacks it. The result is 1/tempo as long; the format follows `out`'s name.
  */
 export async function timeStretch(input: string, out: string, tempo: number): Promise<void> {
-  if (!Number.isFinite(tempo) || tempo <= 0) throw new Error('Ogiltigt tempo.')
+  if (!Number.isFinite(tempo) || tempo <= 0) throw new Error('Invalid tempo.')
   const source = await requireAudio(input)
   let stretch: string
   if (Math.abs(tempo - 1) < 1e-4) stretch = 'anull'
@@ -1829,7 +1829,7 @@ export async function timeStretch(input: string, out: string, tempo: number): Pr
       ...audioOutputArgs(codecFor(out), undefined),
       '-map_metadata', '-1', '-y', tmp
     ],
-    { failure: 'Repliken kunde inte anpassas till tiden' }
+    { failure: 'The line could not be fitted to the time' }
   )
 }
 
@@ -1964,7 +1964,7 @@ async function noiseFloorDb(path: string, o: { signal?: AbortSignal } = {}): Pro
       { signal: o.signal, onStdoutData }
     )
   } catch (err) {
-    throw audioFailure(err, 'Bruset i ljudet kunde inte mätas')
+    throw audioFailure(err, 'The noise in the audio could not be measured')
   }
   if (!levels.length) return -50
   levels.sort((a, b) => a - b)
@@ -1988,7 +1988,7 @@ const DUCK = 'sidechaincompress=threshold=0.03:ratio=6:attack=15:release=350'
  *   starting exactly on sample round(at · 48000).
  * - Ducking: a speech, voice, effect or audio layer with `duck` lowers the bed under it (the new line is heard over
  *   the film); a music layer with `duck` is itself lowered under the speech — the voice stem (or the bed when there
- *   are no stems) and every speech/voice layer ("Sänk under tal"). Sidechain compression, threshold 0.03, ratio 6,
+ *   are no stems) and every speech/voice layer ("Duck under speech"). Sidechain compression, threshold 0.03, ratio 6,
  *   attack 15 ms, release 350 ms.
  * - Everything is summed without normalisation (amix normalize=0), faded in/out, and with `loudness` brought to that
  *   integrated loudness by one linear gain measured in a first pass (what loudnorm's linear mode does, without its
@@ -2000,7 +2000,7 @@ export async function renderMix(
   out: string,
   o: { signal?: AbortSignal; onProgress?: (fraction: number) => void } = {}
 ): Promise<void> {
-  if (!Number.isFinite(mix.duration) || mix.duration <= 0) throw new Error('Ljudet har ingen längd att mixa.')
+  if (!Number.isFinite(mix.duration) || mix.duration <= 0) throw new Error('The audio has no length to mix.')
   const total = samplesAt(mix.duration)
   // The bed and sidechains run past the end: sidechaincompress ends with its shorter input, at a frame boundary.
   const padded = total + MIX_RATE
@@ -2184,7 +2184,7 @@ export async function renderMix(
         '-progress', 'pipe:1', '-nostats',
         '-y', tmp
       ],
-      { failure: 'Ljudet kunde inte mixas', signal: o.signal, onStdout: progressReader(mix.duration, o.onProgress, (f) => f * share) }
+      { failure: 'The audio could not be mixed', signal: o.signal, onStdout: progressReader(mix.duration, o.onProgress, (f) => f * share) }
     )
     if (!normalize) return
 
@@ -2212,7 +2212,7 @@ export async function renderMix(
           '-progress', 'pipe:1', '-nostats',
           '-y', tmp
         ],
-        { failure: 'Ljudnivån kunde inte jämnas ut', signal: o.signal, onStdout: progressReader(mix.duration, o.onProgress, (f) => from + f * (to - from)) }
+        { failure: 'The loudness could not be evened out', signal: o.signal, onStdout: progressReader(mix.duration, o.onProgress, (f) => from + f * (to - from)) }
       )
     await apply(gain, share, limit ? 0.9 : 1)
     // Limiting takes some loudness away (more the spikier the sound): measured again and made up for, at most twice.
@@ -2268,7 +2268,7 @@ export async function assembleAt(
       '-map_metadata', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact',
       '-y', tmp
     ],
-    { failure: 'Rösten kunde inte sättas ihop', signal: o.signal }
+    { failure: 'The voice could not be put together', signal: o.signal }
   )
 }
 
@@ -2307,7 +2307,7 @@ export async function replaceAudioTrack(
       '-movflags', '+faststart',
       '-f', 'mp4', '-y', tmp
     ],
-    { failure: 'Ljudet kunde inte läggas på videon', signal: o.signal }
+    { failure: 'The audio could not be put on the video', signal: o.signal }
   )
 }
 
@@ -2337,7 +2337,7 @@ export async function spliceVideo(o: {
   signal?: AbortSignal
   onProgress?: (fraction: number) => void
 }): Promise<void> {
-  if (!o.parts.length) throw new Error('Det finns ingen bild att sätta ihop.')
+  if (!o.parts.length) throw new Error('There is no picture to put together.')
   const fpsText = rationalFps(o.fps)
   const fps = rationalValue(fpsText)
   const w = even(o.width)
@@ -2398,7 +2398,7 @@ export async function spliceVideo(o: {
       '-f', 'mp4', '-y', tmp
     ],
     {
-      failure: 'Bilden kunde inte klippas ihop',
+      failure: 'The picture could not be cut together',
       signal: o.signal,
       onStdout: progressReader(frames / fps, o.onProgress)
     }
@@ -2462,7 +2462,7 @@ export async function waveform(
       { signal: o.signal, onStdoutData }
     )
   } catch (err) {
-    throw audioFailure(err, 'Ljudets vågform kunde inte läsas')
+    throw audioFailure(err, "The audio's waveform could not be read")
   }
   if (inBlock > 0) blocks.push(blockPeak / 32768)
   const peaks = new Array<number>(n).fill(0)
@@ -2519,7 +2519,7 @@ export async function filmstrip(path: string, outDir: string, count: number): Pr
 
 /**
  * Where the picture cuts (scene changes found by scdet, `threshold` 0–100, default 10), in seconds: the first frame
- * of each new shot. For films without recorded cut markers, so Klippgränser still show where a sequence was joined.
+ * of each new shot. For films without recorded cut markers, so cut markers still show where a sequence was joined.
  */
 export async function sceneCuts(path: string, threshold = 10, o: { signal?: AbortSignal } = {}): Promise<number[]> {
   const { ffmpeg } = await binaries()
@@ -2544,7 +2544,7 @@ export async function sceneCuts(path: string, threshold = 10, o: { signal?: Abor
     )
   } catch (err) {
     if (isAbortError(err)) throw err
-    throw new Error(`Klippen i filmen kunde inte hittas: ${errorMessage(err)}`)
+    throw new Error(`The cuts in the film could not be found: ${errorMessage(err)}`)
   }
   return [...new Set(cuts.filter((c) => Number.isFinite(c) && c > 0).map((c) => Math.round(c * 1000) / 1000))].sort((a, b) => a - b)
 }
@@ -2554,7 +2554,7 @@ export async function sceneCuts(path: string, threshold = 10, o: { signal?: Abor
 /**
  * A file's sound (first decodable audio stream) decoded to mono 32-bit float samples at `rate` (default 48 kHz),
  * from its first sample: what a decoder gives, without moving it onto a time line. At most `maxSeconds` (default
- * 15 min) is decoded, so a mistake can't fill memory. Rejects with "Filen innehåller inget ljud." without sound.
+ * 15 min) is decoded, so a mistake can't fill memory. Rejects with "The file has no sound." without sound.
  */
 export async function decodeSamples(
   path: string,
@@ -2579,7 +2579,7 @@ export async function decodeSamples(
       { signal: o.signal, binaryStdout: { maxBytes: Math.ceil(maxSeconds * rate * 4) + 1024 * 1024 } }
     ))
   } catch (err) {
-    throw audioFailure(err, 'Ljudet kunde inte läsas')
+    throw audioFailure(err, 'The audio could not be read')
   }
   const data = bytes ?? Buffer.alloc(0)
   // A copy on its own aligned buffer: Buffer pools may start at an offset that isn't a multiple of 4.
@@ -2610,7 +2610,7 @@ export async function filterAudio(
       '-map_metadata', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact',
       '-y', tmp
     ],
-    { failure: o.failure ?? 'Ljudet kunde inte bearbetas', signal: o.signal }
+    { failure: o.failure ?? 'The audio could not be processed', signal: o.signal }
   )
 }
 

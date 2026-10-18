@@ -27,7 +27,7 @@ const BASE64 = /^[A-Za-z0-9+/\s]*={0,2}\s*$/
 /** The bytes of data_base64 (a data: URL prefix is allowed); throws when it isn't base64. */
 function decodeBase64(text: string): Buffer {
   const body = text.replace(/^data:[^,]*;base64,/i, '')
-  if (!BASE64.test(body)) throw new Error('data_base64 är inte giltig base64.')
+  if (!BASE64.test(body)) throw new Error('data_base64 is not valid base64.')
   return Buffer.from(body.replace(/\s+/g, ''), 'base64')
 }
 
@@ -112,18 +112,18 @@ export function registerUploadTools(server: McpServer, ctx: ToolContext): void {
       },
       annotations: WRITE,
       summary: ({ file_name, url }) => {
-        if (!url) return `laddade upp ${q(file_name)}`
+        if (!url) return `uploaded ${q(file_name)}`
         try {
-          return `hämtar ${q(file_name)} från ${new URL(url).hostname}`
+          return `is fetching ${q(file_name)} from ${new URL(url).hostname}`
         } catch {
-          return `hämtar ${q(file_name)}`
+          return `is fetching ${q(file_name)}`
         }
       }
     },
     async ({ kind, file_name, url, data_base64, bytes, sha256 }) => {
       requireLibrary()
       const given = [url !== undefined, data_base64 !== undefined, bytes !== undefined].filter(Boolean).length
-      if (given !== 1) throw new Error('Ange exakt en av url, bytes eller data_base64.')
+      if (given !== 1) throw new Error('Give exactly one of url, bytes or data_base64.')
       const fileName = file_name.trim()
       if (url !== undefined) {
         const begun = await beginUrlUpload(ctx, kind as UploadKind, url, fileName)
@@ -133,7 +133,7 @@ export function registerUploadTools(server: McpServer, ctx: ToolContext): void {
         if (settled.status === 'failed') {
           // Nothing usable was made; the failed upload goes, and the agent gets the reason as the tool's error.
           ctx.uploads.discard(settled.id)
-          throw new Error(settled.error ?? 'Hämtningen misslyckades.')
+          throw new Error(settled.error ?? 'The download failed.')
         }
         return {
           data: {
@@ -146,8 +146,8 @@ export function registerUploadTools(server: McpServer, ctx: ToolContext): void {
           },
           summary:
             settled.status === 'ready'
-              ? `hämtade ${KIND_WORDS[settled.kind].one} från ${settled.host ?? 'webben'} (${q(fileName)})`
-              : `hämtar ${q(fileName)} från ${settled.host ?? 'webben'}`
+              ? `fetched ${KIND_WORDS[settled.kind].one} from ${settled.host ?? 'the web'} (${q(fileName)})`
+              : `is fetching ${q(fileName)} from ${settled.host ?? 'the web'}`
         }
       }
       if (data_base64 !== undefined) {
@@ -160,7 +160,7 @@ export function registerUploadTools(server: McpServer, ctx: ToolContext): void {
           source: { data },
           sha256
         })
-        return { data: uploadInfo(entry), summary: `laddade upp ${q(fileName)}` }
+        return { data: uploadInfo(entry), summary: `uploaded ${q(fileName)}` }
       }
       const entry = await ctx.uploads.begin({
         client: ctx.clientName(),
@@ -179,7 +179,7 @@ export function registerUploadTools(server: McpServer, ctx: ToolContext): void {
           put_path: path,
           put_hint: PUT_HINT
         },
-        summary: `började ta emot ${q(fileName)}`
+        summary: `started sending ${q(fileName)}`
       }
     }
   )
@@ -197,7 +197,7 @@ export function registerUploadTools(server: McpServer, ctx: ToolContext): void {
         include_preview: z.boolean().default(true)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'tittade på en uppladdning'
+      summary: () => 'looked at an upload'
     },
     async ({ upload_id, include_preview }) => {
       const entry = ctx.uploads.require(upload_id)
@@ -205,7 +205,7 @@ export function registerUploadTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: uploadInfo(entry),
         images: image ? [image] : [],
-        summary: `tittade på uppladdningen ${q(entry.fileName)} (${entry.status})`
+        summary: `looked at the upload ${q(entry.fileName)} (${entry.status})`
       }
     }
   )
@@ -220,14 +220,14 @@ export function registerUploadTools(server: McpServer, ctx: ToolContext): void {
         'Throws an upload away now (a transfer in progress stops). Only the uploaded scratch file goes: photos, sound clips, stills or own clips already made from it stay in the library. Do it for large video uploads once import_own_clips is done.',
       input: { upload_id: z.string() },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'slängde en uppladdning'
+      summary: () => 'discarded an upload'
     },
     async ({ upload_id }) => {
       const entry = ctx.uploads.get(upload_id)
       ctx.uploads.discard(upload_id)
       return {
         data: { upload_id, discarded: true },
-        summary: entry ? `slängde uppladdningen ${q(entry.fileName)}` : 'slängde en uppladdning'
+        summary: entry ? `discarded the upload ${q(entry.fileName)}` : 'discarded an upload'
       }
     }
   )

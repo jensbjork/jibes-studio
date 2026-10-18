@@ -52,7 +52,7 @@ function descriptionContext(params: GenerationParams, assets: AssetIndex): strin
       : ''
   }
   if (!includesDescriptions(params)) {
-    return '\nThe descriptions of the references are switched off here ("Ta med beskrivningar" is off), so nothing is appended: say in the prompt what matters about their looks.'
+    return '\nThe descriptions of the references are switched off here ("Include descriptions" is off), so nothing is appended: say in the prompt what matters about their looks.'
   }
   const off = new Set(params.excludedDescriptionAssetIds ?? [])
   const lines = all.map((e) => {
@@ -96,7 +96,7 @@ async function transitionContext(transitionId: string): Promise<string> {
   const board = (number: number, role: string): string => {
     const b = storyboard.boards[number - 1]
     if (!b) return `${role}: a board that can't be found.`
-    const note = b.note.trim() ? `, whose note ("Vad visar bilden?") says:\n"""${b.note.trim()}"""` : ' (no note).'
+    const note = b.note.trim() ? `, whose note ("What does the image show?") says:\n"""${b.note.trim()}"""` : ' (no note).'
     const picture = b.imagePath ? '' : '\nIt has no picture yet: it needs one before the transition can be generated.'
     return `${role}: board ${number}${note}${picture}`
   }
@@ -122,7 +122,7 @@ async function promptContext(ctx: ToolContext, segmentId: string | undefined, tr
       const generated = asGenerated(segment.params, continuing, ending)
       const head = `You are writing the prompt for clip ${index + 1} of the sequence "${sequence.name}" (segment_id ${segment.id}), ${generated.duration}, model ${generated.model}.`
       const notes = segment.notes?.trim()
-        ? `\nThe clip's notes ("Vad händer"):\n"""${segment.notes.trim()}"""`
+        ? `\nThe clip's notes ("What happens"):\n"""${segment.notes.trim()}"""`
         : ''
       // A continuation in reference mode is written with the references it carries; the frame goes after them.
       const plan = continuing ? continuationOf(sequence, index) : undefined
@@ -200,7 +200,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       const context = await promptContext(ctx, segment_id, transition_id)
       const task = idea?.trim()
         ? `Write the video prompt for this idea: ${idea.trim()}`
-        : 'Ask the user (in Swedish) what should happen in the clip, then write the video prompt.'
+        : 'Ask the user what should happen in the clip, then write the video prompt.'
       const text = [
         promptWritingGuide(ctx.promptLanguage()),
         '## Context',

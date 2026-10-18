@@ -14,7 +14,7 @@ import { usePrompts } from '../../lib/hooks'
 import BlockMenu, { blockOptionId } from './BlockMenu'
 import { blockChips, blockInsertion, blockSections, slashQueryAt, useLearnings, type BlockItem } from './blocks'
 
-/** The chip that opens every group at once ("Fler…"). */
+/** The chip that opens every group at once ("More…"). */
 export const ALL = 'all'
 
 interface Options {

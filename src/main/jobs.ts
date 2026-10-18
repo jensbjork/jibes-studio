@@ -134,7 +134,7 @@ export function composeSubmission(
 }
 
 /**
- * Refuses (Swedish) a prompt that can't be sent as composed. The legend's tokens are valid by construction and
+ * Refuses a prompt that can't be sent as composed. The legend's tokens are valid by construction and
  * its texts carry no "@", so this only says again what the user's prompt said; it runs anyway, on exactly the
  * text Venice gets, so nothing that would spoil a paid generation can slip in with a description.
  */
@@ -144,7 +144,7 @@ function checkComposed(params: GenerationParams, composed: Pick<ComposedPrompt, 
   if (problem) throw new Error(problem)
 }
 
-/** The params with their "bärs av" choices as stored (sanitizeOutfitWearers): kept with the generation for "Använd igen". */
+/** The params with their "worn by" choices as stored (sanitizeOutfitWearers): kept with the generation for "Use again". */
 function withCleanWearers(params: GenerationParams): GenerationParams {
   const { outfitWearers, ...rest } = params
   const wearers = sanitizeOutfitWearers(outfitWearers)
@@ -152,7 +152,7 @@ function withCleanWearers(params: GenerationParams): GenerationParams {
 }
 
 /**
- * The params exactly as a paid submission sends them, or a Swedish refusal: the prompt's @ImageN and @AudioN
+ * The params exactly as a paid submission sends them, or a refusal: the prompt's @ImageN and @AudioN
  * references are checked against what the caller has (so a token past the model's limit is reported as such),
  * tokens are canonicalised, inputs the model doesn't use are dropped (paramsForSubmit), the prompt as composed with
  * the descriptions legend (composeSubmission) is checked too, and every reference audio clip is measured and its
@@ -206,6 +206,7 @@ export type LocatedGeneration = Pick<Generation, 'createdAt' | 'prompt' | 'segme
 
 /** An import's or a version's file name (without extension): its title, made safe for Finder. */
 function titleBase(g: LocatedGeneration): string {
+  // A name on disk (Tidy up compares it): kept as it has always been.
   const fallback = g.source === 'edit' ? 'Version' : 'Eget klipp'
   return safeName(typeof g.title === 'string' ? g.title : '', { max: 120, fallback })
 }
@@ -215,12 +216,12 @@ function titleBase(g: LocatedGeneration): string {
  * - an import with an edit (an export cloned in as an edit's v1) and an edit version: Redigeringar/<edit>/<title>;
  * - any other import: Egna klipp/<day it was imported>/<title>, also when it is a take of a sequence clip (an
  *   import with a working copy is "<title> (arbetskopia)", its untouched original sits next to it as "<title>");
- * - an AI take made in Redigera: Redigeringar/<edit>/Tagningar/"<YYYY-MM-DD HH.MM> <prompt>";
+ * - an AI take made in the Editor: Redigeringar/<edit>/Tagningar/"<YYYY-MM-DD HH.MM> <prompt>";
  * - anything else (and a version whose edit is gone): a take goes into its sequence's Tagningar folder (a storyboard
  *   transition's into the storyboard's Övergångar) as "<YYYY-MM-DD HH.MM> <name>", anything else into
  *   Genereringar/<day>/ as "<HH.MM> <name>", where the name is the prompt, or the title of a row without one.
  * Times are when the generation was submitted (or imported). Pure: nothing is created (videoLocation creates the
- * folder). The single source of truth for where files go: the job manager, sequence moves, "Städa upp" and the edit
+ * folder). The single source of truth for where files go: the job manager, sequence moves, "Tidy up" and the edit
  * service all ask it.
  */
 export function videoHome(g: LocatedGeneration): { dir: string; base: string } {
@@ -321,7 +322,7 @@ export interface SubmitOptions {
   /** Makes the generation a take of this sequence segment. */
   segmentId?: string
   /**
-   * Makes the generation an AI take of this edit (Redigera): its video goes into the edit's Tagningar folder. An
+   * Makes the generation an AI take of this edit (the Editor): its video goes into the edit's Tagningar folder. An
    * edit deleted while the job was queued leaves an ordinary generation, as for a segment.
    */
   editId?: string
@@ -387,7 +388,7 @@ export class JobManager extends EventEmitter<JobEvents> {
     // Typical durations are the open library's; another library measures its own.
     this.typical.clear()
     const pending = db.listPendingGenerations()
-    // Generera's list keeps these once they settle (shared/session.ts): they were on their way when the session began.
+    // Generate's list keeps these once they settle (shared/session.ts): they were on their way when the session began.
     noteCarriedOver(pending.filter(isGenerateOrigin).map((g) => g.id))
     for (const g of pending) this.track(g)
     void this.backfill(epoch).catch((err: unknown) => console.warn('Media backfill stopped:', err))
@@ -520,11 +521,11 @@ export class JobManager extends EventEmitter<JobEvents> {
 
   private async queue(params: GenerationParams, opts: SubmitOptions, limit: number | undefined): Promise<Generation> {
     // Without an open library the job could be paid for and then not recorded anywhere; this throws
-    // "Välj en biblioteksmapp först." before anything is sent.
+    // "Choose a library folder first." before anything is sent.
     db.getDb()
     // A clear "the start image no longer exists" beats a failed copy.
     ensureImagesExist(params)
-    // The upload below can take seconds; an asset renamed meanwhile (or "Städa upp") moves its pictures,
+    // The upload below can take seconds; an asset renamed meanwhile (or "Tidy up") moves its pictures,
     // and the row written afterwards must point at where they are now (db.followRewrites).
     const mark = db.rewriteMark()
     // What Venice gets: the prompt with the descriptions of the referenced assets as the library has them now
@@ -597,7 +598,7 @@ export class JobManager extends EventEmitter<JobEvents> {
   /** Resolves once the generation is completed or failed (immediately if it already is). */
   waitFor(id: string): Promise<db.StoredGeneration> {
     const g = db.getGeneration(id)
-    if (!g) return Promise.reject(new Error('Genereringen finns inte.'))
+    if (!g) return Promise.reject(new Error('The generation does not exist.'))
     if (isSettled(g)) return Promise.resolve(g)
     return new Promise((resolve, reject) => {
       const list = this.waiters.get(id) ?? []
@@ -612,7 +613,7 @@ export class JobManager extends EventEmitter<JobEvents> {
   private track(g: db.StoredGeneration): void {
     if (this.polling.has(g.id)) return
     if (g.queueId) this.poll(g.id)
-    else this.settle(g.id, { status: 'failed', error: 'Appen stängdes innan jobbet skickades.' })
+    else this.settle(g.id, { status: 'failed', error: 'The app was closed before the job was sent.' })
   }
 
   /** Emits without letting a throwing listener break the job bookkeeping. */
@@ -656,7 +657,7 @@ export class JobManager extends EventEmitter<JobEvents> {
     this.polling.delete(id)
     const waiters = this.waiters.get(id) ?? []
     this.waiters.delete(id)
-    for (const w of waiters) w.reject(new Error('Genereringen togs bort innan den blev klar.'))
+    for (const w of waiters) w.reject(new Error('The generation was deleted before it was done.'))
   }
 
   private fail(id: string, error: string): void {
@@ -680,7 +681,7 @@ export class JobManager extends EventEmitter<JobEvents> {
       if (isSettled(g)) return this.stop(id)
       if (!g.queueId) {
         this.stop(id)
-        return this.fail(id, 'Jobbet saknar kö-id hos Venice.')
+        return this.fail(id, 'The job has no queue ID at Venice.')
       }
       try {
         // An earlier attempt (or a run the app quit during) already saved the video; only the rest is left.

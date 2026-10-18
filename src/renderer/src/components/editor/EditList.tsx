@@ -12,12 +12,12 @@ import { CameraIcon, ScissorsIcon } from './icons'
 import { NewChip, Spinner } from '../work/StatusMark'
 import { countsTitle } from '../work/workText'
 
-// Alla redigeringar, Redigera's overview beside the list while no edit is open: every edit as a card (poster, name,
-// where it came from, versions, length, spent) or as a table row – the same Kort/Tabell switch as Generera's clip
+// All edits, the Editor's overview beside the list while no edit is open: every edit as a card (poster, name,
+// where it came from, versions, length, spent) or as a table row – the same Cards/Table switch as Generate's clip
 // feed – and the ways to start one: an own film (file dialog, or dropped here), a clip from the feed, an exported
 // film. Each edit can be deleted from here too (after a question). It lays out by its own width (@container/edits):
 // in a narrow window the table drops its less needed columns and the header leaves the ways to start one to the
-// list's "＋ Ny redigering".
+// list's "＋ New edit".
 
 export type EditListView = 'cards' | 'table'
 export type EditSort = 'updated' | 'name' | 'length' | 'cost' | 'versions'
@@ -40,12 +40,12 @@ function saveView(view: EditListView): void {
   }
 }
 
-/** Newest change first by default; names A–Ö; length, cost and versions largest first. */
+/** Newest change first by default; names A–Z; length, cost and versions largest first. */
 function sortEdits(edits: readonly EditSummary[], sort: EditSort): EditSummary[] {
   const list = [...edits]
   switch (sort) {
     case 'name':
-      return list.sort((a, b) => a.name.localeCompare(b.name, 'sv'))
+      return list.sort((a, b) => a.name.localeCompare(b.name, 'en'))
     case 'length':
       return list.sort((a, b) => (b.duration ?? -1) - (a.duration ?? -1))
     case 'cost':
@@ -129,13 +129,13 @@ export default function EditList({
     <>
       <button type="button" onClick={onOwnFilm} disabled={!!busy} className={secondaryButton}>
         <CameraIcon size={13} />
-        Öppna en egen film…
+        Open your own film…
       </button>
       <button type="button" onClick={onFromFeed} disabled={!!busy} className={secondaryButton}>
-        Från klippflödet…
+        From the clip feed…
       </button>
       <button type="button" onClick={onFromExport} disabled={!!busy} className={secondaryButton}>
-        Från en export…
+        From an export…
       </button>
     </>
   )
@@ -149,11 +149,11 @@ export default function EditList({
       onDrop={onDrop}
     >
       <div className="drag flex h-12 shrink-0 items-center gap-3 border-b border-line pl-5 pr-3">
-        <h1 className="shrink-0 font-medium">Alla redigeringar</h1>
+        <h1 className="shrink-0 font-medium">All edits</h1>
         {!empty && (
           <div
             role="radiogroup"
-            aria-label="Visning"
+            aria-label="View"
             className="no-drag flex h-7 shrink-0 items-center rounded-md border border-line bg-panel p-0.5"
           >
             <button
@@ -161,22 +161,22 @@ export default function EditList({
               role="radio"
               aria-checked={view === 'cards'}
               onClick={() => setView('cards')}
-              title="Stora kort med bild"
+              title="Large cards with a picture"
               className={segment(view === 'cards')}
             >
               <GridIcon size={12} />
-              Kort
+              Cards
             </button>
             <button
               type="button"
               role="radio"
               aria-checked={view === 'table'}
               onClick={() => setView('table')}
-              title="Tabell – många redigeringar på en gång"
+              title="Table – many edits at once"
               className={segment(view === 'table')}
             >
               <ListIcon size={12} />
-              Tabell
+              Table
             </button>
           </div>
         )}
@@ -189,17 +189,17 @@ export default function EditList({
         <div className="flex flex-1 items-center justify-center overflow-y-auto p-8">
           <div className="max-w-md text-center">
             <ScissorsIcon size={30} className="mx-auto mb-4 text-muted" />
-            <h2 className="mb-2 text-base font-semibold">Redigera en film</h2>
+            <h2 className="mb-2 text-base font-semibold">Edit a film</h2>
             <p className="leading-relaxed text-muted">
-              Öppna ett klipp från Mediabanken, en exporterad film eller en egen film för att ändra den med AI. Originalet
-              lämnas orört — varje ändring blir en ny version.
+              Open a clip from Media, an exported film or your own film to change it with AI. The original is left
+              untouched — every change becomes a new version.
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-2">{actions}</div>
-            <p className="mt-4 text-[11px] text-muted">Du kan också släppa en filmfil här.</p>
+            <p className="mt-4 text-[11px] text-muted">You can also drop a film file here.</p>
           </div>
         </div>
       ) : !sorted ? (
-        <div className="flex flex-1 items-center justify-center text-muted">Hämtar redigeringar…</div>
+        <div className="flex flex-1 items-center justify-center text-muted">Loading edits…</div>
       ) : view === 'table' ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           {cards.map((card) => (
@@ -217,7 +217,7 @@ export default function EditList({
                 <div className="aspect-video bg-black/40">
                   <ImportCardView card={card} compact />
                 </div>
-                <div className="px-3 py-2.5 text-[11px] text-muted">Egen film · importeras</div>
+                <div className="px-3 py-2.5 text-[11px] text-muted">Own film · importing</div>
               </div>
             ))}
             {sorted.map((e) => (
@@ -229,20 +229,20 @@ export default function EditList({
 
       {over && (
         <div className="pointer-events-none absolute inset-3 top-14 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-bg/80">
-          <p className="text-base">Släpp för att öppna som egen film</p>
+          <p className="text-base">Drop to open as your own film</p>
         </div>
       )}
     </div>
   )
 }
 
-/** "”Intervju” – Skapa musik" → "Skapa musik": the card already names its edit. */
+/** "“Interview” – Create music" → "Create music": the card already names its edit. */
 function jobLabel(label: string, editName: string): string {
-  const head = `”${editName}” – `
+  const head = `“${editName}” – `
   return label.startsWith(head) ? label.slice(head.length) : label
 }
 
-/** What an edit is doing and what is new in it (Pågår och klart), for its card, its table row and its list row. */
+/** What an edit is doing and what is new in it (Activity), for its card, its table row and its list row. */
 export function useEditStatus(edit: EditSummary) {
   // A paid job or a free render running for this edit (main counts both), new versions, failures.
   const counts = useOwnerWork(edit.id)
@@ -251,10 +251,10 @@ export function useEditStatus(edit: EditSummary) {
   const running = edit.running || work.length > 0
   const runningCount = Math.max(counts.running, work.length, edit.running ? 1 : 0)
   const runningText = first
-    ? `${jobLabel(first.label, edit.name)}${first.progress !== undefined ? ` ${Math.round(first.progress * 100)} %` : ''}${
+    ? `${jobLabel(first.label, edit.name)}${first.progress !== undefined ? ` ${Math.round(first.progress * 100)}%` : ''}${
         work.length > 1 ? ` +${work.length - 1}` : ''
       }`
-    : 'Pågår…'
+    : 'Running…'
   const title = countsTitle('edit', { ...counts, running: Math.max(counts.running, work.length) })
   return { counts, running, runningCount, runningText, title }
 }
@@ -268,8 +268,8 @@ function DeleteButton({ edit, onDelete, className }: { edit: EditSummary; onDele
         e.stopPropagation()
         onDelete()
       }}
-      title="Radera redigeringen"
-      aria-label={`Radera ${edit.name}`}
+      title="Delete the edit"
+      aria-label={`Delete ${edit.name}`}
       className={`flex h-7 w-7 items-center justify-center rounded-md text-muted opacity-0 transition hover:text-accent focus:opacity-100 group-hover:opacity-100 ${className}`}
     >
       <CloseIcon size={11} />
@@ -303,13 +303,13 @@ function EditCard({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () =>
             {counts.unseen > 0 && (
               <NewChip
                 variant="overlay"
-                label={counts.unseen === 1 ? 'Ny version' : `${counts.unseen} nya versioner`}
+                label={counts.unseen === 1 ? 'New version' : `${counts.unseen} new versions`}
                 className="shrink-0"
               />
             )}
             {counts.failed > 0 && (
               <span className="shrink-0 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-[#ffb3b5] backdrop-blur">
-                Misslyckades
+                Failed
               </span>
             )}
           </span>
@@ -320,7 +320,7 @@ function EditCard({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () =>
             {edit.origin.kind === 'import' && <CameraIcon size={11} className="shrink-0" />}
             <span className="truncate">
               {originLabel(edit.origin)}
-              {edit.origin.missing && ' (borta)'}
+              {edit.origin.missing && ' (gone)'}
             </span>
           </p>
           <p className="mt-0.5 text-[11px] tabular-nums text-muted">{summaryLine(edit)}</p>
@@ -343,12 +343,12 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { id: 'thumb', label: '', width: '76px' },
-  { id: 'name', label: 'Namn', width: 'minmax(140px, 1fr)', sort: 'name' },
-  { id: 'versions', label: 'Versioner', width: '76px', align: 'right', sort: 'versions', wide: true },
-  { id: 'length', label: 'Längd', width: '60px', align: 'right', sort: 'length' },
-  { id: 'cost', label: 'Kostnad', width: '72px', align: 'right', sort: 'cost', wide: true },
+  { id: 'name', label: 'Name', width: 'minmax(140px, 1fr)', sort: 'name' },
+  { id: 'versions', label: 'Versions', width: '76px', align: 'right', sort: 'versions', wide: true },
+  { id: 'length', label: 'Length', width: '60px', align: 'right', sort: 'length' },
+  { id: 'cost', label: 'Cost', width: '72px', align: 'right', sort: 'cost', wide: true },
   { id: 'status', label: 'Status', width: '160px' },
-  { id: 'updated', label: 'Ändrad', width: '96px', sort: 'updated', wide: true },
+  { id: 'updated', label: 'Changed', width: '96px', sort: 'updated', wide: true },
   { id: 'actions', label: '', width: '40px' }
 ]
 // Both templates as variables; the grid takes the one its container's width calls for.
@@ -362,7 +362,7 @@ const GRID = '[grid-template-columns:var(--edit-cols-narrow)] @min-[50rem]/edits
 const WIDE_CELL = 'hidden @min-[50rem]/edits:block'
 
 /**
- * Every edit as one row, like Generera's clip table: poster, name with where it came from, versions, length, spent,
+ * Every edit as one row, like Generate's clip table: poster, name with where it came from, versions, length, spent,
  * what is running or new, last change, and ✕. A click (or Enter) opens it; the column headers sort.
  */
 function EditTable({
@@ -379,7 +379,7 @@ function EditTable({
   onDelete: (edit: EditSummary) => void
 }) {
   return (
-    <div role="table" aria-label="Redigeringar" aria-rowcount={edits.length + 1} className="pb-5">
+    <div role="table" aria-label="Edits" aria-rowcount={edits.length + 1} className="pb-5">
       <div
         role="row"
         className={`sticky top-0 z-10 grid h-8 items-center border-b border-line bg-bg/95 px-5 text-[11px] text-muted backdrop-blur ${GRID}`}
@@ -400,10 +400,10 @@ function EditTable({
                   onClick={() => onSort(c.sort as EditSort)}
                   title={
                     c.sort === 'name'
-                      ? 'Sortera på namn, A–Ö'
+                      ? 'Sort by name, A–Z'
                       : c.sort === 'updated'
-                        ? 'Senast ändrad först'
-                        : `Sortera på ${c.label.toLocaleLowerCase('sv')}, högst först`
+                        ? 'Last changed first'
+                        : `Sort by ${c.label.toLocaleLowerCase('en')}, highest first`
                   }
                   className={`inline-flex max-w-full items-center gap-1 truncate transition hover:text-text ${active ? 'text-text' : ''}`}
                 >
@@ -456,7 +456,7 @@ function EditRow({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => 
           {edit.origin.kind === 'import' && <CameraIcon size={10} className="shrink-0" />}
           <span className="truncate">
             {originLabel(edit.origin)}
-            {edit.origin.missing && ' (borta)'}
+            {edit.origin.missing && ' (gone)'}
           </span>
         </p>
       </div>
@@ -476,9 +476,9 @@ function EditRow({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => 
             <span className="truncate text-muted">{runningText}</span>
           </>
         ) : counts.failed > 0 ? (
-          <span className="truncate text-[#ffb3b5]">Misslyckades</span>
+          <span className="truncate text-[#ffb3b5]">Failed</span>
         ) : counts.unseen > 0 ? (
-          <NewChip label={counts.unseen === 1 ? 'Ny version' : `${counts.unseen} nya`} />
+          <NewChip label={counts.unseen === 1 ? 'New version' : `${counts.unseen} new`} />
         ) : (
           <span className="text-muted/60">–</span>
         )}

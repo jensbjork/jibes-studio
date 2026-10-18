@@ -11,7 +11,7 @@ import { useFolderChoice, useLibrarySwitch } from './useLibrarySwitch'
 
 const secondary = 'rounded-md border border-line px-4 py-2 transition hover:bg-raised disabled:opacity-40'
 
-/** Settings → Bibliotek: where everything is stored, switching folders and tidying up. */
+/** Settings → Library: where everything is stored, switching folders and tidying up. */
 export default function LibrarySection() {
   const [status, setStatus] = useState<LibraryStatus>()
   const [error, setError] = useState<string>()
@@ -41,10 +41,10 @@ export default function LibrarySection() {
 
   return (
     <section className="mb-8">
-      <h2 className="mb-1 font-medium">Bibliotek</h2>
+      <h2 className="mb-1 font-medium">Library</h2>
       <p className="mb-3 text-muted">
-        Allt Studio sparar ligger i grundmappen nedan, ordnat i mappar du kan bläddra i direkt i Finder. Klicka på en
-        mapp för att öppna den.
+        Everything Studio saves is in the library folder below, sorted into folders you can browse right in Finder.
+        Click a folder to open it.
       </p>
 
       {root ? (
@@ -57,14 +57,14 @@ export default function LibrarySection() {
           />
         </div>
       ) : (
-        status && <p className="text-muted">Ingen biblioteksmapp är vald.</p>
+        status && <p className="text-muted">No library folder is chosen.</p>
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button onClick={() => void changeFolder()} disabled={!status || choice.checking} className={secondary}>
-          Byt mapp…
+          Change folder…
         </button>
-        {choice.checking && !dialogOpen && <span className="text-[12px] text-muted">Kontrollerar mappen…</span>}
+        {choice.checking && !dialogOpen && <span className="text-[12px] text-muted">Checking the folder…</span>}
       </div>
       {(error ?? (!dialogOpen && choice.error)) && (
         <p className="mt-2 text-[12px] text-accent select-text">{error ?? choice.error}</p>
@@ -97,8 +97,8 @@ function ChangeFolderDialog({
   return (
     <>
       <Modal
-        title="Byt biblioteksmapp"
-        subtitle={status.root ? `Nu: ${displayPath(status.root)}` : undefined}
+        title="Change library folder"
+        subtitle={status.root ? `Current: ${displayPath(status.root)}` : undefined}
         onClose={close}
         maxWidth={540}
         footer={
@@ -111,10 +111,10 @@ function ChangeFolderDialog({
               disabled={busy || choice.checking}
               className="mr-auto text-[12px] text-muted transition hover:text-text disabled:opacity-40"
             >
-              Välj en annan mapp…
+              Choose another folder…
             </button>
             <button onClick={close} disabled={busy} className={secondary}>
-              Avbryt
+              Cancel
             </button>
           </>
         }
@@ -128,11 +128,11 @@ function ChangeFolderDialog({
             onConfirm={(mode) => void switcher.start(choice.inspection!.path, mode)}
           />
         ) : (
-          choice.checking && <p className="text-muted">Kontrollerar mappen…</p>
+          choice.checking && <p className="text-muted">Checking the folder…</p>
         )}
         {choice.error && <p className="mt-3 text-[12px] text-accent select-text">{choice.error}</p>}
         <p className="mt-4 text-[11px] leading-relaxed text-muted">
-          Byte av mapp går inte medan något genereras eller exporteras. Studio laddar om när bytet är klart.
+          The folder can't be changed while something is generating or exporting. Studio reloads when the change is done.
         </p>
       </Modal>
       <SwitchingOverlay phase={switcher.phase} />
@@ -140,18 +140,18 @@ function ChangeFolderDialog({
   )
 }
 
-/** "1 fil", "3 filer" */
+/** "1 file", "3 files" */
 function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
 
 function summary(r: ReorganizeReport): string {
   const parts = [
-    r.moved ? `${count(r.moved, 'fil', 'filer')} flyttades` : '',
-    r.foldersCreated ? `${count(r.foldersCreated, 'mapp', 'mappar')} skapades` : ''
+    r.moved ? `${count(r.moved, 'file', 'files')} moved` : '',
+    r.foldersCreated ? `${count(r.foldersCreated, 'folder', 'folders')} created` : ''
   ].filter(Boolean)
-  if (!parts.length) return r.errors.length ? 'Inget kunde flyttas.' : 'Allt låg redan på rätt plats.'
-  return `Klart – ${parts.join(' och ')}.`
+  if (!parts.length) return r.errors.length ? 'Nothing could be moved.' : 'Everything was already in the right place.'
+  return `Done – ${parts.join(' and ')}.`
 }
 
 /** Moves every file Studio keeps track of to where it belongs, and reports what happened. */
@@ -175,13 +175,14 @@ function Cleanup() {
 
   return (
     <div className="mt-6 border-t border-line pt-5">
-      <h3 className="mb-1 font-medium">Städa upp</h3>
+      <h3 className="mb-1 font-medium">Tidy up</h3>
       <p className="mb-3 text-muted">
-        Flyttar filer som hamnat fel till rätt mapp och ger dem beskrivande namn, till exempel efter att en
-        karaktär, miljö, produkt, klädsel, pose, sekvens eller storyboard bytt namn. Inget raderas och inga filer skrivs över.
+        Moves misplaced files to the right folder and gives them descriptive names, for example after a character,
+        environment, product, outfit, pose, sequence or storyboard was renamed. Nothing is deleted and no files are
+        overwritten.
       </p>
       <button onClick={() => void run()} disabled={running} className={secondary}>
-        {running ? 'Städar upp…' : 'Städa upp mappstrukturen'}
+        {running ? 'Tidying up…' : 'Tidy up the folder structure'}
       </button>
 
       {error && <p className="mt-3 text-[12px] text-accent select-text">{error}</p>}
@@ -195,14 +196,14 @@ function Cleanup() {
           </p>
           {report.missing > 0 && (
             <p className="mt-1.5 text-muted">
-              {count(report.missing, 'fil', 'filer')} som Studio känner till finns inte längre på disken (till exempel
-              borttagna i Finder) och hoppades över.
+              {count(report.missing, 'file', 'files')} that Studio knows about {report.missing === 1 ? 'is' : 'are'} no
+              longer on disk (for example deleted in Finder) and {report.missing === 1 ? 'was' : 'were'} skipped.
             </p>
           )}
           {report.errors.length > 0 && (
             <>
               <p className="mt-1.5 text-amber-200">
-                {report.errors.length === 1 ? 'Det här gick inte att flytta:' : 'De här gick inte att flytta:'}
+                {report.errors.length === 1 ? "This couldn't be moved:" : "These couldn't be moved:"}
               </p>
               <ul className="mt-1 max-h-40 list-disc space-y-0.5 overflow-y-auto pl-5 text-muted select-text">
                 {report.errors.map((message, i) => (

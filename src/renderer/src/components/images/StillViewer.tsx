@@ -20,12 +20,12 @@ interface Props {
   stills?: Still[]
   onClose: () => void
   /**
-   * Offers "Radera" (two steps). Main refuses, or moves the file to Referensbilder instead of the Trash, when a
-   * clip or a board still uses the image; its Swedish message is shown here.
+   * Offers "Delete" (two steps). Main refuses, or moves the file to Referensbilder instead of the Trash, when a
+   * clip or a board still uses the image; its message is shown here.
    */
   deletable?: boolean
   onDeleted?: (still: Still) => void
-  /** Extra buttons for the still on screen, e.g. "Använd som startbild". */
+  /** Extra buttons for the still on screen, e.g. "Use as start image". */
   actions?: (still: Still) => ReactNode
   /**
    * An agent opened it (open_in_studio): the still it opened on isn't marked seen by being on screen until the user
@@ -138,26 +138,26 @@ export default function StillViewer({
         )}
       </div>
 
-      <StillInfo still={current} position={list.length > 1 ? `${index + 1} av ${list.length}` : undefined}>
+      <StillInfo still={current} position={list.length > 1 ? `${index + 1} of ${list.length}` : undefined}>
         {error && <p className="max-w-md text-[12px] text-accent select-text">{error}</p>}
         <div className="flex flex-wrap items-center justify-end gap-1">
           {actions?.(current)}
           <button onClick={() => void window.studio.revealFile(current.path)} className={button}>
-            Visa i Finder
+            Show in Finder
           </button>
           {deletable && (
             <ConfirmButton
-              question="Radera bilden?"
+              question="Delete the image?"
               onConfirm={() => void remove(current)}
               disabled={deleting}
-              title="Flyttar bilden till papperskorgen (till Referensbilder om ett klipp eller en ruta använder den)"
+              title="Moves the image to the Trash (to “Referensbilder” if a clip or a board uses it)"
               className={`${button} hover:text-accent`}
             >
-              Radera
+              Delete
             </ConfirmButton>
           )}
           <button onClick={onClose} className={button}>
-            Stäng
+            Close
           </button>
         </div>
       </StillInfo>
@@ -168,13 +168,13 @@ export default function StillViewer({
 
 function StillImage({ still, markSeen }: { still: Still; markSeen: boolean }) {
   const [missing, setMissing] = useState(false)
-  // A new picture (Pågår och klart) has been looked at once it has been on screen here for a moment.
+  // A new picture (Activity) has been looked at once it has been on screen here for a moment.
   const imgRef = useRef<HTMLImageElement>(null)
   useSeenWhenVisible(imgRef, missing || !markSeen ? undefined : workKey.still(still.id))
   if (missing) {
     return (
       <p className="max-w-sm text-center text-muted select-text">
-        Bildfilen finns inte längre.
+        The image file no longer exists.
         <br />
         <span className="text-[11px] break-all">{still.path}</span>
       </p>
@@ -197,8 +197,8 @@ function NavButton({ side, disabled, onClick }: { side: 'left' | 'right'; disabl
     <button
       onClick={onClick}
       disabled={disabled}
-      aria-label={side === 'left' ? 'Föregående bild' : 'Nästa bild'}
-      title={side === 'left' ? 'Föregående (←)' : 'Nästa (→)'}
+      aria-label={side === 'left' ? 'Previous image' : 'Next image'}
+      title={side === 'left' ? 'Previous (←)' : 'Next (→)'}
       className={`absolute top-1/2 -translate-y-1/2 rounded-full bg-black/50 px-3 py-2 text-lg leading-none text-white/80 transition hover:bg-black/80 hover:text-white disabled:opacity-0 ${
         side === 'left' ? 'left-3' : 'right-3'
       }`}
@@ -217,9 +217,9 @@ function StillInfo({ still, position, children }: { still: Still; position?: str
     stillSourceLabel(still),
     formatStillTime(still.createdAt),
     modelName,
-    aspectRatio && (aspectRatio === 'auto' ? 'format som basbilden' : aspectRatio),
+    aspectRatio && (aspectRatio === 'auto' ? 'aspect ratio of the base image' : aspectRatio),
     resolution,
-    quality && `${qualityLabel(quality)} kvalitet`,
+    quality && `${qualityLabel(quality)} quality`,
     still.costUsd !== undefined && formatImagePrice(still.costUsd),
     position
   ].filter((f): f is string => !!f)
@@ -233,16 +233,16 @@ function StillInfo({ still, position, children }: { still: Still; position?: str
         )}
         {negativePrompt && (
           <p className="mt-1 text-[12px] text-muted select-text">
-            <span className="text-text/70">Undvik:</span> {negativePrompt}
+            <span className="text-text/70">Avoid:</span> {negativePrompt}
           </p>
         )}
         {referenceImages && referenceImages.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-muted">Gjord av</span>
+            <span className="text-[11px] text-muted">Made from</span>
             {referenceImages.map((path, i) => (
               <span
                 key={path + i}
-                title={i === 0 ? `Basbild · ${path.split('/').pop()}` : path.split('/').pop()}
+                title={i === 0 ? `Base image · ${path.split('/').pop()}` : path.split('/').pop()}
                 className={`h-8 w-8 overflow-hidden rounded bg-raised ${i === 0 ? 'ring-1 ring-accent/70' : ''}`}
               >
                 <img src={mediaUrl(path)} alt="" draggable={false} className="h-full w-full object-cover" />

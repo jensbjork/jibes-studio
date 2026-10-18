@@ -1,10 +1,10 @@
 import { useEffect } from 'react'
 import { LAST_EDIT_KEY, LAST_SEQUENCE_KEY, LAST_STORYBOARD_KEY } from './library'
 
-// Where the user is in the sequence editor (and in Storyboards and Redigera), so an agent asking "what are they
+// Where the user is in the sequence editor (and in Storyboards and the Editor), so an agent asking "what are they
 // looking at" gets the open sequence and clip, the open storyboard, or the open edit and the version on screen (see
 // agentBridge's get_form). The segment editor and the edit workspace report themselves while they are mounted; the
-// Storyboards and Redigera views remember what they show.
+// Storyboards and Editor views remember what they show.
 
 interface OpenSegment {
   sequenceId: string
@@ -51,7 +51,7 @@ interface OpenEdit {
 
 let openEdit: OpenEdit | undefined
 
-/** Records the edit (and the version in its player) shown in Redigera while the calling component is mounted. */
+/** Records the edit (and the version in its player) shown in the Editor while the calling component is mounted. */
 export function useReportOpenEdit(editId: string, versionId: string | undefined): void {
   useEffect(() => {
     const entry: OpenEdit = { editId, versionId }
@@ -63,8 +63,8 @@ export function useReportOpenEdit(editId: string, versionId: string | undefined)
 }
 
 /**
- * The edit open in Redigera and the version its player shows; the remembered edit (without a version) while the
- * view isn't mounted; nothing while Redigera shows its list.
+ * The edit open in the Editor and the version its player shows; the remembered edit (without a version) while the
+ * view isn't mounted; nothing while the Editor shows its list.
  */
 export function openEditInEditor(): { editId?: string; versionId?: string } {
   if (openEdit) return { ...openEdit }

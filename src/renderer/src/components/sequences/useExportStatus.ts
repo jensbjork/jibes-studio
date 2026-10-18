@@ -8,15 +8,15 @@ import { markSeen, useRunning, useUnseen } from '../../lib/work'
 export interface ExportStatus {
   /** 0–1 while the film is being made (also when the export was started elsewhere: an agent, before a view switch). */
   progress?: number
-  /** The newest finished export the user hasn't acted on yet ("Filmen är klar"). */
+  /** The newest finished export the user hasn't acted on yet ("The film is ready"). */
   done?: FinishedWork
   /** Why the newest export failed, until the banner is closed. */
   failure?: string
   /** Starts an export (`start` resolves with the film's path); its outcome reaches the banners through the store. */
   run: (start: () => Promise<string>) => Promise<void>
-  /** "Visa i Finder" on the done banner. */
+  /** "Show in Finder" on the done banner. */
   reveal: () => Promise<void>
-  /** "Redigera" on the done banner: the film opened in Redigera. */
+  /** "Edit" on the done banner: the film opened in the Editor. */
   edit: (navigate: Navigate) => void
   /** ✕ on the done banner. */
   dismissDone: () => void
@@ -55,8 +55,8 @@ function useLiveProgress(ownerId: string | undefined): number | undefined {
 }
 
 /**
- * The export of a sequence or storyboard, from Pågår och klart's store: the bar while it runs and the banner when it
- * is done or failed survive leaving the view (and show an agent's export_film too). "Visa i Finder", "Redigera" and
+ * The export of a sequence or storyboard, from Activity's store: the bar while it runs and the banner when it
+ * is done or failed survive leaving the view (and show an agent's export_film too). "Show in Finder", "Edit" and
  * ✕ on the done banner mark the export seen; a failure stays until its banner is closed.
  *
  * A refusal before anything started (no row in the store) is kept here, for this view, until it is closed.
@@ -97,7 +97,8 @@ export function useExportStatus(ownerId: string | undefined): ExportStatus {
   const done = exporting ? undefined : finished[0]
   const failureText = exporting ? undefined : (storeFailure?.error ?? mine?.error)
   const failure =
-    failureText && (failureText.startsWith('Exporten') ? failureText : `Exporten misslyckades: ${failureText}`)
+    // Main's own export errors already say so ("Export failed: …", "The export was cancelled.").
+    failureText && (/^(the )?export/i.test(failureText) ? failureText : `Export failed: ${failureText}`)
 
   const run = useCallback(
     async (start: () => Promise<string>) => {

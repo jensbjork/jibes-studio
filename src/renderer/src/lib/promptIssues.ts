@@ -21,8 +21,8 @@ export function promptIssuesOf(params: GenerationParams, explained?: ValidateOpt
 }
 
 /**
- * Why main would refuse these params, as a short Swedish reason for a disabled button ("@Image7 finns inte –
- * bara 5 bilder är valda"); undefined when nothing blocks.
+ * Why main would refuse these params, as a short reason for a disabled button ("@Image7 doesn't exist –
+ * only 5 images are selected"); undefined when nothing blocks.
  */
 export function blockingPromptIssue(params: GenerationParams): string | undefined {
   return blockingPromptError(params)?.replace(/\.\s*$/, '')

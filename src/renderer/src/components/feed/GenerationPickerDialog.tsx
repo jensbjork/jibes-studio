@@ -1,6 +1,6 @@
-// Picks one finished clip from the library: the feed's clips (Venice's, the user's own, versions from Redigera) with
-// a search and a "Källa" tab. Used by Sekvenser's "Från klippflödet…" / "Från Redigera…" and by Redigera's
-// "Från klippflödet…".
+// Picks one finished clip from the library: the feed's clips (Venice's, the user's own, versions from the Editor) with
+// a search and a "Source" tab. Used by Sequences' "From the clip feed…" / "From the Editor…" and by the Editor's
+// "From the clip feed…".
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { generationSource, generationTitle, sourceBadge, SOURCE_LABELS } from '@shared/generation-label'
@@ -81,7 +81,7 @@ export default function GenerationPickerDialog({ open, title, sources, onClose, 
   if (!open) return null
 
   const tabs: (GenerationSource | 'all')[] = offered.length > 1 ? ['all', ...offered] : []
-  const tabLabel = (t: GenerationSource | 'all'): string => (t === 'all' ? 'Alla' : SOURCE_LABELS[t])
+  const tabLabel = (t: GenerationSource | 'all'): string => (t === 'all' ? 'All' : SOURCE_LABELS[t])
 
   return (
     <Modal title={title} onClose={onClose} maxWidth={760}>
@@ -100,15 +100,15 @@ export default function GenerationPickerDialog({ open, title, sources, onClose, 
                 setQuery(e.target.value)
                 setLimit(PAGE)
               }}
-              placeholder="Sök på prompt eller namn…"
-              aria-label="Sök klipp"
+              placeholder="Search by prompt or name…"
+              aria-label="Search clips"
               className="h-7 w-full rounded-md border border-line bg-raised pl-7 pr-2 text-[12px] outline-none focus:border-muted"
             />
           </div>
           {tabs.length > 0 && (
             <div
               role="tablist"
-              aria-label="Källa"
+              aria-label="Source"
               className="flex h-7 items-center rounded-md border border-line bg-panel p-0.5"
             >
               {tabs.map((t) => (
@@ -136,16 +136,16 @@ export default function GenerationPickerDialog({ open, title, sources, onClose, 
         {error ? (
           <p className="py-8 text-center text-accent select-text">{error}</p>
         ) : !list ? (
-          <p className="py-8 text-center text-muted">Laddar klippen…</p>
+          <p className="py-8 text-center text-muted">Loading the clips…</p>
         ) : shown.length === 0 ? (
           <p className="py-8 text-center text-muted">
             {query.trim()
-              ? 'Inget klipp matchar sökningen.'
+              ? 'No clip matches the search.'
               : tab === 'import'
-                ? 'Inga egna klipp än. Importera dem i Mediabanken eller dra in dem i en sekvens.'
+                ? 'No own clips yet. Import them in Media or drag them into a sequence.'
                 : tab === 'edit'
-                  ? 'Inga versioner från Redigera än.'
-                  : 'Inga färdiga klipp än.'}
+                  ? 'No versions from the Editor yet.'
+                  : 'No finished clips yet.'}
           </p>
         ) : (
           <>
@@ -162,7 +162,7 @@ export default function GenerationPickerDialog({ open, title, sources, onClose, 
                 onClick={() => setLimit((n) => n + PAGE)}
                 className="self-center rounded-md border border-line px-3 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
               >
-                Visa fler ({shown.length - limit} till)
+                Show more ({shown.length - limit} more)
               </button>
             )}
           </>

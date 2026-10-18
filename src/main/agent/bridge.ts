@@ -11,7 +11,7 @@ export type WindowCommand = AgentFormCommand
 /** How long the window gets to answer. */
 export const COMMAND_TIMEOUT_MS = 10_000
 
-export const WINDOW_NOT_ANSWERING = 'Studio-fönstret svarar inte – är det öppet?'
+export const WINDOW_NOT_ANSWERING = "The Studio window isn't answering – is it open?"
 
 interface Pending {
   /** The window the command went to; only it may answer. */
@@ -35,7 +35,7 @@ export class FormBridge {
     ipcMain.on('agent:reply', (e: IpcMainEvent, id: unknown, reply: unknown) => this.onReply(e, id, reply))
   }
 
-  /** Sends a command to the window and resolves with its answer; rejects (in Swedish) after the timeout. */
+  /** Sends a command to the window and resolves with its answer; rejects after the timeout. */
   send<T>(command: WindowCommand, args?: unknown): Promise<T> {
     const win = targetWindow()
     if (!win) return Promise.reject(new Error(WINDOW_NOT_ANSWERING))
@@ -86,6 +86,6 @@ export class FormBridge {
     clearTimeout(p.timer)
     const reply = (raw ?? {}) as AgentCommandReply
     if (reply.ok) p.resolve(reply.result)
-    else p.reject(new Error(typeof reply.error === 'string' && reply.error ? reply.error : 'Studio kunde inte utföra det.'))
+    else p.reject(new Error(typeof reply.error === 'string' && reply.error ? reply.error : "Studio couldn't do that."))
   }
 }

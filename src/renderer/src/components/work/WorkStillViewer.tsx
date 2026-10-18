@@ -4,7 +4,7 @@ import { showWorkStill, useShownWorkStill } from '../../lib/work'
 import StillViewer from '../images/StillViewer'
 
 /**
- * A picture Pågår och klart opens on its own: one made for a sequence as a whole, or for nothing, which no board or
+ * A picture Activity opens on its own: one made for a sequence as a whole, or for nothing, which no board or
  * clip shows. The viewer's own rule marks it seen once it has been on screen a moment.
  */
 export default function WorkStillViewer() {

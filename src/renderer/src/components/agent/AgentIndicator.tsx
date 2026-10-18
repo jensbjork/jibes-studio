@@ -17,16 +17,16 @@ interface IndicatorState {
   waiting: number
   /** The agent's latest call while it works; undefined when it is quiet. */
   latest?: AgentActivity
-  /** In words: "Agent ansluten", "Agenten arbetar", "OpenClaw arbetar". */
+  /** In words: "Agent connected", "The agent is working", "OpenClaw is working". */
   label: string
-  /** In words: "2 begäranden väntar på ditt OK · Satte prompten"; '' when there is nothing to add. */
+  /** In words: "2 requests waiting for your OK · Set the prompt"; '' when there is nothing to add. */
   status: string
 }
 
-/** "2 begäranden väntar på ditt OK", or nothing. */
+/** "2 requests waiting for your OK", or nothing. */
 function waitingText(waiting: number): string {
   if (!waiting) return ''
-  return `${waiting === 1 ? 'En begäran väntar' : `${waiting} begäranden väntar`} på ditt OK`
+  return `${waiting === 1 ? 'A request is waiting' : `${waiting} requests waiting`} for your OK`
 }
 
 function useIndicator(): IndicatorState {
@@ -57,9 +57,9 @@ function Dot({ working, summary }: { working: boolean; summary: AgentSummary }) 
 }
 
 /**
- * The sidebar's status row of the agent connection: "Agent: av", "Agent: på – väntar" or "● Agent ansluten", with
- * the number of requests waiting for the user's OK as an accent pill. While the agent works it reads "Agenten
- * arbetar" (or the agent's own name) with a pulsing dot, and what it just did is in the tooltip (and in the
+ * The sidebar's status row of the agent connection: "Agent: off", "Agent: on – waiting" or "● Agent connected", with
+ * the number of requests waiting for the user's OK as an accent pill. While the agent works it reads "The agent is
+ * working" (or the agent's own name) with a pulsing dot, and what it just did is in the tooltip (and in the
  * presence pill at the bottom of the window). In the rail it is the dot, with the count on its corner.
  */
 export default function AgentIndicator({ collapsed, active, onClick }: Props) {
@@ -97,7 +97,7 @@ export default function AgentIndicator({ collapsed, active, onClick }: Props) {
       title={
         [waiting ? `${waitingText(waiting)}.` : '', latest ? `${presenceText(latest)}.` : '', summary.detail]
           .filter(Boolean)
-          .join(' ') + (waiting ? '' : ' Klicka för att se vad agenten gjort.')
+          .join(' ') + (waiting ? '' : ' Click to see what the agent has done.')
       }
       live={latest ? presenceText(latest) : ''}
     />

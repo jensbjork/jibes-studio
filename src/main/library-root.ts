@@ -1,6 +1,6 @@
 // The base folder (grundmapp): opening it at startup, switching to another folder or moving the library
 // there, converting a phase-2 library (~/Movies/Studio with studio.db, generations/, thumbs/, …) to the
-// new layout, and "Städa upp", which puts every file the library knows about in its proper folder:
+// new layout, and "Tidy up", which puts every file the library knows about in its proper folder:
 // characters, environments, products, outfits and poses (assets) in Karaktärer/, Miljöer/, Produkter/, Kläder/ and
 // Poser/, one folder each holding the asset's photos and audio clips; a sequence's takes, stills and exports in its
 // folder in Sekvenser/ (Tagningar/, Storyboard/ and the folder itself), and a storyboard's in its folder in
@@ -88,6 +88,7 @@ const LEGACY_EXPORTS_FOLDER = 'Äldre exporter'
 /** Present while a phase-2 library is being converted; a conversion that was cut short resumes on next open. */
 const MIGRATION_MARKER = 'legacy-migration.json'
 const DESCRIPTION_FILE = 'Beskrivning.txt'
+/** Folder-name fallbacks for names that leave nothing (as assets, sequence-store and edits name them): data on disk. */
 const UNNAMED_ASSET = 'Namnlös'
 const UNNAMED_SEQUENCE = 'Namnlös sekvens'
 const UNNAMED_STORYBOARD = 'Namnlös storyboard'
@@ -116,23 +117,23 @@ const VISIBLE_FOLDERS = [
 /** Everything 'move' takes along. */
 const LIBRARY_FOLDERS = [...VISIBLE_FOLDERS, FOLDERS.appData]
 
-const INSIDE_CURRENT = 'Mappen ligger inuti det nuvarande biblioteket. Välj en mapp utanför det.'
-const HAS_LIBRARY = 'Mappen innehåller redan ett Studio-bibliotek. Öppna det i stället.'
-const NO_LIBRARY = 'Mappen innehåller inget Studio-bibliotek.'
-const NOTHING_TO_MOVE = 'Det finns inget bibliotek att flytta.'
+const INSIDE_CURRENT = 'The folder is inside the current library. Choose a folder outside it.'
+const HAS_LIBRARY = 'The folder already holds a Studio library. Open it instead.'
+const NO_LIBRARY = 'The folder holds no Studio library.'
+const NOTHING_TO_MOVE = 'There is no library to move.'
 const OPERATION_RUNNING = LIBRARY_OPERATION_RUNNING
 
 export interface LibraryRootDeps {
-  /** Swedish reason why the library can't be switched or tidied right now (generations, exports, runs). */
+  /** Why the library can't be switched or tidied right now (generations, exports, runs). */
   busy: () => string | undefined
   /** A library has just been opened: at startup or after a switch. */
   onOpened: () => void
   /**
    * The open library was closed (its folder went missing, a switch, a failed open): what was told about it – the Dock
-   * badge, Pågår och klart – must not outlive it.
+   * badge, Activity – must not outlive it.
    */
   onClosed?: () => void
-  /** "Städa upp" finished; these generations' files or posters moved (assets and sequences may too). */
+  /** "Tidy up" finished; these generations' files or posters moved (assets and sequences may too). */
   onReorganized: (movedGenerationIds: string[]) => void
   /**
    * The open library is about to be closed by a switch: background work that writes into it (the poster
@@ -157,37 +158,37 @@ export function configureLibraryRoot(d: LibraryRootDeps): void {
 // ── Small file system helpers ────────────────────────────────────────────────
 
 const SQLITE_REASONS: [RegExp, string][] = [
-  [/^SQLITE_(NOTADB|CORRUPT)/, 'databasen i mappen är skadad'],
-  [/^SQLITE_CANTOPEN/, 'databasen gick inte att öppna'],
-  [/^SQLITE_READONLY/, 'databasen går inte att skriva i'],
-  [/^SQLITE_FULL/, 'disken är full'],
-  [/^SQLITE_(IOERR|BUSY|LOCKED)/, 'databasen gick inte att läsa eller skriva (är disken ansluten?)']
+  [/^SQLITE_(NOTADB|CORRUPT)/, 'the database in the folder is damaged'],
+  [/^SQLITE_CANTOPEN/, 'the database could not be opened'],
+  [/^SQLITE_READONLY/, 'the database cannot be written to'],
+  [/^SQLITE_FULL/, 'the disk is full'],
+  [/^SQLITE_(IOERR|BUSY|LOCKED)/, 'the database could not be read or written (is the disk connected?)']
 ]
 
 /**
- * A Swedish message for the UI. Errors from the file system and SQLite carry English text ("EPERM: operation
- * not permitted, rename '/…' -> '/…'"); those get a short Swedish reason. Studio's own errors pass through.
+ * A message for the UI. Errors from the file system and SQLite carry English text ("EPERM: operation
+ * not permitted, rename '/…' -> '/…'"); those get a short reason. Studio's own errors pass through.
  */
 function message(err: unknown): string {
   const code = (err as { code?: unknown } | undefined)?.code
   if (typeof code === 'string' && code.startsWith('SQLITE_')) {
-    return SQLITE_REASONS.find(([re]) => re.test(code))?.[1] ?? 'databasen gick inte att använda'
+    return SQLITE_REASONS.find(([re]) => re.test(code))?.[1] ?? 'the database could not be used'
   }
   if (typeof (err as NodeJS.ErrnoException | undefined)?.syscall === 'string') {
     switch (code) {
       case 'EBUSY':
-        return 'filen används av ett annat program'
+        return 'the file is in use by another program'
       case 'EROFS':
-        return 'disken är skrivskyddad'
+        return 'the disk is write-protected'
       case 'EEXIST':
-        return 'det finns redan något med samma namn'
+        return 'something with the same name already exists'
       case 'ENOTEMPTY':
-        return 'mappen är inte tom'
+        return 'the folder is not empty'
       case 'ENAMETOOLONG':
-        return 'namnet är för långt'
+        return 'the name is too long'
       case 'EIO':
       case 'ENXIO':
-        return 'disken gick inte att läsa (är den ansluten?)'
+        return 'the disk could not be read (is it connected?)'
       default:
         return fileErrorReason(err)
     }
@@ -195,12 +196,12 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** The error as shown in the UI: a file system or SQLite error gets a Swedish reason and the file's name. */
-function swedishError(err: unknown, what: string): Error {
+/** The error as shown in the UI: a file system or SQLite error gets a reason and the file's name. */
+function readableError(err: unknown, what: string): Error {
   const text = message(err)
   if (err instanceof Error && text === err.message) return err
   const path = (err as NodeJS.ErrnoException | undefined)?.path
-  return new Error(`${what}: ${text}${path ? ` (”${basename(path)}”)` : ''}.`)
+  return new Error(`${what}: ${text}${path ? ` (“${basename(path)}”)` : ''}.`)
 }
 
 function entryExists(p: string): boolean {
@@ -275,8 +276,8 @@ function ensureDirCounted(dir: string, report?: ReorganizeReport): void {
   try {
     mkdirSync(dir, { recursive: true })
   } catch (err) {
-    const reason = (err as NodeJS.ErrnoException).code === 'EEXIST' ? 'det finns en fil med samma namn' : message(err)
-    throw new Error(`Mappen ”${basename(dir)}” kunde inte skapas i ${dirname(dir)}: ${reason}.`)
+    const reason = (err as NodeJS.ErrnoException).code === 'EEXIST' ? 'there is a file with the same name' : message(err)
+    throw new Error(`The folder “${basename(dir)}” could not be created in ${dirname(dir)}: ${reason}.`)
   }
   if (report) report.foldersCreated++
 }
@@ -308,20 +309,20 @@ function isPlainName(name: string | null | undefined): name is string {
 
 const lower = (s: string): string => s.normalize('NFC').toLowerCase()
 
-/** "a", "a och b", "a, b och c". */
+/** "a", "a and b", "a, b and c". */
 function andList(items: string[]): string {
-  return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} och ${items[items.length - 1]}`
+  return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
-/** "”A”", "”A” och ”B”", "”A”, ”B” och ”C”". */
+/** "“A”", "“A” and “B”", "“A”, “B” and “C”". */
 function quotedList(names: string[]): string {
-  return andList(names.map((n) => `”${n}”`))
+  return andList(names.map((n) => `“${n}”`))
 }
 
 function conflictMessage(names: string[]): string {
-  return `Mappen innehåller redan ${quotedList(names)}. Välj en tom mapp eller flytta undan ${
-    names.length === 1 ? 'den' : 'dem'
-  } först.`
+  return `The folder already contains ${quotedList(names)}. Choose an empty folder or move ${
+    names.length === 1 ? 'it' : 'them'
+  } away first.`
 }
 
 function newReport(): ReorganizeReport {
@@ -476,9 +477,9 @@ async function ensureWritableFolder(target: string): Promise<void> {
   try {
     await mkdir(target, { recursive: true })
   } catch (err) {
-    throw new Error(`Mappen ”${target}” kunde inte skapas: ${message(err)}`)
+    throw new Error(`The folder “${target}” could not be created: ${message(err)}`)
   }
-  if (!(await isWritable(target))) throw new Error(`Studio kan inte skriva i ”${target}”. Välj en annan mapp.`)
+  if (!(await isWritable(target))) throw new Error(`Studio cannot write in “${target}”. Choose another folder.`)
 }
 
 // ── Opening and closing ──────────────────────────────────────────────────────
@@ -523,10 +524,10 @@ function activate(root: string, create: boolean): void {
 /** Why a folder without a database isn't opened as a library (it is never silently made an empty one). */
 function missingDatabaseMessage(root: string): string {
   return LIBRARY_FOLDERS.some((name) => isOccupied(join(root, name)))
-    ? `Biblioteksdatabasen (${FOLDERS.appData}/${DB_FILE_NAME}) saknas i mappen, så Studio vet inte vad filerna ` +
-        'i den hör till. Har den raderats, eller har biblioteket flyttats? Välj mappen där biblioteket ligger nu.'
-    : 'Mappen innehåller inget Studio-bibliotek. Har biblioteket flyttats eller döpts om i Finder? Välj mappen ' +
-        'där det ligger nu.'
+    ? `The library database (${FOLDERS.appData}/${DB_FILE_NAME}) is missing from the folder, so Studio doesn't know ` +
+        'what the files in it belong to. Was it deleted, or was the library moved? Choose the folder where the library is now.'
+    : 'The folder holds no Studio library. Was the library moved or renamed in Finder? Choose the folder ' +
+        'where it is now.'
 }
 
 /**
@@ -534,20 +535,20 @@ function missingDatabaseMessage(root: string): string {
  * owns each one, and what this version keeps in it.
  */
 const ADDED_FOLDERS: readonly { name: string; since: number; what: string }[] = [
-  { name: FOLDERS.environments, since: db.ASSETS_SCHEMA_VERSION, what: 'miljöer' },
-  { name: FOLDERS.outfits, since: db.ASSETS_SCHEMA_VERSION, what: 'kläder' },
-  { name: FOLDERS.poses, since: db.POSES_SCHEMA_VERSION, what: 'poser' },
+  { name: FOLDERS.environments, since: db.ASSETS_SCHEMA_VERSION, what: 'environments' },
+  { name: FOLDERS.outfits, since: db.ASSETS_SCHEMA_VERSION, what: 'outfits' },
+  { name: FOLDERS.poses, since: db.POSES_SCHEMA_VERSION, what: 'poses' },
   { name: FOLDERS.storyboards, since: db.STORYBOARDS_SCHEMA_VERSION, what: 'storyboards' },
-  { name: FOLDERS.ownClips, since: db.EDITS_SCHEMA_VERSION, what: 'egna klipp' },
-  { name: FOLDERS.edits, since: db.EDITS_SCHEMA_VERSION, what: 'redigeringar' },
-  { name: FOLDERS.products, since: db.PRODUCTS_SCHEMA_VERSION, what: 'produkter' }
+  { name: FOLDERS.ownClips, since: db.EDITS_SCHEMA_VERSION, what: 'own clips' },
+  { name: FOLDERS.edits, since: db.EDITS_SCHEMA_VERSION, what: 'edits' },
+  { name: FOLDERS.products, since: db.PRODUCTS_SCHEMA_VERSION, what: 'products' }
 ]
 
 /**
  * A library from before one of those folders whose base folder already holds a folder of the user's own by
  * that name, e.g. Miljöer, Kläder, Poser, Storyboards, Egna klipp, Redigeringar or Produkter (the setup screen
  * promised that files already there are left alone): opening it would make it the library's – its paths stored
- * relative, "Flytta" taking it along, submits using its files in place instead of copying them into
+ * relative, "Move" taking it along, submits using its files in place instead of copying them into
  * Referensbilder. Refused, before anything changes, until they have renamed it.
  */
 function refuseOwnAssetFolders(root: string): void {
@@ -557,11 +558,11 @@ function refuseOwnAssetFolders(root: string): void {
   const own = occupied.filter((f) => version < f.since)
   if (!own.length) return
   const one = own.length === 1
-  const where = one ? 'en mapp med det namnet' : 'mappar med de namnen'
+  const where = one ? 'a folder with that name' : 'folders with those names'
   throw new Error(
-    `Biblioteksmappen innehåller redan ${quotedList(own.map((f) => f.name))} med egna filer. Den här versionen ` +
-      `av Studio sparar ${andList(own.map((f) => f.what))} i ${where}, så döp om ${one ? 'mappen' : 'mapparna'} ` +
-      'i Finder och försök igen.'
+    `The library folder already contains ${quotedList(own.map((f) => f.name))} with files of your own. This version ` +
+      `of Studio keeps ${andList(own.map((f) => f.what))} in ${where}, so rename ${one ? 'the folder' : 'the folders'} ` +
+      'in Finder and try again.'
   )
 }
 
@@ -633,8 +634,8 @@ async function openLibraryAt(root: string, create = false): Promise<ReorganizeRe
   if (hasLegacyDb(root)) {
     if (hasNewDb(root)) {
       throw new Error(
-        `Mappen innehåller både en gammal Studio-databas (${DB_FILE_NAME}) och en ny ` +
-          `(${FOLDERS.appData}/${DB_FILE_NAME}). Flytta undan den ena och försök igen.`
+        `The folder holds both an old Studio database (${DB_FILE_NAME}) and a new one ` +
+          `(${FOLDERS.appData}/${DB_FILE_NAME}). Move one of them away and try again.`
       )
     }
     await moveLegacyDatabase(root)
@@ -715,7 +716,7 @@ function isOldLayout(dir: string): boolean {
   return hasLegacyDb(dir) || existsSync(markerFile(dir))
 }
 
-/** In one of the library's own folders under root, which 'move' carries along and "Städa upp" works in. */
+/** In one of the library's own folders under root, which 'move' carries along and "Tidy up" works in. */
 function inLibraryFolders(target: string, root: string): boolean {
   return [...LIBRARY_FOLDERS, ...Object.values(LEGACY)].some((name) => {
     const dir = join(root, name)
@@ -726,7 +727,7 @@ function inLibraryFolders(target: string, root: string): boolean {
 /**
  * A folder inside the library 'move' would take along can't be chosen, except to open another library kept
  * there outside the library's own folders: that is the way back to a library the user left by starting a new
- * one in a folder around it ("Du kan byta tillbaka när du vill").
+ * one in a folder around it ("You can switch back whenever you like").
  */
 function blockedAsInside(target: string, source: string | undefined, mode?: LibraryMode): boolean {
   if (!source || !isStrictlyInside(target, source)) return false
@@ -735,7 +736,7 @@ function blockedAsInside(target: string, source: string | undefined, mode?: Libr
 }
 
 export async function inspectLibraryFolder(path: string): Promise<FolderInspection> {
-  if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Välj en mapp.')
+  if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Choose a folder.')
   const target = resolve(path).normalize('NFC')
   const exists = isDir(target)
   const source = moveSource()
@@ -761,8 +762,8 @@ export async function inspectLibraryFolder(path: string): Promise<FolderInspecti
  * deps.onOpened runs; the caller then reloads the windows.
  */
 export async function setLibraryRoot(path: string, mode: LibraryMode): Promise<void> {
-  if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Välj en mapp.')
-  if (mode !== 'move' && mode !== 'open' && mode !== 'new') throw new Error('Okänt sätt att byta bibliotek.')
+  if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Choose a folder.')
+  if (mode !== 'move' && mode !== 'open' && mode !== 'new') throw new Error('Unknown way to switch library.')
   const target = resolve(path).normalize('NFC')
 
   await exclusive(async () => {
@@ -783,7 +784,7 @@ async function switchLibrary(target: string, mode: LibraryMode): Promise<void> {
   if (isLibraryReady() && samePath(libraryRoot(), target)) return
   const source = moveSource()
   if (blockedAsInside(target, source, mode)) throw new Error(INSIDE_CURRENT)
-  if (entryExists(target) && !isDir(target)) throw new Error(`”${basename(target)}” är en fil. Välj en mapp.`)
+  if (entryExists(target) && !isDir(target)) throw new Error(`“${basename(target)}” is a file. Choose a folder.`)
 
   if (mode === 'move') {
     if (!source) throw new Error(NOTHING_TO_MOVE)
@@ -838,11 +839,11 @@ async function switchTo(target: string, create: boolean): Promise<void> {
     setLibraryRootSetting(target)
   } catch (err) {
     await prepareLibrary()
-    throw new Error(`Inställningen kunde inte sparas: ${message(err)}`)
+    throw new Error(`The setting could not be saved: ${message(err)}`)
   }
   const status = await prepareLibrary({ create })
   if (status.state === 'ready') return
-  const reason = status.error ?? 'Mappen kunde inte nås.'
+  const reason = status.error ?? 'The folder could not be reached.'
   // Go back to the library that was in use, so a failed switch doesn't leave Studio without one.
   try {
     restoreLibraryLocation(saved)
@@ -850,7 +851,7 @@ async function switchTo(target: string, create: boolean): Promise<void> {
     console.error('Could not restore the library setting:', err)
   }
   await prepareLibrary()
-  throw new Error(`Biblioteket kunde inte öppnas: ${reason}`)
+  throw new Error(`The library could not be opened: ${reason}`)
 }
 
 interface MovedFolders {
@@ -1022,12 +1023,12 @@ function unmovableReason(root: string, conversion?: ReorganizeReport): string | 
   const examples = conversion?.errors.length
     ? [...new Set(conversion.errors)].slice(0, 3).join('; ')
     : stranded.length
-      ? quotedList(stranded.slice(0, 3)) + (stranded.length > 3 ? ' med flera' : '')
+      ? quotedList(stranded.slice(0, 3)) + (stranded.length > 3 ? ' and more' : '')
       : undefined
   return (
-    'Biblioteket kan inte flyttas än: några filer från den tidigare versionen av Studio kunde inte ordnas in ' +
-    `i de nya mapparna${examples ? ` (${examples})` : ''}. Är de låsta i Finder (Visa info → Låst), lås upp ` +
-    'dem och försök igen. Inget har flyttats.'
+    'The library cannot be moved yet: some files from the earlier version of Studio could not be sorted into ' +
+    `the new folders${examples ? ` (${examples})` : ''}. If they are locked in Finder (Get Info → Locked), unlock ` +
+    'them and try again. Nothing has been moved.'
   )
 }
 
@@ -1071,16 +1072,16 @@ async function switchByMoving(source: string, target: string): Promise<void> {
     moved = await moveLibraryFolders(source, target)
   } catch (err) {
     await reopenPrevious()
-    throw swedishError(err, 'Biblioteket kunde inte flyttas, inget har ändrats')
+    throw readableError(err, 'The library could not be moved, nothing has changed')
   }
 
   let failure: string | undefined
   try {
     setLibraryRootSetting(target)
     const status = await prepareLibrary()
-    if (status.state !== 'ready') failure = `Biblioteket kunde inte öppnas i den nya mappen: ${status.error ?? 'okänt fel'}`
+    if (status.state !== 'ready') failure = `The library could not be opened in the new folder: ${status.error ?? 'unknown error'}`
   } catch (err) {
-    failure = `Inställningen kunde inte sparas: ${message(err)}`
+    failure = `The setting could not be saved: ${message(err)}`
   }
   if (failure) {
     closeLibrary()
@@ -1284,7 +1285,7 @@ async function finishLegacyMigration(root: string): Promise<ReorganizeReport> {
   return report
 }
 
-// ── Städa upp ────────────────────────────────────────────────────────────────
+// ── Tidy up ──────────────────────────────────────────────────────────────────
 
 /**
  * Moves abs into dir (as base + its extension when given) and rewrites every stored path that pointed at it,
@@ -1434,7 +1435,7 @@ async function ensureEntityFolder(owner: FolderOwner, row: EntityRow, report: Re
       await renameLibraryFolder(join(parent, folder), join(parent, next), record(next))
       folder = next
     } catch (err) {
-      report.errors.push(`Mappen ”${folder}” kunde inte döpas om till ”${next}”: ${message(err)}`)
+      report.errors.push(`The folder “${folder}” could not be renamed to “${next}”: ${message(err)}`)
     }
   }
   if (!folder) {
@@ -1457,13 +1458,13 @@ async function writeDescriptionIfMissing(dir: string, description: string): Prom
   }
 }
 
-/** How a report names an asset of each kind: "Karaktären ”Anna”: …". */
+/** How a report names an asset of each kind: "The character “Anna”: …". */
 const ASSET_LABELS: Readonly<Record<AssetKind, string>> = {
-  character: 'Karaktären',
-  environment: 'Miljön',
-  product: 'Produkten',
-  outfit: 'Klädseln',
-  pose: 'Posen'
+  character: 'The character',
+  environment: 'The environment',
+  product: 'The product',
+  outfit: 'The outfit',
+  pose: 'The pose'
 }
 
 /**
@@ -1533,7 +1534,7 @@ async function tidyAsset(id: string, report: ReorganizeReport): Promise<string |
  * Every file of the generations to its home by the file home rule (jobs.videoHome): Venice's takes into Tagningar
  * (a transition's into its storyboard's Övergångar) or back to Genereringar when free; the user's own clips into
  * Egna klipp/<day>/ (the untouched original next to its working copy), even when they are takes; edit versions
- * and AI takes made in Redigera into the edit's folder (and its Tagningar). Imports and versions are never named
+ * and AI takes made in the Editor into the edit's folder (and its Tagningar). Imports and versions are never named
  * after an empty prompt or moved into Tagningar. Then posters; `only` limits it to some ids.
  */
 async function tidyGenerations(report: ReorganizeReport, only?: Set<string>): Promise<void> {
@@ -1735,8 +1736,8 @@ async function reorganizeTracked(report: ReorganizeReport): Promise<void> {
     try {
       await tidyAsset(r.id, report)
     } catch (err) {
-      const label = isAssetKind(r.kind) ? ASSET_LABELS[r.kind] : 'Posten'
-      report.errors.push(`${label} ”${r.name}”: ${message(err)}`)
+      const label = isAssetKind(r.kind) ? ASSET_LABELS[r.kind] : 'The item'
+      report.errors.push(`${label} “${r.name}”: ${message(err)}`)
     }
   }
   const sequences = conn
@@ -1747,7 +1748,7 @@ async function reorganizeTracked(report: ReorganizeReport): Promise<void> {
     try {
       await ensureEntityFolder(sequenceOwner(r.kind), r, report)
     } catch (err) {
-      report.errors.push(`${storyboard ? 'Storyboarden' : 'Sekvensen'} ”${r.name}”: ${message(err)}`)
+      report.errors.push(`${storyboard ? 'The storyboard' : 'The sequence'} “${r.name}”: ${message(err)}`)
     }
   }
   // Edits get their folders before their versions, takes and audio are put in them.
@@ -1756,7 +1757,7 @@ async function reorganizeTracked(report: ReorganizeReport): Promise<void> {
     try {
       await ensureEntityFolder({ table: 'edits' }, r, report)
     } catch (err) {
-      report.errors.push(`Redigeringen ”${r.name}”: ${message(err)}`)
+      report.errors.push(`The edit “${r.name}”: ${message(err)}`)
     }
   }
   await tidyGenerations(report)
@@ -1779,7 +1780,7 @@ async function removeEmptyFolders(root: string): Promise<void> {
 }
 
 /**
- * "Städa upp": moves every tracked file to its canonical location, gives assets of every kind and sequences their
+ * "Tidy up": moves every tracked file to its canonical location, gives assets of every kind and sequences their
  * folders, rewrites stored paths and removes emptied day folders and empty phase-2 folders. Idempotent, never
  * overwrites anything; files missing on disk are counted, not errors. Refused while the library is busy.
  */
@@ -1788,7 +1789,7 @@ export async function reorganizeLibrary(): Promise<ReorganizeReport> {
     const root = libraryRoot()
     refuseIfBusy()
     assertRootIntact()
-    // A phase-2 conversion that was cut short (a locked file, say) is finished here too, so "Städa upp"
+    // A phase-2 conversion that was cut short (a locked file, say) is finished here too, so "Tidy up"
     // is also the way to retry it; its report covers everything the clean-up does.
     if (existsSync(markerFile(root))) {
       ensureStructure(root)
@@ -1814,12 +1815,12 @@ async function sequenceFolderPath(id: string, kind: SequenceKind): Promise<strin
   const row = db.getDb().prepare('SELECT folder, kind FROM sequences WHERE id = ?').get(id) as
     | { folder: string | null; kind: string }
     | undefined
-  if (!row) throw new Error(kind === 'storyboard' ? 'Storyboarden finns inte längre.' : 'Sekvensen finns inte längre.')
+  if (!row) throw new Error(kind === 'storyboard' ? 'The storyboard no longer exists.' : 'The sequence no longer exists.')
   if (sequenceKindOf(row.kind) !== kind) {
     throw new Error(
       kind === 'storyboard'
-        ? 'Det här är en sekvens, inte en storyboard. Den finns under Sekvenser.'
-        : 'Det här är en storyboard, inte en sekvens. Den finns under Storyboards.'
+        ? 'This is a sequence, not a storyboard. It is under Sequences.'
+        : 'This is a storyboard, not a sequence. It is under Storyboards.'
     )
   }
   const parent = join(libraryRoot(), KIND_FOLDERS[kind].parent)
@@ -1872,7 +1873,7 @@ function isAssetId(id: string): boolean {
  */
 async function editFolderPath(id: string): Promise<string> {
   const row = db.getDb().prepare('SELECT id, name, folder FROM edits WHERE id = ?').get(id) as EntityRow | undefined
-  if (!row) throw new Error('Redigeringen finns inte längre.')
+  if (!row) throw new Error('The edit no longer exists.')
   const parent = join(libraryRoot(), FOLDERS.edits)
   if (isPlainName(row.folder)) return join(parent, row.folder)
   if (operation || deps.busy()) return parent
@@ -1888,7 +1889,7 @@ async function editFolderPath(id: string): Promise<string> {
  * 'storyboards', an edit's for 'edits'.
  */
 export async function revealLibraryFolder(target: LibraryFolderTarget, id?: string): Promise<void> {
-  if (!isRevealTarget(target)) throw new Error('Okänd mapp.')
+  if (!isRevealTarget(target)) throw new Error('Unknown folder.')
   const root = libraryRoot()
   const entityId = typeof id === 'string' && id ? id : undefined
   let dir: string
@@ -1907,7 +1908,7 @@ export async function revealLibraryFolder(target: LibraryFolderTarget, id?: stri
   const error = await shell.openPath(dir)
   if (error) {
     console.warn(`Could not open ${dir}:`, error)
-    throw new Error(`Mappen ”${basename(dir)}” kunde inte öppnas i Finder.`)
+    throw new Error(`The folder “${basename(dir)}” could not be opened in Finder.`)
   }
 }
 
@@ -1948,7 +1949,7 @@ export function registerLibraryRootIpc(d: LibraryRootDeps): void {
     // The open folder may have vanished (renamed in Finder, a drive unplugged): it is closed, and the
     // setup screen asks for it.
     if (!operation && isLibraryReady() && isRootLost()) closeLostLibrary(false)
-    // A missing folder may be back (a drive plugged in again): "Försök igen" asks for the status again.
+    // A missing folder may be back (a drive plugged in again): "Try again" asks for the status again.
     if (!isLibraryReady() && !operation && getLibraryRoot()) await exclusive(() => prepareLibrary())
     return libraryStatus()
   })
@@ -1956,14 +1957,14 @@ export function registerLibraryRootIpc(d: LibraryRootDeps): void {
   ipcMain.handle('library:choose', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     let start = isLibraryReady() ? libraryRoot() : (getLibraryRoot() ?? suggestedLibraryRoot())
-    // Not inside the library itself: "Välj" right away, or "Ny mapp" there, would only be refused (it is the
+    // Not inside the library itself: "Choose" right away, or "New Folder" there, would only be refused (it is the
     // current library, or inside the one that would be moved). Its parent is where a choice makes sense.
     const source = moveSource()
     if (source && (samePath(start, source) || isStrictlyInside(start, source))) start = dirname(source)
     const options: OpenDialogOptions = {
-      title: 'Välj biblioteksmapp',
-      message: 'Välj grundmappen där Studio ska spara allt.',
-      buttonLabel: 'Välj',
+      title: 'Choose library folder',
+      message: 'Choose the base folder where Studio should save everything.',
+      buttonLabel: 'Choose',
       defaultPath: existingFolder(start),
       properties: ['openDirectory', 'createDirectory']
     }

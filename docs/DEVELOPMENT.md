@@ -69,7 +69,7 @@ suggested location of the library. Each library carries its own database inside 
   the front (two instances would poll and download the same paid jobs). That is why `dev:real` needs Studio.app to
   be closed.
 - **`dev:real` migrates the real library.** A build refuses a library whose database is newer than it knows
-  (*Biblioteket har sparats av en nyare version av Studio*), but 0.1.0 predates that check and opens it anyway, then
+  (it says the library was saved by a newer version of Studio), but 0.1.0 predates that check and opens it anyway, then
   loses track of voices when it renames or deletes an asset. After running a branch with a new migration under
   `dev:real`, rebuild Studio.app (`npm run app:install`) before opening it again.
 - **`STUDIO_PROFILE_DIR`** gives a throwaway profile: settings and the suggested library live under that folder.
@@ -86,16 +86,16 @@ suite yet; changes are verified with the techniques below (contributions of a pr
 
 ### Ground rules
 
-- **Never trigger real generations while developing.** Don't press *Generera*, *Generera tagning*, *Generera
-  saknade*, *Skapa* in *Skapa bild…*, a priced button in Redigera, *Fortsätt* on an edit job, *Skapa röst* or
-  approve an agent request in a profile that has a real API key, and never call Venice's paid endpoints from tests —
+- **Never trigger real generations while developing.** Don't press *Generate* (in the form or on a clip), *Generate
+  missing*, the create button in *Create image…*, a priced button in the Editor, continue on a stopped edit job, the
+  voice design button or approve an agent request in a profile that has a real API key, and never call Venice's paid endpoints from tests —
   `/video/queue`, `/image/generate`, `/image/multi-edit`, `/audio/speech`, `/audio/queue`, `/audio/voices`,
   `/audio/transcriptions`, `/video/transcriptions`, `/audio/voice-changer/queue`, `/augment/*`, and the retrieve and
   complete endpoints (they need a key too). Stub the `VeniceClient`, `VeniceAudio` or `fetch` instead. Free calls
   without a key are fine: `GET /models?type=…`, `/video/quote`, `/audio/quote` and `/audio/voice-changer/quote`
-  (Topaz upscale quotes need a key, so plans show *"Lägg till API-nyckeln under Inställningar."* without one).
+  (Topaz upscale quotes need a key, so without one plans ask for an API key under Settings).
 - **Use a profile without an API key** for UI work. The model list and price quotes work without a key, but
-  queueing a generation fails with "Ingen API-nyckel är inställd" before anything is sent.
+  queueing a generation fails with a missing-API-key error before anything is sent.
 - **Work in a throwaway profile and library** (`STUDIO_PROFILE_DIR`), not in `~/Movies/Studio*` or
   `~/Library/Application Support/Studio*`.
 - **Never let a test reach the internet.** Agents' URL uploads are tried against a local HTTP server on
@@ -135,8 +135,8 @@ ffmpeg -y -f lavfi -i "testsrc2=size=1280x720:rate=25" -t 3 -c:v prores_ks -prof
 
 Importing the same file twice reuses the first import (same size and SHA-256).
 
-**Redigera.** Free operations (cuts, fades, volume, noise, loudness, added sound, and *Ta bort rösten* / *Bara
-rösten* with the [native helper](#native-helper)) run entirely on the Mac and can be tried on any test clip. A tone
+**Editor.** Free operations (cuts, fades, volume, noise, loudness, added sound, and removing the voice or keeping
+only the voice with the [native helper](#native-helper)) run entirely on the Mac and can be tried on any test clip. A tone
 with pauses is enough to see where speech is found and how a waveform looks; the separation needs something
 voice-like to separate, so use a recording of speech you are allowed to use. Paid operations are tried only with a
 stubbed `fetch` (below), never by pressing a priced button with a key in the profile.
@@ -159,10 +159,10 @@ ffmpeg -y -f lavfi -i "sine=frequency=500:duration=0.5" short.mp3
 ffmpeg -y -f lavfi -i "testsrc2=size=320x240:rate=24" -t 2 -an -c:v libx264 -pix_fmt yuv420p no-audio.m4a
 ```
 
-Add them to characters under *Röst* in a throwaway library (`short.mp3` and `no-audio.m4a` must be refused with
+Add them to characters as voice clips in a throwaway library (`short.mp3` and `no-audio.m4a` must be refused with
 their names). Two clips with the default 10 s windows add up to 20 s: the form won't take the second one, and
 params that carry both anyway (an agent, a harness) are refused by the prompt check and by `prepareSubmission`
-("Ljudreferenserna är 20 s – max 15 s totalt.") before any call to Venice.
+(the reference audio is 20 s, more than the 15 s allowed) before any call to Venice.
 
 ### Fake generation rows
 
@@ -212,17 +212,17 @@ SQL
 ```
 
 Author `user` is the user's own review (at most one per generation); any other author is an agent. A rating is
-tumme ner (`-1`) or 1–3 stars; since migration 13 the table's `CHECK` allows nothing else. Tags and evidence are JSON
+thumbs down (`-1`) or 1–3 stars; since migration 13 the table's `CHECK` allows nothing else. Tags and evidence are JSON
 lists; evidence holds generation ids.
 
 ### Fake status rows
 
-*Pågår och klart* reads finished work from the `unseen` table, so a fake completed row shows as seen until you add
+*Activity* reads finished work from the `unseen` table, so a fake completed row shows as seen until you add
 one (Studio quit, as above). Ids only, never paths; `created_at` is when it finished:
 
 ```bash
 sqlite3 "$LIB/.studio/studio.db" <<'SQL'
--- A finished video the user hasn't watched: Ny on its card, a dot on Generera, a row in the panel.
+-- A finished video the user hasn't watched: New on its card, a dot on Generate, a row in the panel.
 INSERT INTO unseen (id, generation_id, context, created_at) VALUES ('fake-unseen-1', 'fake-1', '{}', 1767268800000);
 -- A picture that failed after its dialog closed (no row of its own: an error and a label, its owner in context).
 INSERT INTO unseen (id, error, label, context, created_at)
@@ -234,7 +234,7 @@ A failed generation row (`status = 'failed'`, `error` set) with an `unseen` row 
 or storyboard's run or export name it in `context` (`{"sequenceId": "…", "failureOf": "run"}`); such a row goes by
 itself once that sequence is deleted. Things that *run* can't be faked with rows (only Venice generations have them,
 and a pending row would be polled at Venice); start free work instead — an export, an import of a test clip, a free
-operation in Redigera — or drive the services in a harness. Playing a test clip for a second marks it seen, which is
+operation in the Editor — or drive the services in a harness. Playing a test clip for a second marks it seen, which is
 the quickest check of the playback rule.
 
 ### Test agent uploads
@@ -378,7 +378,7 @@ yourself. The job manager needs the models' prompt limits for that: pass a model
 (`new JobManager(venice, async () => models)`, as `index.ts` passes its cached list), or serve `/models` — without
 either it composes without a limit.
 
-For Redigera's paid operations stub `/audio/*` and `/video/*` the same way, keeping the real `VeniceAudio` and
+For the Editor's paid operations stub `/audio/*` and `/video/*` the same way, keeping the real `VeniceAudio` and
 `VeniceClient`: serve `/models?type=tts|music|asr` from saved lists (add a fake model with `voice_changer: true` and
 a short `max_source_audio_duration_seconds` to force chunking), answer `/audio/quote` and
 `/audio/voice-changer/quote` with a price, and parse multipart bodies (`/audio/voices`, `/audio/transcriptions`,
@@ -451,7 +451,7 @@ npm run check       # both of the above
 
 ## Native helper
 
-Voice and background separation (*Ta bort rösten*, *Bara rösten*, keeping the background under a new voice) uses
+Voice and background separation (removing the voice, keeping only the voice, keeping the background under a new voice) uses
 macOS's own AUSoundIsolation audio unit through a small Swift command-line helper, `studio-voice-isolate`
 (`native/voice-isolate/main.swift`). `npm run build:helpers` (`scripts/build-helpers.mjs`) compiles it:
 
@@ -462,8 +462,8 @@ macOS's own AUSoundIsolation audio unit through a small Swift command-line helpe
   the flags and the compiler version) skips an up-to-date helper in a fraction of a second; `--force` rebuilds
   (`npm run build:helpers -- --force`);
 - without the Swift compiler, or off macOS, it prints a note and skips; `STUDIO_SKIP_HELPERS=1` skips it on purpose.
-  Studio then runs without voice separation: *Inställningar → Verktyg* says *"Röstseparering är inte byggd. Kör npm
-  run build:helpers …"*, and Redigera offers only what works without stems.
+  Studio then runs without voice separation: *Settings → Tools* says that it isn't built and to run
+  `npm run build:helpers`, and the Editor offers only what works without stems.
 
 `src/main/voice-separation.ts` looks for the helper in `<app>/Contents/Resources/bin/` when packaged (electron-builder
 copies it there through `extraResources`) and in `build/bin/` in development. Try it by hand:
@@ -474,7 +474,7 @@ build/bin/studio-voice-isolate in.wav voice.wav background.wav   # 32-bit float 
 ```
 
 Studio runs the helper with a watchdog: no `progress=` line for two minutes, or a run longer than the sound itself
-(at least five minutes), kills it and fails the separation with a Swedish message. A new or changed helper must keep
+(at least five minutes), kills it and fails the separation with a message. A new or changed helper must keep
 printing progress every few percent. Before it starts, `separateStems` checks that the scratch WAVs (the sound three
 times over as 32-bit float at 48 kHz) fit on the library's disk with 1 GB to spare.
 
@@ -494,7 +494,7 @@ times over as 32-bit float at 48 kHz) fit on the library's disk with 1 GB to spa
 - **Native helper:** `build/bin/studio-voice-isolate` is copied to `Contents/Resources/bin/` (`extraResources`). A
   build without it only gets a warning from electron-builder, and that app runs without voice separation.
 - **Info.plist:** the folder-access usage descriptions (Documents, Desktop, Downloads, removable and network
-  volumes) are in Swedish, like the UI; `electronLanguages` keeps `sv` and `en`.
+  volumes) are set in `electron-builder.yml`; `electronLanguages` keeps `sv` and `en`.
 - **Node and `require(esm)`:** electron-builder 26 `require()`s ES-module-only dependencies. Node 22.12 and later
   allow that by default (hence `"engines": { "node": ">=22.12" }`); the `app` script also sets
   `NODE_OPTIONS=--experimental-require-module` so it works where the feature is still behind that flag. The
@@ -533,7 +533,7 @@ It only quits a running Studio when that is the copy it replaces.
 
 `npm run screenshots` (after `npm run build`) starts the built app with `STUDIO_PROFILE_DIR` pointing at a new
 temporary folder, creates an empty library there, adds a little neutral structure (a sequence and a storyboard with
-short notes, no media), opens Generera, the `/` menu, Sekvenser, Storyboards and Redigera at 1440 × 900 (2× pixels)
+short notes, no media), opens Generate, the `/` menu, Sequences, Storyboards and the Editor at 1440 × 900 (2× pixels)
 over the DevTools protocol and saves `docs/images/*.png`. It never reads your own settings or library, generates
 nothing and uses no API key; the temporary folder is removed afterwards. Run it again when the UI changes.
 
@@ -550,10 +550,10 @@ change the schema:
    migration 13 rebuilds `generation_reviews` — a new table with the new `CHECK`, the rows copied and converted, the
    old one dropped, the new one renamed and its indexes created again.
 3. If the new data holds **file paths**, store them relative to the base folder and teach every place that
-   rewrites or looks for stored paths about it, or library moves, renames and *Städa upp* will break it (migration
+   rewrites or looks for stored paths about it, or library moves, renames and *Tidy up* will break it (migration
    7 did this for `asset_audio.file_path` and `referenceAudios[].path`):
    - a new **column**: `mapStoredPaths`, `isStoredPathRecorded`, `isStoredPrefixRecorded`, `rewriteStoredPrefix`,
-     `followRewrites` and `relativizeStoredPaths` in `db.ts`, and `trackedFilePaths` and *Städa upp* in
+     `followRewrites` and `relativizeStoredPaths` in `db.ts`, and `trackedFilePaths` and *Tidy up* in
      `library-root.ts` (and the reorganize/rename code if the files belong to an asset). Migration 11 did this for
      `generations.original_path` (an import's original) and `edit_media.file_path`;
    - a new path **inside `params` JSON**: `mapParamPaths` (behind `toStoredParams` / `fromStoredParams`) in
@@ -564,14 +564,14 @@ change the schema:
    - other JSON columns (`recipe`, `details`, `request`, `segments`) hold ids only, never paths: a path there
      would not follow a rename or a library move;
    - a new kind of **file** also needs a home: `jobs.videoHome` decides the folder of every generation's video
-     (the [file home rule](ARCHITECTURE.md#the-file-home-rule)), and sequences, imports, edits and *Städa upp*
+     (the [file home rule](ARCHITECTURE.md#the-file-home-rule)), and sequences, imports, edits and *Tidy up*
      all go through it.
 4. Update the row types and mappers (`GenerationRow`, `generationFromRow`, `sequence-store.ts` …), the shared types
    if the data reaches the renderer, and the data-model section of [ARCHITECTURE.md](ARCHITECTURE.md#data-model).
 5. **Test on a copy.** Quit Studio (closing folds the WAL into `studio.db`), copy a library's folder into a
    throwaway profile (or copy just `.studio/studio.db` into a temp folder for a harness), and open the copy. Check
    that the migration runs once, that the app works afterwards, and that opening it again changes nothing.
-6. **A new top-level folder** (as *Produkter* in migration 12) gets a `*_SCHEMA_VERSION` constant in `db.ts` and an
+6. **A new top-level folder** (as `Produkter` in migration 12) gets a `*_SCHEMA_VERSION` constant in `db.ts` and an
    entry in `library-root.ts`'s `ADDED_FOLDERS` (and `VISIBLE_FOLDERS`), so an older library whose base folder already
    holds a folder of the user's own by that name is refused until it is renamed, instead of the user's files being
    taken over.
@@ -594,7 +594,7 @@ agents' kind words). Products showed what the compiler doesn't catch:
 - `AssetIcon.tsx` (one explicit branch per kind), `KIND_TONE` and `PICKER_COPY` (`pickers/`), `AssetPicker`'s
   `counts` and its tab grid, `ParamsForm.tsx`'s `kindButtons` and `SINGLE_IMAGE_KINDS`, `AssetImages`' `LAYOUT`;
 - the prompt grammar if the kind relates to others (`pickers/text.ts`, `prompt/promptText.ts`, `AssetChips.tsx`);
-- every Swedish sentence that lists the kinds (`ReferenceImages.tsx`, `TokenMenu.tsx`, `LibrarySetup.tsx`,
+- every sentence that lists the kinds (`ReferenceImages.tsx`, `TokenMenu.tsx`, `LibrarySetup.tsx`,
   `assets.ts`'s `assetWorkBusy`, the start and end picker titles in `ParamsForm.tsx`, `agent/studio.ts`), the work
   summary's view of the kind (`work.ts`'s `assetView`, `WorkView`, `AssetViewId`) and the agent guide and tool
   descriptions (`guide.ts`, `tools/library.ts`, `tools/delete.ts`).
@@ -609,7 +609,7 @@ A grep for an existing kind's plural (`Poser`, `poses`) finds them.
    `doThing: (id) => ipcRenderer.invoke('area:doThing', id)`. For a main → renderer event, add an `on…` method
    using the `on()` helper, which returns an unsubscribe function.
 3. **Main** — register `ipcMain.handle('area:doThing', …)` in the owning module's `register…` function. Treat the
-   arguments as untrusted (they are untyped at runtime): validate them and reject with a Swedish, user-facing
+   arguments as untrusted (they are untyped at runtime): validate them and reject with a user-facing
    message.
 4. **Side effects** — broadcast the matching change event (`library:change`, `sequence:change`, `storyboard:change`,
    `generation:update` …) so open views refetch. Anything that moves files must respect the library-wide operation
@@ -618,11 +618,11 @@ A grep for an existing kind's plural (`Poser`, `poses`) finds them.
    `callService('area:doThing', …)`. If agents must be treated differently, check `isAgentCall(event)` (as the
    review and learning handlers do: an agent passes its name as the last argument and may only change what it
    wrote). What only the user may do (settings, delete edits or versions, clone consent, marking things seen …)
-   refuses an agent's call with *"Det här kan bara du göra i Studio."* in the handler too, behind the tool list. A
+   refuses an agent's call in the handler too (an error saying only the user can do it), behind the tool list. A
    handler that takes file paths calls `assertAgentFiles(event, paths)` (`upload-paths.ts`), so an agent's call can
    only hand over uploads or files the library records. Anything paid takes the price the user saw and refuses when
    it rose (`expectedPriceUsd`, as `edits:run` does). A new user-facing capability also needs a tool (see below), and
-   work that runs for a while needs a place in *Pågår och klart* (a registry `work.ts` reads, a `touch` when it starts
+   work that runs for a while needs a place in *Activity* (a registry `work.ts` reads, a `touch` when it starts
    or stops, an `unseen` row when its result is news).
 6. **Check** — `npm run check`, then try it in the dev profile; update [ARCHITECTURE.md](ARCHITECTURE.md#ipc-surface).
 
@@ -636,12 +636,12 @@ review tools.
 
 Tools live in `src/main/agent/tools/` (`library.ts`, `form.ts`, `sequences.ts`, `stills.ts`, `storyboards.ts`,
 `paid.ts`, `editor.ts`, `editor-paid.ts` with `edit-input.ts`, `review.ts`, `uploads.ts`, `imports.ts`, `delete.ts`,
-`work.ts`, with the shared upload and picture sources in `sources.ts`) and are registered with `defineTool` (`kit.ts`). Redigera shows the pattern for a new area: read and free tools in `editor.ts`, the paid requests in
+`work.ts`, with the shared upload and picture sources in `sources.ts`) and are registered with `defineTool` (`kit.ts`). The Editor shows the pattern for a new area: read and free tools in `editor.ts`, the paid requests in
 `editor-paid.ts`, one snake_case input schema and converter for the operations (`edit-input.ts`), every check left
 to the service's own plan (`edits:plan`), and an approval panel in `components/agent/EditApproval.tsx`:
 
 - Give it a clear English `title` and `description` written for an LLM, a zod `input` schema with `.describe()`d
-  fields, honest MCP `annotations` (`READ_ONLY`, `WRITE`, or destructive/open-world hints) and a short Swedish
+  fields, honest MCP `annotations` (`READ_ONLY`, `WRITE`, or destructive/open-world hints) and a short
   `summary` for the activity log.
 - Reach Studio's services through `callService`, never by writing to the database or files directly, so the same
   validation and change notifications apply.

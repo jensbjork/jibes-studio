@@ -48,7 +48,10 @@ interface Props {
   number: number
   /** The next segment starts from this take's (trimmed) last frame. */
   nextContinues: boolean
-  /** The previous segment ends on this take's first frame after the start trim ("Slutbild från nästa klipp"). */
+  /**
+   * The previous segment ends on this take's first frame after the start trim ("End on the next clip's first
+   * frame").
+   */
   previousEndsHere: boolean
   patchSegment: SequenceStore['patchSegment']
   flushers: FlushRegistry
@@ -56,9 +59,9 @@ interface Props {
   selecting?: boolean
   playRequest?: PlayRequest
   playerRef?: Ref<TakePlayerHandle>
-  /** "Välj den": the previewed take becomes the chosen one. */
+  /** "Use this take": the previewed take becomes the chosen one. */
   onChoosePreview: () => void
-  /** "Visa vald" (or Esc): back to the chosen take. */
+  /** "Show selected" (or Esc): back to the chosen take. */
   onLeavePreview: () => void
   /** The take strip, right under the player. */
   children?: ReactNode
@@ -80,7 +83,7 @@ interface TrimState extends Trims {
  * the player and the strip stay while takes are chosen (the strip keeps its focus), and only the trim editor is
  * remounted per take. Trims are saved debounced as a trims-only patch; main clamps them, and the clamped values come
  * back through the draft. A take can also be previewed here without being chosen: the header says so, and
- * "Välj den" / "Visa vald" stand where the trims are.
+ * "Use this take" / "Show selected" stand where the trims are.
  */
 export default function TrimControls({
   segment,
@@ -174,7 +177,7 @@ export default function TrimControls({
   }, [playRequest, shown?.id, startPlaying])
 
   // A start that changes by itself – main's remembered trims for a take just chosen (they arrive a moment after it
-  // is shown), an agent's trim, main's clamping, Nollställ – moves a paused player there, so the frame it shows is
+  // is shown), an agent's trim, main's clamping, Reset – moves a paused player there, so the frame it shows is
   // where the take begins in the sequence. Dragging or typing a start already shows that frame.
   useEffect(() => {
     const el = video.current
@@ -214,19 +217,19 @@ export default function TrimControls({
           <div className="mb-3 flex flex-wrap items-baseline gap-x-2">
             {previewing ? (
               <>
-                <h3 className="font-medium">Förhandsvisning</h3>
-                <span className="text-[12px] text-muted">tagning {formatTakeTime(shown.createdAt)} (inte vald)</span>
+                <h3 className="font-medium">Preview</h3>
+                <span className="text-[12px] text-muted">take {formatTakeTime(shown.createdAt)} (not selected)</span>
               </>
             ) : (
               <>
-                <h3 className="font-medium">Vald tagning</h3>
+                <h3 className="font-medium">Selected take</h3>
                 <span className="text-[12px] text-muted">
-                  klipp {number} · {formatLength(keptLength)} i sekvensen
+                  clip {number} · {formatLength(keptLength)} in the sequence
                 </span>
               </>
             )}
             <span className="ml-auto text-[11px] text-muted">
-              {trims.error ? <span className="text-accent">{trims.error}</span> : trims.status !== 'idle' && 'Sparar…'}
+              {trims.error ? <span className="text-accent">{trims.error}</span> : trims.status !== 'idle' && 'Saving…'}
             </span>
           </div>
           <video
@@ -274,17 +277,17 @@ export default function TrimControls({
             onClick={onChoosePreview}
             className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover"
           >
-            Välj den
+            Use this take
           </button>
           <button
             type="button"
             onClick={onLeavePreview}
-            title="Tillbaka till den valda tagningen (Esc)"
+            title="Back to the selected take (Esc)"
             className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text"
           >
-            {take ? 'Visa vald' : 'Stäng förhandsvisningen'}
+            {take ? 'Show selected' : 'Close preview'}
           </button>
-          <span className="text-[11px] text-muted">Trimningen hör till den valda tagningen.</span>
+          <span className="text-[11px] text-muted">The trim belongs to the selected take.</span>
         </div>
       ) : (
         take?.filePath && (
@@ -313,7 +316,7 @@ export default function TrimControls({
 }
 
 /**
- * The chosen take's trims: the bar, the two inputs with Här, Nollställ, "Spela bara det som används" and the notes
+ * The chosen take's trims: the bar, the two inputs with Here, Reset, "Play only what's used" and the notes
  * about seamless neighbours. Mounted per take (its draft belongs to that take), so a switch saves a pending trim
  * first – on unmount – while main still has the take it was made for.
  */
@@ -411,18 +414,18 @@ function TrimEditor({
 
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <SecondsInput
-          label="Trimma början"
+          label="Trim start"
           value={trimStart}
           onChange={(v) => setTrim('trimStart', v, true)}
           onHere={() => setTrim('trimStart', video.current?.currentTime ?? time, false)}
-          hereTitle="Börja klippet vid uppspelningshuvudet"
+          hereTitle="Start the clip at the playhead"
         />
         <SecondsInput
-          label="Trimma slutet"
+          label="Trim end"
           value={trimEnd}
           onChange={(v) => setTrim('trimEnd', v, true)}
           onHere={() => setTrim('trimEnd', duration - (video.current?.currentTime ?? time), false)}
-          hereTitle="Avsluta klippet vid uppspelningshuvudet"
+          hereTitle="End the clip at the playhead"
         />
         <button
           onClick={() => {
@@ -432,7 +435,7 @@ function TrimEditor({
           disabled={trimStart === 0 && trimEnd === 0}
           className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
         >
-          Nollställ
+          Reset
         </button>
         <label className="ml-auto flex items-center gap-2 pb-1.5 text-muted">
           <input
@@ -441,20 +444,20 @@ function TrimEditor({
             onChange={(e) => onOnlyTrimmed(e.target.checked)}
             className="accent-accent"
           />
-          Spela bara det som används
+          Play only what's used
         </label>
       </div>
 
       {previousEndsHere && (
         <p className="text-[11px] leading-relaxed text-muted">
-          Klipp {number - 1} slutar på bildrutan vid {formatLength(trimStart)}. Ändrar du starten behöver klipp{' '}
-          {number - 1} en ny tagning för att övergången ska bli sömlös.
+          Clip {number - 1} ends on the frame at {formatLength(trimStart)}. If you change the start, clip{' '}
+          {number - 1} needs a new take for the transition to be seamless.
         </p>
       )}
       {nextContinues && (
         <p className="text-[11px] leading-relaxed text-muted">
-          Klipp {number + 1} fortsätter från bildrutan vid {formatLength(keepEnd)}. Ändrar du slutet behöver klipp{' '}
-          {number + 1} en ny tagning för att övergången ska bli sömlös.
+          Clip {number + 1} continues from the frame at {formatLength(keepEnd)}. If you change the end, clip{' '}
+          {number + 1} needs a new take for the transition to be seamless.
         </p>
       )}
     </div>
@@ -511,7 +514,7 @@ function TrimBar({
           track(e, onSeek)
         }}
         className="relative h-9 cursor-pointer touch-none rounded-md bg-raised"
-        title="Klicka för att spola"
+        title="Click to seek"
       >
         <div
           className="absolute inset-y-0 rounded-md border-2 border-accent/80 bg-accent/10"
@@ -527,7 +530,7 @@ function TrimBar({
           <div
             key={key}
             onPointerDown={(e) => track(e, (t) => onDrag(key, t))}
-            title={key === 'trimStart' ? 'Dra för att trimma början' : 'Dra för att trimma slutet'}
+            title={key === 'trimStart' ? 'Drag to trim the start' : 'Drag to trim the end'}
             className="absolute inset-y-0 z-10 flex w-4 -translate-x-1/2 cursor-ew-resize touch-none items-center justify-center"
             style={{ left: pct(key === 'trimStart' ? trimStart : duration - trimEnd) }}
           >
@@ -595,7 +598,7 @@ function SecondsInput({
           title={hereTitle}
           className="rounded-md border border-line px-2 py-1.5 text-muted transition hover:bg-raised hover:text-text"
         >
-          Här
+          Here
         </button>
       </span>
     </label>

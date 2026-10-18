@@ -1,4 +1,4 @@
-// What "Bildruta ur ett klipp" (FramePickerDialog) offers: a sequence's finished takes grouped by clip, or any
+// What "Frame from a clip" (FramePickerDialog) offers: a sequence's finished takes grouped by clip, or any
 // finished video in the library. Pure functions, so the dialog's choices can be checked without a window.
 
 import { generationTitle } from '@shared/generation-label'
@@ -22,7 +22,7 @@ export interface FrameChoice {
   /** Seconds the sequence cuts from the take's start and end (0 outside a cut). */
   trimStart: number
   trimEnd: number
-  /** Where the video comes from, under the player ("Klipp 2, tagningen som används i sekvensen."). */
+  /** Where the video comes from, under the player ("Clip 2, the take the sequence uses."). */
   caption: string
   /** The player starts on this frame: the video's first (or, in a cut, the first kept) or its last. */
   startAt: 'start' | 'end'
@@ -56,8 +56,8 @@ export function clipChoices(sequence: Sequence, wantedSegmentId: string | undefi
           trimStart: inCut ? segment.trimStart : 0,
           trimEnd: inCut ? segment.trimEnd : 0,
           caption: inCut
-            ? `Klipp ${i + 1}, tagningen som används i sekvensen.`
-            : `Klipp ${i + 1}, en annan tagning än den som används.`,
+            ? `Clip ${i + 1}, the take the sequence uses.`
+            : `Clip ${i + 1}, a take other than the one in use.`,
           startAt: segment.id === wantedSegmentId ? at : 'start'
         }
       })
@@ -96,19 +96,19 @@ export function withLiveUpdate(list: readonly Generation[], g: Generation): Gene
   return isReadyVideo(g) ? [g, ...rest].sort((a, b) => b.createdAt - a.createdAt) : rest
 }
 
-/** "14:02" today, else "3 okt." – enough to tell videos apart. */
+/** "14:02" today, else "3 Oct" – enough to tell videos apart. */
 export function takeTime(ms: number, now = Date.now()): string {
   const d = new Date(ms)
   return new Date(now).toDateString() === d.toDateString()
-    ? d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })
+    ? d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-const lengthFormat = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 1 })
+const lengthFormat = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 })
 
 /**
- * "Skapad 3 okt. · 5 s · ”Wide shot of …”": what a library video is, under the player. An own film or a version is
- * named by its title ("Eget klipp ”Strand”").
+ * "Created 3 Oct · 5 s · “Wide shot of …”": what a library video is, under the player. An own film or a version is
+ * named by its title ("Own clip “Strand”").
  */
 export function describeVideo(take: Generation, now = Date.now()): string {
   const titled = !!take.title?.trim()
@@ -116,9 +116,9 @@ export function describeVideo(take: Generation, now = Date.now()): string {
   const excerpt = prompt.length > 140 ? `${prompt.slice(0, 137)}…` : prompt
   const seconds = take.videoDuration ?? durationSeconds(take.params.duration)
   return [
-    `Skapad ${takeTime(take.createdAt, now)}`,
+    `Created ${takeTime(take.createdAt, now)}`,
     seconds > 0 ? `${lengthFormat.format(seconds)} s` : undefined,
-    excerpt ? `”${excerpt}”` : undefined
+    excerpt ? `“${excerpt}”` : undefined
   ]
     .filter(Boolean)
     .join(' · ')

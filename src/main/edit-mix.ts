@@ -18,12 +18,12 @@ import { separateStems } from './voice-separation'
 
 /** Ramp length of a gain change (and of a layer's edges at a replaced line), seconds. */
 export const GAIN_FADE = 0.02
-/** "Sänk originalljudet där rösten byts": the original under a replaced voice. */
+/** Lowering the original sound where the voice is replaced: the original under a replaced voice. */
 export const DUCK_DB = -18
 /** Stem cache size (.studio/stammar): the least recently used stems go first above it. */
 export const STEM_CACHE_BYTES = 4 * 1024 ** 3
 
-export const MISSING_SOURCE_NOTE = 'Ljudlagren kunde inte byggas om; versionens ljud används som det är.'
+export const MISSING_SOURCE_NOTE = "The audio layers could not be rebuilt; the version's sound is used as it is."
 
 const round = (n: number, step = 1000): number => Math.round(n * step) / step
 
@@ -192,7 +192,7 @@ export function spanLayers(
 
 /**
  * Times of the base after a timing change: a time inside a kept span moves with it, a time in a removed part is
- * dropped. The joins themselves become cut markers (Klippgränser), where the picture jumps.
+ * dropped. The joins themselves become cut markers, where the picture jumps.
  */
 export function remapTimes(times: readonly number[], spans: readonly TimeSpan[], joins = true): number[] {
   const out: number[] = []
@@ -311,7 +311,7 @@ export async function pruneStemCache(cap = STEM_CACHE_BYTES): Promise<void> {
 
 /**
  * The mix as files renderMix plays: every source looked up, stems separated where the mix splits its bed. Throws
- * (Swedish) when a source is gone; callers check mixIsComplete first and fall back on the base's own sound.
+ * when a source is gone; callers check mixIsComplete first and fall back on the base's own sound.
  */
 export async function resolveMix(
   mix: AudioMix,

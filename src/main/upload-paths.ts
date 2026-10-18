@@ -21,9 +21,9 @@ import {
 
 export { agentUploadsDir }
 
-/** The refusal of a path an agent may not hand over (Swedish, shown to the agent as the tool's error). */
+/** The refusal of a path an agent may not hand over (shown to the agent as the tool's error). */
 export const AGENT_FILES_REFUSED =
-  'Agenter kan bara lämna filer som laddats upp till Studio (begin_upload) eller som redan finns i biblioteket.'
+  'Agents can only hand over files uploaded to Studio (begin_upload) or already in the library.'
 
 /** How paths are compared: the way macOS volumes compare names (letter case and Unicode form ignored). */
 const fold = (p: string): string => p.normalize('NFC').toLowerCase()
@@ -97,7 +97,7 @@ export function isAgentFileAllowed(path: unknown): boolean {
  * symlinked library root still matches and a symlink inside staging pointing out does not), or be a file the library
  * records (isInsideRoot + db.isStoredPathRecorded: an asset photo, a still, an edit's media…), and be a regular file.
  * Every consumer copies or clones such a file, never moves it. A window's call (and callApproved's) passes untouched.
- * Throws "Agenter kan bara lämna filer som laddats upp till Studio (begin_upload) eller som redan finns i biblioteket."
+ * Throws "Agents can only hand over files uploaded to Studio (begin_upload) or already in the library."
  */
 export function assertAgentFiles(e: IpcMainInvokeEvent | undefined, paths: readonly unknown[]): void {
   if (!isAgentCall(e)) return

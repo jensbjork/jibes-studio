@@ -26,17 +26,20 @@ export type StillsOwner = 'sequence' | 'storyboard'
 /** The stills picker's wording for each owner. */
 const STILLS_COPY: Record<StillsOwner | 'all', { name: string; title: string; gone: string }> = {
   sequence: {
-    name: 'Sekvensens bilder',
-    title: 'Bilder och bildrutor i sekvensen',
-    gone: 'Bilden finns inte bland sekvensens bilder längre.'
+    name: 'Sequence images',
+    title: 'Images and frames in the sequence',
+    gone: "The image is no longer among the sequence's images."
   },
   storyboard: {
-    name: 'Storyboardbilder',
-    title: 'Bilder och bildrutor i storyboarden',
-    gone: 'Bilden finns inte bland storyboardens bilder längre.'
+    name: 'Storyboard images',
+    title: 'Images and frames in the storyboard',
+    gone: "The image is no longer among the storyboard's images."
   },
-  all: { name: 'Sparade bilder', title: 'Sparade bilder', gone: 'Bilden finns inte bland de sparade bilderna längre.' }
+  all: { name: 'Saved images', title: 'Saved images', gone: 'The image is no longer among the saved images.' }
 }
+
+/** "1 image", "3 images". */
+const images = (n: number): string => `${n} ${n === 1 ? 'image' : 'images'}`
 
 interface Props {
   /** Absolute paths, in the order they are sent: the first is the base the others are combined into. */
@@ -50,12 +53,12 @@ interface Props {
   stills: Still[]
   /** Whose the stills are (wording of the picker); undefined: every saved picture. */
   stillsOf?: StillsOwner
-  /** Captions that name a picture by its role, e.g. "Föregående" for the previous board's image; win over others. */
+  /** Captions that name a picture by its role, e.g. "Previous" for the previous board's image; win over others. */
   pathLabels?: Record<string, string>
   /** The clip's own reference images, offered with one click (a keyframe usually shows the same people). */
   clipReferences?: string[]
   clipNumber?: number
-  /** Something couldn't be added (too many), in Swedish; cleared by the next change. */
+  /** Something couldn't be added (too many); cleared by the next change. */
   onNote: (note: string | undefined) => void
   /** Opens a library view, e.g. to create a character. Closes the dialog first. */
   onManage?: (kind: AssetKind) => void
@@ -113,7 +116,7 @@ export default function ReferenceImages({
   /** Adds images after the ones there (duplicates skipped), as many as the model takes. */
   const add = (paths: string[]) => {
     if (paths.length && !paths.some((p) => IMAGE_EXT.test(p))) {
-      onNote('Bara bilder i formatet JPG, PNG eller WebP kan användas.')
+      onNote('Only JPG, PNG or WebP images can be used.')
       return
     }
     const fresh = paths.filter((p, i) => IMAGE_EXT.test(p) && !value.includes(p) && paths.indexOf(p) === i)
@@ -122,8 +125,8 @@ export default function ReferenceImages({
     onNote(
       fresh.length > room
         ? room
-          ? `Bara ${room === 1 ? 'en bild till' : `${room} bilder till`} fick plats – modellen tar högst ${max}.`
-          : `Modellen tar högst ${max} bilder. Ta bort en för att lägga till en annan.`
+          ? `Only ${room === 1 ? 'one more image' : `${room} more images`} fit – the model takes up to ${max}.`
+          : `The model takes up to ${images(max)}. Remove one to add another.`
         : undefined
     )
     if (room) onChange([...value, ...fresh.slice(0, room)])
@@ -188,8 +191,8 @@ export default function ReferenceImages({
    */
   const swap = (i: number, path: string) => {
     setSwapping(undefined)
-    if (!IMAGE_EXT.test(path)) return onNote('Bara bilder i formatet JPG, PNG eller WebP kan användas.')
-    if (value.some((p, j) => j !== i && p === path)) return onNote('Bilden finns redan bland referensbilderna.')
+    if (!IMAGE_EXT.test(path)) return onNote('Only JPG, PNG or WebP images can be used.')
+    if (value.some((p, j) => j !== i && p === path)) return onNote('The image is already among the reference images.')
     onNote(undefined)
     onChange(value.map((p, j) => (j === i ? path : p)))
     focusAfterSwap.current = i
@@ -203,7 +206,7 @@ export default function ReferenceImages({
     list.current?.querySelectorAll<HTMLElement>(':scope > [role=listitem]')[i]?.focus({ preventScroll: true })
   })
 
-  const place = (i: number): string => (i === 0 ? 'Basbild' : `Bild ${i + 1}`)
+  const place = (i: number): string => (i === 0 ? 'Base image' : `Image ${i + 1}`)
 
   /** What thumbnail i's hover card says: its place, what it is (a photo, a role, a still) and whether it is sent. */
   const cardOf = (path: string, i: number): TokenCardContent => {
@@ -220,9 +223,9 @@ export default function ReferenceImages({
         name: pathLabels?.[path] ?? asset?.name ?? (still ? stillSourceLabel(still) : undefined),
         number: photo || undefined,
         count: asset?.images.length,
-        ...(i >= max ? { unsent: `Skickas inte – modellen tar högst ${max} bilder` } : {})
+        ...(i >= max ? { unsent: `Not sent – the model takes up to ${images(max)}` } : {})
       },
-      hint: 'Klicka för att byta bilden – dra för att flytta'
+      hint: 'Click to swap the image – drag to move it'
     }
   }
 
@@ -233,7 +236,7 @@ export default function ReferenceImages({
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className="text-muted">
-          Referensbilder
+          Reference images
           {value.length > 0 && (
             <span className={`ml-1.5 text-[11px] ${overflow ? 'text-accent' : ''}`}>
               {value.length}/{max}
@@ -245,9 +248,9 @@ export default function ReferenceImages({
             ref={libraryButton}
             onClick={() => setPicker((p) => (p === 'library' ? null : 'library'))}
             className={`${smallButton} ${picker === 'library' ? 'bg-raised text-text' : ''}`}
-            title="Karaktärer, miljöer, produkter, kläder och poser"
+            title="Characters, environments, products, outfits and poses"
           >
-            Från biblioteket
+            From the library
           </button>
           <button
             ref={stillsButton}
@@ -257,8 +260,8 @@ export default function ReferenceImages({
           >
             {copy.name}
           </button>
-          <button onClick={() => void pickFiles()} className={smallButton} title="Välj bildfiler på datorn">
-            Från fil…
+          <button onClick={() => void pickFiles()} className={smallButton} title="Choose image files on your computer">
+            From file…
           </button>
         </span>
       </div>
@@ -266,7 +269,7 @@ export default function ReferenceImages({
       <div
         ref={list}
         role="list"
-        aria-label="Referensbilder"
+        aria-label="Reference images"
         onDragOver={(e) => {
           if (!acceptsDrop(e)) return
           e.preventDefault()
@@ -292,7 +295,7 @@ export default function ReferenceImages({
             : asset
               ? { text: asset.name, className: KIND_TONE[asset.kind].caption }
               : still
-                ? { text: still.source === 'frame' ? 'Bildruta' : 'Bild', className: 'bg-black/70' }
+                ? { text: still.source === 'frame' ? 'Frame' : 'Image', className: 'bg-black/70' }
                 : undefined
           const picked = swapping === path
           // The card shows the picture larger on hover – not while a picture is dragged or a picker is open.
@@ -302,7 +305,7 @@ export default function ReferenceImages({
               key={path}
               role="listitem"
               tabIndex={0}
-              aria-label={`${place(i)}: ${caption?.text ?? name}. Enter byter den.`}
+              aria-label={`${place(i)}: ${caption?.text ?? name}. Enter swaps it.`}
               aria-haspopup="dialog"
               aria-expanded={picked}
               draggable
@@ -325,7 +328,7 @@ export default function ReferenceImages({
               }}
               onDrop={(e) => onDrop(e, i)}
               onClick={(e) => {
-                // A click swaps it; not the end of a drag, nor a click on ✕ or "Gör till bas".
+                // A click swaps it; not the end of a drag, nor a click on ✕ or "Make base".
                 if (dragged.current || (e.target as HTMLElement).closest('button')) return
                 openSwap(i, e.currentTarget)
               }}
@@ -342,7 +345,7 @@ export default function ReferenceImages({
             >
               {missing.has(path) ? (
                 <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
-                  Filen saknas
+                  File missing
                 </span>
               ) : (
                 <img
@@ -355,7 +358,7 @@ export default function ReferenceImages({
                 />
               )}
               <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">
-                {i === 0 ? 'Bas' : i + 1}
+                {i === 0 ? 'Base' : i + 1}
               </span>
               {caption && (
                 <span
@@ -367,7 +370,7 @@ export default function ReferenceImages({
               <button
                 onClick={() => remove(i)}
                 className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-black/70 text-[11px] group-hover:flex"
-                title="Ta bort"
+                title="Remove"
               >
                 ✕
               </button>
@@ -375,9 +378,9 @@ export default function ReferenceImages({
                 <button
                   onClick={() => move(i, 0)}
                   className="absolute bottom-4 left-1/2 hidden -translate-x-1/2 rounded bg-black/75 px-1.5 text-[10px] whitespace-nowrap group-hover:block"
-                  title="Gör till basbild (skickas först)"
+                  title="Make it the base image (sent first)"
                 >
-                  Gör till bas
+                  Make base
                 </button>
               )}
             </div>
@@ -390,7 +393,7 @@ export default function ReferenceImages({
           >
             {value.length
               ? '+'
-              : 'Inga referensbilder – bilden skapas bara från prompten. Släpp bilder här eller välj ovan.'}
+              : 'No reference images – the image is created from the prompt alone. Drop images here or choose above.'}
           </button>
         )}
       </div>
@@ -399,17 +402,17 @@ export default function ReferenceImages({
         <button
           onClick={() => add(clipMissing)}
           className="mt-1.5 rounded-md border border-line px-2 py-1 text-[11px] text-muted transition hover:bg-raised hover:text-text"
-          title="Samma karaktärer, miljöer, produkter, kläder och poser som klippet använder"
+          title="The same characters, environments, products, outfits and poses the clip uses"
         >
-          ＋ {clipNumber ? `Klipp ${clipNumber}s` : 'Klippets'} referensbilder ({clipMissing.length})
+          ＋ {clipNumber ? `Clip ${clipNumber}'s` : "The clip's"} reference images ({clipMissing.length})
         </button>
       )}
       <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
         {value.length > 1
-          ? 'Den första bilden är basen som de andra kombineras in i. Dra bilderna för att ändra ordning, och ' +
-            'hänvisa gärna till dem i prompten, t.ex. ”the woman from image 2”.'
-          : 'Med referensbilder kombinerar modellen dem till en ny bild – t.ex. en karaktär i en miljö, i vissa ' +
-            'kläder och en viss pose, eller med en produkt i handen.'}
+          ? 'The first image is the base the others are combined into. Drag the images to reorder them, and ' +
+            'refer to them in the prompt, e.g. “the woman from image 2”.'
+          : 'With reference images, the model combines them into a new image – e.g. a character in an environment, ' +
+            'in a certain outfit and pose, or holding a product.'}
       </p>
 
       {card.card}
@@ -419,12 +422,12 @@ export default function ReferenceImages({
         onClose={() => setSwapping(undefined)}
         width={360}
         maxHeight={480}
-        label={`Byt ${swapIndex === -1 ? 'bilden' : place(swapIndex).toLocaleLowerCase('sv')}`}
+        label={`Swap ${swapIndex === -1 ? 'the image' : place(swapIndex).toLocaleLowerCase('en')}`}
       >
         {swapIndex !== -1 && (
           <SwapImagePicker
-            title={`Byt ${place(swapIndex).toLocaleLowerCase('sv')} mot…`}
-            hint="Bilden byts på samma plats i ordningen, så prompten behöver inte ändras."
+            title={`Swap ${place(swapIndex).toLocaleLowerCase('en')} for…`}
+            hint="The image is swapped in the same place in the order, so the prompt doesn't need to change."
             library={assets}
             current={value[swapIndex]}
             currentKind={byPath.get(value[swapIndex])?.kind}
@@ -447,13 +450,13 @@ export default function ReferenceImages({
         align="end"
         width={340}
         maxHeight={480}
-        label="Referensbilder från biblioteket"
+        label="Reference images from the library"
       >
         <AssetPicker
           assets={assets}
           initialKind={FIRST_KIND}
-          title="Från biblioteket"
-          hint={`Klicka på en bild för att lägga till eller ta bort den – på namnet för omslagsbilden. Högst ${max}.`}
+          title="From the library"
+          hint={`Click an image to add or remove it – click the name for the cover image. Up to ${max}.`}
           selectedPaths={value}
           onPickImage={(path) => toggle(path)}
           onManage={
@@ -478,12 +481,12 @@ export default function ReferenceImages({
       >
         <div className="border-b border-line px-3 py-2.5">
           <p className="font-medium">{copy.name}</p>
-          <p className="mt-0.5 text-[11px] text-muted">Klicka för att lägga till eller ta bort en bild.</p>
+          <p className="mt-0.5 text-[11px] text-muted">Click to add or remove an image.</p>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {stills.length === 0 ? (
             <p className="px-3 py-6 text-center text-[12px] leading-relaxed text-muted">
-              Inga bilder än. Bilder du skapar och bildrutor du sparar ur klipp hamnar här.
+              No images yet. Images you create and frames you save from clips end up here.
             </p>
           ) : (
             <div className="grid grid-cols-3 gap-1.5">

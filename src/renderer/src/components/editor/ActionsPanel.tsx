@@ -9,14 +9,14 @@ import SoundTab from './SoundTab'
 import TextTab from './TextTab'
 import VoiceTab from './VoiceTab'
 
-// Åtgärder: the operations, grouped in tabs. Each card says what it works on (the whole film or the marked range)
+// Actions: the operations, grouped in tabs. Each card says what it works on (the whole film or the marked range)
 // and, for paid ones, shows the price on its button.
 
 const TABS: { id: EditorTab; label: string }[] = [
-  { id: 'bild', label: 'Bild' },
-  { id: 'ljud', label: 'Ljud' },
-  { id: 'rost', label: 'Röst' },
-  { id: 'musik', label: 'Musik & effekter' },
+  { id: 'bild', label: 'Picture' },
+  { id: 'ljud', label: 'Sound' },
+  { id: 'rost', label: 'Voice' },
+  { id: 'musik', label: 'Music & effects' },
   { id: 'text', label: 'Text' }
 ]
 
@@ -46,10 +46,10 @@ export default function ActionsPanel({ tab, onTab }: { tab: EditorTab; onTab: (t
   }
 
   return (
-    <section aria-label="Åtgärder" className="flex min-h-0 flex-1 flex-col">
+    <section aria-label="Actions" className="flex min-h-0 flex-1 flex-col">
       <div
         role="tablist"
-        aria-label="Åtgärder"
+        aria-label="Actions"
         onKeyDown={onTabKeyDown}
         className="flex shrink-0 gap-0.5 overflow-x-auto border-b border-line px-2 pt-1.5"
       >
@@ -64,8 +64,8 @@ export default function ActionsPanel({ tab, onTab }: { tab: EditorTab; onTab: (t
             aria-controls={`${ids}-panel`}
             tabIndex={tab === t.id ? 0 : -1}
             onClick={() => onTab(t.id)}
-            // A little tighter in the narrow column (EditWorkspace), so all five tabs still fit.
-            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-2 py-2 transition @min-[61rem]/main:px-2.5 ${
+            // Tighter in the narrow column (EditWorkspace, 320 px), so all five tabs still fit without scrolling.
+            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-1 py-2 transition @min-[61rem]/main:px-2.5 ${
               tab === t.id ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'
             }`}
           >
@@ -81,8 +81,7 @@ export default function ActionsPanel({ tab, onTab }: { tab: EditorTab; onTab: (t
       >
         {!hasApiKey && tab !== 'ljud' && tab !== 'text' && (
           <p className="mx-1.5 mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
-            Lägg till API-nyckeln under Inställningar för att använda AI-åtgärderna. Ljud, klipp och toningar fungerar
-            ändå.
+            Add the API key in Settings to use the AI actions. Sound, cuts and fades work without it.
           </p>
         )}
         {/* Every tab stays mounted, so a half-written prompt survives a look at another tab. */}

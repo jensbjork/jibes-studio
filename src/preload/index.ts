@@ -88,7 +88,7 @@ const api: StudioApi = {
   onSequenceChange: (cb) => on<string>('sequence:change', cb),
   onExportProgress: (cb) => on<ExportProgress>('export:progress', cb),
 
-  // Keyframes and "Gör om mellan grannarna" (sequence clips)
+  // Keyframes and "Redo between neighbours" (sequence clips)
   setSegmentImage: (segmentId, slot, source) => ipcRenderer.invoke('segments:setImage', segmentId, slot, source),
   previewSegmentFrames: (segmentId) => ipcRenderer.invoke('segments:previewFrames', segmentId),
   bridgeSegment: (segmentId) => ipcRenderer.invoke('segments:bridge', segmentId),
@@ -158,7 +158,7 @@ const api: StudioApi = {
   cancelImports: (path) => ipcRenderer.invoke('imports:cancel', path),
   onImportProgress: (cb) => on<ImportProgress>('import:progress', cb),
 
-  // Redigera (edits and versions)
+  // The Editor (edits and versions)
   listEdits: () => ipcRenderer.invoke('edits:list'),
   getEdit: (id) => ipcRenderer.invoke('edits:get', id),
   createEdit: (source, name) => ipcRenderer.invoke('edits:create', source, name),
@@ -186,7 +186,7 @@ const api: StudioApi = {
   onEditChange: (cb) => on<string>('edit:change', cb),
   onEditProgress: (cb) => on<EditProgress>('edit:progress', cb),
 
-  // Status: Pågår och klart
+  // Status: Activity
   getWorkSummary: () => ipcRenderer.invoke('work:summary'),
   markSeen: (keys) => ipcRenderer.invoke('work:markSeen', keys),
   markAllSeen: (scope) => ipcRenderer.invoke('work:markAllSeen', scope),

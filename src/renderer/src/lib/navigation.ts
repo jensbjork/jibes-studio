@@ -18,7 +18,7 @@ export type View =
  * Cross-view requests, e.g. "generate with this character". Consumed once by the target view.
  *
  * Every intent may carry `source: 'agent'` (set by the agent bridge's open_in_studio). The target view then opens
- * the place without the "explicit choice" seen marks of Pågår och klart: opening a clip drawer or showing a version
+ * the place without the "explicit choice" seen marks of Activity: opening a clip drawer or showing a version
  * because an agent asked is not the user looking at it, so nothing is marked seen on open (playing it still is).
  */
 export type Intent = (
@@ -28,8 +28,8 @@ export type Intent = (
    */
   | { type: 'use-asset'; assetId: string }
   /**
-   * Library views (Karaktärer, Miljöer, Produkter, Kläder, Poser): select that asset; audioId scrolls to the clip in
-   * Röst, jobId to a voice design that failed.
+   * Library views (Characters, Environments, Products, Outfits, Poses): select that asset; audioId scrolls to the clip
+   * in Voice, jobId to a voice design that failed.
    */
   | { type: 'open-asset'; assetId: string; audioId?: string; jobId?: string }
   | { type: 'use-prompt'; promptId: string }
@@ -38,20 +38,20 @@ export type Intent = (
   /** Storyboards view: open that storyboard; transitionId opens the transition editor, boardId flashes the board. */
   | { type: 'open-storyboard'; storyboardId: string; transitionId?: string; boardId?: string }
   /**
-   * Redigera: open an edit. editId opens that one. generationId opens the edit made from that clip (asking
-   * "Öppna redigeringen" / "Ny redigering" when there already is one) or creates one; an id that is itself a
+   * Editor: open an edit. editId opens that one. generationId opens the edit made from that clip (asking
+   * "Open the edit" / "New edit" when there already is one) or creates one; an id that is itself a
    * version of an edit opens that edit. exportId does the same for an exported film (a new edit clones it in).
    * versionId shows that version in the player.
    */
   | { type: 'open-editor'; editId?: string; generationId?: string; exportId?: string; versionId?: string }
-  /** Generera: open that clip in the detail drawer (one from outside this session's list opens in the Mediabank). */
+  /** Generate: open that clip in the detail drawer (one from outside this session's list opens in Media). */
   | { type: 'open-generation'; generationId: string }
   /**
-   * Mediabank: show a tab; generationId opens that clip in the Videor drawer (lifting a filter that hides it, with a
-   * note), stillId that picture in Bilder, exportId that film in Filmer.
+   * Media: show a tab; generationId opens that clip in the Videos drawer (lifting a filter that hides it, with a
+   * note), stillId that picture in Images, exportId that film in Films.
    */
   | { type: 'open-media'; tab?: MediaTab; generationId?: string; stillId?: string; exportId?: string }
-  /** Generera: fill the form with that clip's settings ("Använd igen" from the Mediabank). */
+  /** Generate: fill the form with that clip's settings ("Use again" from Media). */
   | { type: 'use-generation'; generationId: string }
 ) & {
   /** Opened by an agent (open_in_studio): no seen marks on opening. */

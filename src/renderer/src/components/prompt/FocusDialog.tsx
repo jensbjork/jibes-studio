@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 interface Props {
-  /** "Prompt", "Vad händer?", "Undvik"… */
+  /** "Prompt", "What happens?", "Avoid"… */
   title: string
   /** A line under the title: what the field is for. */
   subtitle?: string
@@ -11,7 +11,7 @@ interface Props {
 }
 
 /**
- * Fokusläge: the same field, large, over a dimmed window – room to read and write a long prompt. Esc or "Klar"
+ * Focus mode: the same field, large, over a dimmed window – room to read and write a long prompt. Esc or "Done"
  * goes back; the text is the same text (every change is saved as it is typed).
  */
 export default function FocusDialog({ title, subtitle, onClose, children }: Props) {
@@ -31,7 +31,7 @@ export default function FocusDialog({ title, subtitle, onClose, children }: Prop
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`${title} – fokusläge`}
+        aria-label={`${title} – focus mode`}
         className="flex w-full max-w-4xl flex-col rounded-xl border border-line bg-panel text-text shadow-2xl"
       >
         <div className="flex items-start gap-4 border-b border-line px-6 py-4">
@@ -41,10 +41,10 @@ export default function FocusDialog({ title, subtitle, onClose, children }: Prop
           </div>
           <button
             onClick={onClose}
-            title="Tillbaka (esc)"
+            title="Back (esc)"
             className="shrink-0 rounded-md border border-line px-3 py-1.5 text-text transition hover:bg-raised"
           >
-            Klar
+            Done
           </button>
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-5">{children}</div>

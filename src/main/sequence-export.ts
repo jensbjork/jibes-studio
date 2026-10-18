@@ -14,23 +14,23 @@ const MIN_CLIP_SECONDS = 0.04
 
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
-/** "1", "1 och 3", "1, 3 och 4". */
-export function swedishList(items: (string | number)[]): string {
+/** "1", "1 and 3", "1, 3 and 4". */
+export function englishList(items: (string | number)[]): string {
   const s = items.map(String)
-  return s.length <= 1 ? (s[0] ?? '') : `${s.slice(0, -1).join(', ')} och ${s[s.length - 1]}`
+  return s.length <= 1 ? (s[0] ?? '') : `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`
 }
 
 export function missingTakesMessage(clipNumbers: number[]): string {
   return clipNumbers.length === 1
-    ? `Klipp ${clipNumbers[0]} saknar en färdig vald tagning.`
-    : `Klipp ${swedishList(clipNumbers)} saknar färdiga valda tagningar.`
+    ? `Clip ${clipNumbers[0]} has no finished selected take.`
+    : `Clips ${englishList(clipNumbers)} have no finished selected takes.`
 }
 
 /** The storyboard's words for missingTakesMessage: transitions rather than clips. */
 export function missingTransitionsMessage(numbers: number[]): string {
   return numbers.length === 1
-    ? `Övergång ${numbers[0]} saknar en färdig vald tagning.`
-    : `Övergång ${swedishList(numbers)} saknar färdiga valda tagningar.`
+    ? `Transition ${numbers[0]} has no finished selected take.`
+    : `Transitions ${englishList(numbers)} have no finished selected takes.`
 }
 
 /**
@@ -88,7 +88,7 @@ export async function buildConcatClips(
       probed.set(i, info)
       return info
     } catch (err) {
-      throw new Error(`Klipp ${i + 1} kunde inte läsas: ${errorText(err)}`)
+      throw new Error(`Clip ${i + 1} could not be read: ${errorText(err)}`)
     }
   }
   // Every length first: whether a clip repeats its neighbour's frame depends on where that neighbour's trim cuts.
@@ -117,7 +117,7 @@ export async function buildConcatClips(
     // one before (the trim keeps frames that start before `end`). An end trim of at least that much has
     // already removed it.
     const end = dropLast ? Math.min(length - row.trim_end, length - 1.5 / fps) : length - row.trim_end
-    if (!(end - start > MIN_CLIP_SECONDS)) throw new Error(`Klipp ${i + 1} blir för kort efter trimningen.`)
+    if (!(end - start > MIN_CLIP_SECONDS)) throw new Error(`Clip ${i + 1} is too short after trimming.`)
     clips.push({ path: takes[i].filePath, start, end })
   }
   return clips
@@ -125,7 +125,7 @@ export async function buildConcatClips(
 
 /**
  * Where the clips meet in the film concatClips renders from `clips` (seconds; the start of every clip after the
- * first), recorded with the export so Redigera knows the film's Klippgränser exactly rather than guessing them from
+ * first), recorded with the export so the Editor knows the film's cut markers exactly rather than guessing them from
  * scene changes. Worked out the way concatClips renders: each clip keeps the frames `trim=start:end` keeps on its own
  * frame grid (frameSpan), which is exactly how long its sound is; its picture is then made into round(length · fps)
  * frames on the film's grid (the fps filter), so a clip of another frame rate (an own clip at 29.97 or 25 among 24 fps
@@ -191,7 +191,7 @@ export async function buildStoryboardClips(
         info ??= await probe(take.filePath)
         return info
       } catch (err) {
-        throw new Error(`Övergång ${i + 1} kunde inte läsas: ${errorText(err)}`)
+        throw new Error(`Transition ${i + 1} could not be read: ${errorText(err)}`)
       }
     }
     const length = take.videoDuration ?? (await probeTake()).duration
@@ -205,7 +205,7 @@ export async function buildStoryboardClips(
     // sequence export does); a start trim that long has already removed it.
     const start = dropFirst ? Math.max(row.trim_start, 0.5 / fps) : row.trim_start
     const end = length - row.trim_end
-    if (!(end - start > MIN_CLIP_SECONDS)) throw new Error(`Övergång ${i + 1} blir för kort.`)
+    if (!(end - start > MIN_CLIP_SECONDS)) throw new Error(`Transition ${i + 1} is too short.`)
     clips.push({ path: take.filePath, start, end })
   }
   return clips

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { ASSET_KINDS, type Asset, type PromptLanguage } from '@shared/types'
-import { ASSET_COPY, swedishList } from '../../lib/assets'
+import { ASSET_COPY, englishList } from '../../lib/assets'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
 import { KIND_TONE } from './assetKinds'
@@ -23,12 +23,12 @@ interface Props {
   assetRefs: AssetRef[]
   /** Outfit id → id of the character wearing it (see resolvePairings). */
   pairings: ReadonlyMap<string, string>
-  /** Every outfit in the library, for "Byt kläder". */
+  /** Every outfit in the library, for "Change outfit". */
   outfits: Asset[]
   /** All reference images in the form, including ones that aren't library photos. */
   refs: string[]
   max: number
-  /** Prompt language: decides the words between a character and its voice and clothes ("voice"/"röst"…). */
+  /** Prompt language: decides the words between a character and its voice and clothes ("voice" or the Swedish word…). */
   language: PromptLanguage
   /** The form's reference audio as @AudioN references (also clips that aren't sent). */
   audios: FormAudio[]
@@ -36,19 +36,19 @@ interface Props {
   audioSupported: boolean
   /** Whether the asset's first clip would fit among the reference audio, and why not. */
   audioFits: (asset: Asset) => { fits: boolean; reason?: string }
-  /** "Ta med rösten": adds the asset's first clip, or removes all of its clips. */
+  /** "Include the voice": adds the asset's first clip, or removes all of its clips. */
   onToggleAudio: (asset: Asset, include: boolean) => void
   /** Pose id → the characters it applies to; undefined: every character in the form. */
   posePeople: Readonly<Record<string, string[] | undefined>>
   onPosePeople: (poseId: string, characterIds: string[] | undefined) => void
-  /** Product id → the character holding it ("hålls av"); missing or null: nobody (the default). */
+  /** Product id → the character holding it ("held by"); missing or null: nobody (the default). */
   productHolders: Readonly<Record<string, string | null | undefined>>
   onHolder: (productId: string, characterId: string | null) => void
   onInsert: (text: string) => void
   onRemove: (asset: Asset) => void
-  /** "bärs av": who wears an outfit (null = nobody). */
+  /** "worn by": who wears an outfit (null = nobody). */
   onWear: (outfitId: string, characterId: string | null) => void
-  /** "Byt kläder": replace what a character wears (null = nothing). */
+  /** "Change outfit": replace what a character wears (null = nothing). */
   onSwapOutfit: (character: Asset, outfit: Asset | null) => void
   onManageOutfits?: () => void
 }
@@ -66,7 +66,7 @@ export function posePeopleOf(
 }
 
 /**
- * The character holding a product in the form: the one chosen with "hålls av", while it is still among the
+ * The character holding a product in the form: the one chosen with "held by", while it is still among the
  * references. Nobody by default – a product is often just in the scene, and guessing a hand for it would put
  * words in the prompt the user didn't ask for.
  */
@@ -227,18 +227,18 @@ export default function AssetChips({
       <div className="mt-1.5 flex items-start gap-3 text-[11px] text-muted">
         <span className="min-w-0 flex-1">
           {sorted.length
-            ? 'Klicka på ett namn för att infoga det i prompten – eller skriv @ i prompten.'
-            : 'Hänvisa till bilderna i prompten, t.ex. ”@Image1 går längs stranden” – skriv @ för att välja.'}
+            ? 'Click a name to insert it in the prompt – or type @ in the prompt.'
+            : 'Refer to the images in the prompt, e.g. “@Image1 walks along the beach” – type @ to choose.'}
         </span>
         <span
           className={`shrink-0 tabular-nums ${over ? 'text-accent' : ''}`}
           title={
             over
-              ? `${refs.length - max} av bilderna skickas inte – modellen tar max ${max}.`
-              : `Modellen tar max ${max} referensbilder.`
+              ? `${refs.length - max} of the images ${refs.length - max === 1 ? 'isn’t' : 'aren’t'} sent – the model takes at most ${max}.`
+              : `The model takes at most ${max} reference images.`
           }
         >
-          {refs.length}/{max} bilder
+          {refs.length}/{max} images
         </span>
       </div>
     </div>
@@ -268,7 +268,7 @@ function AssetChip({ entry, audios = [], text, onInsert, onRemove, detail, child
     <span className={`${chip} ${tone.chip}`}>
       <button
         onClick={() => onInsert(text)}
-        title={`Infoga ”${text}” i prompten`}
+        title={`Insert “${text}” in the prompt`}
         className="flex min-w-0 items-center gap-1.5 py-0.5 pl-0.5 pr-1.5"
       >
         <AssetAvatar asset={a} className={`h-5 w-5 rounded-full ring-1 ${tone.ring}`} />
@@ -284,8 +284,8 @@ function AssetChip({ entry, audios = [], text, onInsert, onRemove, detail, child
         onClick={onRemove}
         title={
           audios.length
-            ? `Ta bort ${copy.possessive} bilder och ljud från referenserna`
-            : `Ta bort ${copy.possessive} bilder från referensbilderna`
+            ? `Remove ${copy.possessive} images and sound from the references`
+            : `Remove ${copy.possessive} images from the reference images`
         }
         className="mr-1 shrink-0 rounded-full px-1 text-muted hover:text-text"
       >
@@ -306,22 +306,22 @@ interface AudioToggleProps {
 }
 
 /**
- * "Ta med rösten" on a character chip (or "Ta med ljudmiljön" on an environment's): a microphone that is lit while
+ * "Include the voice" on a character chip (or "Include the soundscape" on an environment's): a microphone that is lit while
  * the clip is among the reference audio. Off removes every clip of the asset from it.
  */
 function AudioToggle({ asset, included, supported, fits, onToggle }: AudioToggleProps) {
   const on = included.length > 0
   const voice = asset.kind === 'character'
-  const label = voice ? 'Ta med rösten' : 'Ta med ljudmiljön'
-  const what = voice ? 'Rösten' : 'Ljudmiljön'
+  const label = voice ? 'Include the voice' : 'Include the soundscape'
+  const what = voice ? 'The voice' : 'The soundscape'
   const disabled = !on && !fits.fits
   const title = on
     ? supported
-      ? `${what} skickas med som ${formatAudioRefs(included)} – klicka för att ta bort den`
-      : `${what} (${formatAudioRefs(included)}) skickas inte – modellen tar inte emot ljud. Klicka för att ta bort.`
+      ? `${what} is sent as ${formatAudioRefs(included)} – click to remove it`
+      : `${what} (${formatAudioRefs(included)}) isn’t sent – the model doesn’t take sound. Click to remove it.`
     : disabled
-      ? `${what} kan inte tas med: ${fits.reason ?? 'inget utrymme kvar'}`
-      : `${label} (${voice ? 'första röstklippet' : 'första ljudklippet'})`
+      ? `${what} can’t be included: ${fits.reason ?? 'no room left'}`
+      : `${label} (${voice ? 'the first voice clip' : 'the first sound clip'})`
   return (
     <button
       onClick={() => onToggle(!on)}
@@ -407,7 +407,7 @@ function CharacterChip({
       onRemove={onRemove}
       detail={
         wearing.length > 0 && (
-          <span className="min-w-0 truncate text-muted">i {swedishList(wearing.map((w) => w.asset.name))}</span>
+          <span className="min-w-0 truncate text-muted">wearing {englishList(wearing.map((w) => w.asset.name))}</span>
         )
       }
     >
@@ -415,15 +415,15 @@ function CharacterChip({
       <button
         ref={button}
         onClick={() => setOpen((o) => !o)}
-        title={wearing.length ? 'Byt kläder' : 'Välj kläder'}
-        aria-label={wearing.length ? 'Byt kläder' : 'Välj kläder'}
+        title={wearing.length ? 'Change outfit' : 'Choose an outfit'}
+        aria-label={wearing.length ? 'Change outfit' : 'Choose an outfit'}
         className={`flex shrink-0 items-center rounded-full p-0.5 transition hover:text-text ${
           open ? 'text-text' : 'text-muted'
         }`}
       >
         <AssetIcon kind="outfit" />
       </button>
-      <Popover anchorRef={button} open={open} onClose={close} width={300} maxHeight={420} label="Byt kläder">
+      <Popover anchorRef={button} open={open} onClose={close} width={300} maxHeight={420} label="Change outfit">
         <OutfitMenu
           character={c}
           outfits={outfits}
@@ -456,7 +456,7 @@ interface WearerSelectProps {
 }
 
 /**
- * "bärs av Anna ▾" on an outfit chip: who wears the outfit (GenerationParams.outfitWearers). The References legend
+ * "worn by Anna ▾" on an outfit chip: who wears the outfit (GenerationParams.outfitWearers). The References legend
  * says it when the prompt is sent ("worn by Anna (@Image1)"), and it shapes the text inserted for the character.
  */
 function WearerSelect({ outfit, wearer, characters, onChange }: WearerSelectProps) {
@@ -464,19 +464,19 @@ function WearerSelect({ outfit, wearer, characters, onChange }: WearerSelectProp
   return (
     <label
       className="relative flex shrink-0 items-center gap-1 pr-1 text-muted"
-      title={`Vem har på sig ${outfit.name}? Skrivs in i prompten när den skickas (Läggs till i prompten) och styr texten som infogas för karaktären.`}
+      title={`Who wears ${outfit.name}? Written into the prompt when it is sent (Added to the prompt), and shapes the text inserted for the character.`}
     >
-      <span>bärs av</span>
-      <span className={`max-w-20 truncate ${name ? 'text-text' : ''}`}>{name ?? 'ingen'}</span>
+      <span>worn by</span>
+      <span className={`max-w-20 truncate ${name ? 'text-text' : ''}`}>{name ?? 'nobody'}</span>
       <span aria-hidden>▾</span>
       {/* The native select sits invisibly on top, so the chip keeps its own look but gets the system menu. */}
       <select
         value={wearer ?? ''}
         onChange={(e) => onChange(e.target.value || null)}
-        aria-label={`Vem bär ${outfit.name}`}
+        aria-label={`Who wears ${outfit.name}`}
         className="absolute inset-0 cursor-pointer opacity-0"
       >
-        <option value="">Ingen</option>
+        <option value="">Nobody</option>
         {characters.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}
@@ -497,27 +497,27 @@ interface HolderSelectProps {
 }
 
 /**
- * "hålls av Anna ▾" on a product chip: which of the form's characters holds the product. Only shapes the text the
- * chip inserts ("Anna (@Image1) holding Kaffeburken (@Image4)"); nothing is stored.
+ * "held by Anna ▾" on a product chip: which of the form's characters holds the product. Only shapes the text the
+ * chip inserts ("Anna (@Image1) holding Coffee tin (@Image4)"); nothing is stored.
  */
 function HolderSelect({ product, holder, characters, onChange }: HolderSelectProps) {
   const name = characters.find((c) => c.id === holder)?.name
   return (
     <label
       className="relative flex shrink-0 items-center gap-1 pr-1 text-muted"
-      title={`Vem håller ${product.name}? Styr texten som infogas.`}
+      title={`Who holds ${product.name}? Shapes the text that is inserted.`}
     >
-      <span>hålls av</span>
-      <span className={`max-w-20 truncate ${name ? 'text-text' : ''}`}>{name ?? 'ingen'}</span>
+      <span>held by</span>
+      <span className={`max-w-20 truncate ${name ? 'text-text' : ''}`}>{name ?? 'nobody'}</span>
       <span aria-hidden>▾</span>
       {/* The native select sits invisibly on top, so the chip keeps its own look but gets the system menu. */}
       <select
         value={holder ?? ''}
         onChange={(e) => onChange(e.target.value || null)}
-        aria-label={`Vem håller ${product.name}`}
+        aria-label={`Who holds ${product.name}`}
         className="absolute inset-0 cursor-pointer opacity-0"
       >
-        <option value="">Ingen</option>
+        <option value="">Nobody</option>
         {characters.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}
@@ -539,8 +539,8 @@ interface PosePeopleSelectProps {
 }
 
 /**
- * "gäller Anna, Erik ▾" on a pose chip: which of the form's characters take the pose. Only shapes the text the
- * chip inserts ("Anna (@Image1) and Erik (@Image3) posed as in Kram (@Image5)"); nothing is stored.
+ * "applies to Anna, Erik ▾" on a pose chip: which of the form's characters take the pose. Only shapes the text the
+ * chip inserts ("Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)"); nothing is stored.
  */
 function PosePeopleSelect({ pose, characters, chosen, onChange }: PosePeopleSelectProps) {
   const button = useRef<HTMLButtonElement>(null)
@@ -548,14 +548,14 @@ function PosePeopleSelect({ pose, characters, chosen, onChange }: PosePeopleSele
   const close = useCallback(() => setOpen(false), [])
   const selected = chosen ? characters.filter((c) => chosen.includes(c.id)) : characters
   const summary = !characters.length
-    ? 'inga karaktärer'
+    ? 'no characters'
     : !selected.length
-      ? 'ingen'
+      ? 'nobody'
       : !chosen || selected.length === characters.length
         ? characters.length === 1
           ? characters[0].name
-          : 'alla'
-        : swedishList(selected.map((c) => c.name))
+          : 'everyone'
+        : englishList(selected.map((c) => c.name))
 
   const toggle = (id: string): void => {
     const current = new Set(selected.map((c) => c.id))
@@ -574,22 +574,22 @@ function PosePeopleSelect({ pose, characters, chosen, onChange }: PosePeopleSele
         disabled={!characters.length}
         title={
           characters.length
-            ? `Vilka karaktärer ska stå som i ${pose.name}? Styr texten som infogas.`
-            : 'Lägg till karaktärer för att välja vilka som ska stå i posen.'
+            ? `Which characters should stand as in ${pose.name}? Shapes the text that is inserted.`
+            : 'Add characters to choose who takes the pose.'
         }
-        aria-label={`Vilka posen ${pose.name} gäller`}
+        aria-label={`Who the pose ${pose.name} applies to`}
         className={`flex shrink-0 items-center gap-1 pr-1 transition disabled:opacity-60 ${
           open ? 'text-text' : 'text-muted hover:text-text'
         }`}
       >
-        <span>gäller</span>
+        <span>applies to</span>
         <span className={`max-w-24 truncate ${selected.length ? 'text-text' : ''}`}>{summary}</span>
         <span aria-hidden>▾</span>
       </button>
-      <Popover anchorRef={button} open={open} onClose={close} width={240} maxHeight={320} label="Vilka posen gäller">
+      <Popover anchorRef={button} open={open} onClose={close} width={240} maxHeight={320} label="Who the pose applies to">
         <div className="border-b border-line px-3 py-2">
-          <p className="truncate font-medium">{pose.name} gäller</p>
-          <p className="mt-0.5 text-[11px] text-muted">Karaktärerna som ska stå så – styr texten som infogas.</p>
+          <p className="truncate font-medium">{pose.name} applies to</p>
+          <p className="mt-0.5 text-[11px] text-muted">The characters who should stand like this – shapes the text that is inserted.</p>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
           {characters.map((c) => {
@@ -611,13 +611,13 @@ function PosePeopleSelect({ pose, characters, chosen, onChange }: PosePeopleSele
             onClick={() => onChange(undefined)}
             className="flex-1 rounded px-2 py-1 text-muted hover:bg-raised hover:text-text"
           >
-            Alla
+            Everyone
           </button>
           <button
             onClick={() => onChange([])}
             className="flex-1 rounded px-2 py-1 text-muted hover:bg-raised hover:text-text"
           >
-            Ingen
+            Nobody
           </button>
         </div>
       </Popover>

@@ -30,13 +30,13 @@ export default function SentPrompt({ prompt, sentPrompt, images, audios, highlig
   return (
     <div className="mt-3">
       <div className="mb-1 flex items-center gap-2">
-        <h4 className="min-w-0 flex-1 truncate text-[11px] text-muted">Skickad prompt</h4>
+        <h4 className="min-w-0 flex-1 truncate text-[11px] text-muted">Sent prompt</h4>
         {legend && (
           <span
             className="shrink-0 text-[11px] text-muted tabular-nums"
-            title="Beskrivningarna av referenserna lades till efter prompten när klippet skickades"
+            title="The descriptions of the references were added after the prompt when the clip was sent"
           >
-            +{added} tecken
+            +{added} {added === 1 ? 'character' : 'characters'}
           </span>
         )}
         <CopyButton text={sentPrompt} />
@@ -58,7 +58,7 @@ export default function SentPrompt({ prompt, sentPrompt, images, audios, highlig
               aria-expanded={expanded}
               className="mt-0.5 text-[11px] text-muted transition hover:text-text hover:underline"
             >
-              {expanded ? 'Visa mindre' : 'Visa hela'}
+              {expanded ? 'Show less' : 'Show all'}
             </button>
           )}
           <div className="mt-2 border-t border-dashed border-line pt-2">

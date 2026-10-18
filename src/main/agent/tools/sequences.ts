@@ -174,7 +174,7 @@ export async function loadSequence(sequenceId: string): Promise<Sequence> {
 /** Says that a storyboard's transition was given to a tool for sequence clips. */
 export function transitionNotClip(): Error {
   return new Error(
-    'Det här är en övergång i en storyboard, inte ett klipp i en sekvens. Använd update_transition, preview_transition och request_transition_generation (get_storyboard visar övergångarna).'
+    'This is a transition in a storyboard, not a clip in a sequence. Use update_transition, preview_transition and request_transition_generation (get_storyboard lists the transitions).'
   )
 }
 
@@ -182,22 +182,22 @@ export function transitionNotClip(): Error {
 export async function loadClip(segmentId: string): Promise<{ sequence: Sequence; index: number; segment: Segment }> {
   requireLibrary()
   const row = store.getSegmentRow(segmentId)
-  if (!row) throw new Error('Klippet finns inte längre.')
+  if (!row) throw new Error('The clip no longer exists.')
   if (isStoryboardId(row.sequence_id)) throw transitionNotClip()
   const sequence = await loadSequence(row.sequence_id)
   const index = sequence.segments.findIndex((s) => s.id === segmentId)
-  if (index < 0) throw new Error('Klippet finns inte längre.')
+  if (index < 0) throw new Error('The clip no longer exists.')
   return { sequence, index, segment: sequence.segments[index] }
 }
 
 /**
- * Clips can't be changed by an agent while "Generera saknade" runs for their sequence: the run re-reads the
+ * Clips can't be changed by an agent while "Generate missing" runs for their sequence: the run re-reads the
  * clips at every step, so a clip added or rewritten meanwhile would be paid for without the user having seen it.
  */
 export function assertNotRunning(sequence: Sequence): void {
   if (sequence.running) {
     throw new Error(
-      `”Generera saknade” pågår för ${q(sequence.name)}. Vänta tills körningen är klar (eller stoppa den med stop_generation_run) innan du ändrar klippen.`
+      `"Generate missing" is running for ${q(sequence.name)}. Wait until the run is done (or stop it with stop_generation_run) before you change the clips.`
     )
   }
 }
@@ -217,7 +217,7 @@ export function continuationOf(sequence: Sequence, index: number): ContinuationP
 }
 
 /**
- * What stops the clip from being generated as it would be sent (`generated`, see asSent), in Swedish: a continuation
+ * What stops the clip from being generated as it would be sent (`generated`, see asSent): a continuation
  * in reference mode is checked against the references it carries with the previous clip's last frame after them;
  * one sent exactly may name no references (and is told it can carry them instead, where it could).
  */
@@ -228,11 +228,11 @@ export function sendProblem(
   plan: ContinuationPlan | undefined
 ): string | undefined {
   if (!plan) return blockingProblem(generated, continuing, ending)
-  if (!generated.prompt.trim()) return 'Prompten är tom.'
+  if (!generated.prompt.trim()) return 'The prompt is empty.'
   if (plan.mode === 'references') return continuationProblem(generated, plan)
   const problem = blockingProblem(generated, continuing, ending)
   // The continuation wording, with the way out reference mode offers where it applies.
-  return problem?.startsWith('Klippet fortsätter') ? (continuationProblem(generated, plan) ?? problem) : problem
+  return problem?.startsWith('The clip continues from') ? (continuationProblem(generated, plan) ?? problem) : problem
 }
 
 /**
@@ -284,16 +284,16 @@ function continuationInfo(plan: ContinuationPlan, assets: AssetIndex): Record<st
 function frameProblems(sequence: Sequence, index: number, generated: GenerationParams): string[] {
   const problems: string[] = []
   const missingTake = (i: number): boolean => !isUsableTake(selectedTake(sequence.segments[i]))
-  if (continues(sequence, index) && missingTake(index - 1)) problems.push(`Klipp ${index} har ingen färdig vald tagning än.`)
+  if (continues(sequence, index) && missingTake(index - 1)) problems.push(`Clip ${index} has no finished selected take yet.`)
   if (endsOnNext(sequence, index) && missingTake(index + 1)) {
-    problems.push(`Klipp ${index + 2} har ingen färdig vald tagning än.`)
+    problems.push(`Clip ${index + 2} has no finished selected take yet.`)
   }
   if (kindOfModelId(generated.model) === 'image-to-video') {
     if (generated.startImage && !existsSync(generated.startImage)) {
-      problems.push(`Startbilden finns inte längre: ${basename(generated.startImage)}.`)
+      problems.push(`The start image no longer exists: ${basename(generated.startImage)}.`)
     }
     if (generated.endImage && !existsSync(generated.endImage)) {
-      problems.push(`Slutbilden finns inte längre: ${basename(generated.endImage)}.`)
+      problems.push(`The end image no longer exists: ${basename(generated.endImage)}.`)
     }
   }
   return problems
@@ -360,7 +360,7 @@ export function clipInfo(
           ...(take.fileMissing ? { file_missing: true } : {})
         }
       : null,
-    // The selected take is the user's own film (or a version made in Redigera), not a generation of the clip's
+    // The selected take is the user's own film (or a version made in the Editor), not a generation of the clip's
     // prompt: the clip needs no prompt to be in the cut, and the next clip can still continue from its last frame.
     ...(take && ownTake(take) ? { own_clip: true } : {}),
     take_count: segment.takes.length,
@@ -369,7 +369,7 @@ export function clipInfo(
   }
 }
 
-/** A take that Venice didn't make from the clip: an import (Egna klipp) or a version from Redigera. */
+/** A take that Venice didn't make from the clip: an import (own clip) or a version from the Editor. */
 export function ownTake(take: Generation): boolean {
   return !!take.source && take.source !== 'generated'
 }
@@ -406,7 +406,7 @@ export function sequenceInfo(sequence: Sequence, assets: AssetIndex, stills: Sti
     clip_count: sequence.segments.length,
     cut_seconds: cutSeconds(sequence),
     clips_without_finished_take: missing,
-    // "Exportformat": the exported film's height, or null = the first clip's own size (update_sequence sets it).
+    // "Export format": the exported film's height, or null = the first clip's own size (update_sequence sets it).
     export_height: sequence.exportHeight ?? null,
     defaults: defaultsInfo(sequence),
     generate_all_running: sequence.running,
@@ -472,8 +472,8 @@ interface SlotPlan {
   path?: string
 }
 
-/** "startbild" / "slutbild", for messages about a slot. */
-const SLOT_SV: Record<SegmentImageSlot, string> = { start: 'startbild', end: 'slutbild' }
+/** "start image" / "end image", for messages about a slot. */
+const SLOT_WORDS: Record<SegmentImageSlot, string> = { start: 'start image', end: 'end image' }
 
 /**
  * The explicit picture a slot input names, checked before anything is saved (the still, the photo, the finished
@@ -487,7 +487,7 @@ function explicitSource(
   if ('file' in value) return { source: { kind: 'file', path: value.file }, path: value.file }
   if ('still_id' in value) {
     const still = stills.require(value.still_id)
-    if (!existsSync(still.path)) throw new Error(`Stillbilden ${basename(still.path)} finns inte längre på disken.`)
+    if (!existsSync(still.path)) throw new Error(`The still image ${basename(still.path)} is no longer on disk.`)
     return { source: { kind: 'still', stillId: still.id }, path: still.path }
   }
   if ('asset_image_id' in value) {
@@ -495,9 +495,9 @@ function explicitSource(
     return { source: { kind: 'asset-image', imageId: photo.imageId }, path: photo.path }
   }
   const g = db.getGeneration(value.generation_id)
-  if (!g) throw new Error(`Det finns ingen generering med id ${value.generation_id}.`)
+  if (!g) throw new Error(`There is no generation with id ${value.generation_id}.`)
   if (g.status !== 'completed' || !g.filePath || !existsSync(g.filePath)) {
-    throw new Error('Genereringen har ingen färdig video att ta en bildruta ur.')
+    throw new Error('The generation has no finished video to take a frame from.')
   }
   return { source: { kind: 'frame', generationId: g.id, time: value.time }, path: '' }
 }
@@ -519,8 +519,8 @@ interface SlotState {
 
 /**
  * Where a clip's start and end frames come from after the agent's change: the neighbours (continue_from_previous,
- * end_from_next, or "previous" / "next"), a picture (kept, or one of the slot inputs) or nothing. Throws (in
- * Swedish) on inputs that contradict each other or the clip's place in the sequence.
+ * end_from_next, or "previous" / "next"), a picture (kept, or one of the slot inputs) or nothing. Throws on
+ * inputs that contradict each other or the clip's place in the sequence.
  */
 function slotState(
   input: {
@@ -538,18 +538,18 @@ function slotState(
 ): SlotState {
   const { start_image: start, end_image: end } = input
   if (start === 'next') {
-    throw new Error('Startbilden kan inte komma från nästa klipp. Menade du end_image: "next"?')
+    throw new Error('The start image can\'t come from the next clip. Did you mean end_image: "next"?')
   }
   if (end === 'previous') {
-    throw new Error('Slutbilden kan inte komma från föregående klipp. Menade du start_image: "previous"?')
+    throw new Error('The end image can\'t come from the previous clip. Did you mean start_image: "previous"?')
   }
   const startContinues = start === 'previous'
   const flagGiven = input.continue_from_previous !== undefined
   if (start !== undefined && flagGiven && startContinues !== input.continue_from_previous) {
-    throw new Error('start_image och continue_from_previous säger emot varandra. Ange bara det ena.')
+    throw new Error('start_image and continue_from_previous contradict each other. Give only one of them.')
   }
   if (end !== undefined && input.end_from_next !== undefined && (end === 'next') !== input.end_from_next) {
-    throw new Error('end_image och end_from_next säger emot varandra. Ange bara det ena.')
+    throw new Error('end_image and end_from_next contradict each other. Give only one of them.')
   }
 
   const continuing =
@@ -557,8 +557,8 @@ function slotState(
       ? start === 'previous'
       : (input.continue_from_previous ?? (current.continuing || defaultContinuing))
   const ending = end !== undefined ? end === 'next' : (input.end_from_next ?? current.ending)
-  if (continuing && place.first) throw new Error('Det första klippet kan inte fortsätta från ett föregående klipp.')
-  if (ending && place.last) throw new Error('Det sista klippet har inget nästa klipp att ta sin slutbild från.')
+  if (continuing && place.first) throw new Error('The first clip can\'t continue from a previous clip.')
+  if (ending && place.last) throw new Error('The last clip has no next clip to take its end image from.')
 
   const plan = (slot: SegmentImageSlot, value: ResolvedSlotInput | undefined, automatic: boolean): SlotPlan => {
     if (automatic) return {}
@@ -598,7 +598,7 @@ interface ClipInput {
 interface ClipParams {
   /** As saved: explicit pictures that are set afterwards (segments:setImage) are not in it yet. */
   params: GenerationParams
-  /** What was decided on the agent's behalf (Swedish), e.g. a voice left out. */
+  /** What was decided on the agent's behalf, e.g. a voice left out. */
   notes: string[]
   /** Audio asked for that didn't fit the model's limits. */
   skippedAudio: (AudioInfo & { reason: string })[]
@@ -625,7 +625,7 @@ interface ClipPlace {
  * the references it carries – the ones given here, its own, or those of the clip it continues from – and the previous
  * clip's last frame after them. A clip with any other start or end frame (a picture, a neighbour's frame) is
  * generated image-to-video – by a model that takes an end image when it has one – and takes no references. Throws
- * (in Swedish) when the clip couldn't be generated as written, so nothing invalid is saved.
+ * when the clip couldn't be generated as written, so nothing invalid is saved.
  */
 async function clipParams(
   base: GenerationParams,
@@ -650,10 +650,10 @@ async function clipParams(
       withReferences = false
       if (input.references?.length) {
         throw new Error(
-          `Klipp ${clipNumber}: ${modelId} har ingen modell för referenser, så klippet kan bara fortsätta med exakt startbild, utan referenser. Välj en modell för referenser (list_models) eller ta bort references.`
+          `Clip ${clipNumber}: ${modelId} has no model for references, so the clip can only continue with an exact start frame, without references. Choose a model for references (list_models) or remove references.`
         )
       }
-      notes.push(`${modelId} har ingen modell för referenser, så klippet fortsätter med exakt startbild, utan referenser.`)
+      notes.push(`${modelId} has no model for references, so the clip continues with an exact start frame, without references.`)
     }
   }
   const keyframed =
@@ -663,9 +663,9 @@ async function clipParams(
     throw new Error(
       continuing
         ? ending || slots.end.path !== undefined
-          ? `Klipp ${clipNumber} fortsätter från föregående klipp och slutar på en slutbild: det genereras bild-till-video med båda bildrutorna och tar inga referenser. Ta bort references, eller slutbilden (end_image: null / end_from_next: false).`
-          : `Klipp ${clipNumber} fortsätter med exakt startbild (continue_mode "exact"): det genereras från föregående klipps sista bildruta och tar inga referenser. Ta bort references, eller sätt continue_mode till "references".`
-        : `Klipp ${clipNumber} har en start- eller slutbild och genereras bild-till-video, som inte tar referenser. Ta bort references, eller ta bort bilderna (start_image / end_image: null) för att använda referenser.`
+          ? `Clip ${clipNumber} continues from the previous clip and ends on an end image: it is generated image-to-video from both frames and takes no references. Remove references, or the end image (end_image: null / end_from_next: false).`
+          : `Clip ${clipNumber} continues with an exact start frame (continue_mode "exact"): it is generated from the previous clip's last frame and takes no references. Remove references, or set continue_mode to "references".`
+        : `Clip ${clipNumber} has a start or end image and is generated image-to-video, which takes no references. Remove references, or remove the images (start_image / end_image: null) to use references.`
     )
   }
 
@@ -674,7 +674,7 @@ async function clipParams(
   } else if (keyframed) {
     if (input.model && needsEnd && kindOfModelId(modelId) === 'image-to-video' && !supportsEndImage(modelId)) {
       throw new Error(
-        `${modelId} kan inte ta en slutbild. Välj en bild-till-video-modell som kan det (t.ex. Seedance), eller ta bort slutbilden.`
+        `${modelId} can't take an end image. Choose an image-to-video model that can (e.g. Seedance), or remove the end image.`
       )
     }
     // As Studio does it when a slot gets a picture: the family's image-to-video model, one that takes an end
@@ -686,12 +686,12 @@ async function clipParams(
     modelId = modelForMode(await getModels(), modelId, 'reference-to-video')
   } else if (input.references?.length && kindOfModelId(modelId) !== 'reference-to-video') {
     if (input.model) {
-      throw new Error(`Referenser används bara i läget reference-to-video, men ${modelId} är ${kindOfModelId(modelId)}.`)
+      throw new Error(`References are only used in reference-to-video mode, but ${modelId} is ${kindOfModelId(modelId)}.`)
     }
     modelId = modelForMode(await getModels(), modelId, 'reference-to-video')
   } else if (kindOfModelId(modelId) === 'image-to-video') {
     throw new Error(
-      `${modelId} är en bild-till-video-modell och behöver en startbild: ange start_image, eller välj en modell för referenser.`
+      `${modelId} is an image-to-video model and needs a start image: give start_image, or choose a model for references.`
     )
   }
 
@@ -707,7 +707,7 @@ async function clipParams(
     if (input.prompt === undefined && hasTokens(prompt)) {
       prompt = withoutReferenceTokens(prompt)
       notes.push(
-        'Prompten skickar inga referenser längre, så @-referenserna togs bort ur den. Skriv gärna om den: beskriv i ord vad som händer mellan start- och slutbilden.'
+        'The prompt no longer sends references, so its @ references were taken out. Consider rewriting it: describe in words what happens between the start and end images.'
       )
     }
     if (input.negative_prompt === undefined && hasTokens(negativePrompt)) {
@@ -724,7 +724,7 @@ async function clipParams(
     aspectRatio: aspectRatio ?? base.aspectRatio,
     audio: input.audio ?? base.audio
   }
-  // Which descriptions of its references the clip appends to its prompt ("Ta med beskrivningar"); they travel
+  // Which descriptions of its references the clip appends to its prompt ("Include descriptions"); they travel
   // with the clip's settings, so a clip continuing from it, or a new one after it, starts from the same choice.
   if (input.include_descriptions !== undefined) params.includeDescriptions = input.include_descriptions
   if (input.excluded_description_asset_ids !== undefined) {
@@ -770,11 +770,11 @@ async function clipParams(
     }
     const max = maxReferenceImages(modelId)
     const count = params.referenceImages?.length ?? 0
-    if (count > max) throw new Error(`Klipp ${clipNumber} har ${count} referensbilder, men modellen tar högst ${max}.`)
+    if (count > max) throw new Error(`Clip ${clipNumber} has ${count} reference images, but the model takes at most ${max}.`)
   } else if (keyframed) {
     if (base.referenceImages?.length || base.referenceAudios?.length) {
       notes.push(
-        'Klippets referenser (bilder och röster) togs bort: med start- eller slutbild genereras det bild-till-video, och utseendet kommer från bilderna.'
+        'The clip\'s references (images and voices) were removed: with a start or end image it is generated image-to-video, and the look comes from the images.'
       )
     }
     params.referenceImages = undefined
@@ -794,12 +794,12 @@ async function clipParams(
     } else if (params.referenceAudios?.length && !takesAudio(modelId, models)) {
       // Kept references meet a model that takes no audio: the voices would only be refused at generation.
       params.referenceAudios = undefined
-      notes.push('Ljudreferenserna togs bort: modellen tar inte emot ljudreferenser.')
+      notes.push('The audio references were removed: the model takes no reference audio.')
     }
     if (kindOfModelId(modelId) === 'reference-to-video') {
       const max = maxReferenceImages(modelId)
       const count = params.referenceImages?.length ?? 0
-      if (count > max) throw new Error(`Klipp ${clipNumber} har ${count} referensbilder, men modellen tar högst ${max}.`)
+      if (count > max) throw new Error(`Clip ${clipNumber} has ${count} reference images, but the model takes at most ${max}.`)
     }
   }
 
@@ -816,7 +816,7 @@ async function clipParams(
   const plan = continuationPlan(clips, place.index)
   const sent = sendParams(clips, place.index)
   const problem = sendProblem(sent, continuing, ending, plan)
-  if (problem) throw new Error(`Klipp ${clipNumber}: ${problem}${plan?.note && plan.applies ? ` (${plan.note})` : ''}`)
+  if (problem) throw new Error(`Clip ${clipNumber}: ${problem}${plan?.note && plan.applies ? ` (${plan.note})` : ''}`)
   // Who wears which outfit: the agent's choices, checked against the pictures the clip has or carries, and the
   // stored ones kept to those (a choice for an outfit that left is forgotten, as in Studio's form).
   try {
@@ -829,14 +829,14 @@ async function clipParams(
     if (wearers) params.outfitWearers = wearers
     else delete params.outfitWearers
   } catch (err) {
-    throw new Error(`Klipp ${clipNumber}: ${errorText(err)}`)
+    throw new Error(`Clip ${clipNumber}: ${errorText(err)}`)
   }
   if (plan?.mode === 'references') {
     const dropped = droppedImagesNote(plan)
     if (dropped) notes.push(dropped)
     if (plan.carried?.inherited) {
       notes.push(
-        `Klippet skickar med referenserna från klipp ${plan.carried.fromClip} och föregående klipps sista bildruta som ${imageToken(plan.frameToken ?? 1)}.`
+        `The clip sends the references of clip ${plan.carried.fromClip} and the previous clip's last frame as ${imageToken(plan.frameToken ?? 1)}.`
       )
     }
   } else if (plan?.note && plan.applies && plan.chosen === 'references') {
@@ -858,7 +858,7 @@ async function applyImages(segmentId: string, slots: SlotState, clipNumber: numb
       updated = await callService<Sequence>('segments:setImage', segmentId, slot, source)
     } catch (err) {
       throw new Error(
-        `Klipp ${clipNumber} sparades, men ${SLOT_SV[slot]}en kunde inte sättas: ${errorText(err)} Försök igen med update_segment({${slot}_image}).`
+        `Clip ${clipNumber} was saved, but its ${SLOT_WORDS[slot]} couldn't be set: ${errorText(err)} Try again with update_segment({${slot}_image}).`
       )
     }
   }
@@ -873,7 +873,7 @@ function savesFrame(slots: SlotState): boolean {
 
 /**
  * A clip's input with what agents send resolved first: slot pictures from uploads or URLs as staged files, and
- * loose reference pictures (stills, uploads made stills in Referensbilder) as files – so a clip never points into
+ * loose reference pictures (stills, uploads made stills in "Referensbilder") as files – so a clip never points into
  * the scratch folder.
  */
 async function resolvedClipInput<
@@ -897,9 +897,9 @@ function clipNotes(result: ClipParams): Record<string, unknown> {
 // ── Reordering and swapping a clip's references ──────────────────────────────
 
 /**
- * Refuses (in Swedish) to change the references of a clip that sends none of its own: one that continues exactly,
+ * Refuses to change the references of a clip that sends none of its own: one that continues exactly,
  * one that carries another clip's references (the message says which clip to change instead: `there`), and one with
- * a start or end image or none at all. `verb` is what can't be done ("ordna om", "byta").
+ * a start or end image or none at all. `verb` is what can't be done ("reorder", "swap").
  */
 function assertOwnClipReferences(
   sequence: Sequence,
@@ -913,35 +913,35 @@ function assertOwnClipReferences(
     const plan = continuationOf(sequence, index)
     if (plan?.form !== 'reference-to-video') {
       throw new Error(
-        `Klipp ${clipNumber} fortsätter med exakt startbild från föregående klipp och skickar inga referenser, så det finns inget att ${verb}.`
+        `Clip ${clipNumber} continues with an exact start frame from the previous clip and sends no references, so there is nothing to ${verb}.`
       )
     }
     if (!ownReferences(segment.params)) {
       const from = plan.carried?.fromClip
       throw new Error(
         from
-          ? `Klipp ${clipNumber} har inga egna referenser – det skickar med referenserna från klipp ${from}. ${there(from)}, eller ge klippet egna med update_segment({references}).`
-          : `Klipp ${clipNumber} har inga referenser att ${verb}.`
+          ? `Clip ${clipNumber} has no references of its own – it sends the references of clip ${from}. ${there(from)}, or give the clip its own with update_segment({references}).`
+          : `Clip ${clipNumber} has no references to ${verb}.`
       )
     }
   }
   if (endsOnNext(sequence, index) || kindOfModelId(segment.params.model) === 'image-to-video') {
     throw new Error(
-      `Klipp ${clipNumber} har en start- eller slutbild (bild-till-video) och skickar inga referenser, så det finns inget att ${verb}.`
+      `Clip ${clipNumber} has a start or end image (image-to-video) and sends no references, so there is nothing to ${verb}.`
     )
   }
   if (kindOfModelId(segment.params.model) !== 'reference-to-video') {
-    throw new Error(`Klipp ${clipNumber} är text-till-video och har inga referenser att ${verb}.`)
+    throw new Error(`Clip ${clipNumber} is text-to-video and has no references to ${verb}.`)
   }
 }
 
 /** Refuses to save a clip the user changed in Studio after it was read (`params`): their change is not written over. */
 function assertClipUnchanged(segmentId: string, params: GenerationParams): void {
   const row = store.getSegmentRow(segmentId)
-  if (!row) throw new Error('Klippet finns inte längre.')
+  if (!row) throw new Error('The clip no longer exists.')
   if (store.serializeParams(store.parseParams(row.params)) !== store.serializeParams(params)) {
     throw new Error(
-      'Klippet ändrades i Studio medan ändringen förbereddes, så inget sparades. Läs klippet igen (get_sequence) och gör ändringen på nytt.'
+      'The clip was changed in Studio while the change was being prepared, so nothing was saved. Read the clip again (get_sequence) and make the change again.'
     )
   }
 }
@@ -949,8 +949,8 @@ function assertClipUnchanged(segmentId: string, params: GenerationParams): void 
 /**
  * reorder_references for a sequence clip: its reference images and/or audio in the new order (see newOrder), with
  * every @ImageN / @AudioN token in its prompt and negative prompt renumbered by the shared reorderReferences (what
- * Studio's own drag and drop applies), saved through the sequence service in one change. Refused while "Generera
- * saknade" runs, for a clip that sends no references, and when the clip changed in Studio meanwhile.
+ * Studio's own drag and drop applies), saved through the sequence service in one change. Refused while "Generate
+ * missing" runs, for a clip that sends no references, and when the clip changed in Studio meanwhile.
  */
 export async function reorderClipReferences(
   segmentId: string,
@@ -960,8 +960,8 @@ export async function reorderClipReferences(
   const { sequence, index, segment } = await loadClip(segmentId)
   assertNotRunning(sequence)
   const clipNumber = index + 1
-  const where = `klipp ${clipNumber}`
-  assertOwnClipReferences(sequence, index, segment, 'ordna om', () => 'Ordna om dem där')
+  const where = `clip ${clipNumber}`
+  assertOwnClipReferences(sequence, index, segment, 'reorder', () => 'Reorder them there')
   // The model list also makes main remember the models' prompt limits, which the descriptions are fitted into.
   const [assets] = await Promise.all([AssetIndex.load(), modelsIfAvailable()])
   const params = segment.params
@@ -980,9 +980,9 @@ export async function reorderClipReferences(
     return {
       data: {
         ...answer(params, { images: [], audios: [] }),
-        notes: ['Referenserna låg redan i den ordningen, så inget ändrades.']
+        notes: ['The references were already in that order, so nothing changed.']
       },
-      summary: `tittade på ordningen på referenserna i klipp ${clipNumber} (oförändrad)`
+      summary: `looked at the order of the references in clip ${clipNumber} (unchanged)`
     }
   }
 
@@ -1001,7 +1001,7 @@ export async function reorderClipReferences(
   }
   return {
     data: answer(saved, moved),
-    summary: `ändrade ordningen på referenserna i klipp ${clipNumber} i ${q(sequence.name)}${movedSummary(moved)}`
+    summary: `reordered the references in clip ${clipNumber} in ${q(sequence.name)}${movedSummary(moved)}`
   }
 }
 
@@ -1016,10 +1016,10 @@ export async function swapClipReference(ctx: ToolContext, segmentId: string, inp
   const { sequence, index, segment } = await loadClip(segmentId)
   assertNotRunning(sequence)
   const clipNumber = index + 1
-  const where = `klipp ${clipNumber}`
-  assertOwnClipReferences(sequence, index, segment, 'byta', (from) => {
+  const where = `clip ${clipNumber}`
+  assertOwnClipReferences(sequence, index, segment, 'swap', (from) => {
     const source = sequence.segments[from - 1]
-    return `Byt bilden där (swap_reference med target {segment_id: "${source?.id ?? ''}"}) – klippen som bär dess referenser följer med`
+    return `Swap the image there (swap_reference with target {segment_id: "${source?.id ?? ''}"}) – the clips that carry its references follow`
   })
   // The model list also makes main remember the models' prompt limits, which the descriptions are fitted into.
   const [assets] = await Promise.all([AssetIndex.load(), modelsIfAvailable()])
@@ -1032,7 +1032,7 @@ export async function swapClipReference(ctx: ToolContext, segmentId: string, inp
   const named = findImageTokens(input.image.trim())
   if (frame !== undefined && named.length === 1 && named[0].index === frame) {
     throw new Error(
-      `@Image${frame} i klipp ${clipNumber} är föregående klipps sista bildruta, som Studio lägger till sist när klippet skickas – den kan inte bytas.`
+      `@Image${frame} in clip ${clipNumber} is the previous clip's last frame, which Studio adds last when the clip is sent – it can't be swapped.`
     )
   }
   const asked = await planSwap(input, paths, assets, where)
@@ -1045,7 +1045,7 @@ export async function swapClipReference(ctx: ToolContext, segmentId: string, inp
   if (!('uploadId' in asked) && swapsNothing(asked, paths)) {
     return {
       data: { ...answer(params, { images: [], audios: [] }), notes: [unchangedNote(asked)] },
-      summary: `tittade på referenserna i klipp ${clipNumber} (oförändrade)`
+      summary: `looked at the references in clip ${clipNumber} (unchanged)`
     }
   }
   // Last: an upload becomes a still only once everything else is known to be right.
@@ -1068,7 +1068,7 @@ export async function swapClipReference(ctx: ToolContext, segmentId: string, inp
   const notes = [...result.notes, ...swapNotes(params, saved, plan, swapped, assets)]
   return {
     data: { ...answer(saved, swapped), ...(notes.length ? { notes } : {}) },
-    summary: swapSummary(plan, swapped, ` i klipp ${clipNumber} i ${q(sequence.name)}`)
+    summary: swapSummary(plan, swapped, ` in clip ${clipNumber} in ${q(sequence.name)}`)
   }
 }
 
@@ -1105,7 +1105,7 @@ const clipFields = {
     .string()
     .max(4000)
     .optional()
-    .describe('"Vad händer": what happens in the shot, shown with the clip in Studio (any language). Not sent to Venice.'),
+    .describe('"What happens": what happens in the shot, shown with the clip in Studio (any language). Not sent to Venice.'),
   continue_from_previous: z
     .boolean()
     .optional()
@@ -1128,7 +1128,7 @@ const clipFields = {
 
 /**
  * add_segment with from_generation_id: a clip whose selected take is a finished video that already exists – the
- * user's own film, a version from Redigera, or another generation – the way "Lägg i sekvens" makes one. The
+ * user's own film, a version from the Editor, or another generation – the way "Add to sequence" makes one. The
  * sequence service seeds its settings like a new clip's (never from an import's empty params), so only the notes
  * go along; everything else is changed afterwards with update_segment.
  */
@@ -1144,16 +1144,16 @@ async function addClipFrom(
   const extra = Object.entries(input).filter(([, v]) => v !== undefined).map(([k]) => k)
   if (extra.length) {
     throw new Error(
-      `Med from_generation_id får klippet sin video därifrån, så ${extra.join(', ')} kan inte anges samtidigt. Lägg till klippet först och ändra det sedan med update_segment.`
+      `With from_generation_id the clip gets its video from there, so ${extra.join(', ')} can't be given at the same time. Add the clip first, then change it with update_segment.`
     )
   }
   const take = db.getGeneration(generationId)
-  if (!take) throw new Error(`Genereringen ${generationId} finns inte (längre). list_generations visar vilka som finns.`)
+  if (!take) throw new Error(`The generation ${generationId} doesn't exist (any more). list_generations lists the ones there are.`)
   if (take.status !== 'completed' || !take.filePath) {
-    throw new Error('Bara en färdig video kan bli ett klipp i sekvensen.')
+    throw new Error('Only a finished video can become a clip in the sequence.')
   }
   if (take.fileMissing || !existsSync(take.filePath)) {
-    throw new Error('Videofilen finns inte längre på disken (flyttad eller raderad i Finder?).')
+    throw new Error('The video file is no longer on disk (moved or deleted in Finder?).')
   }
   const before = new Set(sequence.segments.map((s) => s.id))
   const updated = await callService<Sequence>('segments:add', sequence.id, {
@@ -1167,10 +1167,10 @@ async function addClipFrom(
     data: {
       ...(index >= 0 ? clipInfo(updated, index, assets, stills) : {}),
       clip_count: updated.segments.length,
-      // `notes` is the clip's own "Vad händer" text here; this says what was done.
+      // `notes` is the clip's own "What happens" text here; this says what was done.
       note: `${ownTake(take) ? 'The video' : 'The generation'} ${q(title)} is the clip's selected take. The next clip can continue from its last frame (continue_from_previous).`
     },
-    summary: `lade till ${q(title)} som klipp ${index + 1} i ${q(updated.name)}`
+    summary: `added ${q(title)} as clip ${index + 1} in ${q(updated.name)}`
   }
 }
 
@@ -1185,7 +1185,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         "The user's sequences (films made of several clips), most recently changed first, with the number of clips and the length of the current cut in seconds. Storyboards are not sequences and are not listed here: list_storyboards lists them.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'listade sekvenserna'
+      summary: () => 'listed the sequences'
     },
     async () => {
       requireLibrary()
@@ -1213,13 +1213,13 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Get sequence',
       description:
-        "One sequence with its clips in order (for a storyboard use get_storyboard). Each clip has its notes (\"Vad händer\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next – a continuing clip also has continue_mode (\"references\" or \"exact\"), sent_as (how it goes now; continue_mode_note says why it differs or doesn't apply) and in reference mode carried_references (from_clip, inherited, the references and audio_references it sends – its own, or those of the clip it continues from – and start_frame_token, the @Image token of the previous clip's last frame, sent after them; not_sent when a reference gives way for it), while references / composed_prompt show what is sent, the instruction to start on the frame included –, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error, source; own_clip: true when it is the user's own film or a version from Redigera rather than a generation of the clip's prompt). The sequence's export_height is its Exportformat (null = the first clip's own size; update_sequence changes it), defaults what new clips start from. With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
+        "One sequence with its clips in order (for a storyboard use get_storyboard). Each clip has its notes (\"What happens\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next – a continuing clip also has continue_mode (\"references\" or \"exact\"), sent_as (how it goes now; continue_mode_note says why it differs or doesn't apply) and in reference mode carried_references (from_clip, inherited, the references and audio_references it sends – its own, or those of the clip it continues from – and start_frame_token, the @Image token of the previous clip's last frame, sent after them; not_sent when a reference gives way for it), while references / composed_prompt show what is sent, the instruction to start on the frame included –, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error, source; own_clip: true when it is the user's own film or a version from the Editor rather than a generation of the clip's prompt). The sequence's export_height is its Export format (null = the first clip's own size; update_sequence changes it), defaults what new clips start from. With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
       input: {
         sequence_id: z.string(),
         include_thumbnails: z.boolean().default(true)
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'tittade på en sekvens'
+      summary: () => 'looked at a sequence'
     },
     async ({ sequence_id, include_thumbnails }) => {
       const sequence = await loadSequence(sequence_id)
@@ -1237,7 +1237,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       return {
         data: sequenceInfo(sequence, assets, stills),
         images,
-        summary: `tittade på sekvensen ${q(sequence.name)}`
+        summary: `looked at the sequence ${q(sequence.name)}`
       }
     }
   )
@@ -1250,9 +1250,9 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       title: 'Create sequence',
       description:
         'Creates an empty sequence (a film made of clips) with the default settings (Seedance 2.5, 8s, 480p, 16:9, audio). Add clips with add_segment, one per shot. To plan a film as milestone pictures with generated transitions between them, use create_storyboard instead.',
-      input: { name: z.string().describe('e.g. "Promenad på stranden".') },
+      input: { name: z.string().describe('e.g. "A walk on the beach".') },
       annotations: WRITE,
-      summary: ({ name }) => `skapade sekvensen ${q(name)}`
+      summary: ({ name }) => `created the sequence ${q(name)}`
     },
     async ({ name }) => {
       requireLibrary()
@@ -1268,7 +1268,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Add clip to sequence',
       description:
-        "Adds a clip (a shot) to a sequence, at the end or after after_segment_id, with its notes (\"Vad händer\") and prompt – or, with from_generation_id, a clip whose selected take is a finished video that already exists (the user's own film, a version from Redigera). Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false (pass it true together with references to give a continuing clip references of its own). A continuing clip starts from the previous clip's last frame. By default (continue_mode \"references\") it is sent reference-to-video with the references it carries – its own, or else those of the clip it continues from (up the chain) – plus that frame as the last reference image, which Studio's instruction in front of the prompt says to start on: use the carried @Image / @Audio tokens (get_sequence: carried_references) and describe what happens next. With continue_mode \"exact\" it is image-to-video from the frame and takes no references or tokens. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The descriptions of its referenced assets are appended to its prompt when it is generated, with who wears each outfit (include_descriptions / excluded_description_asset_ids choose which, outfit_wearers who wears what; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
+        "Adds a clip (a shot) to a sequence, at the end or after after_segment_id, with its notes (\"What happens\") and prompt – or, with from_generation_id, a clip whose selected take is a finished video that already exists (the user's own film, a version from the Editor). Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false (pass it true together with references to give a continuing clip references of its own). A continuing clip starts from the previous clip's last frame. By default (continue_mode \"references\") it is sent reference-to-video with the references it carries – its own, or else those of the clip it continues from (up the chain) – plus that frame as the last reference image, which Studio's instruction in front of the prompt says to start on: use the carried @Image / @Audio tokens (get_sequence: carried_references) and describe what happens next. With continue_mode \"exact\" it is image-to-video from the frame and takes no references or tokens. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The descriptions of its referenced assets are appended to its prompt when it is generated, with who wears each outfit (include_descriptions / excluded_description_asset_ids choose which, outfit_wearers who wears what; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
       input: {
         sequence_id: z.string(),
         after_segment_id: z.string().optional().describe('Insert after this clip; at the end when left out.'),
@@ -1276,13 +1276,13 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           .string()
           .optional()
           .describe(
-            "Make the clip from an existing finished video instead – the user's own clip (list_generations source \"import\"), a version from Redigera (source \"edit\") or any finished generation – as its selected take. Only notes may go along; the clip's settings start like a new clip's (change them later with update_segment), and it doesn't continue from the previous clip."
+            "Make the clip from an existing finished video instead – the user's own clip (list_generations source \"import\"), a version from the Editor (source \"edit\") or any finished generation – as its selected take. Only notes may go along; the clip's settings start like a new clip's (change them later with update_segment), and it doesn't continue from the previous clip."
           ),
         ...clipFields,
         prompt: clipFields.prompt.optional().describe(`${clipFields.prompt.description} Required unless from_generation_id is given.`)
       },
       annotations: WRITE,
-      summary: () => 'lade till ett klipp'
+      summary: () => 'added a clip'
     },
     async ({ sequence_id, after_segment_id, from_generation_id, notes, ...raw }) => {
       const sequence = await loadSequence(sequence_id)
@@ -1291,12 +1291,12 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       const afterIndex = after_segment_id
         ? sequence.segments.findIndex((s) => s.id === after_segment_id)
         : sequence.segments.length - 1
-      if (after_segment_id && afterIndex < 0) throw new Error('after_segment_id är inget klipp i den här sekvensen.')
+      if (after_segment_id && afterIndex < 0) throw new Error('after_segment_id is not a clip in this sequence.')
       const previous = afterIndex >= 0 ? sequence.segments[afterIndex] : undefined
       const clipNumber = afterIndex + 2
       if (from_generation_id) return addClipFrom(sequence, previous, from_generation_id, notes, raw, assets, stills)
       if (raw.prompt === undefined) {
-        throw new Error('Ange prompt (vad som händer i klippet), eller from_generation_id för en färdig video.')
+        throw new Error('Give prompt (what happens in the clip), or from_generation_id for a finished video.')
       }
       const input = await resolvedClipInput(ctx, raw)
       const base: GenerationParams = previous
@@ -1338,7 +1338,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           clip_count: updated.segments.length,
           ...clipNotes(result)
         },
-        summary: `lade till klipp ${index + 1} i ${q(updated.name)}`
+        summary: `added clip ${index + 1} to ${q(updated.name)}`
       }
     }
   )
@@ -1350,7 +1350,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update clip',
       description:
-        "Changes a clip: only the fields you pass change. notes is the clip's \"Vad händer\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt, outfit_wearers who wears each outfit (the legend says it); reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens; swap_reference({target: {segment_id}}) swaps one of them (or a whole asset) for another, keeping every number. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
+        "Changes a clip: only the fields you pass change. notes is the clip's \"What happens\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt, outfit_wearers who wears each outfit (the legend says it); reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens; swap_reference({target: {segment_id}}) swaps one of them (or a whole asset) for another, keeping every number. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
       input: {
         segment_id: z.string(),
         ...clipFields,
@@ -1363,7 +1363,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         trim_end: z.number().min(0).optional().describe('Seconds cut off the end of the selected take in the cut.')
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'ändrade ett klipp'
+      summary: () => 'changed a clip'
     },
     async ({ segment_id, notes, selected_take_id, trim_start, trim_end, ...raw }) => {
       const { sequence, index, segment } = await loadClip(segment_id)
@@ -1375,8 +1375,8 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       let take: Generation | undefined
       if (selected_take_id !== undefined) {
         take = segment.takes.find((t) => t.id === selected_take_id)
-        if (!take) throw new Error(`Tagningen ${selected_take_id} hör inte till klipp ${clipNumber}.`)
-        if (!isUsableTake(take)) throw new Error('Bara en färdig tagning (med sin video kvar) kan väljas till klippet.')
+        if (!take) throw new Error(`The take ${selected_take_id} doesn't belong to clip ${clipNumber}.`)
+        if (!isUsableTake(take)) throw new Error('Only a finished take (with its video still there) can be selected for the clip.')
       }
 
       const slots = slotState(
@@ -1399,7 +1399,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       // over without a word. Compared right before the write (nothing can come in between). Notes and the
       // selected take are written as given, so only a change to the clip's settings matters.
       const row = store.getSegmentRow(segment.id)
-      if (!row) throw new Error('Klippet finns inte längre.')
+      if (!row) throw new Error('The clip no longer exists.')
       if (
         result &&
         (store.serializeParams(store.parseParams(row.params)) !== store.serializeParams(segment.params) ||
@@ -1408,13 +1408,13 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           store.continueModeOfRow(row) !== segment.continueMode)
       ) {
         throw new Error(
-          'Klippet ändrades i Studio medan ändringen förbereddes, så inget sparades. Läs klippet igen (get_sequence) och gör ändringen på nytt.'
+          'The clip was changed in Studio while the change was being prepared, so nothing was saved. Read the clip again (get_sequence) and make the change again.'
         )
       }
       const trims = trim_start !== undefined || trim_end !== undefined
       if (trims && !take && !isUsableTake(selectedTake(segment))) {
         throw new Error(
-          `Klipp ${clipNumber} har ingen färdig vald tagning att trimma. Välj en med selected_take_id först.`
+          `Clip ${clipNumber} has no finished selected take to trim. Select one with selected_take_id first.`
         )
       }
       const patch: SegmentPatch = {
@@ -1439,19 +1439,19 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       const stillsNow = savesFrame(slots) ? await StillIndex.load() : stills
       const saved = at >= 0 ? updated.segments[at] : undefined
       const trimNotes: string[] = []
-      const kept = 'Studio håller trimningen inom tagningen (minst 0,2 s kvar).'
+      const kept = 'Studio keeps the trim within the take (at least 0.2 s left).'
       if (saved && trim_start !== undefined && Math.abs(saved.trimStart - trim_start) > 0.001) {
-        trimNotes.push(`trim_start blev ${seconds(saved.trimStart)} s – ${kept}`)
+        trimNotes.push(`trim_start became ${seconds(saved.trimStart)} s – ${kept}`)
       }
       if (saved && trim_end !== undefined && Math.abs(saved.trimEnd - trim_end) > 0.001) {
-        trimNotes.push(`trim_end blev ${seconds(saved.trimEnd)} s – ${kept}`)
+        trimNotes.push(`trim_end became ${seconds(saved.trimEnd)} s – ${kept}`)
       }
       const what =
         !result && take && notes === undefined && !trims
-          ? `valde en tagning för klipp ${clipNumber}`
+          ? `selected a take for clip ${clipNumber}`
           : !result && trims && notes === undefined && !take
-            ? `trimmade klipp ${clipNumber}`
-            : `ändrade klipp ${clipNumber}`
+            ? `trimmed clip ${clipNumber}`
+            : `changed clip ${clipNumber}`
       return {
         data: {
           ...(at >= 0 ? clipInfo(updated, at, assets, stillsNow) : { segment_id }),
@@ -1462,7 +1462,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           ...(result ? clipNotes(result) : {}),
           ...(trimNotes.length ? { trim_notes: trimNotes } : {})
         },
-        summary: `${what} i ${q(sequence.name)}`
+        summary: `${what} in ${q(sequence.name)}`
       }
     }
   )
@@ -1474,13 +1474,13 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Move clip',
       description:
-        'Moves a clip to another place in its sequence. to_clip_number is the 1-based number the clip should have afterwards (as Studio shows "Klipp 1", "Klipp 2" …). Whichever clip ends up first stops continuing from a previous clip, and whichever ends up last stops taking its end image from a next one.',
+        'Moves a clip to another place in its sequence. to_clip_number is the 1-based number the clip should have afterwards (as Studio shows "Clip 1", "Clip 2" …). Whichever clip ends up first stops continuing from a previous clip, and whichever ends up last stops taking its end image from a next one.',
       input: {
         segment_id: z.string(),
         to_clip_number: z.number().int().min(1)
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: ({ to_clip_number }) => `flyttade ett klipp till plats ${to_clip_number}`
+      summary: ({ to_clip_number }) => `moved a clip to place ${to_clip_number}`
     },
     async ({ segment_id, to_clip_number }) => {
       const { sequence, index } = await loadClip(segment_id)
@@ -1496,7 +1496,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
             prompt: s.params.prompt
           }))
         },
-        summary: `flyttade klipp ${index + 1} till plats ${Math.min(to_clip_number, updated.segments.length)} i ${q(sequence.name)}`
+        summary: `moved clip ${index + 1} to place ${Math.min(to_clip_number, updated.segments.length)} in ${q(sequence.name)}`
       }
     }
   )
@@ -1508,7 +1508,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update sequence',
       description:
-        "Changes a sequence: its name (its folder follows), its defaults – the settings its first clip (and an own clip added to it) starts from: model (a reference-to-video or text-to-video model; a clip gets image-to-video from its own start image), duration, resolution, aspect_ratio, audio, checked against the model as Studio does, with what you leave out fitted to the model – and its Exportformat (export_height: 480, 720 or 1080 pixels high, or null for the first clip's own size), which decides the film's size when own clips and AI clips are mixed. Only the fields you pass change. Free.",
+        "Changes a sequence: its name (its folder follows), its defaults – the settings its first clip (and an own clip added to it) starts from: model (a reference-to-video or text-to-video model; a clip gets image-to-video from its own start image), duration, resolution, aspect_ratio, audio, checked against the model as Studio does, with what you leave out fitted to the model – and its Export format (export_height: 480, 720 or 1080 pixels high, or null for the first clip's own size), which decides the film's size when own clips and AI clips are mixed. Only the fields you pass change. Free.",
       input: {
         sequence_id: z.string(),
         name: z.string().min(1).max(120).optional(),
@@ -1525,15 +1525,15 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         export_height: z
           .union([z.literal(480), z.literal(720), z.literal(1080), z.null()])
           .optional()
-          .describe("480, 720, 1080, or null = Automatiskt (the first clip's own size).")
+          .describe("480, 720, 1080, or null = Automatic (the first clip's own size).")
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'ändrade en sekvens'
+      summary: () => 'changed a sequence'
     },
     async ({ sequence_id, name, defaults, export_height }) => {
       const sequence = await loadSequence(sequence_id)
       if (name === undefined && defaults === undefined && export_height === undefined) {
-        throw new Error('Ange name, defaults eller export_height – annars finns inget att ändra.')
+        throw new Error('Give name, defaults or export_height – otherwise there is nothing to change.')
       }
       const nextDefaults = defaults ? await checkedDefaults(sequence, defaults) : undefined
       const updated = await callService<Sequence>('sequences:update', sequence.id, {
@@ -1542,11 +1542,11 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         ...(export_height !== undefined ? { exportHeight: export_height } : {})
       })
       const what = [
-        name !== undefined ? 'namnet' : undefined,
-        defaults ? 'standardinställningarna' : undefined,
-        export_height !== undefined ? 'exportformatet' : undefined
+        name !== undefined ? 'the name' : undefined,
+        defaults ? 'the defaults' : undefined,
+        export_height !== undefined ? 'the export format' : undefined
       ].filter((w): w is string => !!w)
-      const said = what.length > 1 ? `${what.slice(0, -1).join(', ')} och ${what[what.length - 1]}` : what[0]
+      const said = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what[what.length - 1]}` : what[0]
       return {
         data: {
           sequence_id: updated.id,
@@ -1554,7 +1554,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           defaults: defaultsInfo(updated),
           export_height: updated.exportHeight ?? null
         },
-        summary: `ändrade ${said} för ${q(updated.name)}`
+        summary: `changed ${said} of ${q(updated.name)}`
       }
     }
   )
@@ -1566,23 +1566,23 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Export a film',
       description:
-        "Exports a sequence (sequence_id) or a storyboard (storyboard_id) as one film – the selected takes back to back, trimmed, at its Exportformat – into its folder, exactly as Studio's Exportera does. Free and local (ffmpeg on this Mac); every clip (transition) needs a finished selected take. Waits up to wait_seconds (default 30): {status: \"done\", export_id, duration, cuts}, or {status: \"running\", progress} – then follow it with get_work_status or list_exports. An export already running for it answers running. Review the film with review_export({export_id}).",
+        "Exports a sequence (sequence_id) or a storyboard (storyboard_id) as one film – the selected takes back to back, trimmed, at its Export format – into its folder, exactly as Studio's Export does. Free and local (ffmpeg on this Mac); every clip (transition) needs a finished selected take. Waits up to wait_seconds (default 30): {status: \"done\", export_id, duration, cuts}, or {status: \"running\", progress} – then follow it with get_work_status or list_exports. An export already running for it answers running. Review the film with review_export({export_id}).",
       input: {
         sequence_id: z.string().optional(),
         storyboard_id: z.string().optional(),
         wait_seconds: z.number().int().min(0).max(50).default(30)
       },
       annotations: WRITE,
-      summary: () => 'exporterade en film'
+      summary: () => 'exported a film'
     },
     async ({ sequence_id, storyboard_id, wait_seconds }) => {
       requireLibrary()
-      if (!sequence_id === !storyboard_id) throw new Error('Ange antingen sequence_id eller storyboard_id.')
+      if (!sequence_id === !storyboard_id) throw new Error('Give either sequence_id or storyboard_id.')
       const storyboard = !!storyboard_id
       const id = (storyboard_id ?? sequence_id)!
       const kind = sequenceKind(id)
-      if (!kind) throw new Error(storyboard ? 'Storyboarden finns inte (längre).' : 'Sekvensen finns inte (längre).')
-      if (storyboard && kind !== 'storyboard') throw new Error('Det här är en sekvens: exportera den med sequence_id.')
+      if (!kind) throw new Error(storyboard ? 'The storyboard doesn\'t exist (any more).' : 'The sequence doesn\'t exist (any more).')
+      if (storyboard && kind !== 'storyboard') throw new Error('This is a sequence: export it with sequence_id.')
       if (!storyboard && kind === 'storyboard') throw storyboardNotSequence('export_film({storyboard_id})')
       const name = store.getSequenceRow(id)?.name ?? ''
       let run = exporting.get(id)
@@ -1606,7 +1606,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         path = await Promise.race([run.promise, delay(wait_seconds * 1000).then(() => undefined)])
       } catch (err) {
         // The user (or another session) is exporting it right now: that export is followed instead.
-        if (/exporteras redan/.test(errorText(err))) path = undefined
+        if (/already being exported/.test(errorText(err))) path = undefined
         else throw err
       }
       if (!path) {
@@ -1616,7 +1616,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
             ...(await exportProgress(id)),
             next: 'Follow it with get_work_status (or list_exports once it is done); the film lands in list_exports.'
           },
-          summary: `exporterar ${storyboard ? 'storyboarden' : 'sekvensen'} ${q(name)}`
+          summary: `is exporting the ${storyboard ? 'storyboard' : 'sequence'} ${q(name)}`
         }
       }
       const done = (await callService<ExportSummary[]>('exports:list')).find(
@@ -1631,7 +1631,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           ...(done?.cuts ? { cuts: done.cuts.map(seconds) } : {}),
           next: done ? `Look at it with review_export({export_id: "${done.id}"}).` : 'list_exports lists it.'
         },
-        summary: `exporterade ${storyboard ? 'storyboarden' : 'sekvensen'} ${q(name)}`
+        summary: `exported the ${storyboard ? 'storyboard' : 'sequence'} ${q(name)}`
       }
     }
   )
@@ -1641,23 +1641,23 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     ctx,
     'stop_generation_run',
     {
-      title: 'Stop "Generera saknade"',
+      title: 'Stop "Generate missing"',
       description:
-        "Stops a running \"Generera saknade\" (request_generate_all / request_generate_storyboard) for a sequence (sequence_id) or a storyboard (storyboard_id): no further clips are sent. Takes already at Venice keep going and land as usual (they are paid already). Free – it only saves money.",
+        "Stops a running \"Generate missing\" (request_generate_all / request_generate_storyboard) for a sequence (sequence_id) or a storyboard (storyboard_id): no further clips are sent. Takes already at Venice keep going and land as usual (they are paid already). Free – it only saves money.",
       input: {
         sequence_id: z.string().optional(),
         storyboard_id: z.string().optional()
       },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'stoppade Generera saknade'
+      summary: () => 'stopped Generate missing'
     },
     async ({ sequence_id, storyboard_id }) => {
       requireLibrary()
-      if (!sequence_id === !storyboard_id) throw new Error('Ange antingen sequence_id eller storyboard_id.')
+      if (!sequence_id === !storyboard_id) throw new Error('Give either sequence_id or storyboard_id.')
       const id = (storyboard_id ?? sequence_id)!
       const kind = sequenceKind(id)
-      if (!kind) throw new Error(storyboard_id ? 'Storyboarden finns inte (längre).' : 'Sekvensen finns inte (längre).')
-      if (storyboard_id && kind !== 'storyboard') throw new Error('Det här är en sekvens: ange den som sequence_id.')
+      if (!kind) throw new Error(storyboard_id ? 'The storyboard doesn\'t exist (any more).' : 'The sequence doesn\'t exist (any more).')
+      if (storyboard_id && kind !== 'storyboard') throw new Error('This is a sequence: give it as sequence_id.')
       if (sequence_id && kind === 'storyboard') throw storyboardNotSequence('stop_generation_run({storyboard_id})')
       const storyboard = kind === 'storyboard'
       const current = storyboard
@@ -1665,8 +1665,8 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         : await callService<Sequence>('sequences:get', id)
       if (!current.running) {
         return {
-          data: { stopped: false, note: '"Generera saknade" is not running there.' },
-          summary: `försökte stoppa Generera saknade i ${q(current.name)} (körde inte)`
+          data: { stopped: false, note: '"Generate missing" is not running there.' },
+          summary: `tried to stop Generate missing in ${q(current.name)} (it wasn't running)`
         }
       }
       await callService(storyboard ? 'storyboards:stop' : 'sequences:stopGenerateAll', id)
@@ -1675,7 +1675,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           stopped: true,
           note: 'No more clips are sent. Takes already at Venice keep going and land as usual.'
         },
-        summary: `stoppade Generera saknade i ${q(current.name)}`
+        summary: `stopped Generate missing in ${q(current.name)}`
       }
     }
   )
@@ -1688,7 +1688,7 @@ const exporting = new Map<string, { promise: Promise<string>; startedAt: number 
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-/** How far an export is, from Pågår och klart ({progress} 0–1), or {} when it can't be told. */
+/** How far an export is, from Activity ({progress} 0–1), or {} when it can't be told. */
 async function exportProgress(sequenceId: string): Promise<Record<string, unknown>> {
   try {
     const summary = await callService<WorkSummary>('work:summary')
@@ -1713,7 +1713,7 @@ async function checkedDefaults(
   const model = requireModel(models, input.model ?? base.model)
   if (kindOfModelId(model.id) === 'image-to-video') {
     throw new Error(
-      `${model.id} är en bild-till-video-modell. Standardmodellen för nya klipp ska ta referenser eller text – ett klipp blir bild-till-video av sin egen start_image.`
+      `${model.id} is an image-to-video model. The default model for new clips must take references or text – a clip becomes image-to-video from its own start_image.`
     )
   }
   const duration = normalizeDuration(input.duration)

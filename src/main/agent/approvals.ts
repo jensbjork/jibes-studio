@@ -11,14 +11,14 @@ import {
 } from '@shared/types'
 import { errorText } from './studio'
 
-// What an agent asked for that needs the user's OK: paid generations (videos, pictures, Redigera's paid operations,
+// What an agent asked for that needs the user's OK: paid generations (videos, pictures, the Editor's paid operations,
 // designed voices) and removals ('delete'). Nothing reaches Venice, and nothing is removed, until the user approves
 // the request in Studio; main then carries out exactly what the request describes, through the same code paths as
 // the window.
 
 /**
  * What carrying out an approved request led to: the generations it started, or the still it made – or, for a
- * Redigera request, the job it started and the version it made (merged into the request's `edit`) – or, for a
+ * Editor request, the job it started and the version it made (merged into the request's `edit`) – or, for a
  * 'delete' request, every item with its outcome.
  */
 export type ApprovalOutcome =
@@ -37,7 +37,7 @@ export type ApprovalOutcome =
       failedError?: string
     }
 
-/** A request being carried out right now (between the user's OK and its outcome), for Pågår och klart. */
+/** A request being carried out right now (between the user's OK and its outcome), for Activity. */
 export interface ExecutingApproval {
   id: string
   kind: ApprovalRequest['kind']
@@ -46,7 +46,7 @@ export interface ExecutingApproval {
   startedAt: number
   sequenceId?: string
   segmentIds?: string[]
-  /** Swedish: what is being done, e.g. "Klipp 3 i ”Strandscen”", "Ta bort 3 saker i ”Sommar”". */
+  /** What is being done, e.g. "Clip 3 in “Beach scene”", "Delete 3 items in “Sommar”". */
   summary: string
 }
 
@@ -85,7 +85,7 @@ export interface ApprovalPlan {
    */
   clipLegends?: Record<string, string>
   image?: ApprovalImageRequest
-  /** 'edit' and 'voice-design': what Redigera (or Karaktärer → Röst) will do, as the dialog shows it. */
+  /** 'edit' and 'voice-design': what the Editor (or Characters → Voice) will do, as the dialog shows it. */
   edit?: ApprovalEditRequest
   /** 'delete': what will be removed, as the dialog shows it. */
   delete?: ApprovalDeleteRequest
@@ -107,14 +107,14 @@ export interface ApprovalPlan {
    */
   epoch?: number
   /**
-   * `params` as they are now: the files moved since the request was made ("Städa upp", an asset renamed) followed
+   * `params` as they are now: the files moved since the request was made ("Tidy up", an asset renamed) followed
    * to where they are (db.followRewrites), as verify reads them. A pending request is listed with these, so the
    * dialog shows the pictures and composes the legend from the files as they are, and doesn't take a move for an
    * edited description.
    */
   paramsNow?: () => GenerationParams
   /**
-   * Throws (in Swedish) when what would be carried out is no longer what the user is shown. Run before executing,
+   * Throws when what would be carried out is no longer what the user is shown. Run before executing,
    * and – for a 'delete' request – whenever the open dialog checks it again (ApprovalStore.check), so it must not
    * change anything.
    */
@@ -133,33 +133,33 @@ interface Entry {
   startedAt?: number
 }
 
-/** "Klipp 3 i ”Strandscen”": what a request being carried out does, for Pågår och klart. */
+/** "Clip 3 in “Beach scene”": what a request being carried out does, for Activity. */
 function executingSummary(r: ApprovalRequest): string {
-  const named = r.sequenceName ? ` i ”${r.sequenceName}”` : ''
+  const named = r.sequenceName ? ` in “${r.sequenceName}”` : ''
   const storyboard = r.sequenceKind === 'storyboard'
   switch (r.kind) {
     case 'generation':
-      return 'En video från Generera'
+      return 'A video from Generate'
     case 'segment': {
       const n = r.clipNumbers?.[0]
-      const what = storyboard ? (n ? `Övergång ${n}` : 'En övergång') : n ? `Klipp ${n}` : 'Ett klipp'
+      const what = storyboard ? (n ? `Transition ${n}` : 'A transition') : n ? `Clip ${n}` : 'A clip'
       return `${what}${named}`
     }
     case 'generate-all':
-      return `Generera saknade${named}`
+      return `Generate missing${named}`
     case 'image': {
       const board = r.image?.assignToBoard
-      if (board) return `Bild till ruta ${board.boardNumber}${named}`
+      if (board) return `Image for board ${board.boardNumber}${named}`
       const slot = r.image?.assignTo
-      if (slot) return `Bild till klipp ${slot.clipNumber}${named}`
-      return r.sequenceName ? `Bild${named}` : 'Bild'
+      if (slot) return `Image for clip ${slot.clipNumber}${named}`
+      return r.sequenceName ? `Image${named}` : 'Image'
     }
     case 'edit':
-      return r.edit?.editName ? `”${r.edit.editName}” – ${r.edit.summary}` : (r.edit?.summary ?? 'En ändring i Redigera')
+      return r.edit?.editName ? `“${r.edit.editName}” – ${r.edit.summary}` : (r.edit?.summary ?? 'A change in the Editor')
     case 'voice-design':
-      return r.edit?.summary ?? 'En ny röst'
+      return r.edit?.summary ?? 'A new voice'
     case 'delete':
-      return r.delete?.summary ?? 'Tar bort det agenten bad om'
+      return r.delete?.summary ?? 'Deleting what the agent asked for'
   }
 }
 
@@ -171,7 +171,7 @@ export class ApprovalStore {
 
   /**
    * `onChange`: a request was made or changed (`created`: a new one, not a change to one the user has seen).
-   * `onExecuting`: a request started or stopped being carried out (Pågår och klart lists it meanwhile).
+   * `onExecuting`: a request started or stopped being carried out (Activity lists it meanwhile).
    */
   constructor(
     private readonly onChange: (request: ApprovalRequest, created: boolean) => void,
@@ -185,7 +185,7 @@ export class ApprovalStore {
   create(plan: ApprovalPlan): { request: ApprovalRequest; reused: boolean } {
     if (plan.epoch !== undefined && plan.epoch !== this.generation) {
       throw new Error(
-        'Agentanslutningen stängdes av, token byttes eller biblioteket byttes medan förfrågan förbereddes, så den skickades inte till användaren. Fråga igen om det fortfarande ska göras.'
+        "The agent connection was turned off, the token changed or the library was switched while the request was being prepared, so it wasn't sent to the user. Ask again if it should still be done."
       )
     }
     const same = this.findPending(plan.fingerprint)
@@ -193,14 +193,14 @@ export class ApprovalStore {
     if (plan.target) {
       for (const entry of this.entries.values()) {
         if (entry.request.status === 'pending' && !entry.executing && entry.plan.target === plan.target) {
-          this.finish(entry, { status: 'expired', error: 'Ersatt av en nyare förfrågan om samma sak.' })
+          this.finish(entry, { status: 'expired', error: 'Replaced by a newer request for the same thing.' })
         }
       }
     }
     const pending = [...this.entries.values()].filter((e) => e.request.status === 'pending').length
     if (pending >= MAX_PENDING) {
       throw new Error(
-        `Det finns redan ${pending} förfrågningar som väntar på användaren. Vänta på svaret innan du ber om fler.`
+        `There are already ${pending} requests waiting for the user. Wait for their answer before you ask for more.`
       )
     }
 
@@ -290,11 +290,11 @@ export class ApprovalStore {
   /**
    * The live check of a pending 'delete' request (the open dialog's, get_approval's, a new request's): runs its verify
    * without carrying anything out. null while it can still be approved (and for every other kind, whose dialogs check
-   * what they show themselves), else why not (Swedish). A request whose items changed lapses here ('expired').
+   * what they show themselves), else why not. A request whose items changed lapses here ('expired').
    */
   async check(id: string): Promise<string | null> {
     const entry = this.entries.get(id)
-    if (!entry) return 'Förfrågan finns inte längre.'
+    if (!entry) return 'The request no longer exists.'
     if (entry.request.kind !== 'delete' || entry.request.status !== 'pending' || entry.executing) return null
     try {
       await entry.plan.verify?.()
@@ -316,8 +316,8 @@ export class ApprovalStore {
    */
   async resolve(id: string, approve: boolean, reason?: string): Promise<ApprovalRequest> {
     const entry = this.entries.get(id)
-    if (!entry) throw new Error('Förfrågan finns inte längre.')
-    if (entry.executing) throw new Error('Förfrågan behandlas redan.')
+    if (!entry) throw new Error('The request no longer exists.')
+    if (entry.executing) throw new Error('The request is already being handled.')
     if (entry.request.status !== 'pending') return { ...entry.request }
     if (!approve) {
       this.finish(entry, { status: 'declined', reason: reason?.trim() || undefined })
@@ -389,7 +389,7 @@ export class ApprovalStore {
 
   private lapse(entry: Entry): void {
     if (entry.request.status !== 'pending' || entry.executing) return
-    this.finish(entry, { status: 'expired', error: 'Förfrågan gick ut efter 30 minuter utan svar.' })
+    this.finish(entry, { status: 'expired', error: 'The request expired after 30 minutes without an answer.' })
   }
 
   private finish(entry: Entry, patch: Partial<ApprovalRequest>): void {

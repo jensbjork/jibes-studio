@@ -16,7 +16,7 @@ import {
 import ToolsSettings, { useFfmpegStatus } from './settings/ToolsSettings'
 import VeniceSettings from './settings/VeniceSettings'
 
-// Inställningar: one section per subject, each with a heading, one line on what it is for and then its settings,
+// Settings: one section per subject, each with a heading, one line on what it is for and then its settings,
 // and a navigation that follows the scroll – beside the sections when there is room, as a sticky row of pills above
 // them on a narrow window. Every setting does what it did before; only the order and the wording around it changed.
 
@@ -30,14 +30,14 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
       {
         id: SECTION.venice,
         label: 'Venice',
-        attention: settings.hasApiKey ? undefined : 'Ingen API-nyckel än'
+        attention: settings.hasApiKey ? undefined : 'No API key yet'
       },
-      { id: SECTION.generation, label: 'Generering' },
-      { id: SECTION.library, label: 'Bibliotek' },
-      { id: SECTION.archive, label: 'Export och import' },
-      { id: SECTION.agent, label: 'Agentanslutning' },
-      { id: SECTION.tools, label: 'Verktyg', attention: ffmpegMissing ? 'ffmpeg saknas' : undefined },
-      { id: SECTION.about, label: 'Om Studio' }
+      { id: SECTION.generation, label: 'Generation' },
+      { id: SECTION.library, label: 'Library' },
+      { id: SECTION.archive, label: 'Export & import' },
+      { id: SECTION.agent, label: 'Agent connection' },
+      { id: SECTION.tools, label: 'Tools', attention: ffmpegMissing ? 'ffmpeg is missing' : undefined },
+      { id: SECTION.about, label: 'About Studio' }
     ],
     [settings.hasApiKey, ffmpegMissing]
   )
@@ -49,19 +49,19 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
   return (
     <div ref={scroller} className="drag h-full overflow-y-auto">
       <div className="no-drag mx-auto w-full max-w-[940px] px-8 pb-24">
-        <h1 className="pb-6 pt-14 text-xl font-semibold">Inställningar</h1>
+        <h1 className="pb-6 pt-14 text-xl font-semibold">Settings</h1>
 
         <div className="@4xl/main:flex @4xl/main:items-start @4xl/main:gap-12">
           {/* Beside the sections when there is room… */}
           <nav
-            aria-label="Delar av inställningarna"
+            aria-label="Settings sections"
             className="sticky top-8 hidden w-44 shrink-0 @4xl/main:block"
           >
             <SettingsNav items={items} active={active} onGo={go} layout="side" />
           </nav>
           {/* …and a sticky row above them on a narrow window. */}
           <nav
-            aria-label="Delar av inställningarna"
+            aria-label="Settings sections"
             className="sticky top-0 z-10 -mx-8 mb-8 overflow-x-auto border-b border-line bg-bg/90 px-8 py-2.5 backdrop-blur @4xl/main:hidden"
           >
             <SettingsNav items={items} active={active} onGo={go} layout="top" />
@@ -71,47 +71,47 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
             <SettingsSection
               id={SECTION.venice}
               title="Venice"
-              description="Studio genererar video, bilder och ljud via ditt Venice-konto."
+              description="Studio generates video, images and sound through your Venice account."
             >
               <VeniceSettings hasApiKey={settings.hasApiKey} onChanged={onChanged} />
             </SettingsSection>
 
             <SettingsSection
               id={SECTION.generation}
-              title="Generering"
-              description="Hur Studio skriver prompter och skapar bilder."
+              title="Generation"
+              description="How Studio writes prompts and creates images."
             >
               <GenerationSettings settings={settings} onChanged={onChanged} />
             </SettingsSection>
 
-            <SettingsSection id={SECTION.library} title="Bibliotek" ownIntro>
+            <SettingsSection id={SECTION.library} title="Library" ownIntro>
               {/* LibrarySection brings its own heading too; this section's is the one shown. */}
               <div className="[&>section]:mb-0 [&>section>h2]:hidden">
                 <LibrarySection />
               </div>
             </SettingsSection>
 
-            <SettingsSection id={SECTION.archive} title="Export och import" ownIntro>
+            <SettingsSection id={SECTION.archive} title="Export & import" ownIntro>
               <LibraryArchiveSection />
             </SettingsSection>
 
             <SettingsSection
               id={SECTION.agent}
-              title="Agentanslutning"
-              description="Låt dina egna AI-agenter, till exempel OpenClaw eller Hermes Agent, arbeta i Studio via MCP."
+              title="Agent connection"
+              description="Let your own AI agents, such as OpenClaw or Hermes Agent, work in Studio through MCP."
             >
               <AgentSettingsSection />
             </SettingsSection>
 
             <SettingsSection
               id={SECTION.tools}
-              title="Verktyg"
-              description="Program på den här Macen som Studio använder."
+              title="Tools"
+              description="Programs on this Mac that Studio uses."
             >
               <ToolsSettings ffmpeg={ffmpeg} />
             </SettingsSection>
 
-            <SettingsSection id={SECTION.about} title="Om Studio" description="Versionen du kör.">
+            <SettingsSection id={SECTION.about} title="About Studio" description="The version you are running.">
               <AboutSettings devProfile={settings.devProfile} />
             </SettingsSection>
           </div>

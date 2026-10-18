@@ -101,7 +101,7 @@ export class PlayerController {
   }
 
   /**
-   * Shows another version at the same playhead (Jämför ⇄, a new current version). A playing film goes on playing
+   * Shows another version at the same playhead (Compare ⇄, a new current version). A playing film goes on playing
    * in the version shown now.
    */
   show(id: string | undefined): void {
@@ -180,12 +180,12 @@ export class PlayerController {
     this.seek(this.time + n)
   }
 
-  /** Where Markera in puts the range's start: the start of the frame on screen. */
+  /** Where Mark in puts the range's start: the start of the frame on screen. */
   markInTime(): number {
     return Math.min(this.duration, this.frameIndex() / this.fps)
   }
 
-  /** Where Markera ut puts the range's end: the end of the frame on screen, so that frame is included. */
+  /** Where Mark out puts the range's end: the end of the frame on screen, so that frame is included. */
   markOutTime(): number {
     return Math.min(this.duration, (this.frameIndex() + 1) / this.fps)
   }

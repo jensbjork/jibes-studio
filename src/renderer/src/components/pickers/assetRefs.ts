@@ -46,7 +46,7 @@ export function defaultOutfitOf(character: Asset, byId: ReadonlyMap<string, Asse
 
 /**
  * Who wears each outfit in the form: outfit id → character id, decided by the shared rule the References legend and
- * the agents' tools use (shared/outfits.ts). `chosen` is GenerationParams.outfitWearers, the "bärs av" choices (null =
+ * the agents' tools use (shared/outfits.ts). `chosen` is GenerationParams.outfitWearers, the "worn by" choices (null =
  * nobody); a choice naming a character that is no longer there falls back to the default: the character whose
  * default outfit it is, else the only character present.
  */
@@ -82,8 +82,8 @@ export interface RefsChange {
 function fitNote(added: number, wanted: number, max: number): string | undefined {
   if (added >= wanted) return undefined
   return added
-    ? `${added} av ${wanted} bilder fick plats – modellen tar max ${max}.`
-    : `Det finns inte plats för fler bilder – modellen tar max ${max}.`
+    ? `${added} of ${wanted} images fitted – the model takes at most ${max}.`
+    : `There’s no room for more images – the model takes at most ${max}.`
 }
 
 /** Appends the paths that aren't there yet, as many as fit under the model's limit. */
@@ -113,16 +113,16 @@ export function addAsset(
   if (!outfit || !missing.length) return own
   if (own.refs.length + missing.length <= max) return { refs: [...own.refs, ...missing], note: own.note }
   const skipped = own.note
-    ? `Standardklädseln ”${outfit.name}” lades inte till.`
-    : `Standardklädseln ”${outfit.name}” (${imageCount(missing.length)}) fick inte plats – ` +
-      `modellen tar max ${max} bilder.`
+    ? `The default outfit “${outfit.name}” wasn’t added.`
+    : `The default outfit “${outfit.name}” (${imageCount(missing.length)}) didn’t fit – ` +
+      `the model takes at most ${max} images.`
   return { refs: own.refs, note: own.note ? `${own.note} ${skipped}` : skipped }
 }
 
 /**
  * Adds an asset to a form's references the way the pickers do: its photos (a character's default outfit along),
  * and – when the model takes reference audio and some of the character's photos made it in – the character's
- * first voice clip. For adding from outside the form, e.g. "Generera med karaktären" from the library.
+ * first voice clip. For adding from outside the form, e.g. "Generate with the character" from the library.
  */
 export function addAssetToForm(
   current: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'>,

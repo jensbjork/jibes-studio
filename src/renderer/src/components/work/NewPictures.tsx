@@ -17,10 +17,10 @@ function placelessFailure(w: FinishedWork, view: WorkView): boolean {
 
 /**
  * New pictures with no board, clip or sequence to be shown in – an agent's picture made for nothing, say – in the
- * view they count under, so they can be seen there and not only in Pågår och klart. Each counts as seen once it has
+ * view they count under, so they can be seen there and not only in Activity. Each counts as seen once it has
  * been on screen a moment (D4) and stays listed until ✕ or the view is left, so it can still be clicked (it opens in
  * the picture viewer). A picture that failed shows its error the same way. `failuresOnly`: just the failures, for a
- * view that shows the new pictures themselves (the Mediabank's Bilder marks them "Ny" in its grid).
+ * view that shows the new pictures themselves (Media's Images tab marks them "New" in its grid).
  */
 export default function NewPictures({ view, failuresOnly = false }: { view: WorkView; failuresOnly?: boolean }) {
   const unseen = useUnseen((w) => (failuresOnly ? placelessFailure(w, view) : placeless(w, view)))
@@ -44,19 +44,19 @@ export default function NewPictures({ view, failuresOnly = false }: { view: Work
 
   return (
     <section
-      aria-label="Nya bilder"
+      aria-label="New images"
       className="flex items-center gap-3 border-b border-line/60 bg-raised/30 px-6 py-2 text-[12px]"
     >
       <span className="shrink-0 text-muted">
         {pictures === visible.length
           ? pictures === 1
-            ? 'Ny bild'
-            : 'Nya bilder'
+            ? 'New image'
+            : 'New images'
           : pictures === 0
             ? visible.length === 1
-              ? 'Bild som misslyckades'
-              : 'Bilder som misslyckades'
-            : 'Nya bilder och fel'}
+              ? 'Image that failed'
+              : 'Images that failed'
+            : 'New images and errors'}
       </span>
       <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto py-0.5">
         {visible.map((w) => (
@@ -66,8 +66,8 @@ export default function NewPictures({ view, failuresOnly = false }: { view: Work
       <button
         type="button"
         onClick={close}
-        title="Stäng – markerar dem som sedda"
-        aria-label="Stäng och markera bilderna som sedda"
+        title="Close – marks them as seen"
+        aria-label="Close and mark the images as seen"
         className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
       >
         <CloseIcon size={10} />
@@ -91,7 +91,7 @@ function NewPicture({ work, onSeen }: { work: FinishedWork; onSeen: () => void }
         className="flex h-10 max-w-72 shrink-0 flex-col justify-center rounded bg-accent/10 px-2 leading-tight"
       >
         <span className="truncate text-accent">{work.label}</span>
-        <span className="truncate select-text text-[11px] text-[#ffb3b5]">{work.error ?? 'Bilden kunde inte skapas.'}</span>
+        <span className="truncate select-text text-[11px] text-[#ffb3b5]">{work.error ?? 'The image couldn’t be created.'}</span>
       </span>
     )
   }
@@ -102,8 +102,8 @@ function NewPicture({ work, onSeen }: { work: FinishedWork; onSeen: () => void }
       type="button"
       disabled={!stillId}
       onClick={() => stillId && showWorkStill({ stillId, sequenceId: work.target.sequenceId ?? work.target.storyboardId })}
-      title={`${work.label} – klicka för att visa den`}
-      aria-label={`Visa ${work.label.toLowerCase()}`}
+      title={`${work.label} – click to show it`}
+      aria-label={`Show ${work.label.charAt(0).toLowerCase()}${work.label.slice(1)}`}
       className="flex h-10 w-16 shrink-0 items-center justify-center overflow-hidden rounded bg-raised text-[10px] text-muted outline-none transition hover:ring-1 hover:ring-muted focus-visible:ring-2 focus-visible:ring-muted"
     >
       {work.thumbPath && !broken ? (
@@ -117,7 +117,7 @@ function NewPicture({ work, onSeen }: { work: FinishedWork; onSeen: () => void }
           className="h-full w-full object-cover"
         />
       ) : (
-        'Bild'
+        'Image'
       )}
     </button>
   )

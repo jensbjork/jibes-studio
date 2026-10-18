@@ -1,6 +1,6 @@
 import type { SVGProps } from 'react'
 
-// The window's own icons (sidebar, Pågår och klart), drawn on the same 16-unit grid as sequences/icons.tsx and
+// The window's own icons (sidebar, Activity), drawn on the same 16-unit grid as sequences/icons.tsx and
 // editor/icons.tsx: 1.5 stroke, round caps. Sized in px; the sidebar shows every icon in a 16 px box.
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number }
@@ -25,7 +25,7 @@ function Icon({ size = 16, children, ...rest }: IconProps) {
   )
 }
 
-/** Sekvenser: a strip of film, clips one after the other. */
+/** Sequences: a strip of film, clips one after the other. */
 export function FilmIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -35,7 +35,7 @@ export function FilmIcon(props: IconProps) {
   )
 }
 
-/** Mediabank: a frame with a play mark in front of another, everything made gathered in one place. */
+/** Media: a frame with a play mark in front of another, everything made gathered in one place. */
 export function MediaIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -46,7 +46,7 @@ export function MediaIcon(props: IconProps) {
   )
 }
 
-/** Prompter: a quotation mark, filled like the library's other kinds. */
+/** Prompts: a quotation mark, filled like the library's other kinds. */
 export function QuoteIcon(props: IconProps) {
   return (
     <Icon {...props} fill="currentColor" stroke="none">
@@ -56,7 +56,7 @@ export function QuoteIcon(props: IconProps) {
   )
 }
 
-/** Inställningar: a cog. */
+/** Settings: a cog. */
 export function GearIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -67,7 +67,7 @@ export function GearIcon(props: IconProps) {
   )
 }
 
-/** Pågår och klart while nothing runs: an inbox tray, where finished work lands. */
+/** Activity while nothing runs: an inbox tray, where finished work lands. */
 export function TrayIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -118,7 +118,7 @@ export function ArrowInIcon(props: IconProps) {
   )
 }
 
-/** "Markera som sedd". */
+/** "Mark as seen". */
 export function CheckIcon(props: IconProps) {
   return (
     <Icon {...props}>

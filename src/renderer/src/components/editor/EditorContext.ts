@@ -54,7 +54,7 @@ export function useEditor(): EditorContextValue {
   return value
 }
 
-/** How long "Skickat …" stays under a card's button. */
+/** How long "Sent …" stays under a card's button. */
 const SENT_NOTE_MS = 7000
 
 /**
@@ -83,7 +83,7 @@ export function useCardRun(onReplan?: () => void) {
         setError(outcome.error)
         if (req.plan) onReplan?.()
       } else if (outcome.ok && (outcome.result?.jobId || outcome.result?.takeId)) {
-        setSent('Skickat. Det syns överst under Versioner och blir en ny version när det är klart.')
+        setSent('Sent. It shows at the top of Versions and becomes a new version when it’s done.')
       }
       return outcome
     } finally {

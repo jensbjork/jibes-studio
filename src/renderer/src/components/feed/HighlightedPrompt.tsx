@@ -30,12 +30,12 @@ const broken = `${base} text-accent underline decoration-accent decoration-wavy 
 function imageTarget(ref: ImageReference): TokenTarget {
   return {
     kind: ref.asset?.kind,
-    label: ref.asset ? `${ref.asset.name} (foto ${ref.photo ?? 1})` : 'egen bild',
+    label: ref.asset ? `${ref.asset.name} (photo ${ref.photo ?? 1})` : 'own image',
     path: ref.path,
     name: ref.asset?.name,
     number: ref.photo,
     count: ref.asset?.images.length,
-    ...(ref.unsent ? { unsent: 'Skickades inte – modellen tog inte fler bilder' } : {})
+    ...(ref.unsent ? { unsent: 'Not sent – the model took no more images' } : {})
   }
 }
 
@@ -43,7 +43,7 @@ function imageTarget(ref: ImageReference): TokenTarget {
 function audioTarget(ref: AudioReference): TokenTarget {
   return {
     kind: ref.asset?.kind,
-    label: ref.asset ? `${ref.asset.name} · ${audioRole(ref.asset.kind)}` : 'eget ljud',
+    label: ref.asset ? `${ref.asset.name} · ${audioRole(ref.asset.kind)}` : 'own sound',
     path: ref.path,
     name: ref.asset?.name,
     number: ref.number,
@@ -92,7 +92,7 @@ export default function HighlightedPrompt({ text, images, audios, highlighted, o
         canonical,
         ref
           ? { token: canonical, ref: 'image', target: imageTarget(ref) }
-          : { token: canonical, ref: 'image', problem: `${t.raw} pekade inte på någon bild som skickades` },
+          : { token: canonical, ref: 'image', problem: `${t.raw} didn’t point at any image that was sent` },
         !!ref && !ref.unsent
       )
     })
@@ -110,7 +110,7 @@ export default function HighlightedPrompt({ text, images, audios, highlighted, o
         canonical,
         ref
           ? { token: canonical, ref: 'audio', target: audioTarget(ref) }
-          : { token: canonical, ref: 'audio', problem: `${t.raw} pekade inte på något ljud som skickades` },
+          : { token: canonical, ref: 'audio', problem: `${t.raw} didn’t point at any sound that was sent` },
         !!ref
       )
     })
@@ -126,7 +126,7 @@ export default function HighlightedPrompt({ text, images, audios, highlighted, o
           {...card.bind(m.start, {
             token: m.raw,
             ref: 'image',
-            problem: m.suggestion ? `Felskriven referens – menade ${m.suggestion}` : 'Felskriven referens'
+            problem: m.suggestion ? `Misspelled reference – meant ${m.suggestion}` : 'Misspelled reference'
           })}
           className={broken}
         >

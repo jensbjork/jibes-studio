@@ -26,7 +26,7 @@ export interface VideoModel {
   modelSets: string[]
   /**
    * Takes a source video (`video_url`): Venice's `constraints.video_input`. These are the video-to-video edit
-   * models and the upscalers; their kind is 'video-to-video'. Only Redigera uses them: the Generate form never
+   * models and the upscalers; their kind is 'video-to-video'. Only the Editor uses them: the Generate form never
    * offers them.
    */
   videoInput: boolean
@@ -51,7 +51,7 @@ export interface GenerationParams {
    */
   referenceAudios?: ReferenceAudio[]
   /**
-   * "Ta med beskrivningar": the descriptions of the assets whose photos and audio clips are sent are appended to
+   * "Include descriptions": the descriptions of the assets whose photos and audio clips are sent are appended to
    * the prompt as a References legend when it is sent (src/shared/prompt-compose.ts). On unless false, also for
    * params from before it existed. The legend is never written into `prompt` itself.
    */
@@ -59,9 +59,9 @@ export interface GenerationParams {
   /** Assets (ids) whose description is left out of the legend, each switched off in the editor on its own. */
   excludedDescriptionAssetIds?: string[]
   /**
-   * Who wears each outfit among the references ("bärs av"): outfit asset id → character asset id, null = nobody. An
+   * Who wears each outfit among the references ("worn by"): outfit asset id → character asset id, null = nobody. An
    * outfit left out wears its default: the character among the references whose default outfit it is, else the only
-   * character there (shared/outfits.ts). The References legend says it ("Röd klänning (@Image3), worn by Anna
+   * character there (shared/outfits.ts). The References legend says it ("Red dress (@Image3), worn by Anna
    * (@Image1)"). Only choices that differ from that default need be stored.
    */
   outfitWearers?: Record<string, string | null>
@@ -98,7 +98,7 @@ export type GenerationStatus = 'queued' | 'processing' | 'completed' | 'failed'
 
 /**
  * Where a generation's video came from. generated: made by Venice (the only kind that is ever pending). import:
- * the user's own file ("Egna klipp"). edit: a version made in Redigera from another one.
+ * the user's own file ("Own clips"). edit: a version made in the Editor from another one.
  */
 export type GenerationSource = 'generated' | 'import' | 'edit'
 
@@ -113,14 +113,14 @@ export interface Generation {
   title?: string
   /** A version's base version. */
   parentId?: string
-  /** Versions and AI takes made in Redigera: the edit they belong to. */
+  /** Versions and AI takes made in the Editor: the edit they belong to. */
   editId?: string
   /** How an import or a version was made (ids only, never file paths). */
   recipe?: EditRecipe
   /** Imports with a working copy: the untouched original (absolute). `filePath` is then the working copy. */
   originalPath?: string
   model: string
-  /** The user's prompt (canonical tokens), as params.prompt: what "Använd igen" puts back in the editor. */
+  /** The user's prompt (canonical tokens), as params.prompt: what "Use again" puts back in the editor. */
   prompt: string
   /**
    * The prompt exactly as it was sent to Venice: `prompt` with the References legend of the referenced assets'
@@ -150,11 +150,11 @@ export interface Generation {
    */
   fileMissing?: boolean
   /**
-   * Set on the takes of a loaded sequence or storyboard when Redigera keeps the film (a version of an edit, or the film
-   * an edit started from): the take list's "Ta bort" then only takes it off the clip, and that is what main does.
+   * Set on the takes of a loaded sequence or storyboard when the Editor keeps the film (a version of an edit, or the film
+   * an edit started from): the take list's "Remove" then only takes it off the clip, and that is what main does.
    */
   keptByEdit?: boolean
-  /** The user's own rating (a RatingValue: -1 = tumme ner, 1–3 stjärnor), if they have rated it. */
+  /** The user's own rating (a RatingValue: -1 = thumbs down, 1–3 stars), if they have rated it. */
   rating?: number
   /** Reviews recorded for it: the user's (when it has a rating, note or tags) and agents'. */
   reviewCount: number
@@ -182,7 +182,7 @@ export interface GenerationReview {
   generationId: string
   /** 'user', or the agent's name. */
   author: string
-  /** A RatingValue: -1 = tumme ner, 1–3 stjärnor. */
+  /** A RatingValue: -1 = thumbs down, 1–3 stars. */
   rating?: number
   /** E.g. "prompt-followed", "identity-drift" (see the suggested vocabulary in the agent guide). */
   tags: string[]
@@ -191,7 +191,7 @@ export interface GenerationReview {
   updatedAt: number
 }
 
-/** A short insight about prompting, distilled from reviewed results ("Lärdomar"). */
+/** A short insight about prompting, distilled from reviewed results ("Learnings"). */
 export interface Learning {
   id: string
   title: string
@@ -263,9 +263,9 @@ export interface GenerationFilter {
   hasReviews?: boolean
   /** Default 'newest'. */
   sort?: 'newest' | 'oldest' | 'rating' | 'cost' | 'length'
-  /** Only generations of this source ("Källa"): Venice's, the user's own clips, or versions made in Redigera. */
+  /** Only generations of this source ("Source"): Venice's, the user's own clips, or versions made in the Editor. */
   source?: GenerationSource
-  /** "Nya": finished and not looked at yet (needs FilterableGeneration.unseen; rows without it never match). */
+  /** "New": finished and not looked at yet (needs FilterableGeneration.unseen; rows without it never match). */
   unseen?: boolean
 }
 
@@ -276,12 +276,12 @@ export interface Settings {
   /** Running as "Studio Dev" (npm run dev) with its own settings and library, separate from Studio.app. */
   devProfile: boolean
   /**
-   * "Promptspråk": the language video prompts are written in. Decides the words the prompt editor inserts
+   * "Prompt language": the language video prompts are written in. Decides the words the prompt editor inserts
    * between references (en: "Anna (@Image1) wearing …", sv: "Anna (@Image1) i …") and what agents are told.
    */
   promptLanguage: PromptLanguage
   /**
-   * "Säkert läge för bilder": stills are generated with Venice's `safe_mode`, which blurs adult content. On by
+   * "Safe mode for images": stills are generated with Venice's `safe_mode`, which blurs adult content. On by
    * default, like Venice's own default.
    */
   imageSafeMode: boolean
@@ -343,7 +343,7 @@ export interface ReorganizeReport {
   /** Files the library knows about that are no longer on disk. */
   missing: number
   foldersCreated: number
-  /** Swedish messages for files or folders that couldn't be handled. */
+  /** Messages for files or folders that couldn't be handled. */
   errors: string[]
 }
 
@@ -361,7 +361,7 @@ export type LibraryFolderTarget =
   | 'generations'
   | 'sequences'
   | 'storyboards'
-  /** Egna klipp: the user's own imported films. */
+  /** Own clips: the user's own imported films. */
   | 'ownClips'
   /** Redigeringar; with an id, that edit's own folder. */
   | 'edits'
@@ -386,9 +386,9 @@ export const NEEDS_CONSENT = 'NEEDS_CONSENT:'
 // ── Assets: characters, environments, products, outfits, poses ───────────────
 
 /**
- * character: who is in the shot (Karaktärer). environment: where it takes place (Miljöer). product: a specific item
- * to show in the film (Produkter), e.g. a package, a bottle or a gadget. outfit: what a character wears (Kläder).
- * pose: how people stand and where, relative to each other (Poser). Each is a name, a description and reference
+ * character: who is in the shot (folder Karaktärer/). environment: where it takes place (Miljöer/). product: a specific
+ * item to show in the film (Produkter/), e.g. a package, a bottle or a gadget. outfit: what a character wears (Kläder/).
+ * pose: how people stand and where, relative to each other (Poser/). Each is a name, a description and reference
  * photos in a folder of their own; characters and environments can also have audio clips (a voice, a soundscape).
  */
 export type AssetKind = 'character' | 'environment' | 'product' | 'outfit' | 'pose'
@@ -421,7 +421,7 @@ export interface AssetImage {
 }
 
 /**
- * An audio clip of an asset: a character's voice ("Röst") or an environment's soundscape ("Ljudmiljö"). Only
+ * An audio clip of an asset: a character's voice ("Voice") or an environment's soundscape ("Soundscape"). Only
  * the reference window (clipStart, clipLength) is sent to Venice.
  */
 export interface AssetAudio {
@@ -435,7 +435,7 @@ export interface AssetAudio {
   /** Seconds; always resolved (the default is min(duration, 10)), 2–15 and inside the file where possible. */
   clipLength: number
   /**
-   * "Får klonas för nya repliker": the user has confirmed they may use this voice, so Redigera may clone it for
+   * "May be cloned for new lines": the user has confirmed they may use this voice, so the Editor may clone it for
    * new spoken lines. Set only by the user in Studio (never by an agent).
    */
   cloneConsent: boolean
@@ -593,12 +593,12 @@ export interface Segment {
    */
   continueMode: ContinueMode
   /**
-   * "Slutbild från nästa klipp": use the next segment's first displayed frame (its selected take at its
+   * "End on the next clip's first frame": use the next segment's first displayed frame (its selected take at its
    * trimStart) as this segment's end image. Never set on the last clip. Together with continueFromPrevious the
    * clip is regenerated "between its neighbours", which stay untouched.
    */
   endFromNext: boolean
-  /** "Vad händer": the user's or an agent's free-text notes about the shot (any language). */
+  /** "What happens": the user's or an agent's free-text notes about the shot (any language). */
   notes: string
   selectedGenerationId?: string
   /** Seconds cut from the start / end of the selected take in the final cut. */
@@ -616,7 +616,7 @@ export interface Sequence {
   defaults: Partial<GenerationParams>
   segments: Segment[]
   /**
-   * "Exportformat": the exported film's height in pixels (480, 720 or 1080); the width follows the first clip's
+   * "Export format": the exported film's height in pixels (480, 720 or 1080); the width follows the first clip's
    * aspect. null/undefined: Automatiskt (the first clip's own size).
    */
   exportHeight?: number | null
@@ -712,7 +712,7 @@ export interface SegmentFramePreview {
     /** Seconds into that clip's selected take (its trimStart). */
     time?: number
   }
-  /** Why the clip can't be generated as it stands (Swedish), e.g. "Klipp 4 har ingen färdig vald tagning än." */
+  /** Why the clip can't be generated as it stands, e.g. "Clip 4 has no finished selected take yet." */
   problems: string[]
 }
 
@@ -721,7 +721,7 @@ export interface SegmentFramePreview {
 // approvals), but it is its own workflow with its own view and list: one image per board, and between every two
 // adjacent boards a transition — the clip that goes from the first board's image to the second's.
 
-/** What a row of the sequences table is: a sequence (Sekvenser) or a storyboard (Storyboards). */
+/** What a row of the sequences table is: a sequence (Sequences) or a storyboard (Storyboards). */
 export type SequenceKind = 'sequence' | 'storyboard'
 
 /** The formats a storyboard can have: what the default image-to-video model's pictures are practically made in. */
@@ -737,7 +737,7 @@ export interface StoryboardBoard {
   imagePath?: string
   /** The still the image is, when it is one (generated, uploaded, a saved frame); not for a library photo. */
   stillId?: string
-  /** "Vad visar bilden?": free text, any language. */
+  /** "What does the image show?": free text, any language. */
   note: string
   /** The image's shape differs noticeably from the storyboard's aspect ratio (a clip takes the image's shape). */
   aspectMismatch?: boolean
@@ -755,16 +755,16 @@ export interface StoryboardTransition {
   position: number
   fromBoardId: string
   toBoardId: string
-  /** The template for new takes: prompt ("Vad händer?"), model, duration … and the two board images. */
+  /** The template for new takes: prompt ("What happens?"), model, duration … and the two board images. */
   params: GenerationParams
   selectedGenerationId?: string
   /** Newest first. */
   takes: Generation[]
   /** Both boards have images, so it can be generated (other problems may still stand in the way, see problems). */
   ready: boolean
-  /** The selected take was made from other images than the boards have now ("gjord med en tidigare bild"). */
+  /** The selected take was made from other images than the boards have now ("made with an earlier image"). */
   staleTake?: boolean
-  /** Why it can't be generated as it stands (Swedish), e.g. "Ruta 2 saknar bild."; [] when it can. */
+  /** Why it can't be generated as it stands, e.g. "Board 2 has no image."; [] when it can. */
   problems: string[]
 }
 
@@ -776,9 +776,9 @@ export interface Storyboard {
   boards: StoryboardBoard[]
   /** boards.length − 1 of them (none for fewer than two boards), in order. */
   transitions: StoryboardTransition[]
-  /** "Generera saknade" is sending the missing transitions to Venice. */
+  /** "Generate missing" is sending the missing transitions to Venice. */
   running: boolean
-  /** Why the last "Generera saknade" stopped (Swedish, "Övergång 2: …"); cleared when a new run starts. */
+  /** Why the last "Generate missing" stopped ("Transition 2: …"); cleared when a new run starts. */
   runError?: string
   createdAt: number
   updatedAt: number
@@ -830,10 +830,10 @@ export interface ImageModel {
   offline: boolean
 }
 
-/** What a still is generated from ("Skapa bild…"). */
+/** What a still is generated from ("Create image…"). */
 export interface StillParams {
   /**
-   * The sequence (Sekvenser/<namn>/Storyboard/) or storyboard (Storyboards/<namn>/Bilder/) the still belongs to and
+   * The sequence (Sekvenser/<name>/Storyboard/) or storyboard (Storyboards/<name>/Bilder/) the still belongs to and
    * is saved with; none: Referensbilder. A storyboard's aspect ratio is the still's default format.
    */
   sequenceId?: string
@@ -847,12 +847,12 @@ export interface StillParams {
   resolution?: string
   quality?: string
   /**
-   * The dialog's key while the picture is made, so its result or failure is announced (Pågår och klart) also after
+   * The dialog's key while the picture is made, so its result or failure is announced (Activity) also after
    * the dialog closed. Informational: never sent to Venice and never stored; main reads it from the raw IPC input.
    */
   workToken?: string
   /**
-   * Where the picture is meant to go, for its label in Pågår och klart ("Bild till ruta 3 i …"). Informational like
+   * Where the picture is meant to go, for its label in Activity ("Image for board 3 in …"). Informational like
    * workToken; an agent's request_image_generation passes its assign_to here too.
    */
   target?: { boardId?: string; segmentId?: string; slot?: SegmentImageSlot }
@@ -886,7 +886,7 @@ export interface ExportProgress {
   error?: string
 }
 
-// ── Own clips (Egna klipp): the user's own films imported into the library ───
+// ── Own clips: the user's own films imported into the library ──────────────
 
 /** What inspectVideoFiles found out about a file before it is imported (free; nothing is copied yet). */
 export interface VideoFileInfo {
@@ -897,7 +897,7 @@ export interface VideoFileInfo {
   bytes: number
   /** It can be imported. */
   ok: boolean
-  /** Swedish refusal naming the file, e.g. "<namn>: Filen innehåller inget videospår." */
+  /** A refusal naming the file, e.g. "<name>: The file has no video track." */
   error?: string
   /** Seconds. */
   duration?: number
@@ -913,7 +913,7 @@ export interface VideoFileInfo {
   variableFrameRate?: boolean
   /** Reduced "w:h", e.g. "16:9". */
   aspect?: string
-  /** Why a working copy will be made (Swedish, e.g. "HDR", "4K → 1080p"); [] = none needed. */
+  /** Why a working copy will be made (e.g. "HDR", "4K → 1080p"); [] = none needed. */
   workingCopy: string[]
   /** On the same APFS volume as the library: it is cloned (no extra space) instead of copied. */
   cloneable: boolean
@@ -933,7 +933,7 @@ export type ImportTarget =
 export interface ImportResult {
   /** The import rows (or the earlier ones reused), in the order the files were given. */
   generationIds: string[]
-  /** Files that couldn't be imported (Swedish messages); the others were. */
+  /** Files that couldn't be imported (messages); the others were. */
   errors: { path: string; message: string }[]
   sequenceId?: string
   /** 'sequence' and 'segment' targets: the clips the files went to. */
@@ -948,7 +948,6 @@ export interface ImportProgress {
   segmentId?: string
   generationId?: string
   done?: boolean
-  /** Swedish. */
   error?: string
 }
 
@@ -1036,7 +1035,7 @@ export interface AudioCatalog {
 export interface SeparationStatus {
   available: boolean
   quality?: 'high' | 'standard'
-  /** Swedish, when not available. */
+  /** Why, when not available. */
   message?: string
 }
 
@@ -1071,7 +1070,7 @@ export interface Transcript {
   updatedAt: number
 }
 
-// ── Edits (Redigera): one film changed into versions ─────────────────────────
+// ── Edits (Editor): one film changed into versions ───────────────────────────
 
 /** Seconds in the base version. */
 export interface EditRange {
@@ -1083,7 +1082,7 @@ export type VoiceChoice =
   | { kind: 'preset'; voice: string }
   /** A provider voice id (customVoiceId models). */
   | { kind: 'custom'; voiceId: string }
-  /** A character's Röst clip (asset_audio id), cloned with tts-chatterbox-hd. */
+  /** A character's voice clip (asset_audio id), cloned with tts-chatterbox-hd. */
   | { kind: 'clone'; audioId: string }
 
 /** keep needs separation; duck = the original at −18 dB where the voice is replaced; remove = silence there. */
@@ -1173,14 +1172,13 @@ export interface EditPlan {
   priceUsd?: number
   /** true: priceUsd leaves out a part Venice doesn't price (a voice clone); the UI confirms. */
   partialPrice?: boolean
-  /** Swedish, e.g. "debiteras per påbörjad minut: 3 min", "Röstkloning: pris anges inte av Venice". */
+  /** E.g. "billed per started minute: 3 min", "Voice cloning: Venice doesn't state a price". */
   priceNote?: string
   steps: { label: string; seconds?: number; priceUsd?: number }[]
   /** Picture ops: cached PNG paths (absolute; free). */
   frames?: { start?: string; end?: string }
   resultSeconds?: number
   estimatedBytes?: number
-  /** Swedish. */
   notes: string[]
   warnings: string[]
   /** Non-empty: it cannot run. */
@@ -1267,7 +1265,7 @@ export interface EditRecipe {
   op: EditOperation['op'] | 'original' | 'import'
   operation?: EditOperation
   baseId?: string
-  /** Swedish, e.g. "Bytte röst → Aria". */
+  /** E.g. "Changed voice → Aria". */
   label: string
   costUsd?: number
   /**
@@ -1282,7 +1280,7 @@ export interface EditRecipe {
   mix: AudioMix
   /** Picture ops: the AI take spliced in. */
   takeId?: string
-  /** Klippgränser carried along. */
+  /** Cut markers carried along. */
   cuts?: number[]
   import?: { name: string; bytes: number; sha256: string; workingCopy: string[]; fit?: 'pad' | 'crop' }
   export?: { exportId: string; sequenceName?: string }
@@ -1344,26 +1342,25 @@ export interface EditJob {
   fraction?: number
   stepsDone: number
   stepsTotal: number
-  /** Swedish, e.g. "del 2 av 3". */
+  /** E.g. "part 2 of 3". */
   currentStep?: string
   /** USD sent so far. */
   costUsd: number
   quoteUsd?: number
-  /** Swedish. */
   error?: string
   takeId?: string
   resultId?: string
   canCancel: boolean
   /**
-   * "Fortsätt": unsent or failed parts can be sent (paid again for those), or a picture operation's paid take can be
+   * "Continue": unsent or failed parts can be sent (paid again for those), or a picture operation's paid take can be
    * put into the film again after its finish failed (free).
    */
   canResume: boolean
-  /** What "Fortsätt" costs: the priced parts (0 when nothing is sent again); undefined when no part has a price. */
+  /** What "Continue" costs: the priced parts (0 when nothing is sent again); undefined when no part has a price. */
   resumePriceUsd?: number
   /** A part without a price (a voice clone, or a part whose quote failed) is left out of resumePriceUsd. */
   resumePartialPrice?: boolean
-  /** Swedish: why resumePriceUsd leaves a part out, when every such part is a voice clone. */
+  /** Why resumePriceUsd leaves a part out, when every such part is a voice clone. */
   resumePriceNote?: string
   createdAt: number
   updatedAt: number
@@ -1405,7 +1402,7 @@ export interface EditTimeline {
   filmstrip: { time: number; path: string }[]
   /** 0–1 peaks. */
   waveform: number[]
-  /** Klippgränser, seconds. */
+  /** Cut markers, seconds. */
   cuts: number[]
   cutsSource: 'export' | 'scenes' | 'none'
   layers: { id: string; kind: AudioLayer['kind']; label: string; start: number; end: number; gainDb: number }[]
@@ -1420,13 +1417,12 @@ export interface EditProgress {
   jobId?: string
   /** 0–1 */
   fraction?: number
-  /** Swedish. */
   label: string
   done?: boolean
   error?: string
 }
 
-/** "Skapa röst med AI…": a new voice for a character from a description. */
+/** "Design a voice with AI…": a new voice for a character from a description. */
 export interface VoiceDesignRequest {
   assetId: string
   description: string
@@ -1448,7 +1444,7 @@ export interface ApprovalEditRequest {
   assetName?: string
   operation?: EditOperation
   voiceDesign?: VoiceDesignRequest
-  /** Swedish one-liner. */
+  /** A one-liner. */
   summary: string
   /** Picture ops: the start and end frames (absolute). */
   frames?: { start?: string; end?: string }
@@ -1465,11 +1461,11 @@ export interface ApprovalEditRequest {
   /** Once approved: the job it started and the version it made. */
   jobId?: string
   resultId?: string
-  /** Resuming a stopped paid job ("Fortsätt") instead of a new operation: that job's id. */
+  /** Resuming a stopped paid job ("Continue") instead of a new operation: that job's id. */
   resumeJobId?: string
 }
 
-// ── Status: Pågår och klart ──────────────────────────────────────────────────
+// ── Status: Activity ─────────────────────────────────────────────────────────
 // What runs right now and what finished that the user hasn't looked at yet, wherever it was started. Main builds the
 // summary (src/main/work.ts) from the services' registries and the library's `unseen` table and pushes it whole on
 // `work:change`; the renderer keeps one store of it (lib/work.ts) that the sidebar, the lists, the cards and the
@@ -1478,7 +1474,7 @@ export interface ApprovalEditRequest {
 /** The sidebar view an item counts under (the renderer's View ids). */
 export type WorkView =
   | 'generate'
-  /** The Mediabank: a picture with no sequence or storyboard, and Generera's work from an earlier session. */
+  /** Media: a picture with no sequence or storyboard, and Generate's work from an earlier session. */
   | 'media'
   | 'sequences'
   | 'storyboards'
@@ -1489,7 +1485,7 @@ export type WorkView =
   | 'outfits'
   | 'poses'
 
-/** Where "Gå dit" goes; the renderer maps it to navigate(view, intent). */
+/** Where "Go there" goes; the renderer maps it to navigate(view, intent). */
 export interface WorkTarget {
   view: WorkView
   generationId?: string
@@ -1536,9 +1532,9 @@ export interface RunningWork {
   ownerId?: string
   /** The clip or transition it belongs to. */
   segmentId?: string
-  /** Swedish, e.g. "Klipp 3 i ”Strandscen”". */
+  /** E.g. "Clip 3 in “Beach scene”". */
   label: string
-  /** Swedish phase, e.g. "Genererar 40 %", "I kö hos Venice". */
+  /** The phase, e.g. "Generating 40%", "Queued at Venice". */
   detail?: string
   startedAt: number
   /** 0–1. */
@@ -1567,9 +1563,7 @@ export interface FinishedWork {
   view: WorkView
   ownerId?: string
   segmentId?: string
-  /** Swedish. */
   label: string
-  /** Swedish. */
   error?: string
   finishedAt: number
   /** Absolute. */
@@ -1596,7 +1590,7 @@ export interface WorkCounts {
 }
 
 /**
- * An unseen item past the 200 the summary lists in full: enough for the window's seen rules – its "Ny" marks, the
+ * An unseen item past the 200 the summary lists in full: enough for the window's seen rules – its "New" marks, the
  * playback rule (mediaPath) and a picture being on screen (picturePath). Paths absolute.
  */
 export interface UnseenRef {
@@ -1620,7 +1614,7 @@ export interface WorkSummary {
   revision: number
 }
 
-/** What "Markera alla som sedda" covers: everything, one view, or one sequence, storyboard, edit or asset. */
+/** What "Mark all as seen" covers: everything, one view, or one sequence, storyboard, edit or asset. */
 export interface SeenScope {
   view?: WorkView
   ownerId?: string
@@ -1663,7 +1657,7 @@ export interface AgentStatus {
   tailscaleDnsName?: string
   /** Clients with an open session, most recently seen first. */
   clients: AgentClientInfo[]
-  /** Swedish, e.g. why the port couldn't be opened. */
+  /** E.g. why the port couldn't be opened. */
   error?: string
 }
 
@@ -1675,7 +1669,7 @@ export interface AgentActivity {
   client: string
   /** The MCP tool, e.g. "set_form". */
   tool: string
-  /** What it did, in Swedish, without the agent's name: "satte prompten", "vill generera – väntar på ditt OK". */
+  /** What it did, without the agent's name: "set the prompt", "wants to generate – waiting for your OK". */
   summary: string
   ok: boolean
   /** Set when the call created (or found) an approval request. */
@@ -1688,9 +1682,9 @@ export type ApprovalStatus = 'pending' | 'approved' | 'declined' | 'expired' | '
 export interface ApprovalImageReference {
   /** Absolute. */
   path: string
-  /** What it is, in Swedish: "Anna (foto 2)", "Stillbild: woman on the pier …". */
+  /** What it is: "Anna (photo 2)", "Still image: woman on the pier …". */
   label: string
-  /** A short name for a small tile: "Anna", "Stillbild". */
+  /** A short name for a small tile: "Anna", "Still image". */
   name?: string
   /** The asset's kind (for the colour of its tile), or 'still' for a still of a sequence. */
   kind?: AssetKind | 'still'
@@ -1737,9 +1731,9 @@ export interface ApprovalDeleteItem {
   segmentId?: string
   /** 'board-move': the 0-based place it moves to. */
   toIndex?: number
-  /** Swedish, e.g. "Karaktären ”Anna”", "Klipp 4 i ”Sommar”". */
+  /** E.g. "The character “Anna”", "Clip 4 in “Sommar”". */
   label: string
-  /** Swedish group heading, e.g. "Karaktärer", "Klipp". */
+  /** Group heading, e.g. "Characters", "Clips". */
   group: string
   /** Absolute picture: the asset's cover, the photo, a poster, the still, the board picture. */
   preview?: string
@@ -1748,7 +1742,7 @@ export interface ApprovalDeleteItem {
   assetKind?: AssetKind
   /** Prompts, learnings, reviews: a text excerpt (≤ 200 chars). */
   text?: string
-  /** Swedish lines: what else happens, e.g. "3 tagningar blir vanliga klipp i Mediabanken". */
+  /** Lines: what else happens, e.g. "3 takes become ordinary clips in Media". */
   effects: string[]
   /** What goes to the Trash. */
   trash?: { files: number; bytes?: number }
@@ -1760,10 +1754,10 @@ export interface ApprovalDeleteItem {
 
 /** What a 'delete' request asks for. */
 export interface ApprovalDeleteRequest {
-  /** Swedish one-liner, e.g. "Ta bort 3 saker i ”Sommar”". */
+  /** A one-liner, e.g. "Delete 3 items in “Sommar”". */
   summary: string
   items: ApprovalDeleteItem[]
-  /** The second step's question when containers or more than 5 items go (Swedish). */
+  /** The second step's question when containers or more than 5 items go. */
   confirm?: string
 }
 
@@ -1782,8 +1776,8 @@ export interface ApprovalRequest {
   note?: string
   /**
    * generation: the Generate form. segment: one sequence clip. generate-all: every clip still missing a take.
-   * image: one still for a storyboard ("Skapa bild"). edit: a paid operation in Redigera (or resuming a stopped
-   * one). voice-design: a new voice for a character ("Skapa röst med AI"). delete: removing things (free, but
+   * image: one still for a storyboard ("Create image"). edit: a paid operation in the Editor (or resuming a stopped
+   * one). voice-design: a new voice for a character ("Design a voice with AI"). delete: removing things (free, but
    * nothing an agent asks to remove goes without the user's OK).
    */
   kind: 'generation' | 'segment' | 'generate-all' | 'image' | 'edit' | 'voice-design' | 'delete'
@@ -1800,7 +1794,7 @@ export interface ApprovalRequest {
   delete?: ApprovalDeleteRequest
   /** 'image', once approved: the still it made. */
   stillId?: string
-  /** Approved, but something after the paid step didn't work out (Swedish), e.g. the clip was gone. */
+  /** Approved, but something after the paid step didn't work out, e.g. the clip was gone. */
   notice?: string
   sequenceId?: string
   sequenceName?: string
@@ -1811,12 +1805,12 @@ export interface ApprovalRequest {
   sequenceKind?: SequenceKind
   /** 'segment': the clip; 'generate-all': the clips that will be generated, in order. */
   segmentIds?: string[]
-  /** 1-based clip numbers of segmentIds, as Studio shows them ("Klipp 3"). */
+  /** 1-based clip numbers of segmentIds, as Studio shows them ("Clip 3"). */
   clipNumbers?: number[]
   /** USD; for 'generate-all' the sum over the clips. Undefined when Venice couldn't quote it. */
   priceUsd?: number
   status: ApprovalStatus
-  /** Why it failed or expired (Swedish). */
+  /** Why it failed or expired. */
   error?: string
   /** The user's reason when they declined. */
   reason?: string
@@ -1865,7 +1859,6 @@ export interface AgentCommandReply {
   ok: boolean
   /** get_form, set_form, set_references and reorder_references: AgentFormState. open: AgentOpenResult. */
   result?: unknown
-  /** Swedish. */
   error?: string
 }
 
@@ -1907,15 +1900,15 @@ export interface AgentFormState {
   segmentId?: string
   /** The storyboard open in Storyboards, if any (view 'storyboards'). */
   storyboardId?: string
-  /** The edit open in Redigera, if any (view 'editor'). */
+  /** The edit open in the Editor, if any (view 'editor'). */
   editId?: string
-  /** The Mediabank tab on screen (view 'media'). */
+  /** The Media tab on screen (view 'media'). */
   mediaTab?: MediaTab
   /** The Generate form. */
   params: GenerationParams
   references: AgentFormReference[]
   /**
-   * Reference images in the form past the model's limit ("skickas inte" in the strip): not in `params` (which is
+   * Reference images in the form past the model's limit ("not sent" in the strip): not in `params` (which is
    * what a generation sends) and without a token, with their 1-based place in the form's list, so an agent can
    * see them and move one forward with reorder_references.
    */
@@ -1923,7 +1916,7 @@ export interface AgentFormState {
   /** The reference audio clips (params.referenceAudios with their tokens and assets). */
   audioReferences?: AgentFormAudioReference[]
   issues: PromptIssue[]
-  /** What the window adjusted on its own (Swedish), e.g. a mode switch or images that didn't fit. */
+  /** What the window adjusted on its own, e.g. a mode switch or images that didn't fit. */
   notes?: string[]
 }
 
@@ -1945,7 +1938,7 @@ export interface AgentSetFormArgs {
   start_image?: string | null
   /** Absolute path of the end image, for a model that takes one (resolved like start_image); null clears it. */
   end_image?: string | null
-  /** GenerationParams.includeDescriptions ("Ta med beskrivningar"). */
+  /** GenerationParams.includeDescriptions ("Include descriptions"). */
   include_descriptions?: boolean
   /** GenerationParams.excludedDescriptionAssetIds; [] switches every description back on. */
   excluded_description_asset_ids?: string[]
@@ -2001,13 +1994,13 @@ export interface AgentOpenArgs {
   versionId?: string
   /** For an asset view: the asset to open. */
   assetId?: string
-  /** For 'generate': the clip to open in the clip drawer; for 'media': the clip to open in Videor's drawer. */
+  /** For 'generate': the clip to open in the clip drawer; for 'media': the clip to open in the Videos tab's drawer. */
   generationId?: string
   /** For 'media': the tab (none: the one an item is in, else the one it last showed). */
   tab?: MediaTab
   /** For 'media': the picture to open in Bilder. */
   stillId?: string
-  /** For 'media': the film to open in Filmer. */
+  /** For 'media': the film to open in Films. */
   exportId?: string
 }
 
@@ -2031,13 +2024,13 @@ export interface AgentOpenResult {
   /** The asset on screen (asset views). */
   assetId?: string
   assetName?: string
-  /** The clip open in the clip drawer (view 'generate', or Videor in view 'media'). */
+  /** The clip open in the clip drawer (view 'generate', or Videos in view 'media'). */
   generationId?: string
-  /** The Mediabank tab on screen (view 'media'), and the picture or film opened in it. */
+  /** The Media tab on screen (view 'media'), and the picture or film opened in it. */
   tab?: MediaTab
   stillId?: string
   exportId?: string
-  /** Swedish, when the window couldn't show exactly what was asked for. */
+  /** When the window couldn't show exactly what was asked for. */
   note?: string
 }
 
@@ -2050,9 +2043,9 @@ export interface StudioApi {
   testApiKey(): Promise<{ ok: boolean; message: string }>
   ffmpegStatus(): Promise<FfmpegStatus>
   setPromptLanguage(lang: PromptLanguage): Promise<void>
-  /** "Säkert läge för bilder" (Venice blurs adult content in generated stills while it is on). */
+  /** "Safe mode for images" (Venice blurs adult content in generated stills while it is on). */
   setImageSafeMode(on: boolean): Promise<void>
-  /** Fires after a setting that several views show changed in one of them (so far "Säkert läge för bilder"). */
+  /** Fires after a setting that several views show changed in one of them (so far "Safe mode for images"). */
   onSettingsChange(cb: () => void): () => void
 
   // Generation
@@ -2064,9 +2057,9 @@ export interface StudioApi {
   listGenerations(): Promise<Generation[]>
   /**
    * Deletes the generation and its files. From a take list (`from.segmentId`: a sequence clip or a storyboard
-   * transition), a film Redigera keeps (a version, an edit's original) is only taken off that clip instead, and so is
-   * one the list offered "Ta bort" for (`from.release`: it showed the take as kept by Redigera). Refused (Swedish) when
-   * Redigera's rules keep it: a running operation works on it, an edit started from it, a version Redigera wouldn't
+   * transition), a film the Editor keeps (a version, an edit's original) is only taken off that clip instead, and so is
+   * one the list offered "Remove" for (`from.release`: it showed the take as kept by the Editor). Refused when
+   * the Editor's rules keep it: a running operation works on it, an edit started from it, a version the Editor wouldn't
    * delete, or a stopped job that has already paid for parts builds on it.
    */
   deleteGeneration(id: string, from?: { segmentId: string; release?: boolean }): Promise<void>
@@ -2088,13 +2081,13 @@ export interface StudioApi {
   deleteReview(reviewId: string): Promise<void>
   /** Pinned first, then most recently updated. */
   listLearnings(): Promise<Learning[]>
-  /** Creates (no id; author 'user') or updates a learning. Rejects with a Swedish message. */
+  /** Creates (no id; author 'user') or updates a learning. Rejects with a message. */
   saveLearning(input: LearningInput): Promise<Learning>
   deleteLearning(id: string): Promise<void>
   /** Exported films, newest first. */
   listExports(): Promise<ExportSummary[]>
   /**
-   * This session (since Studio started; closing the window keeps it): Generera's list shows what was made there
+   * This session (since Studio started; closing the window keeps it): Generate's list shows what was made there
    * since `startedAt` (ms) and what was still being made when it started (see shared/session.ts).
    */
   getSession(): Promise<GenerateSession>
@@ -2105,7 +2098,7 @@ export interface StudioApi {
   // Assets (characters, environments, products, outfits, poses)
   /** Sorted by name; every kind when kind is omitted. */
   listAssets(kind?: AssetKind): Promise<Asset[]>
-  /** Creates (no id) or updates an asset. Rejects with a Swedish message (empty name, unknown outfit…). */
+  /** Creates (no id) or updates an asset. Rejects with a message (empty name, unknown outfit…). */
   saveAsset(input: AssetInput): Promise<Asset>
   /** Moves its folder to the Trash; characters wearing a deleted outfit by default lose that default. */
   deleteAsset(id: string): Promise<void>
@@ -2116,7 +2109,7 @@ export interface StudioApi {
   reorderAssetImages(assetId: string, imageIds: string[]): Promise<Asset>
   /**
    * Copies audio files (MP3, WAV, M4A, AAC, AIFF, FLAC, OGG) into the asset's folder, after the clips it has.
-   * Characters and environments only. Rejects with a Swedish message (wrong format, shorter than 1 s, …).
+   * Characters and environments only. Rejects with a message (wrong format, shorter than 1 s, …).
    */
   addAssetAudio(assetId: string, paths: string[]): Promise<Asset>
   /** Removes the clip (its copy goes to the Trash, or to Referensbilder when generations still use it). */
@@ -2139,7 +2132,7 @@ export interface StudioApi {
   listSequences(): Promise<SequenceSummary[]>
   getSequence(id: string): Promise<Sequence>
   createSequence(name: string): Promise<Sequence>
-  /** exportHeight: the "Exportformat" (480/720/1080, null = Automatiskt). */
+  /** exportHeight: the "Export format" (480/720/1080, null = Automatic). */
   updateSequence(
     id: string,
     patch: { name?: string; defaults?: Partial<GenerationParams>; exportHeight?: number | null }
@@ -2167,18 +2160,18 @@ export interface StudioApi {
   onSequenceChange(cb: (sequenceId: string) => void): () => void
   onExportProgress(cb: (p: ExportProgress) => void): () => void
 
-  // Keyframes and "Gör om mellan grannarna" (sequence clips)
+  // Keyframes and "Redo between neighbours" (sequence clips)
   /**
    * Puts an image in a clip's start or end slot (null empties it). An image switches the clip to the
    * image-to-video model of its family (one that takes an end image for the end slot); references it had are
    * dropped, since image-to-video can't take them. 'previous' / 'next' set continueFromPrevious / endFromNext.
-   * Rejects with a Swedish message (the first clip has no previous clip, a file isn't an image, …).
+   * Rejects with a message (the first clip has no previous clip, a file isn't an image, …).
    */
   setSegmentImage(segmentId: string, slot: SegmentImageSlot, source: SegmentImageSource | null): Promise<Sequence>
   /** The start and end images the clip would be generated from right now, with what stands in the way. Free. */
   previewSegmentFrames(segmentId: string): Promise<SegmentFramePreview>
   /**
-   * "Gör om mellan grannarna": sets the clip to start on the previous clip's last frame and end on the next
+   * "Redo between neighbours": sets the clip to start on the previous clip's last frame and end on the next
    * clip's first frame (whichever neighbours it has) with the end-capable image-to-video model of its family,
    * keeping its prompt, duration and audio. Free: it only configures the clip; generating is generateSegment.
    */
@@ -2212,7 +2205,7 @@ export interface StudioApi {
   /** Queues a new take of the transition (paid; the UI confirms with the price). */
   generateTransition(transitionId: string): Promise<Generation>
   /**
-   * "Generera saknade": sends every transition without a finished selected take (and none on its way) to Venice,
+   * "Generate missing": sends every transition without a finished selected take (and none on its way) to Venice,
    * one after another without waiting for them to render. Resolves once started; progress arrives via
    * onStoryboardChange and errors via Storyboard.runError.
    */
@@ -2224,7 +2217,7 @@ export interface StudioApi {
    */
   exportStoryboard(storyboardId: string): Promise<string>
   /**
-   * "Gör om till sekvens": a new sequence "<namn> (sekvens)" with one clip per transition, each with a copy of
+   * "Turn into sequence": a new sequence "<name> (sequence)" with one clip per transition, each with a copy of
    * the transition's selected take selected. The storyboard stays as it is.
    */
   convertStoryboardToSequence(storyboardId: string): Promise<{ sequenceId: string }>
@@ -2253,11 +2246,11 @@ export interface StudioApi {
   chooseLibraryFolder(): Promise<string | null>
   inspectLibraryFolder(path: string): Promise<FolderInspection>
   /**
-   * Switches the base folder (see LibraryMode). Rejects with a Swedish message when refused (busy, folder
+   * Switches the base folder (see LibraryMode). Rejects with a message when refused (busy, folder
    * inside the current library, conflicts, not writable). After it resolves every window reloads.
    */
   setLibraryRoot(path: string, mode: LibraryMode): Promise<void>
-  /** "Städa upp": moves every file the library knows about to its proper folder. */
+  /** "Tidy up": moves every file the library knows about to its proper folder. */
   reorganizeLibrary(): Promise<ReorganizeReport>
   /**
    * Opens the folder in Finder (created if needed). With an id: that sequence's folder for 'sequences', that
@@ -2269,7 +2262,7 @@ export interface StudioApi {
   getAgentStatus(): Promise<AgentStatus>
   /** Starts or stops the server; resolves with the new status (status.error says why it couldn't start). */
   setAgentEnabled(enabled: boolean): Promise<AgentStatus>
-  /** 1024–65535; restarts a running server on the new port. Rejects with a Swedish message. */
+  /** 1024–65535; restarts a running server on the new port. Rejects with a message. */
   setAgentPort(port: number): Promise<AgentStatus>
   /**
    * Looks for Tailscale again (a running server), or starts a server that couldn't start. Pending approval
@@ -2292,7 +2285,7 @@ export interface StudioApi {
   resolveApproval(id: string, approve: boolean, reason?: string): Promise<ApprovalRequest>
   /**
    * User only: checks a pending request again without carrying it out (the delete dialog asks every 2 s and on
-   * focus). null: it can still be approved; else why not (Swedish). Always null for kinds other than 'delete'.
+   * focus). null: it can still be approved; else why not. Always null for kinds other than 'delete'.
    */
   verifyApproval(id: string): Promise<string | null>
   onAgentStatus(cb: (s: AgentStatus) => void): () => void
@@ -2303,24 +2296,24 @@ export interface StudioApi {
   onAgentCommand(cb: (cmd: AgentCommand) => void): () => void
   replyAgentCommand(id: string, reply: AgentCommandReply): void
 
-  // Own clips (Egna klipp)
+  // Own clips
   /** File dialog for video files (mp4, mov, m4v, webm, mkv); [] when cancelled. */
   pickVideos(multiple: boolean): Promise<string[]>
   /** Probes the files before importing (free; nothing is copied). */
   inspectVideoFiles(paths: string[]): Promise<VideoFileInfo[]>
   /**
-   * Copies the files into Egna klipp/<dag>/ (an APFS clone when possible), makes working copies where needed and
+   * Copies the files into Egna klipp/<day>/ (an APFS clone when possible), makes working copies where needed and
    * adds them to the feed, a sequence (one new clip per file) or a clip (a selected take). User only.
    */
   importVideoFiles(paths: string[], target: ImportTarget): Promise<ImportResult>
   /**
-   * "Avbryt" on a file's card (`path`): stops that file (or skips it when it hasn't started), the half-made file is
+   * "Cancel" on a file's card (`path`): stops that file (or skips it when it hasn't started), the half-made file is
    * removed and the other files go on. Without a path every running and queued import stops.
    */
   cancelImports(path?: string): Promise<void>
   onImportProgress(cb: (p: ImportProgress) => void): () => void
 
-  // Redigera (edits and versions)
+  // Editor (edits and versions)
   /** Newest first. */
   listEdits(): Promise<EditSummary[]>
   getEdit(id: string): Promise<Edit>
@@ -2333,7 +2326,7 @@ export interface StudioApi {
   setCurrentVersion(editId: string, versionId: string): Promise<Edit>
   /** User only. Refused for v1 and versions in use; its children move up to its parent. */
   deleteVersion(versionId: string): Promise<Edit>
-  /** "Rensa versioner…" (user only): dryRun counts what would go to the Trash. */
+  /** "Clean up versions…" (user only): dryRun counts what would go to the Trash. */
   pruneVersions(editId: string, dryRun: boolean): Promise<{ count: number; bytes: number }>
   /** Filmstrip, waveform, cuts, layers and transcript of a version (free, cached). */
   editTimeline(generationId: string): Promise<EditTimeline>
@@ -2344,10 +2337,10 @@ export interface StudioApi {
    * with "NEEDS_CONSENT:…" when Venice asks for consent.
    */
   runEditOperation(editId: string, op: EditOperation, opts?: EditRunOptions): Promise<EditRunResult>
-  /** "Avbryt": parts not yet sent are cancelled; parts already sent finish. */
+  /** "Cancel": parts not yet sent are cancelled; parts already sent finish. */
   cancelEditJob(jobId: string): Promise<void>
   /**
-   * "Fortsätt": sends the unsent or failed parts again (paid again for those) at a fresh price. Refused (PRICE_CHANGED)
+   * "Continue": sends the unsent or failed parts again (paid again for those) at a fresh price. Refused (PRICE_CHANGED)
    * when it rose above expectedPriceUsd + $0.01, or turned unknown or partial when `expectedPartial` was false.
    */
   resumeEditJob(jobId: string, expectedPriceUsd?: number, expectedPartial?: boolean): Promise<EditJob>
@@ -2364,25 +2357,25 @@ export interface StudioApi {
   /** Whether this Mac can separate voice and background. */
   separationStatus(): Promise<SeparationStatus>
   planVoiceDesign(req: VoiceDesignRequest): Promise<EditPlan>
-  /** Paid: the result becomes a new Röst clip of the character. */
+  /** Paid: the result becomes a new voice clip of the character. */
   designVoice(req: VoiceDesignRequest, expectedPriceUsd?: number): Promise<EditJob>
-  /** "Får klonas för nya repliker" (user only). */
+  /** "May be cloned for new lines" (user only). */
   setVoiceCloneConsent(audioId: string, consent: boolean): Promise<Asset>
   /** Fires with the edit id whenever an edit, its versions, jobs or media change. */
   onEditChange(cb: (editId: string) => void): () => void
   onEditProgress(cb: (p: EditProgress) => void): () => void
 
-  // Status: Pågår och klart
+  // Status: Activity
   /** What runs and what finished unseen; an empty summary while no library is open. */
   getWorkSummary(): Promise<WorkSummary>
   /** User only: the items (WorkSummary keys) were looked at. */
   markSeen(keys: string[]): Promise<void>
   /**
-   * User only: "Markera alla som sedda" (everything, or one view or owner). undoToken undoes it with undoMarkAllSeen
+   * User only: "Mark all as seen" (everything, or one view or owner). undoToken undoes it with undoMarkAllSeen
    * for 10 seconds.
    */
   markAllSeen(scope?: SeenScope): Promise<{ count: number; undoToken?: string }>
-  /** User only: "Ångra" after markAllSeen; resolves with how many items came back (those that still exist). */
+  /** User only: "Undo" after markAllSeen; resolves with how many items came back (those that still exist). */
   undoMarkAllSeen(token: string): Promise<number>
   /** The whole summary, whenever something starts, moves on, finishes or is seen. */
   onWorkChange(cb: (s: WorkSummary) => void): () => void
@@ -2393,10 +2386,10 @@ export interface StudioApi {
   /** File dialog for audio files; [] when cancelled. */
   pickAudio(multiple: boolean): Promise<string[]>
 
-  // ── Export and import of the whole library (Inställningar) ──
+  // ── Export and import of the whole library (Settings) ──
   /**
    * Packs the open library – database snapshot and every file Studio keeps (no settings, API key or agent token) –
-   * into one zip the user chooses with a save dialog. Resolves null when the dialog is cancelled. Refused (Swedish
+   * into one zip the user chooses with a save dialog. Resolves null when the dialog is cancelled. Refused (an
    * error) while something runs that writes to the library.
    */
   exportLibraryArchive(): Promise<ArchiveResult | null>
@@ -2421,7 +2414,7 @@ export interface ArchiveProgress {
   /** Bytes handled so far and in all, when known. */
   done?: number
   total?: number
-  /** Swedish, for the progress line or the error. */
+  /** For the progress line or the error. */
   message?: string
 }
 

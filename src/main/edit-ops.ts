@@ -1,4 +1,4 @@
-// Redigera's operations: plans, free local renders, paid audio jobs made of steps, and picture operations that go
+// The Editor's operations: plans, free local renders, paid audio jobs made of steps, and picture operations that go
 // through the job manager as AI takes.
 //
 // Money rules, which everything here is built around:
@@ -7,7 +7,7 @@
 // - A run re-plans and refuses when the price rose above the price the user (or the approval) saw.
 // - Every paid step is written to the database before it is sent, and set 'sending' right before the request. A
 //   step found 'sending' after a restart may or may not have been charged: it is failed, never sent again.
-// - Starting the library (resume) only fetches what was already sent; unsent parts wait for the user's "Fortsätt",
+// - Starting the library (resume) only fetches what was already sent; unsent parts wait for the user's "Continue",
 //   which quotes them again.
 
 import { createHash, randomUUID } from 'node:crypto'
@@ -158,36 +158,35 @@ export const DEFAULT_UPSCALE = 'topaz-video-upscale'
 export const DESIGN_MODEL = 'seed-audio-1-0'
 export const DESIGN_VOICE = 'Describe in prompt'
 
-// ── Swedish messages ─────────────────────────────────────────────────────────
+// ── Messages ─────────────────────────────────────────────────────────
 
 export const LOST =
-  'Svaret från Venice kom aldrig fram – det kan ha debiterats. Kontrollera saldot innan du fortsätter.'
-export const CLOSED = 'Studio stängdes innan alla delar skickades. Fortsätt för att skicka resten.'
-export const PRICE_CHANGED = 'Priset har ändrats – kontrollera och försök igen.'
-export const BUSY = 'Det pågår en redigering. Vänta tills den är klar och försök igen.'
-const CONFIRM_PRICE = 'Bekräfta priset innan åtgärden körs.'
-const NO_SEPARATION = 'Röstseparering saknas på den här datorn.'
-const NO_KEY = 'Lägg till API-nyckeln under Inställningar.'
-const NO_VOICE_CHANGER = 'Röstbyte finns inte hos Venice just nu — använd Läs in repliker på nytt.'
-const CONSENT_MISSING = 'Bocka i att du har rätt att använda rösten (Karaktärer → Röst).'
-const SAMPLE_TOO_SHORT = 'Röstprovet är kortare än 5 sekunder och kan inte klonas.'
-const TOO_BIG = 'Underlaget är för stort för Venice (högst ~22 MB). Välj en kortare markering.'
+  "Venice's answer never arrived – it may have been charged. Check your balance before you continue."
+export const CLOSED = 'Studio was closed before all parts were sent. Continue to send the rest.'
+export const PRICE_CHANGED = 'The price has changed – check it and try again.'
+export const BUSY = 'An edit is in progress. Wait until it is done and try again.'
+const CONFIRM_PRICE = 'Confirm the price before the operation runs.'
+const NO_SEPARATION = "Voice separation isn't available on this Mac."
+const NO_KEY = 'Add the API key in Settings.'
+const NO_VOICE_CHANGER = "Venice doesn't offer voice change right now — use Re-record lines instead."
+const CONSENT_MISSING = 'Tick that you have the right to use the voice (Characters → Voice).'
+const SAMPLE_TOO_SHORT = 'The voice sample is shorter than 5 seconds and cannot be cloned.'
+const TOO_BIG = 'The input is too large for Venice (at most ~22 MB). Select a shorter part.'
 const IMAGES_TOO_BIG =
-  'Bilderna att utgå från gör underlaget för stort för Venice (högst ~22 MB tillsammans med filmen). Välj färre bilder eller en kortare markering.'
+  'The images to start from make the input too large for Venice (at most ~22 MB together with the film). Choose fewer images or a shorter selection.'
 /** Room left beside the pictures for the request's rounding (base64 padding, JPEG sizes varying by a few kB). */
 const IMAGE_BYTES_MARGIN = 256 * 1024
 const UPSCALE_TOO_BIG =
-  'Filmen är för lång för att skalas upp i ett svep (Venice tar emot högst ~22 MB). Kortare filmer går.'
+  'The film is too long to upscale in one go (Venice takes at most ~22 MB). Shorter films work.'
 const LIP_SYNC =
-  'Munrörelserna följer inte den nya repliken. Bäst för röst utanför bild — eller gör om avsnittet efteråt.'
-const REAL_PEOPLE = 'Seedance tar ofta inte emot video med riktiga personer. Nekas det, prova en annan modell.'
-const BASE_GONE = 'Versionen åtgärden utgick från finns inte längre.'
-const NO_MODELS = 'Modellistan kunde inte hämtas från Venice. Kontrollera internetanslutningen och försök igen.'
-const CLONE_EXPIRED = 'Röstklonen har gått ut. Fortsätt för att klona rösten igen.'
+  "The mouth movements don't follow the new line. Best for a voice off screen — or regenerate the section afterwards."
+const REAL_PEOPLE = "Seedance often doesn't accept video with real people. If it is refused, try another model."
+const BASE_GONE = 'The version the operation started from no longer exists.'
+const NO_MODELS = 'The model list could not be fetched from Venice. Check your internet connection and try again.'
+const CLONE_EXPIRED = 'The voice clone has expired. Continue to clone the voice again.'
 
-// ── Formatting (Swedish) ─────────────────────────────────────────────────────
+// ── Formatting ─────────────────────────────────────────────────────
 
-const comma = (s: string): string => s.replace('.', ',')
 const round = (n: number, step = 1000): number => Math.round(n * step) / step
 const fmtSeconds = formatSecondsSv
 function fmtDuration(seconds: number): string {
@@ -198,17 +197,17 @@ function fmtDuration(seconds: number): string {
   return s ? `${m} min ${s} s` : `${m} min`
 }
 const fmtGb = (bytes: number): string =>
-  bytes >= 1024 ** 3 ? `${comma((bytes / 1024 ** 3).toFixed(1))} GB` : `${Math.max(1, Math.round(bytes / MB))} MB`
+  bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / MB))} MB`
 const fmtClock = formatTimecode
 function excerpt(text: string, max = 40): string {
   return safeName(text.replace(/\s+/g, ' '), { max, fallback: '' })
 }
 /**
- * A version's or a sound's label as part of a file name: its timecodes ("0:41,5–0:45,0") written "0m41.5s–0m45s",
- * since safeName would turn the colon into a dot beside the decimal comma ("0.41,5").
+ * A version's or a sound's label as part of a file name: its timecodes ("0:41.5–0:45.0", or "0:41,5" in labels
+ * from before) written "0m41.5s–0m45s", since safeName would turn the colon into a dot ("0.41.5").
  */
 export function fileLabel(label: string): string {
-  return label.replace(/(?:(\d+):)?(\d+):(\d{2}),(\d)/g, (_m, h: string | undefined, m: string, s: string, d: string) => {
+  return label.replace(/(?:(\d+):)?(\d+):(\d{2})[.,](\d)/g, (_m, h: string | undefined, m: string, s: string, d: string) => {
     const tenths = d === '0' ? '' : `.${d}`
     return h ? `${h}h${m.padStart(2, '0')}m${s}${tenths}s` : `${m}m${s}${tenths}s`
   })
@@ -227,12 +226,12 @@ const sleep = (ms: number): Promise<void> =>
 /** Venice answered (and charged) but the answer couldn't be kept: told as it is, not as a lost answer. */
 class AfterSendError extends Error {}
 
-/** Keeps an answer that was paid for, or says so in Swedish. */
+/** Keeps an answer that was paid for, or says so. */
 async function keepAnswer(path: string, data: Buffer | string): Promise<void> {
   try {
     await writeFile(path, data)
   } catch (err) {
-    throw new AfterSendError(`Svaret från Venice kunde inte sparas (${errorText(err)}). Delen har debiterats.`)
+    throw new AfterSendError(`Venice's answer could not be saved (${errorText(err)}). The part has been charged.`)
   }
 }
 
@@ -242,14 +241,14 @@ function statusOf(err: unknown): number | undefined {
   return typeof status === 'number' && Number.isFinite(status) ? status : undefined
 }
 
-/** A failed paid request in Swedish, by status (the spec's wording where it has one). */
+/** A failed paid request, by status (the spec's wording where it has one). */
 export function veniceFailure(err: unknown): string {
   const status = statusOf(err)
   const message = errorText(err)
-  if (status === 402) return 'Saldot hos Venice räcker inte.'
-  if (status === 401 && /pro\b/i.test(message)) return 'Modellen kräver Venice Pro.'
-  if (status === 422) return 'Venice nekade innehållet.'
-  if (status === 413) return 'Underlaget är för stort.'
+  if (status === 402) return 'Your Venice balance is too low.'
+  if (status === 401 && /pro\b/i.test(message)) return 'The model requires Venice Pro.'
+  if (status === 422) return 'Venice refused the content.'
+  if (status === 413) return 'The input is too large.'
   return message
 }
 
@@ -264,13 +263,13 @@ export interface OpsDeps {
   progress: (p: EditProgress) => void
   generationChanged: (g: Generation) => void
   /**
-   * The asset library changed (a designed voice added as a Röst clip, clone consent given or withdrawn): every
+   * The asset library changed (a designed voice added as a voice clip, clone consent given or withdrawn): every
    * open asset list and picker refetches. index.ts routes it to 'library:change'.
    */
   libraryChanged?: () => void
 }
 
-/** What Redigera runs right now, for the status summary (work.ts). */
+/** What the Editor runs right now, for the status summary (work.ts). */
 export interface EditActiveWork {
   /** Running paid jobs: an edit's operations, and designed voices (assetId). */
   jobs: {
@@ -574,7 +573,7 @@ export class EditOps {
   /**
    * A library was opened: jobs still running in it are picked up without sending anything new. Steps that were
    * queued at Venice are fetched (they are paid for); a step found 'sending' is failed (its answer was lost); a job
-   * with unsent steps ends up failed with "Fortsätt". Picture jobs finish once their take has.
+   * with unsent steps ends up failed with "Continue". Picture jobs finish once their take has.
    */
   resumeAll(): void {
     this.stopped = false
@@ -639,18 +638,18 @@ export class EditOps {
     const versions = store.listVersions(edit)
     let base: db.StoredGeneration | undefined
     if (baseId !== undefined && baseId !== null && baseId !== '') {
-      const id = store.safeId(baseId, 'versions-id')
+      const id = store.safeId(baseId, 'version ID')
       base = versions.find((v) => v.id === id)
-      if (!base) throw new Error('Versionen hör inte till redigeringen.')
+      if (!base) throw new Error('The version does not belong to the edit.')
     } else {
       base =
         versions.find((v) => v.id === edit.current_generation_id) ??
         versions.find((v) => v.id === edit.origin_generation_id) ??
         versions[versions.length - 1]
     }
-    if (!base) throw new Error('Redigeringen har inga versioner kvar.')
+    if (!base) throw new Error('The edit has no versions left.')
     if (base.status !== 'completed' || !base.filePath || !existsSync(base.filePath)) {
-      throw new Error('Versionens videofil saknas (flyttad eller raderad i Finder).')
+      throw new Error("The version's video file is missing (moved or deleted in Finder).")
     }
     return base as db.StoredGeneration & { filePath: string }
   }
@@ -704,7 +703,7 @@ export class EditOps {
           ;({ op, exec } = await this.planPicture(d, edit, base, info, raw))
           break
         default:
-          d.problem('Okänd åtgärd.')
+          d.problem('Unknown operation.')
           op = { op: 'denoise', strength: 'mild' }
           exec = { kind: 'none' }
       }
@@ -751,9 +750,9 @@ export class EditOps {
       const s = await statfs(libraryRoot())
       const free = Number(s.bavail) * Number(s.bsize)
       const left = free - bytes
-      if (left < DISK_REFUSE_BYTES) d.problem(`Det finns för lite ledigt utrymme på disken (behöver ~${fmtGb(bytes)}).`)
+      if (left < DISK_REFUSE_BYTES) d.problem(`There is too little free disk space (needs ~${fmtGb(bytes)}).`)
       else if (left < DISK_WARN_BYTES) {
-        d.warn(`Det blir mindre än 5 GB ledigt på disken (versionen tar ~${fmtGb(bytes)}).`)
+        d.warn(`Less than 5 GB will be left free on the disk (the version takes ~${fmtGb(bytes)}).`)
       }
     } catch {
       // statfs isn't available everywhere; the render itself reports a full disk.
@@ -806,11 +805,11 @@ export class EditOps {
       case 'trim': {
         const keep = readRange(raw.keep)
         if (!keep) {
-          d.problem('Markera det som ska behållas.')
+          d.problem('Select what to keep.')
           return { op: 'trim', keep: { start: 0, end: D } }
         }
         const r = this.snap(d, keep, info, { min: MIN_REMAINING_SECONDS })
-        if (r.start <= 1e-3 && r.end >= D - 1e-3) d.problem('Markeringen är redan hela filmen.')
+        if (r.start <= 1e-3 && r.end >= D - 1e-3) d.problem('The selection is already the whole film.')
         d.resultSeconds = r.end - r.start
         d.estimatedBytes = info.bytes * (d.resultSeconds / D) * 1.3
         return { op: 'trim', keep: r }
@@ -818,12 +817,12 @@ export class EditOps {
       case 'cut': {
         const range = readRange(raw.range)
         if (!range) {
-          d.problem('Markera det som ska klippas bort.')
+          d.problem('Select what to cut out.')
           return { op: 'cut', range: { start: 0, end: 0 } }
         }
         const r = this.snap(d, range, info)
-        if (r.end - r.start <= 0) d.problem('Markeringen är tom.')
-        if (D - (r.end - r.start) < MIN_REMAINING_SECONDS) d.problem('Det måste finnas minst 0,2 s kvar av filmen.')
+        if (r.end - r.start <= 0) d.problem('The selection is empty.')
+        if (D - (r.end - r.start) < MIN_REMAINING_SECONDS) d.problem('At least 0.2 s of the film must be left.')
         d.resultSeconds = D - (r.end - r.start)
         d.estimatedBytes = info.bytes * (d.resultSeconds / D) * 1.3
         return { op: 'cut', range: r }
@@ -831,8 +830,8 @@ export class EditOps {
       case 'fade': {
         const inSeconds = round(Math.max(0, num(raw.inSeconds) ?? 0), 100)
         const outSeconds = round(Math.max(0, num(raw.outSeconds) ?? 0), 100)
-        if (!inSeconds && !outSeconds) d.problem('Välj hur lång toningen ska vara.')
-        if (inSeconds > D / 2 || outSeconds > D / 2) d.problem('En toning kan vara högst halva filmen.')
+        if (!inSeconds && !outSeconds) d.problem('Choose how long the fade should be.')
+        if (inSeconds > D / 2 || outSeconds > D / 2) d.problem('A fade can be at most half the film.')
         d.estimatedBytes = info.bytes * 1.3
         return {
           op: 'fade',
@@ -842,11 +841,11 @@ export class EditOps {
       }
       case 'volume': {
         const gainDb = num(raw.gainDb)
-        if (gainDb === undefined) d.problem('Ange hur mycket volymen ska ändras.')
+        if (gainDb === undefined) d.problem('Give how much the volume should change.')
         const target = await needsStems(raw.target)
         const range = readRange(raw.range)
         const r = range ? this.snap(d, range, info) : undefined
-        if (!info.hasAudio && !mix.layers.length) d.problem('Filmen har inget ljud.')
+        if (!info.hasAudio && !mix.layers.length) d.problem('The film has no sound.')
         return {
           op: 'volume',
           gainDb: round(Math.min(24, Math.max(-60, gainDb ?? 0)), 10),
@@ -864,7 +863,7 @@ export class EditOps {
         return { op: 'denoise', strength: raw.strength === 'strong' ? 'strong' : 'mild' }
       case 'loudness': {
         const lufs = raw.lufs === -16 || raw.lufs === -23 ? raw.lufs : -14
-        if (raw.lufs !== undefined && raw.lufs !== lufs) d.problem('Ljudnivån kan vara −14, −16 eller −23 LUFS.')
+        if (raw.lufs !== undefined && raw.lufs !== lufs) d.problem('The loudness can be −14, −16 or −23 LUFS.')
         return { op: 'loudness', lufs }
       }
       case 'add-audio': {
@@ -873,21 +872,21 @@ export class EditOps {
         let src: { mediaId: string } | { assetAudioId: string }
         if (typeof source.mediaId === 'string') {
           const media = store.getMedia(source.mediaId)
-          if (!media || media.editId !== edit.id) d.problem('Ljudet finns inte i redigeringen.')
-          else if (!existsSync(media.path)) d.problem('Ljudfilen saknas (flyttad eller raderad i Finder).')
+          if (!media || media.editId !== edit.id) d.problem('The audio is not in the edit.')
+          else if (!existsSync(media.path)) d.problem('The audio file is missing (moved or deleted in Finder).')
           else duration = media.duration ?? (await probeAudio(media.path).catch(() => ({ duration: 0 }))).duration
           src = { mediaId: source.mediaId }
         } else if (typeof source.assetAudioId === 'string') {
           const clip = store.audioClipRow(source.assetAudioId)
-          if (!clip) d.problem('Ljudklippet finns inte längre i biblioteket.')
+          if (!clip) d.problem('The audio clip no longer exists in the library.')
           else duration = clip.duration
           src = { assetAudioId: source.assetAudioId }
         } else {
-          d.problem('Välj ett ljud att lägga till.')
+          d.problem('Choose a sound to add.')
           src = { mediaId: '' }
         }
         const at = round(Math.max(0, num(raw.at) ?? 0))
-        if (at >= D) d.problem('Ljudet måste börja inuti filmen.')
+        if (at >= D) d.problem('The sound must start inside the film.')
         const loop = raw.loop === true
         const room = Math.max(0, D - at)
         const asked = num(raw.length)
@@ -911,9 +910,9 @@ export class EditOps {
       default: {
         const layerId = typeof raw.layerId === 'string' ? raw.layerId : ''
         const layer = mix.layers.find((l) => l.id === layerId)
-        if (!layer) d.problem('Lagret finns inte i den här versionen.')
+        if (!layer) d.problem('The layer is not in this version.')
         const at = num(raw.at)
-        if (at !== undefined && (at < 0 || at >= D)) d.problem('Lagret måste börja inuti filmen.')
+        if (at !== undefined && (at < 0 || at >= D)) d.problem('The layer must start inside the film.')
         const gainDb = num(raw.gainDb)
         return {
           op: 'layer',
@@ -937,15 +936,15 @@ export class EditOps {
     const catalog = await this.catalogOrProblem(d)
     const wanted = str(raw.model, 200) || DEFAULT_ASR
     const model: AsrModel | undefined = catalog?.transcription.find((m) => m.id === wanted)
-    if (catalog && !model) d.problem('Transkriberingsmodellen finns inte hos Venice.')
+    if (catalog && !model) d.problem("Venice doesn't have the transcription model.")
     const language = str(raw.language, 20) || undefined
-    if (!info.hasAudio) d.problem('Filmen har inget ljud att transkribera.')
-    if (info.duration > ASR_MAX_SECONDS) d.problem('Filmen är för lång för att transkriberas (högst 50 minuter).')
+    if (!info.hasAudio) d.problem('The film has no sound to transcribe.')
+    if (info.duration > ASR_MAX_SECONDS) d.problem('The film is too long to transcribe (at most 50 minutes).')
     const usd = model ? transcriptionPriceUsd(info.duration, model.usdPerSecond) : undefined
     d.addPrice(usd)
-    d.steps.push({ label: `Transkribera ${fmtClock(info.duration)}`, seconds: round(info.duration), priceUsd: usd })
-    if (model?.timestamps === 'segment') d.note('Modellen ger tider per mening, inte per ord.')
-    if (transcriptFor(base.id)) d.note('Den nuvarande transkriptionen ersätts.')
+    d.steps.push({ label: `Transcribe ${fmtClock(info.duration)}`, seconds: round(info.duration), priceUsd: usd })
+    if (model?.timestamps === 'segment') d.note('The model gives times per sentence, not per word.')
+    if (transcriptFor(base.id)) d.note('The current transcript is replaced.')
     const op: EditOperation = { op: 'transcribe', model: wanted, ...(language ? { language } : {}) }
     const exec: Exec = {
       kind: 'audio',
@@ -955,7 +954,7 @@ export class EditOps {
           model: wanted,
           request: { language, seconds: round(info.duration) },
           quote: usd,
-          label: 'Transkribera',
+          label: 'Transcribe',
           seconds: info.duration
         }
       ],
@@ -968,7 +967,7 @@ export class EditOps {
     try {
       return await this.catalog()
     } catch (err) {
-      d.problem(`Venices modellista kunde inte hämtas: ${errorText(err)}`)
+      d.problem(`Venice's model list could not be fetched: ${errorText(err)}`)
       return undefined
     }
   }
@@ -1033,19 +1032,19 @@ export class EditOps {
     const model: VoiceChangerModel | undefined =
       changers.find((m) => m.id === wanted) ?? (wanted ? undefined : changers[0])
     if (catalog && !changers.length) d.problem(catalog.keyed || getApiKey() ? NO_VOICE_CHANGER : NO_KEY)
-    else if (catalog && !model) d.problem('Röstbytesmodellen finns inte hos Venice.')
+    else if (catalog && !model) d.problem("Venice doesn't have the voice change model.")
 
     // The new voice.
     const v = (raw.voice && typeof raw.voice === 'object' ? raw.voice : {}) as Record<string, unknown>
     let voice: Exclude<VoiceChoice, { kind: 'clone' }>
     if (v.kind === 'custom') {
       const voiceId = str(v.voiceId, 200)
-      if (!voiceId) d.problem('Ange röst-ID:t.')
-      if (model && !model.customVoiceId) d.problem('Modellen tar inte egna röst-ID:n.')
+      if (!voiceId) d.problem('Give the voice ID.')
+      if (model && !model.customVoiceId) d.problem("The model doesn't take custom voice IDs.")
       voice = { kind: 'custom', voiceId }
     } else {
       const name = str(v.voice, 200) || model?.defaultVoice || model?.voices[0] || ''
-      if (model && !model.voices.includes(name)) d.problem('Välj en av modellens röster.')
+      if (model && !model.voices.includes(name)) d.problem("Choose one of the model's voices.")
       voice = { kind: 'preset', voice: name }
     }
 
@@ -1056,9 +1055,9 @@ export class EditOps {
     if (Array.isArray(raw.segmentIds) && raw.segmentIds.length) {
       segmentIds = [...new Set(raw.segmentIds.filter((s): s is string => typeof s === 'string'))]
       const t = transcriptFor(base.id)
-      if (!t) d.problem('Transkribera filmen först för att välja repliker.')
+      if (!t) d.problem('Transcribe the film first to choose lines.')
       const chosen = (t?.segments ?? []).filter((s) => segmentIds!.includes(s.id))
-      if (t && chosen.length !== segmentIds.length) d.problem('En vald replik finns inte längre i transkriptionen.')
+      if (t && chosen.length !== segmentIds.length) d.problem('A chosen line is no longer in the transcript.')
       scopes = mergeRanges(
         chosen.map((s) => ({ start: Math.max(0, s.start - LINE_PAD), end: Math.min(D, s.end + LINE_PAD) }))
       )
@@ -1092,15 +1091,15 @@ export class EditOps {
     if (!d.problems.length && model) {
       try {
         const from = await this.voiceSource(base, mix, separation)
-        if (!from) d.problem('Filmen har inget tal att byta röst på.')
+        if (!from) d.problem('The film has no speech to change the voice of.')
         else {
           source = from.kind
           const { speech, pauses } = await this.speechIn(from.path, D, scopes)
           chunks = planVoiceChunks(speech, { maxSeconds: model.maxSourceSeconds, margin: CHUNK_MARGIN, pauses })
-          if (!chunks.length) d.problem('Det finns inget tal i området att byta röst på.')
+          if (!chunks.length) d.problem('There is no speech in the range to change the voice of.')
         }
       } catch (err) {
-        d.problem(`Talet kunde inte hittas: ${errorText(err)}`)
+        d.problem(`The speech could not be found: ${errorText(err)}`)
       }
     }
 
@@ -1128,24 +1127,24 @@ export class EditOps {
             ...(c.fadeOut ? { fadeOut: c.fadeOut } : {})
           },
           quote: quotes[i],
-          label: chunks.length > 1 ? `Del ${i + 1} av ${chunks.length}` : 'Röstbyte',
+          label: chunks.length > 1 ? `Part ${i + 1} of ${chunks.length}` : 'Voice change',
           seconds
         })
         d.addPrice(quotes[i])
         d.steps.push({
-          label: `${chunks.length > 1 ? `Del ${i + 1}` : 'Röstbyte'} (${fmtClock(c.start)}–${fmtClock(c.end)})`,
+          label: `${chunks.length > 1 ? `Part ${i + 1}` : 'Voice change'} (${fmtClock(c.start)}–${fmtClock(c.end)})`,
           seconds,
           priceUsd: quotes[i]
         })
       })
       const sent = chunks.reduce((s, c) => s + (c.end - c.start), 0)
       const minutes = chunks.reduce((s, c) => s + c.billedMinutes, 0)
-      const parts = `${chunks.length} ${chunks.length === 1 ? 'del' : 'delar'}`
+      const parts = `${chunks.length} ${chunks.length === 1 ? 'part' : 'parts'}`
       d.priceNote = `${fmtDuration(sent)} → ${parts}, ${minuteBillingNote(minutes)}`
     }
-    d.note('Bilden lämnas orörd, så läpparna följer med.')
-    if (!segmentIds) d.note('Alla röster i området får den nya rösten. Välj repliker för att bara byta en person.')
-    if (!separation) d.warn('Den gamla rösten kan höras svagt under den nya.')
+    d.note('The picture is left untouched, so the lips follow along.')
+    if (!segmentIds) d.note('Every voice in the range gets the new voice. Choose lines to change only one person.')
+    if (!separation) d.warn('The old voice may be faintly heard under the new one.')
     d.inputs.push({ separation, chunks: chunks.map((c) => [c.start, c.end]) })
 
     const op: EditOperation = {
@@ -1184,9 +1183,9 @@ export class EditOps {
     const wanted = cloning ? CLONE_MODEL : str(raw.model, 200) || DEFAULT_SPEECH
     const model: SpeechModel | undefined = catalog?.speech.find((m) => m.id === wanted)
     if (catalog && !model) {
-      d.problem(cloning ? 'Röstkloning finns inte hos Venice just nu.' : 'Talmodellen finns inte hos Venice.')
+      d.problem(cloning ? "Venice doesn't offer voice cloning right now." : "Venice doesn't have the speech model.")
     }
-    if (cloning && model && !model.cloning) d.problem('Modellen kan inte klona röster.')
+    if (cloning && model && !model.cloning) d.problem('The model cannot clone voices.')
 
     // The voice.
     let voice: VoiceChoice
@@ -1195,7 +1194,7 @@ export class EditOps {
       const audioId = str(v.audioId, 80)
       clip = store.audioClipRow(audioId)
       voice = { kind: 'clone', audioId }
-      if (!clip) d.problem('Röstklippet finns inte längre i biblioteket.')
+      if (!clip) d.problem('The voice clip no longer exists in the library.')
       else {
         if (!clip.clone_consent_at) d.problem(CONSENT_MISSING)
         const min = model?.cloning?.minSampleSeconds ?? 5
@@ -1203,19 +1202,19 @@ export class EditOps {
       }
     } else if (v.kind === 'custom') {
       const voiceId = str(v.voiceId, 200)
-      if (!voiceId) d.problem('Ange röst-ID:t.')
-      if (model && !model.customVoiceId) d.problem('Modellen tar inte egna röst-ID:n.')
+      if (!voiceId) d.problem('Give the voice ID.')
+      if (model && !model.customVoiceId) d.problem("The model doesn't take custom voice IDs.")
       voice = { kind: 'custom', voiceId }
     } else {
       const name = str(v.voice, 200) || model?.defaultVoice || model?.voices[0] || ''
-      if (model && model.voices.length && !model.voices.includes(name)) d.problem('Välj en av modellens röster.')
+      if (model && model.voices.length && !model.voices.includes(name)) d.problem("Choose one of the model's voices.")
       voice = { kind: 'preset', voice: name }
     }
 
     // The lines and where they go.
     const rawLines = Array.isArray(raw.lines) ? raw.lines.slice(0, MAX_LINES + 1) : []
-    if (!rawLines.length) d.problem('Skriv minst en replik.')
-    if (rawLines.length > MAX_LINES) d.problem(`Högst ${MAX_LINES} repliker åt gången.`)
+    if (!rawLines.length) d.problem('Write at least one line.')
+    if (rawLines.length > MAX_LINES) d.problem(`At most ${MAX_LINES} lines at a time.`)
     const transcript = rawLines.some((l) => typeof (l as SpeakLine)?.segmentId === 'string')
       ? transcriptFor(base.id)
       : null
@@ -1235,12 +1234,12 @@ export class EditOps {
     rawLines.slice(0, MAX_LINES).forEach((value, i) => {
       const l = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
       const text = str(l.text, 6000)
-      if (!text) d.problem(`Replik ${i + 1} är tom.`)
-      else if (Array.from(text).length > maxChars) d.problem(`Replik ${i + 1} är för lång (högst ${maxChars} tecken).`)
+      if (!text) d.problem(`Line ${i + 1} is empty.`)
+      else if (Array.from(text).length > maxChars) d.problem(`Line ${i + 1} is too long (at most ${maxChars} characters).`)
       if (typeof l.segmentId === 'string') {
-        if (!transcript) d.problem('Transkribera filmen först för att läsa in repliker på nytt.')
+        if (!transcript) d.problem('Transcribe the film first to re-record lines.')
         const seg = segments.find((s) => s.id === l.segmentId)
-        if (transcript && !seg) d.problem(`Replik ${i + 1} finns inte längre i transkriptionen.`)
+        if (transcript && !seg) d.problem(`Line ${i + 1} is no longer in the transcript.`)
         lines.push({ segmentId: l.segmentId, text })
         if (seg) {
           const next = segments.filter((s) => s.start > seg.start + 1e-3).sort((a, b) => a.start - b.start)[0]
@@ -1257,7 +1256,7 @@ export class EditOps {
         }
       } else {
         const at = num(l.at)
-        if (at === undefined || at < 0 || at >= D) d.problem(`Replik ${i + 1} måste placeras inuti filmen.`)
+        if (at === undefined || at < 0 || at >= D) d.problem(`Line ${i + 1} must be placed inside the film.`)
         const t = round(Math.min(Math.max(0, at ?? 0), D))
         lines.push({ at: t, text })
         const next = segments.filter((s) => s.start > t + 1e-3).sort((a, b) => a.start - b.start)[0]
@@ -1277,7 +1276,7 @@ export class EditOps {
     if (replacing && background === 'keep' && !separation) d.problem(NO_SEPARATION)
     const fit = raw.fit === 'overlap' ? 'overlap' : 'tempo'
     const style = model?.stylePrompt ? str(raw.style, 500) || undefined : undefined
-    if (!model?.stylePrompt && str(raw.style)) d.note('Modellen tar ingen ton – den skickas inte.')
+    if (!model?.stylePrompt && str(raw.style)) d.note("The model takes no tone – it isn't sent.")
     const language = model?.endpoint === 'speech' ? str(raw.language, 40) || undefined : undefined
     const format = model
       ? (['wav', 'mp3', 'flac'].find((f) => model.formats.includes(f)) ?? model.formats[0] ?? 'mp3')
@@ -1292,11 +1291,11 @@ export class EditOps {
         endpoint: 'voice-clone',
         model: model.id,
         request: { audioId: clip.id, start: window.start, length: window.length },
-        label: 'Röstkloning'
+        label: 'Voice cloning'
       })
       d.addPrice(undefined)
-      d.priceNote = 'Röstkloning: pris anges inte av Venice'
-      d.steps.push({ label: `Röstkloning (${clip.asset_name})` })
+      d.priceNote = 'Voice cloning: Venice gives no price'
+      d.steps.push({ label: `Voice cloning (${clip.asset_name})` })
     }
     if (model) {
       const voiceValue =
@@ -1322,22 +1321,22 @@ export class EditOps {
             ...(language ? { language } : {})
           },
           quote: prices[i],
-          label: `Replik ${slot.index + 1}`
+          label: `Line ${slot.index + 1}`
         })
         d.addPrice(prices[i])
-        d.steps.push({ label: `Replik ${slot.index + 1}: ${excerpt(slot.text, 30)}`, priceUsd: prices[i] })
+        d.steps.push({ label: `Line ${slot.index + 1}: ${excerpt(slot.text, 30)}`, priceUsd: prices[i] })
       })
-      if (model.endpoint === 'speech' && !d.priceNote) d.priceNote = 'Uppskattat från Venices prislista'
-      if (model.endpoint === 'speech' && d.priceNote === 'Röstkloning: pris anges inte av Venice') {
-        d.priceNote = 'Röstkloning: pris anges inte av Venice · repliker uppskattade från prislistan'
+      if (model.endpoint === 'speech' && !d.priceNote) d.priceNote = "Estimated from Venice's price list"
+      if (model.endpoint === 'speech' && d.priceNote === 'Voice cloning: Venice gives no price') {
+        d.priceNote = 'Voice cloning: Venice gives no price · lines estimated from the price list'
       }
     }
     if (replacing) d.warn(LIP_SYNC)
-    if (fit === 'overlap') d.note('Repliker som blir längre än sin plats får överlappa det som kommer efter.')
+    if (fit === 'overlap') d.note('Lines that get longer than their slot may overlap what comes after.')
     if (cloning) {
-      d.note('Lyssna på första repliken innan du läser in en hel film – klonade röster på svenska är inte provade.')
+      d.note("Listen to the first line before you re-record a whole film – cloned voices in Swedish haven't been tested.")
     }
-    if (replacing && !separation) d.warn('Den gamla rösten kan höras svagt under den nya.')
+    if (replacing && !separation) d.warn('The old voice may be faintly heard under the new one.')
 
     const op: EditOperation = {
       op: 'speak-lines',
@@ -1366,14 +1365,14 @@ export class EditOps {
     const list = isMusic ? catalog?.music : catalog?.effects
     const model = list?.find((m) => m.id === wanted)
     if (catalog && !model) {
-      d.problem(isMusic ? 'Musikmodellen finns inte hos Venice.' : 'Ljudeffektmodellen finns inte hos Venice.')
+      d.problem(isMusic ? "Venice doesn't have the music model." : "Venice doesn't have the sound effect model.")
     }
     const prompt = str(raw.prompt, 4000)
-    if (!prompt) d.problem(isMusic ? 'Beskriv musiken.' : 'Beskriv ljudet.')
+    if (!prompt) d.problem(isMusic ? 'Describe the music.' : 'Describe the sound.')
     else if (model && prompt.length > model.promptLimit) {
-      d.problem(`Beskrivningen är för lång (högst ${model.promptLimit} tecken).`)
+      d.problem(`The description is too long (at most ${model.promptLimit} characters).`)
     }
-    else if (model && prompt.length < model.minPromptLength) d.problem('Beskrivningen är för kort.')
+    else if (model && prompt.length < model.minPromptLength) d.problem('The description is too short.')
     const gainDb = round(Math.min(24, Math.max(-60, num(raw.gainDb) ?? (isMusic ? DEFAULT_MUSIC_GAIN_DB : 0))), 10)
 
     if (isMusic) {
@@ -1383,10 +1382,10 @@ export class EditOps {
       const length = range ? range.end - range.start : D
       const seconds = model ? audioDurationFor(model, length) : undefined
       if (model && !model.durationControl) {
-        d.note('Modellen väljer själv längden – musiken kortas av eller slutar tidigare.')
+        d.note('The model picks the length itself – the music is cut short or ends earlier.')
       } else if (seconds !== undefined && seconds < length - 0.5) {
-        const of = range ? 'markeringens' : 'filmens'
-        d.note(`Musiken blir ${seconds} s (modellens längsta) och slutar före ${of} slut.`)
+        const of = range ? 'the selection' : 'the film'
+        d.note(`The music will be ${seconds} s (the model's longest) and ends before ${of} does.`)
       }
       const instrumental = model?.instrumental ? raw.instrumental !== false : undefined
       const duck = raw.duck !== false
@@ -1397,7 +1396,7 @@ export class EditOps {
             .catch(() => undefined)
         : undefined
       d.addPrice(usd)
-      d.steps.push({ label: `Musik ${seconds !== undefined ? `${seconds} s` : ''}`.trim(), seconds, priceUsd: usd })
+      d.steps.push({ label: `Music ${seconds !== undefined ? `${seconds} s` : ''}`.trim(), seconds, priceUsd: usd })
       const op: EditOperation = {
         op: 'music',
         model: model?.id ?? wanted,
@@ -1424,7 +1423,7 @@ export class EditOps {
                     ...(instrumental !== undefined ? { instrumental } : {})
                   },
                   quote: usd,
-                  label: 'Musik',
+                  label: 'Music',
                   seconds
                 }
               ]
@@ -1435,11 +1434,11 @@ export class EditOps {
     }
 
     const at = round(Math.max(0, num(raw.at) ?? 0))
-    if (at >= D) d.problem('Ljudeffekten måste börja inuti filmen.')
+    if (at >= D) d.problem('The sound effect must start inside the film.')
     const asked = Math.max(1, num(raw.seconds) ?? model?.defaultSeconds ?? 3)
     const seconds = model ? (audioDurationFor(model, asked) ?? asked) : Math.round(asked)
     if (model && model.durationControl && Math.abs(seconds - asked) > 0.5) {
-      d.note(`Ljudeffekten blir ${seconds} s (modellen gör ${model.minSeconds}–${model.maxSeconds} s).`)
+      d.note(`The sound effect will be ${seconds} s (the model makes ${model.minSeconds}–${model.maxSeconds} s).`)
     }
     const usd = model
       ? await this.deps.audio
@@ -1447,7 +1446,7 @@ export class EditOps {
           .catch(() => undefined)
       : undefined
     d.addPrice(usd)
-    d.steps.push({ label: `Ljudeffekt ${seconds} s`, seconds, priceUsd: usd })
+    d.steps.push({ label: `Sound effect ${seconds} s`, seconds, priceUsd: usd })
     const op: EditOperation = { op: 'effect', model: model?.id ?? wanted, prompt, at, seconds, gainDb }
     return {
       op,
@@ -1460,7 +1459,7 @@ export class EditOps {
                 model: model.id,
                 request: { kind: 'effect', prompt, ...(model.durationControl ? { durationSeconds: seconds } : {}) },
                 quote: usd,
-                label: 'Ljudeffekt',
+                label: 'Sound effect',
                 seconds
               }
             ]
@@ -1546,7 +1545,7 @@ export class EditOps {
     } catch (err) {
       const status = statusOf(err)
       if (status === 401 || status === 403) d.problem(NO_KEY)
-      else d.warn(`Priset kunde inte hämtas från Venice: ${errorText(err)}`)
+      else d.warn(`The price could not be fetched from Venice: ${errorText(err)}`)
     }
     d.addPrice(usd)
     d.steps.push({ label, ...(seconds !== undefined ? { seconds: round(seconds) } : {}), priceUsd: usd })
@@ -1578,13 +1577,13 @@ export class EditOps {
       const factor: 2 | 4 = raw.factor === 4 ? 4 : 2
       const vm = models.find((m) => m.videoInput && isUpscaleModel(m.id))
       const modelId = vm?.id ?? DEFAULT_UPSCALE
-      if (models.length && !vm) d.problem('Uppskalning finns inte hos Venice just nu.')
+      if (models.length && !vm) d.problem("Venice doesn't offer upscaling right now.")
       const longSide = Math.max(info.width, info.height)
       if (longSide * factor > MAX_UPSCALE_LONG_SIDE) {
         d.problem(
           factor === 4 && longSide * 2 <= MAX_UPSCALE_LONG_SIDE
-            ? 'Filmen blir för stor med 4× (högst 3840 bildpunkter på längden). Välj 2×.'
-            : 'Filmen är redan så stor att den inte kan skalas upp mer.'
+            ? 'The film gets too large at 4× (at most 3840 pixels on the long side). Choose 2×.'
+            : 'The film is already so large that it cannot be upscaled further.'
         )
       }
       const sendBase = info.bytes <= MAX_REQUEST_MEDIA_BYTES && /\.(mp4|mov|m4v)$/i.test(base.filePath)
@@ -1596,11 +1595,11 @@ export class EditOps {
       if (!d.problems.length) {
         const standIn = await this.standIn(D, info.width, info.height, info.fps)
         d.problem(blockingPromptError(params))
-        if (!d.problems.length) await this.quote(d, { ...params, sourceVideo: standIn }, `Uppskala ${factor}×`, D)
+        if (!d.problems.length) await this.quote(d, { ...params, sourceVideo: standIn }, `Upscale ${factor}×`, D)
       }
       d.resultSeconds = D
       d.estimatedBytes = info.bytes * factor * factor
-      d.note('Uppskalningen görs av hela filmen i en begäran.')
+      d.note('The whole film is upscaled in one request.')
       return {
         op,
         exec: {
@@ -1617,7 +1616,7 @@ export class EditOps {
     if (raw.op === 'extend') {
       let modelId = str(raw.model, 200) || DEFAULT_I2V
       let vm = models.find((m) => m.id === modelId)
-      if (models.length && !vm) d.problem('Modellen finns inte hos Venice.')
+      if (models.length && !vm) d.problem("Venice doesn't have the model.")
       if (vm && vm.kind !== 'image-to-video') {
         modelId = endImageVariant(modelId, ids)
         vm = models.find((m) => m.id === modelId)
@@ -1628,14 +1627,14 @@ export class EditOps {
         (best, s) => (Math.abs(s - asked) < Math.abs(best - asked) ? s : best),
         allowed[0] ?? 5
       )
-      if (!allowed.length) d.problem('Modellen kan inte göra 4–15 s.')
-      if (Math.abs(seconds - asked) > 1e-3) d.note(`Längden justeras till ${seconds} s — modellen gör hela sekunder.`)
-      if (!prompt) d.problem('Skriv vad som händer sedan.')
+      if (!allowed.length) d.problem('The model cannot make 4–15 s.')
+      if (Math.abs(seconds - asked) > 1e-3) d.note(`The length is adjusted to ${seconds} s — the model makes whole seconds.`)
+      if (!prompt) d.problem('Write what happens next.')
       const audio: 'model' | 'silence' = raw.audio === 'silence' ? 'silence' : 'model'
       const resolution = vm ? patchResolution(vm.resolutions, info.height, str(raw.resolution, 20)) : undefined
       const aspectRatio = vm ? closestAspect(vm.aspectRatios, info.width, info.height) : undefined
       const sound = audio === 'model' && !!vm?.audio
-      if (audio === 'model' && vm && !vm.audio) d.note('Modellen gör inget ljud – förlängningen blir tyst.')
+      if (audio === 'model' && vm && !vm.audio) d.note('The model makes no sound – the extension will be silent.')
       const params: GenerationParams = {
         model: modelId,
         prompt,
@@ -1648,11 +1647,11 @@ export class EditOps {
       try {
         d.frames = { start: await this.frame(base, 'last') }
       } catch (err) {
-        d.problem(`Sista bildrutan kunde inte tas ut: ${errorText(err)}`)
+        d.problem(`The last frame could not be taken out: ${errorText(err)}`)
       }
       if (own) d.warn(REAL_PEOPLE)
       if (prompt) d.problem(blockingPromptError(params))
-      if (!d.problems.length) await this.quote(d, params, `Förläng ${seconds} s`, seconds)
+      if (!d.problems.length) await this.quote(d, params, `Extend ${seconds} s`, seconds)
       d.resultSeconds = D + seconds - frame
       d.estimatedBytes = info.bytes * (d.resultSeconds / D) * 1.3
       const op: EditOperation = {
@@ -1667,18 +1666,18 @@ export class EditOps {
     }
 
     const r = readRange(raw.range)
-    if (!r) d.problem('Markera avsnittet först.')
+    if (!r) d.problem('Select the section first.')
     const audio: 'keep' | 'model' = raw.audio === 'model' ? 'model' : 'keep'
 
     if (raw.op === 'regenerate') {
       let modelId = str(raw.model, 200) || DEFAULT_I2V
       let vm = models.find((m) => m.id === modelId)
-      if (models.length && !vm) d.problem('Modellen finns inte hos Venice.')
+      if (models.length && !vm) d.problem("Venice doesn't have the model.")
       if (vm && (vm.kind !== 'image-to-video' || !supportsEndImage(modelId))) {
         const swapped = endImageVariant(modelId, ids)
         if (swapped !== modelId) {
           const name = models.find((m) => m.id === swapped)?.name ?? swapped
-          d.note(`Modellen byts till ${name}, som tar en slutbild.`)
+          d.note(`The model is switched to ${name}, which takes an end image.`)
         }
         modelId = swapped
         vm = models.find((m) => m.id === modelId)
@@ -1692,10 +1691,10 @@ export class EditOps {
         : { start: 0, end: Math.min(D, 4) }
       const length = round(range.end - range.start)
       const needEnd = range.end < D - frame / 2
-      if (!prompt) d.problem('Skriv vad som händer i avsnittet.')
+      if (!prompt) d.problem('Write what happens in the section.')
       const resolution = vm ? patchResolution(vm.resolutions, info.height, str(raw.resolution, 20)) : undefined
       const aspectRatio = vm ? closestAspect(vm.aspectRatios, info.width, info.height) : undefined
-      if (audio === 'model' && vm && !vm.audio) d.problem('Modellen gör inget ljud. Välj Behåll originalljudet.')
+      if (audio === 'model' && vm && !vm.audio) d.problem('The model makes no sound. Choose Keep the original sound.')
       const params: GenerationParams = {
         model: modelId,
         prompt,
@@ -1711,13 +1710,13 @@ export class EditOps {
         const end = needEnd ? await this.frame(base, 'after', range.end) : undefined
         d.frames = { start, ...(end ? { end } : {}) }
       } catch (err) {
-        d.problem(`Bildrutorna kunde inte tas ut: ${errorText(err)}`)
+        d.problem(`The frames could not be taken out: ${errorText(err)}`)
       }
-      if (range.start <= frame / 2) d.note('Avsnittet börjar på filmens första bildruta.')
-      if (!needEnd) d.note('Avsnittet slutar där filmen slutar – ingen slutbild behövs.')
+      if (range.start <= frame / 2) d.note("The section starts on the film's first frame.")
+      if (!needEnd) d.note('The section ends where the film ends – no end image is needed.')
       if (own) d.warn(REAL_PEOPLE)
       if (prompt) d.problem(blockingPromptError(params))
-      if (!d.problems.length) await this.quote(d, params, `Gör om ${fmtSeconds(length)}`, length)
+      if (!d.problems.length) await this.quote(d, params, `Regenerate ${fmtSeconds(length)}`, length)
       d.resultSeconds = D
       d.estimatedBytes = info.bytes * 1.3
       const op: EditOperation = {
@@ -1735,29 +1734,29 @@ export class EditOps {
     const modelId = str(raw.model, 200) || DEFAULT_EDIT_MODEL
     const spec = PICTURE_EDIT_MODELS[modelId]
     const vm = models.find((m) => m.id === modelId)
-    if (!spec) d.problem('Modellen kan inte ändra video.')
-    else if (models.length && !vm) d.problem('Modellen finns inte hos Venice.')
+    if (!spec) d.problem('The model cannot edit video.')
+    else if (models.length && !vm) d.problem("Venice doesn't have the model.")
     const range = r
       ? this.snap(d, r, info, { min: spec?.minSeconds ?? 1, max: spec?.maxSeconds ?? 10 })
       : { start: 0, end: Math.min(D, spec?.minSeconds ?? 4) }
     const length = round(range.end - range.start)
-    if (!prompt) d.problem('Skriv vad som ska ändras.')
+    if (!prompt) d.problem('Write what should change.')
     const seedance = spec?.kind === 'r2v-edit' || supportsReferenceVideos(modelId)
     const resolution = vm ? patchResolution(vm.resolutions, info.height, str(raw.resolution, 20)) : undefined
     const imageIds = Array.isArray(raw.referenceImageIds)
       ? [...new Set(raw.referenceImageIds.filter((s): s is string => typeof s === 'string'))]
       : []
     const imagePaths: string[] = []
-    if (imageIds.length && !spec?.referenceImages) d.problem('Modellen tar inga bilder att utgå från.')
-    if (imageIds.length > 9) d.problem('Högst 9 bilder att utgå från.')
+    if (imageIds.length && !spec?.referenceImages) d.problem('The model takes no images to start from.')
+    if (imageIds.length > 9) d.problem('At most 9 images to start from.')
     for (const id of imageIds) {
       const path = store.assetImagePath(id)
-      if (!path || !existsSync(path)) d.problem('En bild att utgå från finns inte längre.')
+      if (!path || !existsSync(path)) d.problem('An image to start from no longer exists.')
       else imagePaths.push(path)
     }
     let soundFromModel = audio === 'model'
     if (soundFromModel && vm && !vm.audio) {
-      d.note('Modellen gör inget ljud – originalljudet behålls.')
+      d.note('The model makes no sound – the original sound is kept.')
       soundFromModel = false
     }
     // The proxy: ≤720p (the film's own height when lower), at least 0.05 bits per pixel and frame, ≤22 MB.
@@ -1799,11 +1798,11 @@ export class EditOps {
     if (own && seedance) d.warn(REAL_PEOPLE)
     const named = Math.max(0, ...[...prompt.matchAll(/@image\s*(\d+)/gi)].map((m) => Number(m[1])))
     if (named > imagePaths.length) {
-      const chosen = `${imagePaths.length} ${imagePaths.length === 1 ? 'bild' : 'bilder'}`
+      const chosen = `${imagePaths.length} ${imagePaths.length === 1 ? 'image' : 'images'}`
       d.problem(
         imagePaths.length
-          ? `Prompten hänvisar till @Image${named}, men bara ${chosen} att utgå från är valda.`
-          : `Prompten hänvisar till @Image${named}, men ingen bild att utgå från är vald.`
+          ? `The prompt refers to @Image${named}, but only ${chosen} to start from ${imagePaths.length === 1 ? 'is' : 'are'} chosen.`
+          : `The prompt refers to @Image${named}, but no image to start from is chosen.`
       )
     }
     // What the change works on, for the approval dialog and plan_edit_operation (only a preview: nothing is sent).
@@ -1822,7 +1821,7 @@ export class EditOps {
         ? { ...params, referenceVideos: [standIn] }
         : { ...params, sourceVideo: standIn }
       d.problem(blockingPromptError(sent as Parameters<typeof blockingPromptError>[0]))
-      if (!d.problems.length) await this.quote(d, sent, `Ändra ${fmtSeconds(length)}`, length)
+      if (!d.problems.length) await this.quote(d, sent, `Edit ${fmtSeconds(length)}`, length)
     }
     d.resultSeconds = D
     d.estimatedBytes = info.bytes * 1.3
@@ -1884,7 +1883,7 @@ export class EditOps {
       case 'picture':
         return this.runPicture(planned, planned.exec)
       default:
-        throw new Error('Okänd åtgärd.')
+        throw new Error('Unknown operation.')
     }
   }
 
@@ -2004,7 +2003,7 @@ export class EditOps {
       await extractAudio(base.filePath, tmp, { rate: SAMPLE_RATE, channels: 2, codec: 'flac' })
       const media = await this.addMediaFile(edit, tmp, {
         kind: 'bake',
-        label: `Ljud från ${base.title ?? 'versionen'}`,
+        label: `Sound from ${base.title ?? 'the version'}`,
         duration: info.duration
       })
       return mixes.defaultMixFromMedia(media.id)
@@ -2028,7 +2027,7 @@ export class EditOps {
     move = false
   ): Promise<store.StoredMedia> {
     const fresh = store.getEditRow(edit.id)
-    if (!fresh?.folder) throw new Error('Redigeringen finns inte längre.')
+    if (!fresh?.folder) throw new Error('The edit no longer exists.')
     await libraryOperationSettled()
     const dir = editDir(fresh.folder, 'audio')
     const ext = extname(file).toLowerCase() || '.wav'
@@ -2106,11 +2105,11 @@ export class EditOps {
     takeId?: string
     quote?: number
     costUsd?: number
-    /** Made by a paid job: the version is news for the user until they look at it (Pågår och klart). */
+    /** Made by a paid job: the version is news for the user until they look at it (Activity). */
     paid?: boolean
   }): Promise<db.StoredGeneration> {
     const edit = store.getEditRow(spec.edit.id)
-    if (!edit?.folder) throw new Error('Redigeringen finns inte längre.')
+    if (!edit?.folder) throw new Error('The edit no longer exists.')
     await libraryOperationSettled()
     const n = store.nextVersionNumber(edit)
     const dir = editDir(edit.folder)
@@ -2220,7 +2219,7 @@ export class EditOps {
   private renderFree(p: Planned): Promise<string> {
     const { edit, base, info, op } = p
     const label = this.label(op)
-    return this.render(edit.id, `Gör ${label.toLowerCase()}…`, async ({ signal, work, progress }) => {
+    return this.render(edit.id, `${label}…`, async ({ signal, work, progress }) => {
       const D = info.duration
       let mix = await this.usableMix(edit, base, info)
       const out = join(work, 'version.mp4')
@@ -2264,7 +2263,7 @@ export class EditOps {
         }
         case 'layer': {
           const layer = mix.layers.find((l) => l.id === op.layerId)
-          if (!layer) throw new Error('Lagret finns inte i den här versionen.')
+          if (!layer) throw new Error('The layer is not in this version.')
           if (op.remove) mix.layers = mix.layers.filter((l) => l.id !== op.layerId)
           else {
             if (op.gainDb !== undefined) layer.gainDb = op.gainDb
@@ -2325,14 +2324,14 @@ export class EditOps {
               (f) => progress(0.8 + f * 0.1)
             )
           }
-          mix = await this.bakeMix(edit, wav, `${label} – ljud`)
+          mix = await this.bakeMix(edit, wav, `${label} – sound`)
           await replaceAudioTrack(picture, wav, out, { signal })
           return (
             await this.writeVersion({ edit, base, op, label, video: out, mix, timing: 'changed', spans })
           ).id
         }
         default:
-          throw new Error('Åtgärden kan inte göras här.')
+          throw new Error('The operation cannot be done here.')
       }
       const wav = await this.mixToFile(mix, D, work, signal, (f) => progress(f * 0.8))
       await replaceAudioTrack(base.filePath, wav, out, { signal })
@@ -2357,14 +2356,14 @@ export class EditOps {
     if ('mediaId' in source) {
       const media = store.getMedia(source.mediaId)
       if (!media || media.editId !== edit.id || !existsSync(media.path)) {
-        throw new Error('Ljudet finns inte i redigeringen.')
+        throw new Error('The audio is not in the edit.')
       }
       return media
     }
     const clip = store.audioClipRow(source.assetAudioId)
-    if (!clip) throw new Error('Ljudklippet finns inte längre i biblioteket.')
+    if (!clip) throw new Error('The audio clip no longer exists in the library.')
     const path = fromStoredPath(clip.file_path)
-    if (!existsSync(path)) throw new Error('Ljudklippets fil saknas.')
+    if (!existsSync(path)) throw new Error("The audio clip's file is missing.")
     return this.addMediaFile(edit, path, {
       kind: 'audio',
       label: `${clip.asset_name} – ${basename(path, extname(path))}`,
@@ -2377,7 +2376,7 @@ export class EditOps {
 
   private async startAudioJob(p: Planned, exec: Extract<Exec, { kind: 'audio' }>): Promise<string> {
     const { edit, base, info, op, plan } = p
-    if (!exec.steps.length) throw new Error('Det finns inget att skicka.')
+    if (!exec.steps.length) throw new Error('There is nothing to send.')
     this.submitting++
     try {
       // The mix the finish builds on is fixed now (a missing source becomes a bed of the base's own sound), and the
@@ -2477,12 +2476,12 @@ export class EditOps {
     if (steps.some((s) => s.status === 'queued' || s.status === 'sending')) return
     const failed = steps.find((s) => s.status === 'failed')
     if (failed) {
-      store.updateJob(job.id, { status: 'failed', error: failed.error ?? 'En del misslyckades.' })
+      store.updateJob(job.id, { status: 'failed', error: failed.error ?? 'A part failed.' })
       this.reportDone(job, failed.error)
       return
     }
     if (steps.some((s) => s.status === 'pending' || s.status === 'cancelled')) {
-      // Only a resumed job (nothing sent without a click) gets here: it waits for "Fortsätt".
+      // Only a resumed job (nothing sent without a click) gets here: it waits for "Continue".
       store.updateJob(job.id, { status: 'failed', error: CLOSED })
       this.reportDone(job, CLOSED)
       return
@@ -2499,7 +2498,7 @@ export class EditOps {
     const done = steps.filter((s) => s.status === 'completed').length
     const total = steps.length
     const fraction = total ? (done / total) * 0.9 : 0
-    const currentStep = total > 1 ? `del ${Math.min(done + 1, total)} av ${total}` : undefined
+    const currentStep = total > 1 ? `part ${Math.min(done + 1, total)} of ${total}` : undefined
     this.live.set(job.id, { fraction, currentStep })
     this.report({
       editId: job.editId,
@@ -2518,7 +2517,7 @@ export class EditOps {
     const mix = job.request.finish?.mix as AudioMix | undefined
     if (job.op === 'transcribe' || !mix) return (await mixes.stemsOf(base.filePath)).voice
     const from = await this.voiceSource(base as db.StoredGeneration & { filePath: string }, mix, true)
-    if (!from) throw new Error('Filmen har inget tal att byta röst på.')
+    if (!from) throw new Error('The film has no speech to change the voice of.')
     return from.path
   }
 
@@ -2578,10 +2577,10 @@ export class EditOps {
         })
         const named = join(dir, `${step.position}.sent.${res.format}`)
         if (existsSync(sent)) await rename(sent, named)
-        if (!existsSync(named)) throw new Error('Ljudet kunde inte förberedas.')
+        if (!existsSync(named)) throw new Error('The audio could not be prepared.')
         store.updateStep(step.id, { request: { ...req, sentFormat: res.format } })
         const file = await readFile(named)
-        const filename = `del-${step.position + 1}.${res.format}`
+        const filename = `part-${step.position + 1}.${res.format}`
         return async () => {
           const out = await this.deps.audio.queueVoiceChange({
             model: step.model,
@@ -2633,7 +2632,7 @@ export class EditOps {
         const sent = join(dir, `${step.position}.sent.mp3`)
         await extractAudio(src, sent, { rate: 16000, channels: 1, codec: 'mp3', bitrate: '64k' })
         if ((await stat(sent)).size > ASR_MAX_BYTES) {
-          throw new Error('Ljudet är för långt för att transkriberas i ett svep (högst ~24 MB).')
+          throw new Error('The audio is too long to transcribe in one go (at most ~24 MB).')
         }
         const file = await readFile(sent)
         return async () => {
@@ -2650,7 +2649,7 @@ export class EditOps {
       }
       case 'voice-clone': {
         const clip = store.audioClipRow(String(req.audioId))
-        if (!clip) throw new Error('Röstklippet finns inte längre i biblioteket.')
+        if (!clip) throw new Error('The voice clip no longer exists in the library.')
         if (!clip.clone_consent_at) throw new Error(CONSENT_MISSING)
         const sample = join(dir, `${step.position}.sample.wav`)
         const start = Number(req.start) || 0
@@ -2678,7 +2677,7 @@ export class EditOps {
         }
       }
       default:
-        throw new Error('Okänd del av jobbet.')
+        throw new Error('Unknown part of the job.')
     }
   }
 
@@ -2687,7 +2686,7 @@ export class EditOps {
     const voice = step.request.voice
     const audioId = cloneVoiceOf(step)
     if (audioId) {
-      // Consent withdrawn after the job was planned (or before "Fortsätt"): the line is not said in that voice. Checked
+      // Consent withdrawn after the job was planned (or before "Continue"): the line is not said in that voice. Checked
       // here, before the step is marked 'sending', so the refusal leaves nothing charged.
       if (!store.audioClipRow(audioId)?.clone_consent_at) throw new Error(CONSENT_MISSING)
       const clone = store.validClone(audioId, step.model, 60_000)
@@ -2721,7 +2720,7 @@ export class EditOps {
   /** Polls a queued (paid) step to its audio, with the job manager's backoff. */
   private async poll(run: JobRun, step: store.StoredStep): Promise<void> {
     if (!step.queueId) {
-      store.updateStep(step.id, { status: 'failed', error: 'Jobbet saknar kö-id hos Venice.' })
+      store.updateStep(step.id, { status: 'failed', error: 'The job has no queue ID at Venice.' })
       return
     }
     const job = store.getJob(step.jobId)
@@ -2774,7 +2773,7 @@ export class EditOps {
     const label = job.request.label
     return this.render(
       job.editId,
-      `${label} … gör klart`,
+      `${label} … finishing`,
       async (ctx) => {
         try {
           await this.finishJob(jobId, ctx)
@@ -2799,34 +2798,34 @@ export class EditOps {
     ctx: { signal: AbortSignal; work: string; progress: (f: number) => void }
   ): Promise<void> {
     const job = store.getJob(jobId)
-    if (!job) throw new Error('Jobbet finns inte längre.')
+    if (!job) throw new Error('The job no longer exists.')
     const steps = store.listSteps(jobId)
     const dir = this.jobDir(jobId)
     const output = (s: store.StoredStep): string => {
       const format = typeof s.request.format === 'string' ? s.request.format : 'mp3'
       const path = join(dir, `${s.position}.${format}`)
-      if (!existsSync(path)) throw new Error('Ett hämtat ljud saknas. Gör om åtgärden.')
+      if (!existsSync(path)) throw new Error('A fetched sound is missing. Do the operation again.')
       return path
     }
 
     if (job.op === 'design-voice') {
       const req = job.request.voiceDesign
       const step = steps[0]
-      if (!req || !step) throw new Error('Jobbet är ofullständigt.')
-      await addGeneratedAudio(req.assetId, output(step), `Skapad röst ${dayStamp(new Date())}`)
+      if (!req || !step) throw new Error('The job is incomplete.')
+      await addGeneratedAudio(req.assetId, output(step), `Designed voice ${dayStamp(new Date())}`)
       this.deps.libraryChanged?.()
       return
     }
 
     const edit = job.editId ? store.getEditRow(job.editId) : undefined
-    if (!edit) throw new Error('Redigeringen finns inte längre.')
+    if (!edit) throw new Error('The edit no longer exists.')
     const base = job.baseId ? db.getGeneration(job.baseId) : undefined
     if (!base?.filePath || !existsSync(base.filePath)) throw new Error(BASE_GONE)
     const fullBase = base as db.StoredGeneration & { filePath: string }
     const info = await this.baseInfo(base.filePath)
     const D = info.duration
     const op = job.request.operation
-    if (!op) throw new Error('Jobbet är ofullständigt.')
+    if (!op) throw new Error('The job is incomplete.')
     const fin = job.request.finish ?? {}
     const mix = mixes.cloneMix(
       (fin.mix as AudioMix | undefined) ?? mixes.mixOf(base, base.id === edit.origin_generation_id)
@@ -2935,7 +2934,7 @@ export class EditOps {
         await extractAudio(voiceTrack, flac, { codec: 'flac' })
         const media = await this.addMediaFile(edit, flac, {
           kind: 'voice',
-          label: `Röst – ${voiceName}`,
+          label: `Voice – ${voiceName}`,
           model: steps[0]?.model,
           cost: quote,
           details: { voice: voiceName }
@@ -2965,7 +2964,7 @@ export class EditOps {
         await extractAudio(gated ?? assembled, flac, { codec: 'flac' })
         const media = await this.addMediaFile(edit, flac, {
           kind: 'voice',
-          label: `Röst – ${voiceName}`,
+          label: `Voice – ${voiceName}`,
           model: steps[0]?.model,
           cost: quote,
           details: { voice: voiceName }
@@ -2974,7 +2973,7 @@ export class EditOps {
           id: randomUUID(),
           kind: 'voice',
           mediaId: media.id,
-          label: `Röst – ${voiceName}`,
+          label: `Voice – ${voiceName}`,
           at: scopeStart,
           offset: 0,
           length: scopeEnd - scopeStart,
@@ -3030,7 +3029,7 @@ export class EditOps {
           ? op.voice.voice
           : op.voice.kind === 'custom'
             ? op.voice.voiceId
-            : (store.audioClipRow(op.voice.audioId)?.asset_name ?? 'klonad röst')
+            : (store.audioClipRow(op.voice.audioId)?.asset_name ?? 'cloned voice')
       for (const [i, s] of lineSteps.entries()) {
         const slot = slots.find((x) => x.index === Number(s.request.line))
         if (!slot) continue
@@ -3063,7 +3062,7 @@ export class EditOps {
         }
         const media = await this.addMediaFile(edit, file, {
           kind: 'speech',
-          label: `Replik ${slot.index + 1} – ${excerpt(slot.text, 40)}`,
+          label: `Line ${slot.index + 1} – ${excerpt(slot.text, 40)}`,
           model: s.model,
           cost: s.quote,
           duration: length,
@@ -3074,7 +3073,7 @@ export class EditOps {
           kind: 'speech',
           mediaId: media.id,
           ...(op.voice.kind === 'clone' ? { assetAudioId: op.voice.audioId } : {}),
-          label: `Replik ${slot.index + 1}: ${excerpt(slot.text, 30)}`,
+          label: `Line ${slot.index + 1}: ${excerpt(slot.text, 30)}`,
           at: slot.start,
           offset: 0,
           length: Math.min(length, Math.max(0.05, D - slot.start)),
@@ -3121,7 +3120,7 @@ export class EditOps {
       const fade = op.op === 'music' ? Math.min(Number(fin.fade) || 0, length / 2) : Math.min(0.01, length / 4)
       const media = await this.addMediaFile(edit, file, {
         kind: op.op,
-        label: `${op.op === 'music' ? 'Musik' : 'Effekt'} – ${excerpt(op.prompt, 40)}`,
+        label: `${op.op === 'music' ? 'Music' : 'Effect'} – ${excerpt(op.prompt, 40)}`,
         model: step.model,
         cost: quote,
         duration,
@@ -3131,7 +3130,7 @@ export class EditOps {
         id: randomUUID(),
         kind: op.op,
         mediaId: media.id,
-        label: `${op.op === 'music' ? 'Musik' : 'Effekt'}: ${excerpt(op.prompt, 30)}`,
+        label: `${op.op === 'music' ? 'Music' : 'Effect'}: ${excerpt(op.prompt, 30)}`,
         at,
         offset: 0,
         length,
@@ -3159,26 +3158,26 @@ export class EditOps {
       return
     }
 
-    throw new Error('Okänd åtgärd.')
+    throw new Error('Unknown operation.')
   }
 
-  // ── Cancel and "Fortsätt" ────────────────────────────────────────────────
+  // ── Cancel and "Continue" ────────────────────────────────────────────────
 
   cancel(jobId: unknown): void {
     const job = store.requireJob(jobId)
     if (job.status !== 'running') return
-    if (isPictureOp(job.op)) throw new Error('Tagningen är redan skickad till Venice och kan inte avbrytas.')
+    if (isPictureOp(job.op)) throw new Error('The take has already been sent to Venice and cannot be cancelled.')
     db.getDb().transaction(() => {
       store.cancelPendingSteps(job.id)
       store.updateJob(job.id, { status: 'cancelled', error: null })
     })()
     // The runner sees the status and sends nothing more; parts already at Venice are fetched and kept.
-    this.reportDone(job, 'Avbrutet.')
+    this.reportDone(job, 'Cancelled.')
     this.notify(job.editId)
   }
 
   /**
-   * What "Fortsätt" would send again now, priced afresh (each step's quote – the stored one when Venice's fails right
+   * What "Continue" would send again now, priced afresh (each step's quote – the stored one when Venice's fails right
    * now – undefined for one Venice doesn't price): the price is what the priced parts cost, undefined when none of
    * them can be priced; `unknown` when a part has no price.
    */
@@ -3231,16 +3230,16 @@ export class EditOps {
   async resume(jobId: unknown, expectedPriceUsd?: unknown, expectedPartial?: unknown): Promise<EditJob> {
     const job = store.requireJob(jobId)
     if (job.status === 'running' || this.runs.has(job.id) || this.finishing.has(job.id)) {
-      throw new Error('Jobbet pågår redan.')
+      throw new Error('The job is already running.')
     }
-    if (job.status === 'completed') throw new Error('Jobbet är redan klart.')
+    if (job.status === 'completed') throw new Error('The job is already done.')
     if (job.editId) {
       const base = job.baseId ? db.getGeneration(job.baseId) : undefined
       if (!base?.filePath || !existsSync(base.filePath)) throw new Error(BASE_GONE)
     }
     if (isPictureOp(job.op)) {
       // Nothing is sent again: a take that is paid for and still here is only put into the film once more (free).
-      if (!this.pictureRefinishable(job)) throw new Error('En bildåtgärd kan inte fortsättas – gör om den i stället.')
+      if (!this.pictureRefinishable(job)) throw new Error('A picture operation cannot be continued – do it again instead.')
       store.updateJob(job.id, { status: 'running', error: null })
       this.finishPicture(job.id)
       this.notify(job.editId)
@@ -3251,9 +3250,9 @@ export class EditOps {
       const audioId = cloneVoiceOf(s)
       if (audioId && isUnsent(s) && !store.audioClipRow(audioId)?.clone_consent_at) throw new Error(CONSENT_MISSING)
     }
-    // A clone handle that has run out is made again inside this job (the user clicked Fortsätt): its clone step is
+    // A clone handle that has run out is made again inside this job (the user clicked Continue): its clone step is
     // sent again, or — for a job planned while an earlier handle was still valid, which has no clone step — one is
-    // added. Without it every line would fail on the expired handle again, however often Fortsätt is clicked.
+    // added. Without it every line would fail on the expired handle again, however often Continue is clicked.
     const steps = store.listSteps(job.id)
     const cloned = new Map<string, string>()
     for (const s of steps) {
@@ -3271,7 +3270,7 @@ export class EditOps {
         continue
       }
       const clip = store.audioClipRow(audioId)
-      if (!clip) throw new Error('Röstklippet finns inte längre i biblioteket.')
+      if (!clip) throw new Error('The voice clip no longer exists in the library.')
       const speechModel = (await this.catalog().catch(() => undefined))?.speech.find((m) => m.id === model)
       const min = speechModel?.cloning?.minSampleSeconds ?? 5
       store.appendStep(job.id, { endpoint: 'voice-clone', model, request: { audioId, ...cloneWindow(clip, min) } })
@@ -3329,7 +3328,7 @@ export class EditOps {
         : known.length
           ? roundUsd(known.reduce((sum, q) => sum + q, 0))
           : undefined
-    // A clone handle that has run out is made again by Fortsätt (resume adds or reopens its clone step): unpriced too.
+    // A clone handle that has run out is made again by Continue (resume adds or reopens its clone step): unpriced too.
     const cloneAgain = resumable.some((s) => {
       const audioId = s.endpoint === 'voice-clone' ? undefined : cloneVoiceOf(s)
       return (
@@ -3345,10 +3344,10 @@ export class EditOps {
     let currentStep = live?.currentStep
     if (picture && job.status === 'running') {
       currentStep = this.finishing.has(job.id)
-        ? 'sätter in tagningen'
+        ? 'putting the take in'
         : take?.status === 'processing'
-          ? 'Venice gör tagningen'
-          : 'i kö hos Venice'
+          ? 'Venice is making the take'
+          : 'queued at Venice'
     }
     return {
       id: job.id,
@@ -3369,7 +3368,7 @@ export class EditOps {
       canResume,
       ...(resumePriceUsd !== undefined ? { resumePriceUsd } : {}),
       ...(resumePartialPrice ? { resumePartialPrice: true } : {}),
-      ...(resumePartialPrice && clonesOnly ? { resumePriceNote: 'Röstkloningen anger Venice inget pris för i förväg.' } : {}),
+      ...(resumePartialPrice && clonesOnly ? { resumePriceNote: "Venice doesn't give a price for the voice cloning in advance." } : {}),
       createdAt: job.createdAt,
       updatedAt: job.updatedAt
     }
@@ -3392,7 +3391,7 @@ export class EditOps {
     try {
       await libraryOperationSettled()
       const fresh = store.getEditRow(edit.id)
-      if (!fresh?.folder) throw new Error('Redigeringen finns inte längre.')
+      if (!fresh?.folder) throw new Error('The edit no longer exists.')
       const dir = editDir(fresh.folder, 'inputs')
       const now = new Date()
       const stamp = `${dayStamp(now)} ${timeStamp(now)}`
@@ -3466,7 +3465,7 @@ export class EditOps {
       const job = store.jobForTake(g.id)
       if (!job || job.status !== 'running') return
       if (g.status === 'failed') {
-        store.updateJob(job.id, { status: 'failed', error: `Tagningen misslyckades: ${g.error ?? 'okänt fel'}` })
+        store.updateJob(job.id, { status: 'failed', error: `The take failed: ${g.error ?? 'unknown error'}` })
         this.report({ editId: job.editId, jobId: job.id, label: job.request.label, done: true, error: g.error })
         this.notify(job.editId)
         return
@@ -3510,13 +3509,13 @@ export class EditOps {
       }
     }
     if (!takeId) {
-      store.updateJob(job.id, { status: 'failed', error: 'Studio stängdes innan tagningen skickades.' })
+      store.updateJob(job.id, { status: 'failed', error: 'Studio was closed before the take was sent.' })
       this.notify(job.editId)
       return
     }
     const take = db.getGeneration(takeId)
     if (!take) {
-      store.updateJob(job.id, { status: 'failed', error: 'Tagningen togs bort innan den blev klar.' })
+      store.updateJob(job.id, { status: 'failed', error: 'The take was deleted before it was done.' })
       this.notify(job.editId)
       return
     }
@@ -3530,7 +3529,7 @@ export class EditOps {
     const job = store.getJob(jobId)!
     void this.render(
       job.editId,
-      `${job.request.label} … sätter in tagningen`,
+      `${job.request.label} … putting the take in`,
       async (ctx) => {
         try {
           const g = await this.finishPictureJob(jobId, ctx)
@@ -3541,7 +3540,7 @@ export class EditOps {
             store.updateJob(jobId, {
               status: 'failed',
               error: errorText(err),
-              // No free "Fortsätt" for what would fail the same way again: the row can then be hidden.
+              // No free "Continue" for what would fail the same way again: the row can then be hidden.
               ...(err instanceof FinishRefused ? { request: { ...stored.request, noRefinish: true } } : {})
             })
           }
@@ -3563,19 +3562,19 @@ export class EditOps {
   ): Promise<db.StoredGeneration> {
     const { signal, work, progress } = ctx
     const job = store.getJob(jobId)
-    if (!job?.editId) throw new Error('Jobbet finns inte längre.')
+    if (!job?.editId) throw new Error('The job no longer exists.')
     const edit = store.getEditRow(job.editId)
-    if (!edit) throw new Error('Redigeringen finns inte längre.')
+    if (!edit) throw new Error('The edit no longer exists.')
     const base = job.baseId ? db.getGeneration(job.baseId) : undefined
     if (!base?.filePath || !existsSync(base.filePath)) throw new Error(BASE_GONE)
     const fullBase = base as db.StoredGeneration & { filePath: string }
     const take = job.takeId ? db.getGeneration(job.takeId) : undefined
-    if (!take?.filePath || !existsSync(take.filePath)) throw new Error('Tagningens videofil saknas.')
+    if (!take?.filePath || !existsSync(take.filePath)) throw new Error("The take's video file is missing.")
     const op = job.request.operation
-    if (!op) throw new FinishRefused('Jobbet är ofullständigt.')
+    if (!op) throw new FinishRefused('The job is incomplete.')
     const info = await this.baseInfo(base.filePath)
     const t = await probe(take.filePath).catch((err: unknown) => {
-      throw new FinishRefused(`Tagningens videofil går inte att läsa (${errorText(err)}). Gör om åtgärden.`)
+      throw new FinishRefused(`The take's video file cannot be read (${errorText(err)}). Do the operation again.`)
     })
     const D = info.duration
     const L = t.duration
@@ -3589,8 +3588,8 @@ export class EditOps {
     const refuseScale = (span: number, target: number): void => {
       if (target <= 0 || Math.abs(span / target - 1) > TIME_SCALE_TOLERANCE) {
         throw new FinishRefused(
-          `Tagningen blev ${fmtSeconds(span)} men avsnittet är ${fmtSeconds(target)} – för stor skillnad för att ` +
-            'passa in. Gör om åtgärden.'
+          `The take came out ${fmtSeconds(span)} but the section is ${fmtSeconds(target)} – too big a difference to ` +
+            'fit in. Do the operation again.'
         )
       }
     }
@@ -3680,7 +3679,7 @@ export class EditOps {
         work,
         signal
       )
-      const mix = await this.bakeMix(edit, wav, `${label} – ljud`)
+      const mix = await this.bakeMix(edit, wav, `${label} – sound`)
       await replaceAudioTrack(picture, wav, out, { signal })
       return this.writeVersion({
         ...pictureVersion,
@@ -3691,7 +3690,7 @@ export class EditOps {
       })
     }
 
-    if (op.op !== 'regenerate' && op.op !== 'prompt-edit') throw new FinishRefused('Okänd bildåtgärd.')
+    if (op.op !== 'regenerate' && op.op !== 'prompt-edit') throw new FinishRefused('Unknown picture operation.')
     const { start: a, end: b } = op.range
     const target = b - a
     // A regenerated range drops the take's first frame (the start image, already shown) and its last (the end image).
@@ -3745,7 +3744,7 @@ export class EditOps {
       work,
       signal
     )
-    const mix = await this.bakeMix(edit, wav, `${label} – ljud`)
+    const mix = await this.bakeMix(edit, wav, `${label} – sound`)
     await replaceAudioTrack(picture, wav, out, { signal })
     return this.writeVersion({ ...pictureVersion, video: out, mix, timing: 'same' })
   }
@@ -3754,7 +3753,7 @@ export class EditOps {
   takeDeleted(): void {
     for (const job of store.listJobsWithStatus('running')) {
       if (!isPictureOp(job.op) || job.takeId || this.submittingJobs.has(job.id) || this.finishing.has(job.id)) continue
-      store.updateJob(job.id, { status: 'failed', error: 'Tagningen togs bort innan den blev klar.' })
+      store.updateJob(job.id, { status: 'failed', error: 'The take was deleted before it was done.' })
       this.notify(job.editId)
     }
   }
@@ -3774,26 +3773,26 @@ export class EditOps {
           | { id: string; name: string; kind: string }
           | undefined)
       : undefined
-    if (!asset) d.problem('Karaktären finns inte längre.')
-    else if (asset.kind !== 'character') d.problem('Bara karaktärer har en röst.')
+    if (!asset) d.problem('The character no longer exists.')
+    else if (asset.kind !== 'character') d.problem('Only characters have a voice.')
     const description = str(req.description, 2000)
     const sampleText = str(req.sampleText, 2000)
-    if (!description) d.problem('Beskriv rösten.')
-    if (!sampleText) d.problem('Skriv en provtext.')
+    if (!description) d.problem('Describe the voice.')
+    if (!sampleText) d.problem('Write a sample text.')
     const catalog = await this.catalogOrProblem(d)
     const wanted = str(req.model, 200) || DESIGN_MODEL
     const model = catalog?.voiceDesign.find((m) => m.id === wanted)
-    if (catalog && !model) d.problem('Röstdesign finns inte hos Venice just nu.')
+    if (catalog && !model) d.problem("Venice doesn't offer voice design right now.")
     const prompt = designPrompt(description, sampleText)
     if (model && Array.from(prompt).length > model.maxCharacters) {
-      d.problem(`Beskrivning och provtext får vara högst ${model.maxCharacters} tecken tillsammans.`)
+      d.problem(`The description and sample text may be at most ${model.maxCharacters} characters together.`)
     }
     const usd = model ? await this.deps.audio.quoteAudio({ model: model.id }).catch(() => undefined) : undefined
     d.addPrice(usd)
-    d.steps.push({ label: 'Skapa röst', priceUsd: usd })
-    if (asset) d.note(`Rösten läggs till som ett nytt röstklipp hos ${asset.name}.`)
+    d.steps.push({ label: 'Design voice', priceUsd: usd })
+    if (asset) d.note(`The voice is added as a new voice clip of ${asset.name}.`)
     d.warn(
-      'Venice beskriver inte hur beskrivningen och provtexten ska skrivas – lyssna på resultatet innan du använder det.'
+      "Venice doesn't say how the description and sample text should be written – listen to the result before you use it."
     )
     const plan: EditPlan = {
       // Voice design is no operation on a film: the plan's operation names it, for whoever reads plans generically.
@@ -3827,7 +3826,7 @@ export class EditOps {
     const job = store.insertJob({
       assetId: req.assetId,
       op: 'design-voice',
-      request: { voiceDesign: design, label: `Skapar röst åt ${name}` },
+      request: { voiceDesign: design, label: `Designing a voice for ${name}` },
       quote: plan.priceUsd
     })
     store.insertSteps(job.id, [
@@ -3845,10 +3844,10 @@ export class EditOps {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** A step "Fortsätt" sends again: never sent, failed, or cancelled. */
+/** A step "Continue" sends again: never sent, failed, or cancelled. */
 /**
  * A picture job's finish failed for a reason another try can't change (the take is the wrong length, unreadable, or
- * the job incomplete): Fortsätt (a free re-finish) isn't offered for it.
+ * the job incomplete): Continue (a free re-finish) isn't offered for it.
  */
 class FinishRefused extends Error {}
 
@@ -3856,7 +3855,7 @@ function isUnsent(s: store.StoredStep): boolean {
   return s.status === 'pending' || s.status === 'failed' || s.status === 'cancelled'
 }
 
-/** The character's Röst clip a step clones or speaks with (a voice-clone step, or a line in a cloned voice). */
+/** The character's voice clip a step clones or speaks with (a voice-clone step, or a line in a cloned voice). */
 function cloneVoiceOf(s: store.StoredStep): string | undefined {
   if (s.endpoint === 'voice-clone') return typeof s.request.audioId === 'string' ? s.request.audioId : undefined
   const voice = s.request.voice

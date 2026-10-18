@@ -208,14 +208,14 @@ export default function PreviewPlayer({ sequence, startSegmentId, onClose }: Pro
     'flex h-9 w-9 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent'
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-black/95" role="dialog" aria-label="Förhandsvisning">
+    <div className="fixed inset-0 z-40 flex flex-col bg-black/95" role="dialog" aria-label="Preview">
       <div className="drag flex h-12 shrink-0 items-center gap-3 pl-24 pr-4">
         <span className="truncate font-medium text-white/90">{sequence.name}</span>
-        <span className="shrink-0 text-[12px] text-white/50">Förhandsvisning</span>
+        <span className="shrink-0 text-[12px] text-white/50">Preview</span>
         <button
           onClick={onClose}
           onMouseDown={keepFocus}
-          title="Stäng (Esc)"
+          title="Close (Esc)"
           className="no-drag ml-auto flex h-8 w-8 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
         >
           <CloseIcon size={14} />
@@ -243,8 +243,8 @@ export default function PreviewPlayer({ sequence, startSegmentId, onClose }: Pro
               className="h-full w-full object-contain"
             />
             <span className="pointer-events-none absolute left-9 top-3 rounded bg-black/60 px-2 py-1 text-[12px] text-white/90">
-              Klipp {clip.number}
-              <span className="text-white/50"> av {sequence.segments.length}</span>
+              Clip {clip.number}
+              <span className="text-white/50"> of {sequence.segments.length}</span>
             </span>
             {ended && (
               <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -256,7 +256,7 @@ export default function PreviewPlayer({ sequence, startSegmentId, onClose }: Pro
           </>
         ) : (
           <div className="flex h-full items-center justify-center text-white/60">
-            Inga klipp har en färdig vald tagning ännu.
+            No clip has a finished selected take yet.
           </div>
         )}
       </div>
@@ -268,7 +268,7 @@ export default function PreviewPlayer({ sequence, startSegmentId, onClose }: Pro
             return (
               <div
                 key={c.segmentId}
-                title={`Klipp ${c.number}`}
+                title={`Clip ${c.number}`}
                 onPointerDown={(e) => {
                   const r = e.currentTarget.getBoundingClientRect()
                   const offset = ((e.clientX - r.left) / r.width) * lengths[i]
@@ -284,7 +284,7 @@ export default function PreviewPlayer({ sequence, startSegmentId, onClose }: Pro
         </div>
 
         <div className="flex items-center gap-2">
-          <button onClick={previous} onMouseDown={keepFocus} disabled={!clip} className={control} title="Föregående klipp (←)">
+          <button onClick={previous} onMouseDown={keepFocus} disabled={!clip} className={control} title="Previous clip (←)">
             <PrevIcon size={14} />
           </button>
           <button
@@ -292,7 +292,7 @@ export default function PreviewPlayer({ sequence, startSegmentId, onClose }: Pro
             onMouseDown={keepFocus}
             disabled={!clip}
             className={`${control} bg-white/10`}
-            title={playing ? 'Pausa (mellanslag)' : 'Spela (mellanslag)'}
+            title={playing ? 'Pause (space)' : 'Play (space)'}
           >
             {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
           </button>
@@ -301,7 +301,7 @@ export default function PreviewPlayer({ sequence, startSegmentId, onClose }: Pro
             onMouseDown={keepFocus}
             disabled={index === -1 || index >= clips.length - 1}
             className={control}
-            title="Nästa klipp (→)"
+            title="Next clip (→)"
           >
             <NextIcon size={14} />
           </button>
@@ -319,7 +319,7 @@ export default function PreviewPlayer({ sequence, startSegmentId, onClose }: Pro
                   onClick={() => goTo(ci)}
                   onMouseDown={keepFocus}
                   disabled={ci === -1}
-                  title={ci === -1 ? `Klipp ${i + 1} saknar färdig vald tagning och hoppas över` : `Spela från klipp ${i + 1}`}
+                  title={ci === -1 ? `Clip ${i + 1} has no finished selected take and is skipped` : `Play from clip ${i + 1}`}
                   className={`h-7 min-w-7 rounded-md px-2 text-[12px] tabular-nums transition ${
                     current
                       ? 'bg-accent text-white'

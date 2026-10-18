@@ -17,7 +17,7 @@ interface Props {
 }
 
 /**
- * Pågår och klart: everything Studio is working on, grouped by place, and everything that finished that the user
+ * Activity: everything Studio is working on, grouped by place, and everything that finished that the user
  * hasn't looked at yet, wherever it was started. Floats beside the sidebar, bottom-aligned with its row. A row
  * goes there; nothing here stops or cancels anything (each control lives in one place, its view).
  */
@@ -34,7 +34,7 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
   const panel = useRef<HTMLDivElement>(null)
 
   // Rows that became seen by being on screen here stay listed (without their dot) until the panel closes, so a
-  // failure or a picture doesn't vanish while it is being read. Explicit marks (✓, Markera alla) remove at once.
+  // failure or a picture doesn't vanish while it is being read. Explicit marks (✓, Mark all) remove at once.
   const [seenHere, setSeenHere] = useState<ReadonlyMap<string, FinishedWork>>(new Map())
   const keep = useCallback((w: FinishedWork) => {
     setSeenHere((m) => (m.has(w.key) ? m : new Map(m).set(w.key, w)))
@@ -101,24 +101,24 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
       <div
         ref={panel}
         role="dialog"
-        aria-label="Pågår och klart"
+        aria-label="Activity"
         tabIndex={-1}
         className="no-drag fixed bottom-3 left-[calc(var(--sidebar-w)+8px)] z-40 flex max-h-[min(70vh,560px)] w-[360px] flex-col rounded-xl border border-line bg-panel shadow-2xl shadow-black/50 outline-none transition-[left] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none"
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-3">
-          <h2 className="font-semibold">Pågår och klart</h2>
+          <h2 className="font-semibold">Activity</h2>
           {anyUnseen && (
             <button
               onClick={markAll}
               className="ml-auto rounded px-1.5 py-0.5 text-xs text-muted transition hover:bg-raised hover:text-text"
             >
-              Markera alla som sedda
+              Mark all as seen
             </button>
           )}
           <button
             onClick={onClose}
-            title="Stäng"
-            aria-label="Stäng"
+            title="Close"
+            aria-label="Close"
             className={`rounded p-1 text-muted transition hover:bg-raised hover:text-text ${anyUnseen ? '' : 'ml-auto'}`}
           >
             <CloseIcon size={12} />
@@ -129,7 +129,7 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
           <div className="flex shrink-0 items-center gap-2 border-b border-line bg-accent/5 px-4 py-2.5 text-xs">
             <StatusDot failed large />
             <span className="min-w-0 flex-1 truncate">
-              {waiting.length === 1 ? 'En begäran väntar på ditt OK' : `${waiting.length} begäranden väntar på ditt OK`}
+              {waiting.length === 1 ? 'A request is waiting for your OK' : `${waiting.length} requests are waiting for your OK`}
             </span>
             <button
               onClick={() => {
@@ -138,7 +138,7 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
               }}
               className="rounded-md bg-accent px-2.5 py-1 font-medium text-white transition hover:bg-accent-hover"
             >
-              Granska
+              Review
             </button>
           </div>
         )}
@@ -146,13 +146,13 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {empty ? (
             <p className="px-2 pt-4 text-xs leading-relaxed text-muted">
-              Inget pågår just nu. Det du genererar, importerar, redigerar eller exporterar syns här medan det pågår –
-              och när det är klart, även om du är i en annan vy.
+              Nothing is running right now. What you generate, import, edit or export shows up here while it runs –
+              and when it’s done, even if you’re in another view.
             </p>
           ) : (
             <>
               {/* Counted as the sidebar counts (a run with a take at Venice is one), not row by row. */}
-              <Section title={`Pågår · ${work.total.running}`}>
+              <Section title={`Running · ${work.total.running}`}>
                 {groups.length ? (
                   groups.map((g) => (
                     <div key={g.id} className="mb-1">
@@ -165,11 +165,11 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
                     </div>
                   ))
                 ) : (
-                  <Empty>Inget pågår just nu.</Empty>
+                  <Empty>Nothing is running right now.</Empty>
                 )}
               </Section>
 
-              <Section title={`Klart att titta på · ${work.total.unseen}`}>
+              <Section title={`Ready to look at · ${work.total.unseen}`}>
                 {fresh.length ? (
                   <ul>
                     {fresh.map((w) => (
@@ -185,12 +185,12 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
                     ))}
                   </ul>
                 ) : (
-                  <Empty>Inget nytt att titta på.</Empty>
+                  <Empty>Nothing new to look at.</Empty>
                 )}
               </Section>
 
               {failed.length > 0 && (
-                <Section title={`Misslyckades · ${work.total.failed}`}>
+                <Section title={`Failed · ${work.total.failed}`}>
                   <ul>
                     {failed.map((w) => (
                       <FinishedRow
@@ -233,19 +233,19 @@ interface RunGroup {
   id: string
   view?: WorkView
   ownerId?: string
-  /** "Sekvenser · ”Strandscen”", "Generera", "Uppladdningar". */
+  /** "Sequences · “Beach scene”", "Generate", "Uploads". */
   title: string
   items: RunningWork[]
-  /** The row label without the place the heading already names: "Klipp 3 i ”Strandscen”" → "Klipp 3". */
+  /** The row label without the place the heading already names: "Clip 3 in “Beach scene”" → "Clip 3". */
   shorten: (label: string) => string
 }
 
-const QUOTED = /”([^”]+)”/g
+const QUOTED = /“([^”]+)”/g
 
 /**
  * The name of the place an owned item belongs to, read from main's label: an edit's name comes first
- * ("”Intervju” – Skapa musik"), everything else names its sequence, storyboard or asset last
- * ("Klipp 3 i ”Strandscen”", "Ny röst till ”Anna”").
+ * ("“Interview” – Create music"), everything else names its sequence, storyboard or asset last
+ * ("Clip 3 in “Beach scene”", "New voice for “Anna”").
  */
 function ownerName(w: RunningWork): string | undefined {
   if (!w.ownerId) return undefined
@@ -256,8 +256,8 @@ function ownerName(w: RunningWork): string | undefined {
 
 function shortener(name: string | undefined): (label: string) => string {
   if (!name) return (label) => label
-  const tail = ` i ”${name}”`
-  const head = `”${name}” – `
+  const tail = ` in “${name}”`
+  const head = `“${name}” – `
   return (label) => {
     if (label.endsWith(tail) && label.length > tail.length) return label.slice(0, -tail.length)
     if (label.startsWith(head) && label.length > head.length) return label.slice(head.length)
@@ -279,7 +279,7 @@ function groupRunning(running: readonly RunningWork[]): RunGroup[] {
   // Named after the place by any of its items that names it (an import is labelled by its file name only).
   for (const g of groups.values()) {
     const name = g.items.map(ownerName).find((n) => n !== undefined)
-    g.title = g.view ? `${VIEW_LABEL[g.view]}${name ? ` · ”${name}”` : ''}` : 'Uppladdningar'
+    g.title = g.view ? `${VIEW_LABEL[g.view]}${name ? ` · “${name}”` : ''}` : 'Uploads'
     g.shorten = shortener(name)
   }
   return [...groups.values()]
@@ -308,7 +308,7 @@ function GroupHeading({ group, onGo }: { group: RunGroup; onGo: (t: WorkTarget) 
   const cls = 'block w-full truncate px-2 pb-0.5 pt-1.5 text-left text-xs text-muted'
   if (!target) return <div className={cls}>{group.title}</div>
   return (
-    <button onClick={() => onGo(target)} title="Gå dit" className={`${cls} transition hover:text-text`}>
+    <button onClick={() => onGo(target)} title="Go there" className={`${cls} transition hover:text-text`}>
       {group.title}
     </button>
   )
@@ -389,7 +389,7 @@ function RunningRow({
       <button
         onClick={w.target ? () => onGo(w.target!) : undefined}
         disabled={!w.target}
-        title={w.target ? `${w.label} – gå dit` : w.label}
+        title={w.target ? `${w.label} – go there` : w.label}
         className={rowButton}
       >
         <Thumb path={w.thumbPath} icon={runningIcon(w)} />
@@ -430,7 +430,7 @@ function FinishedRow({
 
   return (
     <li ref={ref} className="group relative">
-      <button onClick={() => onGo(w.target)} title={`${w.label} – gå dit`} className={`${rowButton} pr-9`}>
+      <button onClick={() => onGo(w.target)} title={`${w.label} – go there`} className={`${rowButton} pr-9`}>
         {/* The dot sits on the thumbnail's corner, so the pictures line up with the running rows above. */}
         <span className="relative shrink-0">
           <Thumb path={w.thumbPath} icon={finishedIcon(w)} />
@@ -451,8 +451,8 @@ function FinishedRow({
       {!seen && (
         <button
           onClick={() => onMark(w)}
-          title="Markera som sedd"
-          aria-label={`Markera ”${w.label}” som sedd`}
+          title="Mark as seen"
+          aria-label={`Mark “${w.label}” as seen`}
           className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted opacity-0 transition hover:bg-line hover:text-text focus-visible:opacity-100 group-hover:opacity-100"
         >
           <CheckIcon size={13} />

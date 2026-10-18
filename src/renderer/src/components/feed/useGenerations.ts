@@ -49,9 +49,9 @@ export interface GenerationsState {
   upsert: (g: Generation) => void
   /** Moves the video to the Trash and drops it from the list; false (with `error` set) when that failed. */
   remove: (g: Generation) => Promise<boolean>
-  /** A locally patched copy, e.g. with segmentId set after "Lägg i sekvens". */
+  /** A locally patched copy, e.g. with segmentId set after "Add to sequence". */
   patch: (g: Generation) => void
-  /** Sets (or with null clears) the user's rating (-1 = tumme ner, 1–3 stars), showing it right away. */
+  /** Sets (or with null clears) the user's rating (-1 = thumbs down, 1–3 stars), showing it right away. */
   rate: (g: Generation, rating: number | null) => Promise<void>
 }
 

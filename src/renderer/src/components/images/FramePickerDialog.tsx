@@ -55,7 +55,7 @@ export interface FramePickerDialogProps {
 }
 
 /**
- * "Bildruta ur ett klipp": pick a finished video – a take of the sequence, or any video in the library – scrub or
+ * "Frame from a clip": pick a finished video – a take of the sequence, or any video in the library – scrub or
  * step frame by frame, and save the frame on screen as a still (saveFrameAsStill). Free: the frame is cut out
  * locally with ffmpeg.
  */
@@ -110,11 +110,11 @@ function FramePickerBody({
 
   return (
     <Modal
-      title="Bildruta ur ett klipp"
+      title="Frame from a clip"
       subtitle={
         library
-          ? 'Välj ett klipp ur biblioteket, spola fram till rätt bildruta och använd den som bild.'
-          : 'Välj en tagning, spola fram till rätt bildruta och spara den som en bild i sekvensen.'
+          ? 'Pick a clip from the library, scrub to the right frame and use it as an image.'
+          : 'Pick a take, scrub to the right frame and save it as an image in the sequence.'
       }
       onClose={onClose}
       maxWidth={1040}
@@ -123,14 +123,14 @@ function FramePickerBody({
           {error && <p className="mr-auto max-w-lg text-[12px] text-accent select-text">{error}</p>}
           {!error && choice && !unplayable && (
             <p className="mr-auto text-[11px] text-muted">
-              ← → en bildruta · Shift + ← → en sekund · Mellanslag spelar
+              ← → one frame · Shift + ← → one second · Space plays
             </p>
           )}
           <button onClick={onClose} className="rounded-md border border-line px-4 py-2 hover:bg-raised">
-            Avbryt
+            Cancel
           </button>
           <button onClick={() => void pick()} disabled={!choice || saving || unplayable} className={pickButton}>
-            {saving ? 'Sparar…' : 'Använd den här bildrutan'}
+            {saving ? 'Saving…' : 'Use this frame'}
           </button>
         </>
       }
@@ -138,14 +138,14 @@ function FramePickerBody({
       {source.error ? (
         <p className="text-accent select-text">{source.error}</p>
       ) : !source.loaded ? (
-        <p className="text-muted">{library ? 'Hämtar klippen…' : 'Hämtar sekvensen…'}</p>
+        <p className="text-muted">{library ? 'Loading the clips…' : 'Loading the sequence…'}</p>
       ) : source.empty ? (
         <p className="py-10 text-center leading-relaxed text-muted">
-          {library ? 'Det finns inga färdiga klipp i biblioteket än.' : 'Ingen tagning i sekvensen är klar än.'}
+          {library ? 'There are no finished clips in the library yet.' : 'No take in the sequence is finished yet.'}
           <br />
           {library
-            ? 'När en video är klar kan du ta en bildruta ur den här.'
-            : 'När ett klipp har en färdig tagning kan du ta en bildruta ur den här.'}
+            ? 'When a video is finished, you can take a frame from it here.'
+            : 'When a clip has a finished take, you can take a frame from it here.'}
         </p>
       ) : (
         <div className="grid gap-5 md:grid-cols-[236px_minmax(0,1fr)]">
@@ -305,11 +305,11 @@ function TakeChooser({
         return (
           <div key={segment.id}>
             <p className="mb-1 truncate text-[12px]" title={label || undefined}>
-              <span className="font-medium">Klipp {clip}</span>
+              <span className="font-medium">Clip {clip}</span>
               {label && <span className="text-muted"> · {label}</span>}
             </p>
             {choices.length === 0 ? (
-              <p className="text-[11px] text-muted">Ingen färdig tagning</p>
+              <p className="text-[11px] text-muted">No finished take</p>
             ) : (
               <div className="grid grid-cols-2 gap-1.5">
                 {choices.map((c) => (
@@ -317,8 +317,8 @@ function TakeChooser({
                     key={c.take.id}
                     take={c.take}
                     current={c.take.id === current}
-                    badge={c.inCut ? 'Vald' : undefined}
-                    title={c.inCut ? 'Tagningen som används i sekvensen' : 'En annan tagning av klippet'}
+                    badge={c.inCut ? 'Selected' : undefined}
+                    title={c.inCut ? 'The take the sequence uses' : 'Another take of the clip'}
                     onChoose={onChoose}
                   />
                 ))}
@@ -334,10 +334,13 @@ function TakeChooser({
 /** What a video is called on its tile: an own film or a version by its title, a Venice clip by its prompt. */
 function takeLabel(take: Generation): string {
   if (take.title?.trim()) return generationTitle(take)
-  return plainImagePrompt(take.prompt || take.params.prompt || '') || 'Klipp utan prompt'
+  return plainImagePrompt(take.prompt || take.params.prompt || '') || 'Clip without a prompt'
 }
 
-/** How many videos the library chooser shows before "Visa fler" (a library can hold hundreds). */
+/** "1 clip", "3 clips". */
+const clips = (n: number): string => `${n} ${n === 1 ? 'clip' : 'clips'}`
+
+/** How many videos the library chooser shows before "Show more" (a library can hold hundreds). */
 const LIBRARY_PAGE = 60
 
 /** Every finished video in the library, newest first, with a search over the prompts. */
@@ -366,18 +369,18 @@ function LibraryChooser({
         autoFocus
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Sök i prompter och namn"
-        aria-label="Sök bland klippen"
+        placeholder="Search prompts and names"
+        aria-label="Search the clips"
         spellCheck={false}
         className="mb-2 w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted"
       />
       <p className="mb-1.5 text-[11px] text-muted" aria-live="polite">
-        {deferred.trim() ? `${found.length} klipp hittades` : `${takes.length} klipp, nyast först`}
+        {deferred.trim() ? `${clips(found.length)} found` : `${clips(takes.length)}, newest first`}
       </p>
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {found.length === 0 ? (
           <p className="px-2 py-6 text-center text-[12px] leading-relaxed text-muted">
-            Inget klipp har de orden i prompten eller namnet.
+            No clip has those words in its prompt or name.
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-1.5">
@@ -397,7 +400,7 @@ function LibraryChooser({
             onClick={() => setLimit((n) => n + LIBRARY_PAGE)}
             className="mt-2 w-full rounded-md border border-line px-2 py-1.5 text-[12px] text-muted transition hover:bg-raised hover:text-text"
           >
-            Visa fler ({found.length - shown.length})
+            Show more ({found.length - shown.length})
           </button>
         )}
       </div>
@@ -464,8 +467,8 @@ const DEFAULT_FRAME = 1 / 24
 // Hatching for the parts the sequence cuts away.
 const HATCH = 'repeating-linear-gradient(135deg, #00000088 0 4px, #00000044 4px 8px)'
 
-const decimal = new Intl.NumberFormat('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-/** "3,42 s" */
+const decimal = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+/** "3.42 s" */
 function formatFrameTime(seconds: number): string {
   return `${decimal.format(Math.max(0, seconds))} s`
 }
@@ -695,7 +698,7 @@ function FramePlayer({
       />
       {broken && (
         <p className="mt-2 text-[12px] text-accent select-text">
-          Videon kunde inte spelas – filen finns inte kvar där Studio har den. Välj ett annat klipp.
+          The video couldn't be played – the file is no longer where Studio keeps it. Pick another clip.
         </p>
       )}
 
@@ -714,7 +717,7 @@ function FramePlayer({
         <button
           onClick={jumpFirst}
           className={control}
-          title={inCut ? 'Första bildrutan som används (Home)' : 'Första bildrutan (Home)'}
+          title={inCut ? 'First frame in use (Home)' : 'First frame (Home)'}
         >
           ⇤
         </button>
@@ -724,12 +727,12 @@ function FramePlayer({
             seekTo((video.current?.currentTime ?? shown) - 1)
           }}
           className={control}
-          title="En sekund bakåt (Shift + ←)"
+          title="One second back (Shift + ←)"
         >
           −1 s
         </button>
-        <button onClick={() => step(-1)} className={control} title="En bildruta bakåt (←)">
-          ‹ Bildruta
+        <button onClick={() => step(-1)} className={control} title="One frame back (←)">
+          ‹ Frame
         </button>
         <button
           onClick={() => {
@@ -739,12 +742,12 @@ function FramePlayer({
             else el.pause()
           }}
           className={`${control} w-20`}
-          title="Spela / pausa (mellanslag)"
+          title="Play / pause (Space)"
         >
-          {playing ? 'Pausa' : 'Spela'}
+          {playing ? 'Pause' : 'Play'}
         </button>
-        <button onClick={() => step(1)} className={control} title="En bildruta framåt (→)">
-          Bildruta ›
+        <button onClick={() => step(1)} className={control} title="One frame forward (→)">
+          Frame ›
         </button>
         <button
           onClick={() => {
@@ -752,27 +755,27 @@ function FramePlayer({
             seekTo((video.current?.currentTime ?? shown) + 1)
           }}
           className={control}
-          title="En sekund framåt (Shift + →)"
+          title="One second forward (Shift + →)"
         >
           +1 s
         </button>
         <button
           onClick={jumpLast}
           className={control}
-          title={inCut ? 'Sista bildrutan som används (End)' : 'Sista bildrutan (End)'}
+          title={inCut ? 'Last frame in use (End)' : 'Last frame (End)'}
         >
           ⇥
         </button>
         <span className="ml-auto text-right text-[12px] tabular-nums text-muted">
-          <span className="text-text">{formatFrameTime(shown)}</span> av {formatFrameTime(duration)}
-          {frameNumber !== undefined && ` · bildruta ${frameNumber}`}
+          <span className="text-text">{formatFrameTime(shown)}</span> of {formatFrameTime(duration)}
+          {frameNumber !== undefined && ` · frame ${frameNumber}`}
         </span>
       </div>
 
       <p className="mt-2 text-[11px] leading-relaxed text-muted select-text">
         {choice.caption}
-        {inCut && (trimStart > 0 || trimEnd > 0) && ' Randade delar är bortklippta i sekvensen.'}
-        {outside && <span className="text-accent"> Den här bildrutan syns inte i sekvensen.</span>}
+        {inCut && (trimStart > 0 || trimEnd > 0) && ' Hatched parts are trimmed away in the sequence.'}
+        {outside && <span className="text-accent"> This frame isn't shown in the sequence.</span>}
       </p>
     </div>
   )
@@ -823,7 +826,7 @@ function ScrubBar({
         ref={bar}
         onPointerDown={onPointerDown}
         className="relative h-8 cursor-pointer touch-none rounded-md bg-raised"
-        title="Klicka eller dra för att spola"
+        title="Click or drag to scrub"
       >
         {usedStart > 0 && (
           <div className="absolute inset-y-0 left-0 rounded-l-md" style={{ width: pct(usedStart), backgroundImage: HATCH }} />

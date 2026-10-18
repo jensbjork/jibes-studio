@@ -107,7 +107,7 @@ const migrations: string[] = [
   );
   CREATE INDEX exports_by_sequence ON exports(sequence_id);`,
 
-  // Phase 4: characters become one kind of asset, next to environments (Miljöer) and outfits (Kläder). Existing
+  // Phase 4: characters become one kind of asset, next to environments and outfits. Existing
   // rows are characters; the renames carry their rows, images and foreign keys over unchanged.
   `ALTER TABLE characters RENAME TO assets;
   ALTER TABLE character_images RENAME TO asset_images;
@@ -178,7 +178,7 @@ const migrations: string[] = [
 
   // Phase 8: the descriptions of the referenced assets are appended to the prompt as a References legend when it
   // is sent. sent_prompt is the prompt exactly as Venice got it; prompt (and params.prompt) stay the user's text,
-  // which "Använd igen" puts back. NULL for generations from before.
+  // which "Use again" puts back. NULL for generations from before.
   `ALTER TABLE generations ADD COLUMN sent_prompt TEXT;`,
 
   // Phase 9: storyboards as a workflow of their own. A storyboard is a row of `sequences` of kind 'storyboard' (so
@@ -201,11 +201,11 @@ const migrations: string[] = [
   ALTER TABLE segments ADD COLUMN from_board_id TEXT REFERENCES storyboard_boards(id) ON DELETE SET NULL;
   ALTER TABLE segments ADD COLUMN to_board_id TEXT REFERENCES storyboard_boards(id) ON DELETE SET NULL;`,
 
-  // Phase 10: Redigera and own clips. A generations row is no longer only a Venice generation: `source` tells a
-  // Venice generation ('generated') from the user's own imported film ('import') and a version made in Redigera
+  // Phase 10: the Editor and own clips. A generations row is no longer only a Venice generation: `source` tells a
+  // Venice generation ('generated') from the user's own imported film ('import') and a version made in the Editor
   // ('edit'). Imports and versions are always inserted completed (never pending). An edit is one film being worked
   // on: its versions and AI takes point at it with edit_id, a version at its base with parent_id. edit_media holds
-  // an edit's paid or added audio (Redigeringar/<namn>/Ljud/), media_jobs and media_job_steps the bookkeeping of
+  // an edit's paid or added audio (Redigeringar/<name>/Ljud/), media_jobs and media_job_steps the bookkeeping of
   // multi-step paid work, so a job interrupted by quitting can be fetched or resumed without sending anything twice.
   // original_path and edit_media.file_path are stored paths like every other; recipe, details, request and
   // segments are JSON with ids only, never paths. exports.cuts records where the clips meet in an exported film,
@@ -376,8 +376,8 @@ const migrations: string[] = [
 
 
 /**
- * The user_version from which a library has assets (the migration above): from then on Miljöer and Kläder in
- * the base folder are the library's own folders.
+ * The user_version from which a library has assets (the migration above): from then on the folders Miljöer and
+ * Kläder in the base folder are the library's own folders.
  */
 export const ASSETS_SCHEMA_VERSION = 6
 
@@ -405,7 +405,7 @@ export const PRODUCTS_SCHEMA_VERSION = 12
  * trash files they still use.
  */
 export const NEWER_LIBRARY_MESSAGE =
-  'Biblioteket har sparats av en nyare version av Studio. Uppdatera appen för att öppna det.'
+  'The library was saved by a newer version of Studio. Update the app to open it.'
 
 /** Whether a database at this schema version comes from a newer Studio than this build. */
 export function isNewerSchema(version: number): boolean {
@@ -696,7 +696,7 @@ export function listGenerationsForSegments(segmentIds: string[]): StoredGenerati
   ).map(generationFromRow)
 }
 
-// ── Unseen work (Pågår och klart) ────────────────────────────────────────────
+// ── Unseen work (Activity) ──────────────────────────────────────────────────
 
 /**
  * What an unseen row is about beyond its one item: ids only, never paths (the table isn't part of the stored-path
@@ -723,9 +723,9 @@ export interface UnseenInput {
   exportId?: string
   audioId?: string
   jobId?: string
-  /** Swedish. */
+  /** As the user reads it. */
   error?: string
-  /** Swedish, the label at the time it failed. */
+  /** The label at the time it failed. */
   label?: string
   context?: UnseenContext
   /** When it finished (epoch ms); default now. */
@@ -823,7 +823,7 @@ function paramFilePaths(json: string): string[] {
  * board's image, or an image, audio clip or video in generation, segment or still params. A row
  * whose file was deleted in Finder still claims its name: a new file given that name would otherwise be taken
  * for the old row's file — deleting that row would take the new file with it, and an old generation or clip
- * whose picture was removed would silently use somebody else's picture on "Använd igen" or a regenerated take.
+ * whose picture was removed would silently use somebody else's picture on "Use again" or a regenerated take.
  * `ignoreStillId`: that still's own row doesn't count (is anything else using the still's file?).
  */
 export function isStoredPathRecorded(stored: string, opts: { ignoreStillId?: string } = {}): boolean {
@@ -861,7 +861,7 @@ export function isStoredPathRecorded(stored: string, opts: { ignoreStillId?: str
  * Whether a row records a stored path inside this folder (letter case ignored, like the disk); see
  * isStoredPathRecorded. A folder that is gone (a deleted asset's folder in the Trash) still claims its name
  * while a generation or clip records a path in it: an asset folder renamed or created under that name would
- * otherwise hand those rows its own photos of the same names, and "Använd igen" or a regenerated clip would
+ * otherwise hand those rows its own photos of the same names, and "Use again" or a regenerated clip would
  * silently send the wrong picture.
  */
 export function isStoredPrefixRecorded(folder: string): boolean {
@@ -1003,7 +1003,7 @@ export function mapStoredPaths(
       }
     }
 
-    // A still's own file, and the reference images it was made from (its "Skapa igen" sends them again).
+    // A still's own file, and the reference images it was made from (its "Create again" sends them again).
     const stills = conn.prepare('SELECT id, file_path, params FROM stills').all() as {
       id: string
       file_path: string
@@ -1041,7 +1041,7 @@ export function mapStoredPaths(
 let rewrittenStills = false
 
 /**
- * Whether prefix rewrites (or "Städa upp", relativizing on open) have changed stills' paths since the last call:
+ * Whether prefix rewrites (or "Tidy up", relativizing on open) have changed stills' paths since the last call:
  * the storyboard's stills strip holds their old paths until it is told to fetch them again.
  */
 export function takeRewrittenStills(): boolean {
@@ -1092,7 +1092,7 @@ export function takeRewrittenGenerations(): string[] {
 export function rewriteStoredPrefix(oldRel: string, newRel: string): number {
   const from = cleanRelative(oldRel)
   const to = cleanRelative(newRel)
-  if (!from || !to || isAbsolute(from) || isAbsolute(to)) throw new Error('Ogiltig sökväg i biblioteket.')
+  if (!from || !to || isAbsolute(from) || isAbsolute(to)) throw new Error('Invalid path in the library.')
   if (from === to) return 0
   const changed = mapStoredPaths(
     (stored) => rebasePrefix(stored, from, to),

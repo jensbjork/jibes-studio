@@ -10,8 +10,8 @@ interface Props {
 }
 
 /**
- * A small pill at the bottom of the window while an agent works: a pulsing dot, "Agenten arbetar" (or the agent's
- * own name, "OpenClaw arbetar") and what it just did, with the step before it fading above. It fades out a few
+ * A small pill at the bottom of the window while an agent works: a pulsing dot, "The agent is working" (or the
+ * agent's own name, "OpenClaw is working") and what it just did, with the step before it fading above. It fades out a few
  * seconds after the agent goes quiet; a click opens the activity drawer.
  */
 export default function AgentPresence({ hidden, onOpen }: Props) {
@@ -36,7 +36,7 @@ export default function AgentPresence({ hidden, onOpen }: Props) {
       <button
         onClick={onOpen}
         tabIndex={visible ? 0 : -1}
-        title="Se allt agenten gjort"
+        title="See everything the agent has done"
         className={`flex max-w-md items-center gap-3 rounded-full border border-line bg-panel/95 py-2 pl-3.5 pr-4 text-left text-sm shadow-lg shadow-black/40 backdrop-blur ${
           visible ? 'pointer-events-auto' : ''
         }`}

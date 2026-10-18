@@ -1,4 +1,4 @@
-// Venice's audio endpoints, for Redigera and voice design: the audio model lists, free quotes, the voice changer
+// Venice's audio endpoints, for the Editor and voice design: the audio model lists, free quotes, the voice changer
 // (speech-to-speech), text-to-speech (/audio/speech, synchronous), voice cloning, transcription, and the queued
 // generators (/audio/queue: music, sound effects, ElevenLabs TTS, voice design). Nothing here touches the library;
 // edit-ops.ts decides what is sent and where results go.
@@ -35,7 +35,7 @@ export const DESCRIBE_IN_PROMPT = 'Describe in prompt'
 /** Studio's assumption for a model without duration metadata (Lyria picks its own length, up to ~3 min). */
 const ASSUMED_RANGE = { min: 1, max: 180, music: 60, effect: 10 }
 
-const NO_KEY = 'Ingen API-nyckel är inställd. Lägg till den under Inställningar.'
+const NO_KEY = 'No API key is set. Add it in Settings.'
 
 // ── The model lists ──────────────────────────────────────────────────────────
 
@@ -374,7 +374,7 @@ function detailOf(body: unknown, text: string): string {
 
 type What = 'list' | 'quote' | 'paid' | 'result'
 
-/** A failed response in Swedish, keeping its status (callers tell retryable from final by it). */
+/** A failed response in plain words, keeping its status (callers tell retryable from final by it). */
 async function responseError(res: Response, what: What): Promise<VeniceError> {
   const text = await res.text().catch(() => '')
   let body: unknown = text
@@ -389,53 +389,53 @@ async function responseError(res: Response, what: What): Promise<VeniceError> {
   let message: string
   switch (res.status) {
     case 400:
-      message = withDetail('Venice godtog inte förfrågan.')
+      message = withDetail('Venice did not accept the request.')
       break
     case 401:
       message = /pro/i.test(detail)
-        ? 'Modellen kräver Venice Pro.'
-        : 'Venice godtog inte API-nyckeln. Kontrollera den under Inställningar.'
+        ? 'The model requires Venice Pro.'
+        : 'Venice did not accept the API key. Check it in Settings.'
       break
     case 402:
-      message = 'Saldot hos Venice räcker inte. Fyll på hos Venice och försök igen.'
+      message = 'Your Venice balance is too low. Top it up at Venice and try again.'
       break
     case 403:
-      message = withDetail('Venice nekade förfrågan för den här API-nyckeln.')
+      message = withDetail('Venice refused the request for this API key.')
       break
     case 404:
       message =
         what === 'result'
           ? refunded
-            ? 'Venice kunde inte göra klart ljudet och har betalat tillbaka det.'
-            : 'Venice hittar inte resultatet längre (det kan ha gått ut).'
-          : 'Venice känner inte till modellen. Välj en annan modell.'
+            ? 'Venice could not finish the audio and has refunded it.'
+            : 'Venice can no longer find the result (it may have expired).'
+          : "Venice doesn't know the model. Choose another model."
       break
     case 413:
-      message = 'Underlaget är för stort. Välj en kortare del.'
+      message = 'The input is too large. Select a shorter part.'
       break
     case 415:
-      message = withDetail('Venice kunde inte läsa förfrågan.')
+      message = withDetail('Venice could not read the request.')
       break
     case 422:
-      message = withDetail('Venice nekade innehållet.')
+      message = withDetail('Venice refused the content.')
       break
     case 429:
-      message = 'Venice tar inte emot fler förfrågningar just nu. Vänta en stund och försök igen.'
+      message = "Venice isn't taking more requests right now. Wait a moment and try again."
       break
     case 503:
-      message = 'Modellen är fullt upptagen hos Venice just nu. Försök igen om en stund.'
+      message = 'The model is fully busy at Venice right now. Try again in a moment.'
       break
     default:
       message =
         res.status >= 500
-          ? `Venice kunde inte göra klart ljudet (serverfel ${res.status}).${refunded ? ' Venice har betalat tillbaka det.' : ' Försök igen om en stund.'}`
-          : withDetail(`Venice svarade med fel ${res.status}.`)
+          ? `Venice could not finish the audio (server error ${res.status}).${refunded ? ' Venice has refunded it.' : ' Try again in a moment.'}`
+          : withDetail(`Venice answered with error ${res.status}.`)
   }
   if ((body as { code?: unknown } | undefined)?.code === 'INSUFFICIENT_BALANCE') {
-    message = 'Saldot hos Venice räcker inte. Fyll på hos Venice och försök igen.'
+    message = 'Your Venice balance is too low. Top it up at Venice and try again.'
   }
   if (what === 'list' && res.status !== 401 && res.status !== 429) {
-    message = `Venice kunde inte skicka listan över ljudmodeller (fel ${res.status}). Försök igen om en stund.`
+    message = `Venice could not send the list of audio models (error ${res.status}). Try again in a moment.`
   }
   return new VeniceError(message, res.status, body)
 }
@@ -448,11 +448,11 @@ function transportError(err: unknown, what: What, timeoutMs: number): NetworkErr
   const message =
     what === 'paid'
       ? timedOut
-        ? `Venice svarade inte inom ${waited}. Det kan ändå ha debiterats – kontrollera saldot innan du försöker igen.`
-        : 'Anslutningen till Venice bröts. Det kan ändå ha debiterats – kontrollera saldot innan du försöker igen.'
+        ? `Venice did not answer within ${waited}. It may have been charged anyway – check your balance before you try again.`
+        : 'The connection to Venice was lost. It may have been charged anyway – check your balance before you try again.'
       : timedOut
-        ? `Venice svarade inte inom ${waited}. Försök igen om en stund.`
-        : 'Kunde inte nå Venice. Kontrollera internetanslutningen och försök igen.'
+        ? `Venice did not answer within ${waited}. Try again in a moment.`
+        : 'Could not reach Venice. Check your internet connection and try again.'
   return new NetworkError(message, { cause: err })
 }
 
@@ -495,7 +495,7 @@ export class VeniceAudio {
     }
     if (res.headers.get('x-venice-is-content-violation')?.trim().toLowerCase() === 'true') {
       await res.body?.cancel().catch(() => {})
-      throw new VeniceError('Venice nekade innehållet.', 422)
+      throw new VeniceError('Venice refused the content.', 422)
     }
     if (!res.ok) throw await responseError(res, o.what)
     return res
@@ -508,8 +508,8 @@ export class VeniceAudio {
       if (err instanceof SyntaxError) {
         throw new VeniceError(
           what === 'paid'
-            ? 'Venice skickade ett svar som inte gick att läsa. Det kan ändå ha debiterats – kontrollera saldot.'
-            : 'Venice skickade ett svar som inte gick att läsa. Försök igen om en stund.',
+            ? 'Venice sent an answer that could not be read. It may have been charged anyway – check your balance.'
+            : 'Venice sent an answer that could not be read. Try again in a moment.',
           502
         )
       }
@@ -520,7 +520,7 @@ export class VeniceAudio {
   private async list(type: 'tts' | 'music' | 'asr'): Promise<RawAudioModel[]> {
     const res = await this.call(`/models?type=${type}`, { method: 'GET', requireKey: false, timeoutMs: LIST_TIMEOUT_MS, what: 'list' })
     const json = await this.json<{ data?: unknown }>(res, 'list', LIST_TIMEOUT_MS)
-    if (!Array.isArray(json?.data)) throw new VeniceError('Venice skickade en oväntad lista över ljudmodeller.', res.status)
+    if (!Array.isArray(json?.data)) throw new VeniceError('Venice sent an unexpected list of audio models.', res.status)
     return json.data as RawAudioModel[]
   }
 
@@ -559,7 +559,7 @@ export class VeniceAudio {
   private async musicSpec(model: string): Promise<RawAudioSpec> {
     if (!this.cache?.music.has(model)) await this.catalog(!!this.cache)
     const spec = this.cache?.music.get(model)
-    if (!spec) throw new VeniceError(`Venice listar inte modellen ${model} längre. Välj en annan modell.`, 404)
+    if (!spec) throw new VeniceError(`Venice no longer lists the model ${model}. Choose another model.`, 404)
     return spec
   }
 
@@ -580,7 +580,7 @@ export class VeniceAudio {
     const res = await this.call('/audio/quote', { method: 'POST', json: body, requireKey: false, timeoutMs: QUOTE_TIMEOUT_MS, what: 'quote' })
     const quote = (await this.json<{ quote?: unknown }>(res, 'quote', QUOTE_TIMEOUT_MS)).quote
     if (typeof quote !== 'number' || !Number.isFinite(quote) || quote < 0) {
-      throw new VeniceError('Venice skickade inget pris.', 502)
+      throw new VeniceError('Venice sent no price.', 502)
     }
     this.quotes.set(cacheKey, quote)
     return quote
@@ -604,7 +604,7 @@ export class VeniceAudio {
     })
     const quote = (await this.json<{ quote?: unknown }>(res, 'quote', QUOTE_TIMEOUT_MS)).quote
     if (typeof quote !== 'number' || !Number.isFinite(quote) || quote < 0) {
-      throw new VeniceError('Venice skickade inget pris.', 502)
+      throw new VeniceError('Venice sent no price.', 502)
     }
     this.quotes.set(cacheKey, quote)
     return quote
@@ -616,13 +616,13 @@ export class VeniceAudio {
   async queueAudio(body: Record<string, unknown>): Promise<{ queueId: string }> {
     const model = typeof body.model === 'string' ? body.model : ''
     if (!model || typeof body.prompt !== 'string' || !body.prompt.trim()) {
-      throw new Error('Förfrågan saknar modell eller text.')
+      throw new Error('The request has no model or text.')
     }
     const gated = audioQueueBody(await this.musicSpec(model), body)
     const res = await this.call('/audio/queue', { method: 'POST', json: gated, requireKey: true, timeoutMs: QUEUE_TIMEOUT_MS, what: 'paid' })
     const json = await this.json<{ queue_id?: unknown }>(res, 'paid', QUEUE_TIMEOUT_MS)
     if (typeof json.queue_id !== 'string' || !json.queue_id) {
-      throw new VeniceError('Venice svarade utan kö-id. Det kan ändå ha debiterats – kontrollera saldot.', 502)
+      throw new VeniceError('Venice answered without a queue ID. It may have been charged anyway – check your balance.', 502)
     }
     return { queueId: json.queue_id }
   }
@@ -665,7 +665,7 @@ export class VeniceAudio {
         }
       }
       // Anything else is not a state Venice documents for audio: treated like a server hiccup and polled again.
-      throw new VeniceError(`Venice svarade oväntat på frågan om ljudet (${String(json.status ?? 'okänt')}).`, 502)
+      throw new VeniceError(`Venice gave an unexpected answer about the audio (${String(json.status ?? 'unknown')}).`, 502)
     }
     let data: Buffer
     try {
@@ -673,7 +673,7 @@ export class VeniceAudio {
     } catch (err) {
       throw transportError(err, 'result', RETRIEVE_TIMEOUT_MS)
     }
-    if (!data.length) throw new VeniceError('Venice skickade inget ljud.', 502)
+    if (!data.length) throw new VeniceError('Venice sent no audio.', 502)
     return { state: 'audio', data, format: audioFormatOf(type, data, res.headers.get('x-venice-audio-format')) }
   }
 
@@ -693,7 +693,7 @@ export class VeniceAudio {
     seed?: number
   }): Promise<{ queueId: string; durationSeconds: number }> {
     const spec = await this.musicSpec(o.model)
-    if (spec.voice_changer !== true) throw new VeniceError(`${o.model} är ingen röstbytarmodell.`, 400)
+    if (spec.voice_changer !== true) throw new VeniceError(`${o.model} is not a voice changer model.`, 400)
     const form = new FormData()
     form.append('model', o.model)
     form.append('file', fileBlob(o.file, o.filename), o.filename)
@@ -707,7 +707,7 @@ export class VeniceAudio {
     const res = await this.call('/audio/voice-changer/queue', { method: 'POST', form, requireKey: true, timeoutMs: UPLOAD_TIMEOUT_MS, what: 'paid' })
     const json = await this.json<{ queue_id?: unknown; duration_seconds?: unknown }>(res, 'paid', UPLOAD_TIMEOUT_MS)
     if (typeof json.queue_id !== 'string' || !json.queue_id) {
-      throw new VeniceError('Venice svarade utan kö-id. Det kan ändå ha debiterats – kontrollera saldot.', 502)
+      throw new VeniceError('Venice answered without a queue ID. It may have been charged anyway – check your balance.', 502)
     }
     const measured = Number(json.duration_seconds)
     return { queueId: json.queue_id, durationSeconds: Number.isFinite(measured) && measured > 0 ? measured : 0 }
@@ -745,8 +745,8 @@ export class VeniceAudio {
     prompt?: string
   }): Promise<{ data: Buffer; format: string }> {
     const characters = Array.from(o.input).length
-    if (!o.input.trim()) throw new Error('Repliken är tom.')
-    if (characters > SPEECH_MAX_CHARACTERS) throw new Error(`Repliken är för lång (högst ${SPEECH_MAX_CHARACTERS} tecken).`)
+    if (!o.input.trim()) throw new Error('The line is empty.')
+    if (characters > SPEECH_MAX_CHARACTERS) throw new Error(`The line is too long (at most ${SPEECH_MAX_CHARACTERS} characters).`)
     const body: Record<string, unknown> = { model: o.model, input: o.input, voice: o.voice, response_format: o.format }
     if (typeof o.speed === 'number' && Number.isFinite(o.speed)) body.speed = Math.min(4, Math.max(0.25, o.speed))
     if (o.language) body.language = o.language
@@ -758,7 +758,7 @@ export class VeniceAudio {
     } catch (err) {
       throw transportError(err, 'paid', SPEECH_TIMEOUT_MS)
     }
-    if (!data.length) throw new VeniceError('Venice skickade inget ljud. Det kan ändå ha debiterats – kontrollera saldot.', 502)
+    if (!data.length) throw new VeniceError('Venice sent no audio. It may have been charged anyway – check your balance.', 502)
     const format = audioFormatOf(res.headers.get('content-type') ?? '', data, res.headers.get('x-venice-audio-format'), o.format)
     return { data, format }
   }
@@ -775,7 +775,7 @@ export class VeniceAudio {
     const res = await this.call('/audio/voices', { method: 'POST', form, requireKey: true, timeoutMs: UPLOAD_TIMEOUT_MS, what: 'paid' })
     const json = await this.json<{ id?: unknown }>(res, 'paid', UPLOAD_TIMEOUT_MS)
     if (typeof json.id !== 'string' || !json.id) {
-      throw new VeniceError('Venice skickade ingen röst tillbaka. Det kan ändå ha debiterats – kontrollera saldot.', 502)
+      throw new VeniceError('Venice sent no voice back. It may have been charged anyway – check your balance.', 502)
     }
     return { handle: json.id }
   }

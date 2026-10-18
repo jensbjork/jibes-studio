@@ -48,13 +48,13 @@ interface Props {
   onClose: () => void
   onReuse: (g: Generation) => void
   onDelete: (g: Generation) => void
-  /** A locally patched copy, e.g. with segmentId set after "Lägg i sekvens". */
+  /** A locally patched copy, e.g. with segmentId set after "Add to sequence". */
   onChange?: (g: Generation) => void
   onRate: (g: Generation, rating: number | null) => void
   navigate?: Navigate
-  /** Opens a learning; without it the learning is opened in the Prompter view. */
+  /** Opens a learning; without it the learning is opened in the Prompts view. */
   onOpenLearning?: (id: string) => void
-  /** "Använd igen" also takes the user to Generera (when the drawer is shown elsewhere). */
+  /** "Use again" also takes the user to Generate (when the drawer is shown elsewhere). */
   reuseTitle?: string
   /**
    * An agent opened the drawer (open_in_studio): showing the clip then isn't the user looking at it, so it is not
@@ -64,9 +64,9 @@ interface Props {
 }
 
 const MODE_LABEL: Record<Kind, string> = {
-  'text-to-video': 'Text till video',
-  'image-to-video': 'Startbild till video',
-  'reference-to-video': 'Referensbilder till video'
+  'text-to-video': 'Text to video',
+  'image-to-video': 'Start image to video',
+  'reference-to-video': 'Reference images to video'
 }
 
 const sectionTitle = 'mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted'
@@ -109,7 +109,7 @@ export default function ClipDrawer({
   onRate,
   navigate,
   onOpenLearning,
-  reuseTitle = 'Fyll i formuläret med klippets inställningar',
+  reuseTitle = 'Fill in the form with the clip’s settings',
   openedByAgent = false
 }: Props) {
   const asideRef = useRef<HTMLElement>(null)
@@ -175,7 +175,7 @@ export default function ClipDrawer({
   return (
     <aside
       ref={asideRef}
-      aria-label="Klippets detaljer"
+      aria-label="Clip details"
       className="no-drag absolute inset-y-0 right-0 z-30 flex flex-col border-l border-line bg-panel shadow-2xl shadow-black/60"
       style={{ width: 'min(620px, 82%)' }}
     >
@@ -188,7 +188,7 @@ export default function ClipDrawer({
               type="button"
               onClick={onPrev}
               disabled={!onPrev}
-              title="Föregående klipp (←)"
+              title="Previous clip (←)"
               className="rounded p-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-30"
             >
               <ChevronLeftIcon size={13} />
@@ -197,25 +197,25 @@ export default function ClipDrawer({
               type="button"
               onClick={onNext}
               disabled={!onNext}
-              title="Nästa klipp (→)"
+              title="Next clip (→)"
               className="rounded p-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-30"
             >
               <ChevronRightIcon size={13} />
             </button>
             {position && (
               <span className="ml-1 text-[11px] text-muted tabular-nums">
-                {position.index + 1} av {position.total}
+                {position.index + 1} of {position.total}
               </span>
             )}
           </div>
         )}
         <h2 className="min-w-0 flex-1 truncate px-2 font-medium" title={generationTitle(g)}>
-          {g.title?.trim() ? generationTitle(g, 60) : titleFromPrompt(g.prompt, 8, 60) || 'Klipp'}
+          {g.title?.trim() ? generationTitle(g, 60) : titleFromPrompt(g.prompt, 8, 60) || 'Clip'}
         </h2>
         <button
           type="button"
           onClick={onClose}
-          title="Stäng (Esc)"
+          title="Close (Esc)"
           className="rounded p-1.5 text-muted transition hover:bg-raised hover:text-text"
         >
           <CloseIcon size={12} />
@@ -226,7 +226,7 @@ export default function ClipDrawer({
         <Player key={g.id} g={g} videoRef={videoRef} autoPlay={!openedByAgent} />
 
         <div className="space-y-6 px-5 pb-8 pt-4">
-          {/* Keyed by clip: an armed "Radera" (and its focused confirm button) must never carry over to the next
+          {/* Keyed by clip: an armed "Delete" (and its focused confirm button) must never carry over to the next
               clip, or → then Space would delete a clip the user never confirmed. (Not g.id alone: YourReview is a
               sibling keyed by it, and duplicate keys would leave the old one in the page.) */}
           <Actions
@@ -274,7 +274,7 @@ export default function ClipDrawer({
               )}
               {g.params.negativePrompt && (
                 <div className="mt-3">
-                  <h4 className="mb-1 text-[11px] text-muted">Negativ prompt</h4>
+                  <h4 className="mb-1 text-[11px] text-muted">Negative prompt</h4>
                   <HighlightedPrompt
                     text={g.params.negativePrompt}
                     images={refs.images}
@@ -342,14 +342,14 @@ function Player({
         <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-muted">
           <span className="flex items-center gap-2">
             <Spinner />
-            {g.status === 'queued' ? 'I kö…' : 'Genererar…'}
+            {g.status === 'queued' ? 'Queued…' : 'Generating…'}
           </span>
           <div className="h-1 w-full max-w-64 overflow-hidden rounded bg-raised">
             <div className="h-full bg-accent transition-all duration-1000" style={{ width: `${(progress ?? 0.03) * 100}%` }} />
           </div>
           <span className="text-[11px]">
             {formatSeconds(g.executionDuration)}
-            {g.averageExecutionTime ? ` av ~${formatSeconds(g.averageExecutionTime)}` : ''}
+            {g.averageExecutionTime ? ` of ~${formatSeconds(g.averageExecutionTime)}` : ''}
           </span>
         </div>
       ) : (
@@ -357,7 +357,7 @@ function Player({
           ref={failureRef}
           className="flex h-full items-center justify-center overflow-y-auto p-6 text-center text-accent select-text"
         >
-          {g.status === 'failed' ? (g.error ?? 'Misslyckades') : 'Videon finns inte.'}
+          {g.status === 'failed' ? (g.error ?? 'Failed') : 'The video doesn’t exist.'}
         </div>
       )}
     </div>
@@ -401,22 +401,22 @@ function Actions({
             title={reuseTitle}
             className="rounded-md bg-accent px-3 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
           >
-            Använd igen
+            Use again
           </button>
         )}
         {g.status === 'completed' && g.filePath && navigate && (
           <button
             type="button"
             onClick={() => {
-              // Taking a clip into Redigera is choosing it on purpose.
+              // Taking a clip into the Editor is choosing it on purpose.
               markSeen([workKey.generation(g.id)])
               navigate('editor', { type: 'open-editor', generationId: g.id })
             }}
-            title="Ändra klippet med AI i Redigera. Originalet lämnas orört – varje ändring blir en ny version."
+            title="Change the clip with AI in the Editor. The original is left untouched – every change becomes a new version."
             className={`${actionButton} flex items-center gap-1.5`}
           >
             <ScissorsIcon size={12} />
-            Redigera…
+            Edit…
           </button>
         )}
         {g.status !== 'failed' && (
@@ -426,23 +426,23 @@ function Actions({
             onClick={() => setPickerOpen((o) => !o)}
             className={`${actionButton} ${pickerOpen ? 'bg-raised text-text' : ''}`}
           >
-            Lägg i sekvens
+            Add to sequence
           </button>
         )}
         {g.filePath && (
           <button type="button" onClick={() => void window.studio.revealFile(g.filePath!)} className={actionButton}>
-            Visa fil
+            Show file
           </button>
         )}
         {!isPending(g) && (
           <span className="ml-auto">
             <ConfirmButton
-              question={g.segmentId ? 'Används som tagning – radera?' : 'Radera videon?'}
+              question={g.segmentId ? 'Used as a take – delete?' : 'Delete the video?'}
               onConfirm={() => onDelete(g)}
-              title="Flyttar videon till papperskorgen"
+              title="Moves the video to the Trash"
               className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-accent"
             >
-              Radera
+              Delete
             </ConfirmButton>
           </span>
         )}
@@ -451,7 +451,7 @@ function Actions({
         <div className="mt-2 flex items-center gap-2 rounded-md bg-raised px-2.5 py-1.5 text-[12px]">
           <span className="text-emerald-400">✓</span>
           <span className="min-w-0 flex-1 truncate">
-            Klipp {added.clipNumber} i ”{added.name}”
+            Clip {added.clipNumber} in “{added.name}”
           </span>
           {navigate && (
             <button
@@ -459,12 +459,12 @@ function Actions({
               onClick={() => navigate('sequences', { type: 'open-sequence', sequenceId: added.sequenceId })}
               className="shrink-0 font-medium text-accent hover:underline"
             >
-              Öppna
+              Open
             </button>
           )}
         </div>
       )}
-      <Popover anchorRef={sequenceButton} open={pickerOpen} onClose={closePicker} width={300} label="Lägg i sekvens">
+      <Popover anchorRef={sequenceButton} open={pickerOpen} onClose={closePicker} width={300} label="Add to sequence">
         <SequencePicker generation={g} onAdded={onAdded} />
       </Popover>
     </div>
@@ -490,11 +490,11 @@ function References({
   }
   return (
     <section>
-      <h3 className={sectionTitle}>Referenser</h3>
+      <h3 className={sectionTitle}>References</h3>
       {images.length > 0 && (
         <ul className="grid grid-cols-[repeat(auto-fill,minmax(92px,1fr))] gap-2">
           {images.map((r) => {
-            const label = r.token ?? (r.role === 'start' ? 'Startbild' : 'Slutbild')
+            const label = r.token ?? (r.role === 'start' ? 'Start image' : 'End image')
             const tone = r.asset ? KIND_TONE[r.asset.kind] : undefined
             return (
               <li key={`${label}:${r.path}`}>
@@ -503,7 +503,7 @@ function References({
                   onClick={() => openAsset(r, r.path)}
                   onMouseEnter={() => r.token && onHover(r.token)}
                   onMouseLeave={() => onHover(undefined)}
-                  title={r.asset ? `Öppna ${r.asset.name} i biblioteket` : 'Visa filen i Finder'}
+                  title={r.asset ? `Open ${r.asset.name} in the library` : 'Show the file in Finder'}
                   className={`group block w-full overflow-hidden rounded-md border text-left transition ${
                     highlighted && highlighted === r.token ? 'border-white/60' : 'border-line hover:border-muted'
                   } ${r.unsent ? 'opacity-45' : ''}`}
@@ -517,7 +517,7 @@ function References({
                     </span>
                   </span>
                   <span className="block truncate px-1.5 py-1 text-[11px] text-muted">
-                    {r.unsent ? 'Skickades inte' : imageCaption(r)}
+                    {r.unsent ? 'Not sent' : imageCaption(r)}
                   </span>
                 </button>
               </li>
@@ -542,10 +542,10 @@ function References({
                   <SoundIcon size={12} className="shrink-0 text-muted" />
                   <span className={`shrink-0 font-medium ${tone?.text ?? 'text-text'}`}>{a.token}</span>
                   <span className="min-w-0 flex-1 truncate">
-                    {a.asset ? a.asset.name : <span className="text-muted">Eget ljud</span>}
-                    {a.asset && a.asset.audio.length > 1 && <span className="text-muted"> · klipp {a.number}</span>}
+                    {a.asset ? a.asset.name : <span className="text-muted">Own sound</span>}
+                    {a.asset && a.asset.audio.length > 1 && <span className="text-muted"> · clip {a.number}</span>}
                   </span>
-                  <span className="shrink-0 text-[11px] text-muted tabular-nums" title="Den del av ljudfilen som skickades">
+                  <span className="shrink-0 text-[11px] text-muted tabular-nums" title="The part of the audio file that was sent">
                     {audioWindowText(a.start, a.length)}
                   </span>
                 </div>
@@ -571,7 +571,7 @@ function ReferenceImage({ path }: { path: string }) {
   if (failed) {
     return (
       <span className="flex h-full w-full items-center justify-center p-2 text-center text-[10px] text-muted">
-        Bilden finns inte längre
+        The image no longer exists
       </span>
     )
   }
@@ -594,44 +594,44 @@ function Settings({ g, modelName, navigate }: { g: Generation; modelName?: strin
   const own = g.source === 'import' || g.source === 'edit'
   const rows: [string, ReactNode][] = own
     ? [
-        ['Källa', g.source === 'import' ? 'Egen film' : 'Version från Redigera'],
-        ['Längd', g.videoDuration ? formatClipLength(g.videoDuration) : p.duration]
+        ['Source', g.source === 'import' ? 'Own film' : 'Version from the Editor'],
+        ['Duration', g.videoDuration ? formatClipLength(g.videoDuration) : p.duration]
       ]
     : [
-        ['Modell', <span title={g.model}>{modelName ?? g.model}</span>],
+        ['Model', <span title={g.model}>{modelName ?? g.model}</span>],
         [
-          'Läge',
-          // A take made from a video in Redigera (an edit or an upscale) isn't one of the Generate form's modes.
+          'Mode',
+          // A take made from a video in the Editor (an edit or an upscale) isn't one of the Generate form's modes.
           p.upscaleFactor
-            ? 'Uppskalning'
+            ? 'Upscale'
             : p.sourceVideo || p.referenceVideos?.length
-              ? 'Video till video'
+              ? 'Video to video'
               : MODE_LABEL[kindOfModelId(g.model)]
         ],
         [
-          'Längd',
+          'Duration',
           // The model sometimes delivers a little more or less than asked for.
           g.videoDuration && Math.abs(g.videoDuration - durationSeconds(p.duration)) > 0.05
-            ? `${p.duration} (blev ${formatClipLength(g.videoDuration)})`
+            ? `${p.duration} (became ${formatClipLength(g.videoDuration)})`
             : p.duration
         ]
       ]
-  if (p.resolution) rows.push(['Upplösning', p.resolution])
-  if (p.aspectRatio) rows.push(['Bildformat', p.aspectRatio])
-  if (p.audio !== undefined) rows.push(['Ljud', p.audio ? 'På' : 'Av'])
-  rows.push(['Kostnad', g.source === 'import' ? 'Ingen (egen film)' : formatUsd(g.quote)])
+  if (p.resolution) rows.push(['Resolution', p.resolution])
+  if (p.aspectRatio) rows.push(['Aspect ratio', p.aspectRatio])
+  if (p.audio !== undefined) rows.push(['Audio', p.audio ? 'On' : 'Off'])
+  rows.push(['Cost', g.source === 'import' ? 'None (own film)' : formatUsd(g.quote)])
   rows.push(['Status', STATUS_LABEL[g.status]])
-  rows.push(['Skapad', new Date(g.createdAt).toLocaleString('sv-SE', { dateStyle: 'medium', timeStyle: 'short' })])
-  if (g.completedAt && g.status === 'completed') rows.push(['Tog', formatSeconds(g.completedAt - g.createdAt)])
+  rows.push(['Created', new Date(g.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })])
+  if (g.completedAt && g.status === 'completed') rows.push(['Took', formatSeconds(g.completedAt - g.createdAt)])
   if (g.segmentId) {
     rows.push([
-      'Tagning i',
+      'Take in',
       <TakeOwnerLink key={g.segmentId} segmentId={g.segmentId} generationId={g.id} navigate={navigate} />
     ])
   }
   if (g.filePath) {
     rows.push([
-      'Fil',
+      'File',
       <span className="break-all text-muted select-text" title={g.filePath}>
         {g.filePath.split('/').pop()}
       </span>
@@ -639,7 +639,7 @@ function Settings({ g, modelName, navigate }: { g: Generation; modelName?: strin
   }
   return (
     <section>
-      <h3 className={sectionTitle}>Inställningar</h3>
+      <h3 className={sectionTitle}>Settings</h3>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[12px]">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
@@ -653,8 +653,8 @@ function Settings({ g, modelName, navigate }: { g: Generation; modelName?: strin
 }
 
 /**
- * An own film's original (when Studio made a working copy of it), or where a version came from: "Gjord från v2 i
- * "<redigering>"", with a way to open the edit.
+ * An own film's original (when Studio made a working copy of it), or where a version came from: "Made from v2 in
+ * "<edit>"", with a way to open the edit.
  */
 function OwnFilm({ g, navigate }: { g: Generation; navigate?: Navigate }) {
   const badge = sourceBadge(g)
@@ -678,7 +678,7 @@ function OwnFilm({ g, navigate }: { g: Generation; navigate?: Navigate }) {
 
   return (
     <section>
-      <h3 className={sectionTitle}>{g.source === 'import' ? 'Egen film' : 'Version'}</h3>
+      <h3 className={sectionTitle}>{g.source === 'import' ? 'Own film' : 'Version'}</h3>
       <div className="space-y-2 rounded-md border border-line px-3 py-2.5 text-[12px]">
         <p className="flex items-center gap-1.5">
           {g.source === 'import' ? (
@@ -695,21 +695,21 @@ function OwnFilm({ g, navigate }: { g: Generation; navigate?: Navigate }) {
           <>
             {g.recipe?.import?.name && (
               <p className="text-muted">
-                Importerad från <span className="text-text">{g.recipe.import.name}</span>
+                Imported from <span className="text-text">{g.recipe.import.name}</span>
                 {note ? ` · ${note}` : ''}
               </p>
             )}
             {g.originalPath && (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="min-w-0 text-muted">
-                  Originalfil: <span className="break-all text-text select-text">{g.originalPath.split('/').pop()}</span>
+                  Original file: <span className="break-all text-text select-text">{g.originalPath.split('/').pop()}</span>
                 </span>
                 <button
                   type="button"
                   onClick={() => void window.studio.revealFile(g.originalPath!)}
                   className="rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-text"
                 >
-                  Visa original i Finder
+                  Show original in Finder
                 </button>
               </div>
             )}
@@ -719,12 +719,12 @@ function OwnFilm({ g, navigate }: { g: Generation; navigate?: Navigate }) {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-muted">
               {edit === undefined && g.editId
-                ? 'Letar efter redigeringen…'
+                ? 'Looking for the edit…'
                 : edit
                   ? parent
-                    ? `Gjord från v${parent.number} i ”${edit.name}”`
-                    : `En version i ”${edit.name}”`
-                  : 'Redigeringen finns inte längre.'}
+                    ? `Made from v${parent.number} in “${edit.name}”`
+                    : `A version in “${edit.name}”`
+                  : 'The edit no longer exists.'}
             </span>
             {edit && navigate && (
               <button
@@ -732,7 +732,7 @@ function OwnFilm({ g, navigate }: { g: Generation; navigate?: Navigate }) {
                 onClick={() => navigate('editor', { type: 'open-editor', editId: edit.id })}
                 className="rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-text"
               >
-                Öppna i Redigera
+                Open in the Editor
               </button>
             )}
           </div>
@@ -761,7 +761,7 @@ function TakeOwnerLink({
       (found) => current && setOwner(found ?? null),
       (e: unknown) => {
         // Only a label and a shortcut; the take is still reachable from the sidebar.
-        console.warn('Kunde inte hitta var tagningen hör hemma', e)
+        console.warn('Could not find where the take belongs', e)
         if (current) setOwner(null)
       }
     )
@@ -770,13 +770,13 @@ function TakeOwnerLink({
     }
   }, [segmentId])
   if (owner === undefined) return <span className="text-muted">…</span>
-  if (owner === null) return <span className="text-muted">En sekvens eller storyboard</span>
+  if (owner === null) return <span className="text-muted">A sequence or storyboard</span>
   if (!navigate) return <span>{takeOwnerLabel(owner)}</span>
   return (
     <button
       type="button"
       onClick={() => openTakeOwner(owner, segmentId, navigate, generationId)}
-      title={owner.kind === 'storyboard' ? 'Öppna storyboarden' : 'Öppna sekvensen'}
+      title={owner.kind === 'storyboard' ? 'Open the storyboard' : 'Open the sequence'}
       className="text-left text-text underline-offset-2 hover:underline"
     >
       {takeOwnerLabel(owner)}
@@ -804,7 +804,7 @@ function LinkedLearnings({
   }
   return (
     <section>
-      <h3 className={sectionTitle}>Lärdomar från klippet</h3>
+      <h3 className={sectionTitle}>Learnings from the clip</h3>
       <ul className="space-y-1.5">
         {linked.map((l) => (
           <li key={l.id}>

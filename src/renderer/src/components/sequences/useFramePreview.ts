@@ -85,7 +85,7 @@ export function hasAutomaticFrames(segment: Segment, index: number, count: numbe
 /**
  * The start and end frames a new take of the clip would be made from, as main works them out
  * (previewSegmentFrames): the previous clip's last frame, the next clip's first frame, or the clip's own images,
- * plus what stands in the way, in Swedish. Re-asked whenever something it depends on changes.
+ * plus what stands in the way. Re-asked whenever something it depends on changes.
  */
 export function useFramePreview(sequence: Sequence | undefined, index: number, enabled = true): FramePreviewState {
   const segmentId = sequence?.segments[index]?.id

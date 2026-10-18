@@ -20,32 +20,32 @@ stops it: open **System Settings → Privacy & Security** and click **Open Anywa
 ## Get started
 
 1. Choose a folder for your library.
-2. **Inställningar** → paste your Venice API key.
-3. Write a prompt and press **Generera**.
+2. **Settings** → paste your Venice API key.
+3. Write a prompt and press **Generate**.
 
-The interface is in Swedish. You pay Venice per generation; the price is shown before you generate.
+You pay Venice per generation; the price is shown before you generate.
 
 ## How it works
 
-- **Generera** – a clip from text, a start image, or reference photos and voices you point at in the prompt
+- **Generate** – a clip from text, a start image, or reference photos and voices you point at in the prompt
   (`@Image1`, `@Audio1`).
-- **Mediabank** – everything you've made in one place: videos, pictures and exported films.
-- **Bibliotek** – characters, environments, products, outfits and poses: photos, a description and a voice.
+- **Media** – everything you've made in one place: videos, pictures and exported films.
+- **Library** – characters, environments, products, outfits and poses: photos, a description and a voice.
   Their descriptions are added to the prompt for you.
-- **Sekvenser** – clips that continue from each other's last frame, exported as one film.
+- **Sequences** – clips that continue from each other's last frame, exported as one film.
 - **Storyboards** – one picture per moment; the clips between them are generated.
-- **Redigera** – cut, clean up the sound, replace a voice, add music, redo a stretch with AI. Every change is a
+- **Editor** – cut, clean up the sound, replace a voice, add music, redo a stretch with AI. Every change is a
   new version; the original is never touched.
 - **Agents** – connect your own AI agent over [MCP](https://modelcontextprotocol.io). It can do what you can;
   anything that costs money or deletes something waits for your OK.
 
 Everything is stored as plain files in the folder you chose.
 
-| Sekvenser | Storyboards |
+| Sequences | Storyboards |
 | --- | --- |
-| ![Sekvenser](docs/images/sequences.png) | ![Storyboards](docs/images/storyboards.png) |
-| **Redigera** | **Writing help** – type `/` for ready-made phrases |
-| ![Redigera](docs/images/editor.png) | ![Byggstenar](docs/images/prompt-blocks.png) |
+| ![Sequences](docs/images/sequences.png) | ![Storyboards](docs/images/storyboards.png) |
+| **Editor** | **Writing help** – type `/` for ready-made phrases |
+| ![Editor](docs/images/editor.png) | ![Building blocks](docs/images/prompt-blocks.png) |
 
 ## More
 

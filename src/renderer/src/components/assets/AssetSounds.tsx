@@ -36,13 +36,13 @@ import VoiceDesignDialog from './VoiceDesignDialog'
 const DRAG_TYPE = 'application/x-studio-asset-audio'
 const MAX_AUDIOS = maxReferenceAudios(DEFAULT_MODEL['reference-to-video'])
 
-/** What Pågår och klart's "Gå dit" points out in Röst: a new clip, or a voice design that failed. */
+/** What Activity's "Go there" points out in Voice: a new clip, or a voice design that failed. */
 export interface SoundFocus {
   audioId?: string
   jobId?: string
 }
 
-/** A voice being made for this character ("Skapa röst med AI"). */
+/** A voice being made for this character ("Design a voice with AI"). */
 interface DesignJob {
   id: string
   label: string
@@ -59,17 +59,17 @@ interface Props {
   onAdd: (paths: string[]) => void
   onUpdated: (a: Asset) => void
   onError: (message: string) => void
-  /** Whether a window edit is waiting to be saved or being saved (Generera waits for it). */
+  /** Whether a window edit is waiting to be saved or being saved (Generate waits for it). */
   onBusyChange: (busy: boolean) => void
   /**
-   * A clip (or a failed voice design) to bring into view and point out once (Pågår och klart's "Gå dit"). Changes to
+   * A clip (or a failed voice design) to bring into view and point out once (Activity's "Go there"). Changes to
    * a new request object each time, so the same one can be pointed out again.
    */
   focus?: SoundFocus
 }
 
 /**
- * A character's voice ("Röst") or an environment's sound ("Ljudmiljö"): the clips in order, each with a
+ * A character's voice ("Voice") or an environment's sound ("Soundscape"): the clips in order, each with a
  * player and the window that is sent to Venice. Add (drop or pick), remove, reorder, and preview exactly
  * what is sent.
  */
@@ -93,7 +93,7 @@ export default function AssetSounds({
   const [target, setTarget] = useState<DropTarget>()
   const dragRef = useRef<string | undefined>(undefined)
   const reorderSeq = useRef(0)
-  // Characters only: voices made with AI ("Skapa röst med AI"), and the dialog that starts one.
+  // Characters only: voices made with AI ("Design a voice with AI"), and the dialog that starts one.
   const voices = asset.kind === 'character'
   const [designing, setDesigning] = useState(false)
   const [designs, setDesigns] = useState<DesignJob[]>([])
@@ -123,7 +123,7 @@ export default function AssetSounds({
   }
 
   // A designed voice reports its progress per character; when it is done the new clip is fetched (main has marked it
-  // new in Pågår och klart, so its row shows "Ny" until it has been played).
+  // new in Activity, so its row shows "New" until it has been played).
   const designsRef = useRef(designs)
   designsRef.current = designs
   useEffect(() => {
@@ -139,7 +139,7 @@ export default function AssetSounds({
         return
       }
       if (job) setDesigns((l) => l.filter((d) => d.id !== job.id))
-      // A failure also gets its row below (from Pågår och klart), which is what marks it seen.
+      // A failure also gets its row below (from Activity), which is what marks it seen.
       if (p.error) onError(p.error)
       // Also for a job started before this view mounted (or by an agent): the new clip shows at once.
       else void collect()
@@ -162,7 +162,7 @@ export default function AssetSounds({
       ...list,
       {
         id: job.id,
-        label: job.label || 'Skapar röst med AI',
+        label: job.label || 'Designing a voice with AI',
         fraction: job.fraction
       }
     ])
@@ -308,7 +308,7 @@ export default function AssetSounds({
           <OpenFolderButton
             target={ASSET_FOLDER[asset.kind]}
             id={asset.id}
-            title={`Visa mappen med ${copy.clip} i Finder`}
+            title={`Show the folder with the ${copy.clips} in Finder`}
             onError={onError}
             className="rounded-md px-2.5 py-1 text-muted hover:bg-raised hover:text-text disabled:opacity-40"
           />
@@ -316,18 +316,18 @@ export default function AssetSounds({
             <button
               onClick={() => setDesigning(true)}
               className="rounded-md px-2.5 py-1 text-muted hover:bg-raised hover:text-text"
-              title="Beskriv en röst – Venice skapar den och den sparas som ett nytt röstklipp"
+              title="Describe a voice – Venice creates it and it is saved as a new voice clip"
             >
-              Skapa röst med AI…
+              Design a voice with AI…
             </button>
           )}
           {!empty && (
             <button
               onClick={() => void pick()}
               className="rounded-md px-2.5 py-1 text-muted hover:bg-raised hover:text-text"
-              title={`Välj ljudfiler (${AUDIO_FORMATS})`}
+              title={`Choose audio files (${AUDIO_FORMATS})`}
             >
-              ＋ Lägg till
+              ＋ Add
             </button>
           )}
         </div>
@@ -342,10 +342,10 @@ export default function AssetSounds({
         >
           <span className="text-xl">＋</span>
           <span className="text-sm">
-            {fileOver ? 'Släpp för att lägga till' : 'Släpp en ljudfil här eller klicka för att välja'}
+            {fileOver ? 'Drop to add' : 'Drop an audio file here or click to choose'}
           </span>
           <span className="max-w-md text-[11px] leading-relaxed text-muted">
-            {AUDIO_FORMATS}, minst {MIN_AUDIO_CLIP_SECONDS} sekunder. {copy.tips}
+            {AUDIO_FORMATS}, at least {MIN_AUDIO_CLIP_SECONDS} seconds. {copy.tips}
           </span>
         </button>
       ) : (
@@ -386,14 +386,14 @@ export default function AssetSounds({
               key={`adding-${i}`}
               className="flex h-16 animate-pulse items-center rounded-lg bg-raised px-4 text-[11px] text-muted"
             >
-              Lägger till ljud…
+              Adding sound…
             </li>
           ))}
           {designs.map((d) => (
             <li key={d.id} className="flex h-16 items-center gap-3 rounded-lg bg-raised px-4 text-[11px] text-muted">
               <Spinner />
               <span className="min-w-0 flex-1 truncate">{d.label}…</span>
-              {d.fraction !== undefined && <span className="tabular-nums">{Math.round(d.fraction * 100)} %</span>}
+              {d.fraction !== undefined && <span className="tabular-nums">{Math.round(d.fraction * 100)}%</span>}
             </li>
           ))}
           {failures.map((w) => (
@@ -413,9 +413,9 @@ export default function AssetSounds({
 
       {!empty && (
         <p className="mt-3 text-[11px] leading-relaxed text-muted">
-          Bara utdraget skickas. Venice tar emot högst {MAX_AUDIOS} ljudklipp och sammanlagt{' '}
-          {MAX_REFERENCE_AUDIO_SECONDS} sekunder per generering, och bara tillsammans med minst en referensbild.
-          Ljudet visar hur det ska låta – vad som sägs eller händer skriver du i prompten.
+          Only the excerpt is sent. Venice takes at most {MAX_AUDIOS} {MAX_AUDIOS === 1 ? 'sound clip' : 'sound clips'}{' '}
+          and {MAX_REFERENCE_AUDIO_SECONDS} seconds in total per generation, and only together with at least one
+          reference image. The clip sets how things sound – write what is said or happens in the prompt.
         </p>
       )}
     </div>
@@ -430,7 +430,7 @@ function DesignFailureRow({
   onClose
 }: {
   work: FinishedWork
-  /** Set when "Gå dit" points it out (a new request object each time). */
+  /** Set when "Go there" points it out (a new request object each time). */
   focus?: SoundFocus
   /** Told just before it is marked seen: it stays listed until ✕. */
   onSeen: () => void
@@ -454,14 +454,14 @@ function DesignFailureRow({
       }`}
     >
       <span className="min-w-0 flex-1 select-text">
-        <span className="font-medium text-accent">Rösten kunde inte skapas.</span>{' '}
-        <span className="text-[#ffb3b5]">{work.error ?? 'Jobbet misslyckades.'}</span>
+        <span className="font-medium text-accent">Couldn't create the voice.</span>{' '}
+        <span className="text-[#ffb3b5]">{work.error ?? 'The job failed.'}</span>
       </span>
       <button
         type="button"
         onClick={onClose}
-        title="Stäng"
-        aria-label="Stäng felet"
+        title="Close"
+        aria-label="Close the error"
         className="shrink-0 rounded px-1 text-muted transition hover:bg-raised hover:text-text"
       >
         ✕
@@ -480,7 +480,7 @@ interface RowProps {
   /** Side on which the drop marker is drawn. */
   indicator?: 'before' | 'after'
   onUpdated: (a: Asset) => void
-  /** A character's voice: it can be marked as allowed to clone ("Får klonas för nya repliker"). */
+  /** A character's voice: it can be marked as allowed to clone ("May be cloned for new lines"). */
   voice: boolean
   /** Set when this clip is to be brought into view and pointed out (a new request object each time). */
   focus?: SoundFocus
@@ -523,7 +523,7 @@ function ClipRow({
   const failed = player.failed.has(clip.id)
   const tooShort = clip.duration < MIN_AUDIO_CLIP_SECONDS
   const long = clip.duration > LONG_AUDIO_SECONDS
-  // A voice made with AI that hasn't been played yet (Pågår och klart); playing a second of it clears it.
+  // A voice made with AI that hasn't been played yet (Activity); playing a second of it clears it.
   const fresh = useIsUnseen(workKey.audio(clip.id))
   const origin = originText(clip.origin)
 
@@ -577,8 +577,8 @@ function ClipRow({
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onKeyDown={gripKeys}
-              aria-label={`Flytta ${name} – dra, eller använd ↑ och ↓`}
-              title="Dra för att ändra ordning"
+              aria-label={`Move ${name} – drag, or use ↑ and ↓`}
+              title="Drag to reorder"
               className="-ml-1 flex h-7 w-4 shrink-0 cursor-grab items-center justify-center rounded text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 active:cursor-grabbing"
             >
               <GripIcon />
@@ -588,8 +588,8 @@ function ClipRow({
             type="button"
             onClick={() => player.toggleFile(clip)}
             disabled={failed}
-            aria-label={playingFile ? 'Pausa' : `Spela upp ${name}`}
-            title={failed ? undefined : playingFile ? 'Pausa' : 'Spela upp hela inspelningen'}
+            aria-label={playingFile ? 'Pause' : `Play ${name}`}
+            title={failed ? undefined : playingFile ? 'Pause' : 'Play the whole recording'}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-raised text-text transition hover:bg-line disabled:opacity-40 disabled:hover:bg-raised"
           >
             {playingFile ? <PauseIcon size={12} /> : <PlayIcon size={12} className="translate-x-px" />}
@@ -599,7 +599,7 @@ function ClipRow({
               <span className="truncate" title={origin ? `${origin}\n${clip.path}` : clip.path}>
                 {name}
               </span>
-              {fresh && <NewChip title="Ny röst – spela upp den för att lyssna" className="shrink-0" />}
+              {fresh && <NewChip title="New voice – play it to listen" className="shrink-0" />}
               {index === 0 && copy.firstBadge && (
                 <span title={copy.firstBadge.title} className="shrink-0 rounded bg-raised px-1.5 py-0.5 text-[10px] font-medium text-muted">
                   {copy.firstBadge.label}
@@ -608,7 +608,7 @@ function ClipRow({
             </div>
             <div className="text-[11px] tabular-nums text-muted">
               {loaded && (player.state.playing || player.state.time > 0)
-                ? `${formatPosition(player.state.time)} av ${formatDuration(clip.duration)}`
+                ? `${formatPosition(player.state.time)} of ${formatDuration(clip.duration)}`
                 : formatDuration(clip.duration)}
             </div>
           </div>
@@ -616,21 +616,21 @@ function ClipRow({
             <button
               type="button"
               onClick={() => onMove(0)}
-              title={copy.firstBadge ? copy.firstBadge.title : 'Flytta klippet först i listan'}
+              title={copy.firstBadge ? copy.firstBadge.title : 'Move the clip to the top of the list'}
               className="shrink-0 rounded-md px-2 py-1 text-[11px] text-muted hover:bg-raised hover:text-text"
             >
-              Flytta överst
+              Move to top
             </button>
           )}
           <ConfirmButton
-            question={`Ta bort ${copy.clipDefinite}?`}
-            confirmLabel="Ta bort"
+            question={`Remove ${copy.clipDefinite}?`}
+            confirmLabel="Remove"
             onConfirm={onRemove}
-            title={`Ta bort ${copy.clipDefinite} – filen flyttas till papperskorgen, eller till Referensbilder om genereringar har använt den`}
+            title={`Remove ${copy.clipDefinite} – the file is moved to the Trash, or to “Referensbilder” if generations have used it`}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-accent"
           >
             <span aria-hidden>✕</span>
-            <span className="sr-only">Ta bort</span>
+            <span className="sr-only">Remove</span>
           </ConfirmButton>
         </div>
 
@@ -649,30 +649,30 @@ function ClipRow({
           <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
             <div className="flex items-center gap-1.5">
               <TimeField
-                label="Från"
+                label="From"
                 value={w.start}
                 format={formatPosition}
                 onCommit={(t) => draft.change(moveWindow(w, t, clip.duration), 'now')}
-                title="Var utdraget börjar, i minuter och sekunder (t.ex. 0:05,5) eller sekunder"
+                title="Where the excerpt starts, in minutes and seconds (e.g. 0:05.5) or seconds"
                 clamp={(t) => moveWindow(w, t, clip.duration).start}
               />
               <button
                 type="button"
                 onClick={startHere}
                 disabled={!loaded}
-                title={loaded ? 'Låt utdraget börja vid uppspelningen' : 'Spela upp eller klicka i ljudet först'}
+                title={loaded ? 'Start the excerpt at the playhead' : 'Play or click in the sound first'}
                 className="rounded-md border border-line px-2 py-1 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted"
               >
-                Här
+                Here
               </button>
             </div>
             <TimeField
-              label="Längd"
+              label="Length"
               value={w.length}
               format={formatSecondsField}
               suffix="s"
               onCommit={(t) => draft.change(withLength(w, t, clip.duration), 'now')}
-              title={`Hur lång del som skickas, ${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} sekunder`}
+              title={`How long a part is sent, ${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} seconds`}
               clamp={(t) => withLength(w, t, clip.duration).length}
             />
             <button
@@ -682,15 +682,15 @@ function ClipRow({
               className="flex items-center gap-1.5 rounded-md border border-line px-3 py-1 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
             >
               {playingWindow ? <PauseIcon size={11} /> : <PlayIcon size={11} />}
-              {playingWindow ? 'Stoppa' : 'Lyssna på utdraget'}
+              {playingWindow ? 'Stop' : 'Listen to the excerpt'}
             </button>
             <span className="ml-auto text-[11px] text-muted">
               {draft.error ? (
                 <span className="text-accent select-text" title={draft.error}>
-                  Kunde inte spara: {draft.error}
+                  Couldn't save: {draft.error}
                 </span>
               ) : (
-                draft.saving && 'Sparar…'
+                draft.saving && 'Saving…'
               )}
             </span>
           </div>
@@ -698,7 +698,7 @@ function ClipRow({
           {voice && (
             <label
               className="mt-2.5 flex w-fit cursor-pointer items-center gap-2 text-[12px]"
-              title="Redigera får då klona rösten för nya repliker (Läs in repliker på nytt). Bocka bara i om du har rätt att använda rösten."
+              title="The Editor may then clone the voice for new lines (Re-record lines). Only tick this if you have the right to use the voice."
             >
               <input
                 type="checkbox"
@@ -706,8 +706,8 @@ function ClipRow({
                 onChange={(e) => onConsent(e.target.checked)}
                 className="accent-accent"
               />
-              <span>Får klonas för nya repliker</span>
-              <span className="text-[11px] text-muted">– jag har rätt att använda den här rösten</span>
+              <span>May be cloned for new lines</span>
+              <span className="text-[11px] text-muted">– I have the right to use this voice</span>
             </label>
           )}
 
@@ -715,16 +715,16 @@ function ClipRow({
             <div className="mt-2 space-y-1 text-[11px] leading-relaxed">
               {tooShort && (
                 <p className="text-amber-400">
-                  ⚠ Inspelningen är bara {formatDuration(clip.duration)} – Venice kräver minst {MIN_AUDIO_CLIP_SECONDS}{' '}
-                  sekunder. Välj en längre inspelning.
+                  ⚠ The recording is only {formatDuration(clip.duration)} – Venice needs at least{' '}
+                  {MIN_AUDIO_CLIP_SECONDS} seconds. Choose a longer recording.
                 </p>
               )}
               {long && !tooShort && (
-                <p className="text-muted">Lång inspelning – bara utdraget skickas, så välj den del som låter bäst.</p>
+                <p className="text-muted">Long recording – only the excerpt is sent, so pick the part that sounds best.</p>
               )}
               {failed && (
                 <p className="text-muted">
-                  Filen kan inte spelas upp här, men utdraget skickas som vanligt när du genererar.
+                  The file can't be played here, but the excerpt is sent as usual when you generate.
                 </p>
               )}
             </div>

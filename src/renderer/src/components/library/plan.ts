@@ -19,7 +19,7 @@ export interface PlanAction {
 }
 
 /**
- * The library that "Flytta mitt bibliotek hit" would move, if there is one. legacy: it is the library found
+ * The library that "Move my library here" would move, if there is one. legacy: it is the library found
  * while no folder was chosen; oldLayout: it is in the layout of an earlier Studio version.
  */
 export function movableLibrary(
@@ -32,10 +32,10 @@ export function movableLibrary(
   return undefined
 }
 
-/** "”Genereringar” och ”Sekvenser”" */
+/** "“Genereringar” and “Sekvenser”" (on-disk folder names, which stay as they are). */
 function quotedList(names: string[]): string {
-  const quoted = names.map((n) => `”${n}”`)
-  return quoted.length === 1 ? quoted[0] : `${quoted.slice(0, -1).join(', ')} och ${quoted[quoted.length - 1]}`
+  const quoted = names.map((n) => `“${n}”`)
+  return quoted.length === 1 ? quoted[0] : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`
 }
 
 export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPlan {
@@ -48,14 +48,14 @@ export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPla
   if (status.state === 'missing' && samePath(ins.path, status.root)) {
     return blocked(
       status.error
-        ? 'Det här är biblioteksmappen som inte gick att öppna. Försök igen, eller välj en annan mapp.'
+        ? "This is the library folder that couldn't be opened. Try again, or choose another folder."
         : ins.exists
-          ? 'Det är den här mappen Studio letar efter. Tryck på Försök igen för att öppna den.'
-          : 'Det är den här mappen Studio letar efter, men den går inte att nå. Anslut disken och försök igen.'
+          ? 'This is the folder Studio is looking for. Press Try again to open it.'
+          : "This is the folder Studio is looking for, but it can't be reached. Connect the disk and try again."
     )
   }
   if (status.state === 'ready' && (ins.isCurrent || samePath(ins.path, status.root))) {
-    return blocked('Det här är redan din biblioteksmapp.')
+    return blocked('This is already your library folder.')
   }
   // Main may count the old-layout folder itself as "inside" the library it would take along; choosing that
   // folder is fine, it is reorganized in place. So is another library kept inside it (outside its own
@@ -66,16 +66,16 @@ export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPla
     // Named, since the setup screen doesn't mention a library without content.
     const which =
       status.state === 'ready'
-        ? 'ditt nuvarande bibliotek'
+        ? 'your current library'
         : status.legacy && !status.legacy.hasContent
-          ? `det tomma Studio-biblioteket${status.legacy.oldLayout ? ' från en tidigare version' : ''}`
-          : 'ditt gamla bibliotek'
+          ? `the empty Studio library${status.legacy.oldLayout ? ' from an earlier version' : ''}`
+          : 'your old library'
     return blocked(
-      `Mappen ligger inuti ${which}${container ? ` (${displayPath(container)})` : ''}. Välj en mapp som ligger utanför det.`
+      `The folder is inside ${which}${container ? ` (${displayPath(container)})` : ''}. Choose a folder outside it.`
     )
   }
   if (!ins.writable) {
-    return blocked('Studio får inte spara filer i den här mappen. Välj en annan mapp, till exempel i din hemmapp.')
+    return blocked("Studio isn't allowed to save files in this folder. Choose another folder, for example in your home folder.")
   }
 
   const notes: FolderPlan['notes'] = []
@@ -83,23 +83,23 @@ export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPla
     notes.push({
       tone: 'warning',
       text:
-        'Mappen synkas med molnet (iCloud, Dropbox eller liknande). Databasen kan skadas om den synkas medan ' +
-        'Studio arbetar, så en vanlig mapp på datorn eller en extern disk är säkrare.'
+        'The folder syncs with the cloud (iCloud, Dropbox or similar). The database can be damaged if it syncs while ' +
+        'Studio is working, so a regular folder on your computer or an external disk is safer.'
     })
   }
   if (ins.oldLayout) {
     notes.push({
       tone: 'info',
       text: legacyHere
-        ? 'Här ligger biblioteket från en tidigare version av Studio. Det ordnas om till den nya mappstrukturen – ' +
-          'inget raderas.'
-        : 'Biblioteket i mappen är från en tidigare version av Studio. När Studio öppnar det flyttas och döps ' +
-          'filerna om till den nya mappstrukturen – inget raderas.'
+        ? 'The library from an earlier version of Studio is here. It is reorganized into the new folder structure – ' +
+          'nothing is deleted.'
+        : 'The library in the folder is from an earlier version of Studio. When Studio opens it, the files are moved ' +
+          'and renamed into the new folder structure – nothing is deleted.'
     })
   } else if (legacyHere) {
-    notes.push({ tone: 'info', text: 'Här ligger ett Studio-bibliotek som redan har den nya mappstrukturen.' })
+    notes.push({ tone: 'info', text: 'A Studio library with the new folder structure is already here.' })
   } else if (!ins.exists) {
-    notes.push({ tone: 'info', text: 'Mappen finns inte än och skapas.' })
+    notes.push({ tone: 'info', text: "The folder doesn't exist yet and will be created." })
   } else if (!ins.empty && !ins.hasLibrary) {
     // Folders that already carry the names of Studio's own would be taken for the library's: their files
     // count as its own, and moving the library takes them along.
@@ -109,18 +109,18 @@ export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPla
         ? {
             tone: 'warning',
             text:
-              `Mappen har redan ${quotedList(ins.conflicts)} med innehåll. Studio använder ${one ? 'det namnet' : 'de namnen'} ` +
-              `för sina egna mappar, så det som ligger i ${one ? 'den' : 'dem'} räknas till biblioteket och följer med ` +
-              `om du flyttar det. Döp om ${one ? 'mappen' : 'mapparna'} i Finder först, eller välj en annan mapp.`
+              `The folder already has ${quotedList(ins.conflicts)} with content. Studio uses ${one ? 'that name' : 'those names'} ` +
+              `for its own folders, so what is in ${one ? 'it' : 'them'} counts as part of the library and comes along ` +
+              `if you move it. Rename ${one ? 'the folder' : 'the folders'} in Finder first, or choose another folder.`
           }
         : {
             tone: 'info',
-            text: 'Mappen innehåller redan andra filer. De lämnas orörda – Studios mappar läggs bredvid dem.'
+            text: "The folder already contains other files. They're left untouched – Studio's folders go next to them."
           }
     )
   }
 
-  const left = from ? ` ${from.legacy ? 'Det gamla biblioteket' : 'Ditt nuvarande bibliotek'} ligger kvar orört i ${displayPath(from.path)}.` : ''
+  const left = from ? ` ${from.legacy ? 'The old library' : 'Your current library'} stays untouched in ${displayPath(from.path)}.` : ''
 
   if (legacyHere) {
     return {
@@ -129,12 +129,12 @@ export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPla
         {
           // Main reorganizes an old-layout library in place when it opens the folder.
           mode: ins.hasLibrary ? 'open' : 'new',
-          label: 'Använd biblioteket i mappen',
+          label: 'Use the library in the folder',
           description: !ins.oldLayout
-            ? 'Studio börjar använda biblioteket i mappen.'
+            ? 'Studio starts using the library in the folder.'
             : status.state === 'ready' && status.root
-              ? `Studio byter till det gamla biblioteket och ordnar det. Ditt nuvarande bibliotek ligger kvar orört i ${displayPath(status.root)}.`
-              : 'Karaktärer, videor och sekvenser sorteras in i de nya mapparna.',
+              ? `Studio switches to the old library and reorganizes it. Your current library stays untouched in ${displayPath(status.root)}.`
+              : 'Characters, videos and sequences are sorted into the new folders.',
           primary: true
         }
       ]
@@ -147,10 +147,10 @@ export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPla
       actions: [
         {
           mode: 'open',
-          label: 'Öppna biblioteket i mappen',
+          label: 'Open the library in the folder',
           description: ins.oldLayout
-            ? `Mappen innehåller ett Studio-bibliotek från en tidigare version. Studio byter till det och ordnar om dess filer i de nya mapparna.${left}`
-            : `Mappen innehåller redan ett Studio-bibliotek. Studio byter till det.${left}`,
+            ? `The folder contains a Studio library from an earlier version. Studio switches to it and reorganizes its files into the new folders.${left}`
+            : `The folder already contains a Studio library. Studio switches to it.${left}`,
           primary: true
         }
       ]
@@ -163,21 +163,21 @@ export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPla
       actions: [
         {
           mode: 'move',
-          label: 'Flytta mitt bibliotek hit',
+          label: 'Move my library here',
           description: from.oldLayout
-            ? 'Karaktärer, videor och sekvenser från det gamla biblioteket flyttas hit och sorteras in i de nya mapparna.'
+            ? 'Characters, videos and sequences from the old library are moved here and sorted into the new folders.'
             : from.legacy
-              ? 'Allt i biblioteket flyttas hit. Den gamla mappen tas bort om den blir tom – inget annat raderas.'
-              : 'Allt i ditt nuvarande bibliotek flyttas hit. Den gamla mappen tas bort om den blir tom – inget annat raderas.',
+              ? 'Everything in the library is moved here. The old folder is removed if it ends up empty – nothing else is deleted.'
+              : 'Everything in your current library is moved here. The old folder is removed if it ends up empty – nothing else is deleted.',
           primary: true,
           disabled: ins.conflicts.length
-            ? `Går inte: mappen har redan ${quotedList(ins.conflicts)} med innehåll. Välj en tom mapp, eller flytta undan ${ins.conflicts.length === 1 ? 'den' : 'dem'} först.`
+            ? `Not possible: the folder already has ${quotedList(ins.conflicts)} with content. Choose an empty folder, or move ${ins.conflicts.length === 1 ? 'it' : 'them'} out of the way first.`
             : undefined
         },
         {
           mode: 'new',
-          label: 'Börja med ett tomt bibliotek',
-          description: `Studio börjar om från noll i den här mappen.${left} Du kan byta tillbaka när du vill.`,
+          label: 'Start with an empty library',
+          description: `Studio starts from scratch in this folder.${left} You can switch back whenever you like.`,
           primary: false
         }
       ]
@@ -189,11 +189,11 @@ export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPla
     actions: [
       {
         mode: 'new',
-        label: status.state === 'missing' ? 'Börja med ett tomt bibliotek här' : 'Spara allt i den här mappen',
+        label: status.state === 'missing' ? 'Start with an empty library here' : 'Save everything in this folder',
         description:
           status.state === 'missing' && status.root
-            ? `Biblioteket i ${displayPath(status.root)} används inte längre, men finns kvar och kan öppnas igen när mappen går att nå.`
-            : 'Studio skapar mapparna ovan här och sparar allt du gör i dem.',
+            ? `The library in ${displayPath(status.root)} is no longer used, but it stays and can be opened again when the folder can be reached.`
+            : 'Studio creates the folders above here and saves everything you do in them.',
         primary: true
       }
     ]

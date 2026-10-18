@@ -20,60 +20,60 @@ interface PickerCopy {
 
 export const PICKER_COPY: Record<AssetKind, PickerCopy> = {
   character: {
-    add: 'Karaktär',
-    addTitle: 'Lägg till en sparad karaktärs bilder (och standardklädseln)',
-    search: 'Sök karaktär…',
-    emptyTitle: 'Inga karaktärer än.',
-    emptyText: 'Spara personer med referensfoton så kan du återanvända dem här.',
-    create: 'Skapa en karaktär',
-    manage: 'Hantera karaktärer →',
-    noMatch: 'Ingen karaktär matchar',
-    needsImages: 'Lägg till bilder på karaktären först'
+    add: 'Character',
+    addTitle: 'Add a saved character’s images (and its default outfit)',
+    search: 'Search characters…',
+    emptyTitle: 'No characters yet.',
+    emptyText: 'Save people with reference photos and you can reuse them here.',
+    create: 'Create a character',
+    manage: 'Manage characters →',
+    noMatch: 'No character matches',
+    needsImages: 'Add images to the character first'
   },
   environment: {
-    add: 'Miljö',
-    addTitle: 'Lägg till en sparad miljös bilder',
-    search: 'Sök miljö…',
-    emptyTitle: 'Inga miljöer än.',
-    emptyText: 'Spara platser med foton – en strand, ett kök, en gata – och låt scenen utspela sig där.',
-    create: 'Skapa en miljö',
-    manage: 'Hantera miljöer →',
-    noMatch: 'Ingen miljö matchar',
-    needsImages: 'Lägg till bilder på miljön först'
+    add: 'Environment',
+    addTitle: 'Add a saved environment’s images',
+    search: 'Search environments…',
+    emptyTitle: 'No environments yet.',
+    emptyText: 'Save places with photos – a beach, a kitchen, a street – and let the scene play out there.',
+    create: 'Create an environment',
+    manage: 'Manage environments →',
+    noMatch: 'No environment matches',
+    needsImages: 'Add images to the environment first'
   },
   product: {
-    add: 'Produkt',
-    addTitle: 'Lägg till en sparad produkts bilder',
-    search: 'Sök produkt…',
-    emptyTitle: 'Inga produkter än.',
-    emptyText: 'Spara produkter med bilder så kan du ta med dem i klippen.',
-    create: 'Skapa en produkt',
-    manage: 'Hantera produkter →',
-    noMatch: 'Ingen produkt matchar',
-    needsImages: 'Lägg till bilder på produkten först'
+    add: 'Product',
+    addTitle: 'Add a saved product’s images',
+    search: 'Search products…',
+    emptyTitle: 'No products yet.',
+    emptyText: 'Save products with images and you can include them in your clips.',
+    create: 'Create a product',
+    manage: 'Manage products →',
+    noMatch: 'No product matches',
+    needsImages: 'Add images to the product first'
   },
   outfit: {
-    add: 'Kläder',
-    addTitle: 'Lägg till en sparad klädsels bilder',
-    search: 'Sök kläder…',
-    emptyTitle: 'Inga kläder än.',
-    emptyText: 'Spara klädslar med foton så kan du välja vad karaktärerna har på sig.',
-    create: 'Skapa en klädsel',
-    manage: 'Hantera kläder →',
-    noMatch: 'Ingen klädsel matchar',
-    needsImages: 'Lägg till bilder på klädseln först'
+    add: 'Outfit',
+    addTitle: 'Add a saved outfit’s images',
+    search: 'Search outfits…',
+    emptyTitle: 'No outfits yet.',
+    emptyText: 'Save outfits with photos and you can choose what the characters wear.',
+    create: 'Create an outfit',
+    manage: 'Manage outfits →',
+    noMatch: 'No outfit matches',
+    needsImages: 'Add images to the outfit first'
   },
   pose: {
     add: 'Pose',
-    addTitle: 'Lägg till en sparad pose: bilder som visar hur personerna står och var, i förhållande till varandra',
-    search: 'Sök pose…',
-    emptyTitle: 'Inga poser än.',
+    addTitle: 'Add a saved pose: images that show how the people stand and where, in relation to each other',
+    search: 'Search poses…',
+    emptyTitle: 'No poses yet.',
     emptyText:
-      'Spara ett foto eller en skiss av positionerna du vill ha – sedan hänvisar du till personerna i den med dina karaktärer.',
-    create: 'Skapa en pose',
-    manage: 'Hantera poser →',
-    noMatch: 'Ingen pose matchar',
-    needsImages: 'Lägg till bilder på posen först'
+      'Save a photo or a sketch of the positions you want – then refer to the people in it with your characters.',
+    create: 'Create a pose',
+    manage: 'Manage poses →',
+    noMatch: 'No pose matches',
+    needsImages: 'Add images to the pose first'
   }
 }
 

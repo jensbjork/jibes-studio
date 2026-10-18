@@ -139,7 +139,7 @@ export function CameraIcon(props: IconProps) {
   )
 }
 
-/** Redigera: changing a finished film. */
+/** Editor: changing a finished film. */
 export function ScissorsIcon(props: IconProps) {
   return (
     <Icon {...props}>

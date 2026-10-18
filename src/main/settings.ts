@@ -25,10 +25,10 @@ interface StoredSettings {
   libraryDir?: string
   /** Accepted provider consent versions, keyed by consent flow (e.g. "seedance"). */
   consents?: Record<string, string>
-  /** "Promptspråk"; English unless the user picks Swedish. */
+  /** "Prompt language"; English unless the user picks Swedish. */
   promptLanguage?: PromptLanguage
   /**
-   * "Säkert läge för bilder": Venice blurs adult content in generated stills. Unset means on, Venice's own
+   * "Safe mode for images": Venice blurs adult content in generated stills. Unset means on, Venice's own
    * default; only an explicit `false` turns it off.
    */
   imageSafeMode?: boolean
@@ -149,7 +149,7 @@ export function getPromptLanguage(): PromptLanguage {
 }
 
 export function setPromptLanguage(lang: unknown): void {
-  if (lang !== 'en' && lang !== 'sv') throw new Error('Okänt promptspråk.')
+  if (lang !== 'en' && lang !== 'sv') throw new Error('Unknown prompt language.')
   const s = load()
   s.promptLanguage = lang
   save(s)
@@ -161,7 +161,7 @@ export function getImageSafeMode(): boolean {
 }
 
 export function setImageSafeMode(on: unknown): void {
-  if (typeof on !== 'boolean') throw new Error('Ogiltigt värde för säkert läge.')
+  if (typeof on !== 'boolean') throw new Error('Invalid value for safe mode.')
   const s = load()
   s.imageSafeMode = on
   save(s)
@@ -193,7 +193,7 @@ export function setAgentEnabledSetting(enabled: boolean): void {
 }
 
 export function setAgentPortSetting(port: number): void {
-  if (!isValidAgentPort(port)) throw new Error('Porten måste vara ett heltal mellan 1024 och 65535.')
+  if (!isValidAgentPort(port)) throw new Error('The port must be a whole number between 1024 and 65535.')
   updateAgent({ port })
 }
 

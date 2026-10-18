@@ -122,18 +122,18 @@ Mac it wasn't given, and so that nothing outside the user's devices can reach it
   anything changed since the agent asked makes the whole request lapse (expired). Only then are the items removed
   through the window's own handlers with the user's authority (`callApproved`, used by nothing else); the rules an
   agent's own call would meet there — only its own reviews and learnings, never the user's own review or learnings the
-  user wrote, edited or pinned, nothing during a run (no take or video of a clip in a running *Generera saknade*
+  user wrote, edited or pinned, nothing during a run (no take or video of a clip in a running *Generate missing*
   either, which would otherwise be generated again, paid, without its own approval) — are enforced by the planner and
   the re-check. A board added or moved
   by an agent that would drop a storyboard transition with a prompt or takes is refused by the service itself, inside
   its transaction; such a move also goes through `request_delete`.
-- **Paid actions need approval in the app.** Paid tools (videos, pictures, paid edits in Redigera and designed
+- **Paid actions need approval in the app.** Paid tools (videos, pictures, paid edits in the Editor and designed
   voices) only create a request. Studio shows it with the prompt, the reference images or frames and the price, and
   submits only after the user approves. Before submitting, Studio checks that the clips, the image files and the
   version to be edited are still exactly what was shown (an edit also re-plans and refuses a higher price), and each
   take is re-checked right before it is sent. A paid edit job interrupted by quitting Studio never sends its
   remaining parts by itself.
-- **Only library files are uploaded.** The video Redigera sends to Venice (a short proxy or a stand-in for a free
+- **Only library files are uploaded.** The video the Editor sends to Venice (a short proxy or a stand-in for a free
   quote) is read only from inside the library; params that name any other file are refused before anything is
   read. Requests expire after 30 minutes and immediately when the token is replaced, the library is switched or
   the connection is turned off; at most 10 can be pending.

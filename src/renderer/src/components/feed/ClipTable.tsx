@@ -19,7 +19,7 @@ interface Props {
   models: readonly VideoModel[]
   index: LibraryIndex
   sort: SortKey
-  /** Clicking a sortable header changes the order; without it the headers are plain (Generera's session list). */
+  /** Clicking a sortable header changes the order; without it the headers are plain (Generate's session list). */
   onSort?: (sort: SortKey) => void
   selectedId?: string
   onSelect: (id: string) => void
@@ -55,15 +55,15 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { id: 'thumb', label: '', width: '76px' },
-  { id: 'prompt', label: 'Prompt / namn', width: 'minmax(160px, 1fr)' },
-  { id: 'assets', label: 'Tillgångar', width: '88px', minTable: 720 },
-  { id: 'model', label: 'Modell', width: '136px', minTable: 980 },
-  { id: 'length', label: 'Längd', width: '60px', minTable: 640, align: 'right', sort: 'length' },
-  { id: 'resolution', label: 'Upplösn.', width: '68px', minTable: 1100 },
-  { id: 'cost', label: 'Kostnad', width: '68px', minTable: 560, align: 'right', sort: 'cost' },
+  { id: 'prompt', label: 'Prompt / name', width: 'minmax(160px, 1fr)' },
+  { id: 'assets', label: 'Assets', width: '88px', minTable: 720 },
+  { id: 'model', label: 'Model', width: '136px', minTable: 980 },
+  { id: 'length', label: 'Duration', width: '68px', minTable: 640, align: 'right', sort: 'length' },
+  { id: 'resolution', label: 'Resolution', width: '76px', minTable: 1100 },
+  { id: 'cost', label: 'Cost', width: '68px', minTable: 560, align: 'right', sort: 'cost' },
   { id: 'status', label: 'Status', width: '124px' },
-  { id: 'rating', label: 'Betyg', width: '86px', sort: 'rating' },
-  { id: 'created', label: 'Skapad', width: '92px', minTable: 800, sort: 'newest' }
+  { id: 'rating', label: 'Rating', width: '86px', sort: 'rating' },
+  { id: 'created', label: 'Created', width: '120px', minTable: 800, sort: 'newest' }
 ]
 
 function visibleColumns(width: number): Column[] {
@@ -237,7 +237,7 @@ export default function ClipTable({
     <div
       ref={bodyRef}
       role="grid"
-      aria-label="Klipp"
+      aria-label="Clips"
       aria-rowcount={generations.length + 1}
       aria-activedescendant={selectedIndex >= 0 ? `clip-row-${generations[selectedIndex].id}` : undefined}
       tabIndex={0}
@@ -270,9 +270,9 @@ export default function ClipTable({
                   title={
                     c.id === 'created'
                       ? sort === 'newest'
-                        ? 'Visa äldst först'
-                        : 'Visa nyast först'
-                      : `Sortera på ${c.label.toLocaleLowerCase('sv')}, högst först`
+                        ? 'Show oldest first'
+                        : 'Show newest first'
+                      : `Sort by ${c.label.toLocaleLowerCase('en')}, highest first`
                   }
                   className={`inline-flex max-w-full items-center gap-1 truncate transition hover:text-text ${
                     direction ? 'text-text' : ''
@@ -324,7 +324,7 @@ function Row({
   onRate: (g: Generation, rating: number | null) => void
 }) {
   const failed = g.status === 'failed'
-  // Pågår och klart: a dot before the title while the clip (or its failure) is new; a failed row counts as seen
+  // Activity: a dot before the title while the clip (or its failure) is new; a failed row counts as seen
   // once it has been on screen for a moment.
   const key = workKey.generation(g.id)
   const unseen = useIsUnseen(key)
@@ -392,7 +392,7 @@ function Cell({
       return (
         <span className="flex min-w-0 items-center gap-1.5">
           {unseen && (
-            <span title={failed ? 'Misslyckades – inte sett än' : 'Ny – inte tittad på än'} className="flex shrink-0">
+            <span title={failed ? 'Failed – not seen yet' : 'New – not watched yet'} className="flex shrink-0">
               <StatusDot failed={failed} />
             </span>
           )}
@@ -405,7 +405,7 @@ function Cell({
             </span>
           )}
           <span className={`min-w-0 truncate ${failed ? 'text-muted' : ''}`} title={title}>
-            {g.prompt || g.title ? title : <span className="text-muted">Ingen prompt</span>}
+            {g.prompt || g.title ? title : <span className="text-muted">No prompt</span>}
           </span>
           {others > 0 && (
             <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-muted" title={reviewCountText(others)}>
@@ -421,7 +421,7 @@ function Cell({
     case 'model':
       return (
         <span className="truncate text-[12px] text-muted" title={g.model || undefined}>
-          {g.model ? modelName : g.source === 'edit' ? 'Redigerad film' : 'Eget klipp'}
+          {g.model ? modelName : g.source === 'edit' ? 'Edited film' : 'Own clip'}
         </span>
       )
     case 'length':
@@ -454,7 +454,7 @@ function Cell({
       )
     case 'created':
       return (
-        <span className="truncate text-[12px] text-muted" title={new Date(g.createdAt).toLocaleString('sv-SE')}>
+        <span className="truncate text-[12px] text-muted" title={new Date(g.createdAt).toLocaleString('en-GB')}>
           {formatWhen(g.createdAt)}
         </span>
       )
@@ -485,7 +485,7 @@ function RowThumb({ g }: { g: Generation }) {
 }
 
 /**
- * The status column in Pågår och klart's vocabulary: a spinner while it runs, an accent dot when it failed, a
+ * The status column in Activity's vocabulary: a spinner while it runs, an accent dot when it failed, a
  * quiet dot when done (emerald is kept for "new", shown before the title).
  */
 function StatusCell({ g }: { g: Generation }) {
@@ -493,7 +493,7 @@ function StatusCell({ g }: { g: Generation }) {
   return (
     <span
       className={`flex min-w-0 items-center gap-1.5 text-[12px] ${g.status === 'failed' ? 'text-accent' : g.status === 'completed' ? 'text-muted' : ''}`}
-      title={g.status === 'failed' ? (g.error ?? 'Misslyckades') : STATUS_LABEL[g.status]}
+      title={g.status === 'failed' ? (g.error ?? 'Failed') : STATUS_LABEL[g.status]}
     >
       {isPending(g) ? (
         <Spinner size={10} />

@@ -66,7 +66,7 @@ export default function TagInput({ value, onChange, suggestions, onBlur }: Props
                 e.stopPropagation()
                 onChange(value.filter((t) => t !== tag))
               }}
-              title={`Ta bort taggen ${tag}`}
+              title={`Remove the tag ${tag}`}
               className="flex h-4 w-4 items-center justify-center rounded text-[9px] text-muted hover:bg-bg hover:text-text"
             >
               ✕
@@ -85,13 +85,13 @@ export default function TagInput({ value, onChange, suggestions, onBlur }: Props
             setFocused(false)
             onBlur?.()
           }}
-          placeholder={value.length ? 'Lägg till…' : 'Taggar, separerade med komma'}
+          placeholder={value.length ? 'Add…' : 'Tags, separated by commas'}
           className="min-w-24 flex-1 bg-transparent py-0.5 outline-none placeholder:text-muted/70"
         />
       </div>
       {focused && matches.length > 0 && (
         <div className="absolute inset-x-0 top-full z-10 mt-1 flex flex-wrap items-center gap-1 rounded-md border border-line bg-panel p-2 shadow-xl shadow-black/40">
-          <span className="mr-1 text-[11px] text-muted">{text ? 'Befintliga:' : 'Förslag:'}</span>
+          <span className="mr-1 text-[11px] text-muted">{text ? 'Existing:' : 'Suggestions:'}</span>
           {matches.map((s) => (
             <button
               key={s}

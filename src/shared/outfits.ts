@@ -1,4 +1,4 @@
-// Who wears which outfit in a generation ("bärs av"): the form's chips, the References legend (prompt-compose.ts) and
+// Who wears which outfit in a generation ("worn by"): the form's chips, the References legend (prompt-compose.ts) and
 // the agents' tools decide it the same way. A choice stored in the params (GenerationParams.outfitWearers) wins while
 // that character is among the references; otherwise an outfit is worn by the character whose default outfit it is,
 // else by the only character there.

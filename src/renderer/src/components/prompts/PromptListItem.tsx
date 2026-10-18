@@ -52,9 +52,9 @@ export default function PromptListItem({
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <div className={`truncate font-medium ${row.title ? '' : 'text-muted'}`}>{row.title || 'Ny prompt'}</div>
+          <div className={`truncate font-medium ${row.title ? '' : 'text-muted'}`}>{row.title || 'New prompt'}</div>
           <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted">
-            {row.body || (unsaved ? 'Skriv prompten till höger…' : '')}
+            {row.body || (unsaved ? 'Write the prompt on the right…' : '')}
           </p>
         </div>
         <FavoriteButton
@@ -76,7 +76,7 @@ export default function PromptListItem({
                   e.stopPropagation()
                   onTagClick(tag)
                 }}
-                title={active ? `Sluta filtrera på ${tag}` : `Filtrera på ${tag}`}
+                title={active ? `Stop filtering by ${tag}` : `Filter by ${tag}`}
                 className={`max-w-28 shrink-0 truncate rounded px-1.5 py-px text-[11px] transition ${
                   active ? 'bg-accent/15 text-text' : 'bg-line/70 text-muted hover:text-text'
                 }`}
@@ -89,13 +89,13 @@ export default function PromptListItem({
         </div>
 
         {unsaved ? (
-          <span className="shrink-0 text-[11px] text-muted">Ej sparad</span>
+          <span className="shrink-0 text-[11px] text-muted">Not saved</span>
         ) : (
           <>
             {row.useCount > 0 && (
               <span
                 className={`shrink-0 text-[11px] text-muted ${onUse ? 'group-hover:hidden' : ''}`}
-                title={row.useCount === 1 ? 'Använd 1 gång' : `Använd ${row.useCount} gånger`}
+                title={row.useCount === 1 ? 'Used once' : `Used ${row.useCount} times`}
               >
                 {row.useCount}×
               </span>
@@ -107,10 +107,10 @@ export default function PromptListItem({
                   e.stopPropagation()
                   onUse()
                 }}
-                title="Öppna i Generera"
+                title="Open in Generate"
                 className="hidden shrink-0 rounded px-1.5 py-px text-[11px] text-accent hover:bg-accent/15 group-hover:block"
               >
-                Använd →
+                Use →
               </button>
             )}
           </>

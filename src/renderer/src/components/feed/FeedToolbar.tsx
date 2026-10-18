@@ -30,7 +30,7 @@ interface Props {
   onFilters: (filters: FeedFilters) => void
   sort: SortKey
   onSort: (sort: SortKey) => void
-  /** "42 klipp · $38.20 · 5 min 12 s" for what is shown. */
+  /** "42 clips · $38.20 · 5 min 12 s" for what is shown. */
   summary: string
   /** Every generation (not just the shown ones), for the choices and their counts. */
   generations: readonly Generation[]
@@ -40,11 +40,11 @@ interface Props {
   searchRef: RefObject<HTMLInputElement | null>
   /** ArrowDown in the search field hands the keyboard to the list. */
   onSearchArrowDown: () => void
-  /** Clips being generated right now (all of them, not just the shown ones): the "◌ n pågår" chip. */
+  /** Clips being generated right now (all of them, not just the shown ones): the "◌ n in progress" chip. */
   pendingCount: number
-  /** Finished clips not looked at yet: the "Nya" chip. */
+  /** Finished clips not looked at yet: the "New" chip. */
   unseenCount: number
-  /** Left end of the first row (the Mediabank's tabs). */
+  /** Left end of the first row (Media's tabs). */
   leading?: ReactNode
   /** Right end of the first row (e.g. the folder button). */
   trailing?: ReactNode
@@ -94,7 +94,7 @@ export default function FeedToolbar({
     const counts = new Map<string, number>()
     for (const g of generations) if (g.model) counts.set(g.model, (counts.get(g.model) ?? 0) + 1)
     return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1] || modelName(a[0], models).localeCompare(modelName(b[0], models), 'sv'))
+      .sort((a, b) => b[1] - a[1] || modelName(a[0], models).localeCompare(modelName(b[0], models), 'en'))
       .map(([id, count]) => ({ id, label: modelName(id, models), text: id, hint: count }))
   }, [generations, models])
   const sourceCounts = useMemo(() => {
@@ -116,9 +116,9 @@ export default function FeedToolbar({
             value={filters.query}
             onChange={(e) => set({ query: e.target.value })}
             onKeyDown={onSearchKey}
-            placeholder="Sök i prompter och namn…"
-            aria-label="Sök i prompter och namn"
-            title="Sök i prompter och namn (⌘ F)"
+            placeholder="Search prompts and names…"
+            aria-label="Search prompts and names"
+            title="Search prompts and names (⌘ F)"
             className="h-7 w-full rounded-md border border-line bg-raised pl-7 pr-7 text-[12px] outline-none focus:border-muted"
           />
           {filters.query && (
@@ -128,7 +128,7 @@ export default function FeedToolbar({
                 set({ query: '' })
                 searchRef.current?.focus()
               }}
-              title="Rensa sökningen"
+              title="Clear the search"
               className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted hover:bg-line hover:text-text"
             >
               <CloseIcon size={9} />
@@ -145,25 +145,25 @@ export default function FeedToolbar({
           <ToggleChip
             on={filters.status === 'pending'}
             onToggle={() => set({ status: filters.status === 'pending' ? undefined : 'pending' })}
-            title="Visa bara det som genereras just nu"
+            title="Show only what is generating right now"
           >
             <Spinner size={11} />
-            {pendingCount} pågår
+            {pendingCount} in progress
           </ToggleChip>
         )}
         {(unseenCount > 0 || filters.unseen) && (
           <ToggleChip
             on={!!filters.unseen}
             onToggle={() => set({ unseen: filters.unseen ? undefined : true })}
-            title="Visa bara klipp som är klara men som du inte har tittat på än"
+            title="Show only clips that are done but you haven’t watched yet"
           >
             <StatusDot />
-            Nya
+            New
             {unseenCount > 0 && <span className="text-muted tabular-nums">{unseenCount}</span>}
           </ToggleChip>
         )}
         <FilterMenu
-          title="Källa"
+          title="Source"
           value={filters.source}
           valueLabel={SOURCE_OPTIONS.find((o) => o.id === filters.source)?.label}
           options={SOURCE_OPTIONS.map((o) => ({
@@ -173,7 +173,7 @@ export default function FeedToolbar({
             hint: sourceCounts.get(o.id)
           }))}
           onChange={(source) => set({ source })}
-          allLabel="Alla"
+          allLabel="All"
         />
         <FilterMenu
           title="Status"
@@ -183,14 +183,14 @@ export default function FeedToolbar({
           onChange={(status) => set({ status })}
         />
         <FilterMenu
-          title="Modell"
+          title="Model"
           value={filters.model}
           valueLabel={filters.model && modelName(filters.model, models)}
           options={modelOptions}
           onChange={(model) => set({ model })}
-          allLabel="Alla modeller"
+          allLabel="All models"
           width={300}
-          empty={<p className="px-3 py-2 text-[12px] text-muted">Inga klipp än.</p>}
+          empty={<p className="px-3 py-2 text-[12px] text-muted">No clips yet.</p>}
         />
         <AssetFilter
           value={filters.assetId}
@@ -200,7 +200,7 @@ export default function FeedToolbar({
           index={index}
         />
         <FilterMenu
-          title="Betyg"
+          title="Rating"
           value={filters.rating}
           valueLabel={ratingFilterLabel(filters.rating)}
           options={RATING_OPTIONS.map((o) => ({
@@ -223,15 +223,15 @@ export default function FeedToolbar({
           onChange={(rating) => set({ rating })}
         />
         <FilterMenu
-          title="Tid"
+          title="Time"
           value={filters.period}
           valueLabel={PERIOD_OPTIONS.find((o) => o.id === filters.period)?.label}
           options={PERIOD_OPTIONS.map((o) => ({ id: o.id, label: o.label }))}
           onChange={(period) => set({ period })}
-          allLabel="All tid"
+          allLabel="All time"
         />
         <FilterMenu
-          title="Plats"
+          title="Placement"
           value={filters.placement}
           valueLabel={PLACEMENT_OPTIONS.find((o) => o.id === filters.placement)?.label}
           options={PLACEMENT_OPTIONS.map((o) => ({
@@ -239,11 +239,11 @@ export default function FeedToolbar({
             label: o.label,
             text:
               o.id === 'sequence'
-                ? 'Tagningar i en sekvens eller storyboard'
-                : 'Klipp som inte ingår i någon sekvens eller storyboard'
+                ? 'Takes in a sequence or storyboard'
+                : 'Clips that aren’t part of any sequence or storyboard'
           }))}
           onChange={(placement) => set({ placement })}
-          allLabel="Alla klipp"
+          allLabel="All clips"
         />
         {hasFilters(filters) && (
           <button
@@ -251,7 +251,7 @@ export default function FeedToolbar({
             onClick={() => onFilters({ query: '' })}
             className="no-drag ml-1 rounded px-1.5 py-1 text-[12px] text-muted underline-offset-2 hover:text-text hover:underline"
           >
-            Rensa filter
+            Clear filters
           </button>
         )}
 
@@ -266,12 +266,12 @@ export default function FeedToolbar({
   )
 }
 
-/** Kort or Tabell. */
+/** Cards or Table. */
 function ViewSwitch({ view, onView }: { view: FeedView; onView: (view: FeedView) => void }) {
   return (
     <div
       role="radiogroup"
-      aria-label="Visning"
+      aria-label="View"
       className="no-drag flex h-7 shrink-0 items-center rounded-md border border-line bg-panel p-0.5"
     >
       <button
@@ -279,30 +279,30 @@ function ViewSwitch({ view, onView }: { view: FeedView; onView: (view: FeedView)
         role="radio"
         aria-checked={view === 'cards'}
         onClick={() => onView('cards')}
-        title="Stora kort med video"
+        title="Large cards with video"
         className={segment(view === 'cards')}
       >
         <GridIcon size={12} />
-        Kort
+        Cards
       </button>
       <button
         type="button"
         role="radio"
         aria-checked={view === 'table'}
         onClick={() => onView('table')}
-        title="Tabell – många klipp på en gång"
+        title="Table – many clips at once"
         className={segment(view === 'table')}
       >
         <ListIcon size={12} />
-        Tabell
+        Table
       </button>
     </div>
   )
 }
 
 /**
- * Generera's header over this session's clips: the view switch and the import and folder buttons, then what the
- * session has made so far and the way to everything older in the Mediabank. No search, filters or order: the list is
+ * Generate's header over this session's clips: the view switch and the import and folder buttons, then what the
+ * session has made so far and the way to everything older in Media. No search, filters or order: the list is
  * short and always newest first.
  */
 export function SessionToolbar({
@@ -314,9 +314,9 @@ export function SessionToolbar({
 }: {
   view: FeedView
   onView: (view: FeedView) => void
-  /** "Den här sessionen · 3 klipp · $1.20 · 24 s". */
+  /** "This session · 3 clips · $1.20 · 24 s". */
   summary: string
-  /** "Alla videor i Mediabanken". */
+  /** "All videos in Media". */
   onShowAll: () => void
   trailing?: ReactNode
 }) {
@@ -337,21 +337,21 @@ export function SessionToolbar({
   )
 }
 
-/** "Alla videor i Mediabanken →": from Generera's session list to every clip. */
+/** "All videos in Media →": from Generate's session list to every clip. */
 export function MediaLink({ onClick, className = '' }: { onClick: () => void; className?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      title="Visa alla klipp du har gjort, också från tidigare sessioner"
+      title="Show every clip you have made, also from earlier sessions"
       className={`no-drag shrink-0 whitespace-nowrap text-[12px] text-text underline-offset-2 hover:underline ${className}`}
     >
-      Alla videor i Mediabanken →
+      All videos in Media →
     </button>
   )
 }
 
-/** A one-click filter (Pågår, Nya), styled like the filter menus' chips. */
+/** A one-click filter (In progress, New), styled like the filter menus' chips. */
 function ToggleChip({
   on,
   onToggle,
@@ -382,7 +382,7 @@ function ToggleChip({
 function SortSelect({ sort, onSort }: { sort: SortKey; onSort: (sort: SortKey) => void }) {
   return (
     <label className="no-drag flex shrink-0 items-center gap-1 text-[12px] text-muted">
-      <span>Sortera:</span>
+      <span>Sort:</span>
       <select
         value={sort}
         onChange={(e) => isSortKey(e.target.value) && onSort(e.target.value)}
@@ -398,7 +398,7 @@ function SortSelect({ sort, onSort }: { sort: SortKey; onSort: (sort: SortKey) =
   )
 }
 
-/** What the Betyg chip says: "★★ eller mer", "★★★", "Tumme ner", "Ej betygsatt". */
+/** What the Rating chip says: "★★ or more", "★★★", "Thumbs down", "Not rated". */
 function ratingFilterLabel(rating: FeedFilters['rating']): string | undefined {
   if (rating === undefined) return undefined
   return RATING_OPTIONS.find((o) => o.id === rating)?.label
@@ -433,11 +433,11 @@ function AssetFilter({
     index
   ])
   const selected = assets.find((a) => a.id === value)
-  const needle = query.trim().toLocaleLowerCase('sv')
+  const needle = query.trim().toLocaleLowerCase('en')
   const options: MenuOption<string>[] = ASSET_KINDS.flatMap((kind) =>
     assets
       .filter((a) => a.kind === kind && (counts.get(a.id) ?? 0) > 0)
-      .filter((a) => !needle || a.name.toLocaleLowerCase('sv').includes(needle))
+      .filter((a) => !needle || a.name.toLocaleLowerCase('en').includes(needle))
       .map((a) => ({
         id: a.id,
         text: `${a.name} (${ASSET_COPY[a.kind].singular})`,
@@ -453,12 +453,12 @@ function AssetFilter({
 
   return (
     <FilterMenu
-      title="Tillgång"
+      title="Asset"
       value={value}
       valueLabel={selected?.name}
       options={options}
       onChange={onChange}
-      allLabel="Alla tillgångar"
+      allLabel="All assets"
       width={280}
       onOpenChange={setOpen}
       header={
@@ -472,15 +472,15 @@ function AssetFilter({
                 e.currentTarget.closest('[role="dialog"]')?.querySelector<HTMLElement>('[data-menu-item]')?.focus()
               }
             }}
-            placeholder="Sök karaktär, miljö, produkt, kläder, pose…"
-            aria-label="Sök tillgång"
+            placeholder="Search characters, environments, products, outfits, poses…"
+            aria-label="Search assets"
             className="w-full rounded-md border border-line bg-raised px-2.5 py-1 text-[12px] outline-none focus:border-muted"
           />
         </div>
       }
       empty={
         <p className="px-3 py-2 text-[12px] leading-relaxed text-muted">
-          {needle ? 'Inget matchar.' : 'Inga klipp använder biblioteket än.'}
+          {needle ? 'Nothing matches.' : 'No clips use the library yet.'}
         </p>
       }
     />

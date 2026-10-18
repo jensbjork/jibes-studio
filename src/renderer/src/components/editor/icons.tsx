@@ -1,6 +1,6 @@
 import type { SVGProps } from 'react'
 
-// Icons for Redigera, drawn like the ones in sequences/icons.tsx (16-unit grid, 1.5 stroke).
+// Icons for the Editor, drawn like the ones in sequences/icons.tsx (16-unit grid, 1.5 stroke).
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number }
 
@@ -23,7 +23,7 @@ function Icon({ size = 14, children, ...rest }: IconProps) {
   )
 }
 
-/** Redigera in the sidebar. */
+/** The Editor in the sidebar. */
 export function ScissorsIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -34,7 +34,7 @@ export function ScissorsIcon(props: IconProps) {
   )
 }
 
-/** Jämför ⇄: switch between two versions. */
+/** Compare ⇄: switch between two versions. */
 export function CompareIcon(props: IconProps) {
   return (
     <Icon {...props}>

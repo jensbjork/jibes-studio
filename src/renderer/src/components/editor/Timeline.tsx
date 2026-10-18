@@ -25,8 +25,8 @@ import { ZoomInIcon, ZoomOutIcon } from './icons'
 import { usePlayhead, type PlayerController } from './playerController'
 import { GainSlider, PlanNotes } from './ui'
 
-// The timeline under the player: Bild (a filmstrip with the cut markers), Ljud (the waveform, muted stretches
-// shaded), Lager (added voices, music and effects as bars) and Text (the transcript's lines). Drag on any lane to
+// The timeline under the player: Picture (a filmstrip with the cut markers), Sound (the waveform, muted stretches
+// shaded), Layers (added voices, music and effects as bars) and Text (the transcript's lines). Drag on any lane to
 // mark a range; it snaps to cut markers and line edges (hold ⌥ to snap to frames only). A click moves the playhead.
 
 const LABEL_WIDTH = 56
@@ -47,14 +47,14 @@ const LAYER_TONE: Record<string, string> = {
 }
 
 const LAYER_KIND: Record<string, string> = {
-  speech: 'Replik',
-  voice: 'Röst',
-  music: 'Musik',
-  effect: 'Ljudeffekt',
-  audio: 'Ljud'
+  speech: 'Line',
+  voice: 'Voice',
+  music: 'Music',
+  effect: 'Sound effect',
+  audio: 'Sound'
 }
 
-const MUTED_TARGET: Record<string, string> = { all: 'tyst', voice: 'utan röst', background: 'bara röst' }
+const MUTED_TARGET: Record<string, string> = { all: 'muted', voice: 'no voice', background: 'voice only' }
 
 interface Props {
   timeline?: EditTimeline
@@ -187,28 +187,28 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
 
   const cutsNote =
     timeline?.cutsSource === 'export'
-      ? 'Klippgränser från exporten'
+      ? 'Cuts from the export'
       : timeline?.cutsSource === 'scenes' && timeline.cuts.length
-        ? 'Klippgränser hittade i bilden'
+        ? 'Cuts found in the picture'
         : undefined
 
   return (
-    <section aria-label="Tidslinje" className="shrink-0 border-t border-line">
+    <section aria-label="Timeline" className="shrink-0 border-t border-line">
       <div className="flex h-8 items-center gap-3 px-3 text-[11px] text-muted">
         {selection ? (
           <span className="flex items-center gap-1.5">
-            <span className="text-text">Markering</span> {formatRange(selection)}
+            <span className="text-text">Selection</span> {formatRange(selection)}
             <button
               type="button"
               onClick={() => setSelection(undefined)}
-              title="Rensa markering (Esc)"
+              title="Clear selection (Esc)"
               className="rounded px-1 text-muted transition hover:bg-raised hover:text-text"
             >
               ✕
             </button>
           </span>
         ) : (
-          <span>Dra över tidslinjen för att markera ett avsnitt.</span>
+          <span>Drag across the timeline to mark a section.</span>
         )}
         {cutsNote && <span className="hidden @min-[67rem]/main:inline">· {cutsNote}</span>}
         <span className="ml-auto flex items-center gap-0.5">
@@ -216,8 +216,8 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
             type="button"
             onClick={() => zoomBy(-1)}
             disabled={zoom === ZOOMS[0]}
-            title="Zooma ut (⌘ + scroll)"
-            aria-label="Zooma ut"
+            title="Zoom out (⌘ + scroll)"
+            aria-label="Zoom out"
             className="flex h-6 w-6 items-center justify-center rounded transition hover:bg-raised hover:text-text disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <ZoomOutIcon size={13} />
@@ -226,8 +226,8 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
             type="button"
             onClick={() => zoomBy(1)}
             disabled={zoom === ZOOMS[ZOOMS.length - 1]}
-            title="Zooma in (⌘ + scroll)"
-            aria-label="Zooma in"
+            title="Zoom in (⌘ + scroll)"
+            aria-label="Zoom in"
             className="flex h-6 w-6 items-center justify-center rounded transition hover:bg-raised hover:text-text disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <ZoomInIcon size={13} />
@@ -238,9 +238,9 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
       <div className="flex pb-2">
         <div className="shrink-0 select-none text-[11px] text-muted" style={{ width: LABEL_WIDTH }}>
           <div className="h-5" />
-          <LaneLabel height={48}>Bild</LaneLabel>
-          <LaneLabel height={40}>Ljud</LaneLabel>
-          <LaneLabel height={layerHeight}>Lager</LaneLabel>
+          <LaneLabel height={48}>Picture</LaneLabel>
+          <LaneLabel height={40}>Sound</LaneLabel>
+          <LaneLabel height={layerHeight}>Layers</LaneLabel>
           <LaneLabel height={30}>Text</LaneLabel>
         </div>
         <div ref={scroller} onWheel={onWheel} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden pr-3">
@@ -263,14 +263,14 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
               {timeline?.cuts.map((c) => (
                 <span
                   key={c}
-                  title={`Klippgräns ${formatClock(c)}`}
+                  title={`Cut ${formatClock(c)}`}
                   className="absolute bottom-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[5px] border-x-transparent border-t-amber-300/80"
                   style={{ left: pct(c) }}
                 />
               ))}
             </div>
 
-            {/* Bild */}
+            {/* Picture */}
             <Lane height={48} loading={loading && !timeline}>
               {timeline?.filmstrip.map((f, i, all) => {
                 // Frames are sampled inside their stretch, so the first tile starts at 0:00 to leave no gap.
@@ -292,10 +292,10 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
               ))}
             </Lane>
 
-            {/* Ljud */}
+            {/* Sound */}
             <Lane height={40} loading={loading && !timeline}>
               {timeline && !timeline.hasAudio ? (
-                <span className="absolute inset-0 flex items-center px-2 text-[11px] text-muted">Inget ljud</span>
+                <span className="absolute inset-0 flex items-center px-2 text-[11px] text-muted">No sound</span>
               ) : (
                 timeline && <Waveform peaks={timeline.waveform} />
               )}
@@ -311,7 +311,7 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
               ))}
             </Lane>
 
-            {/* Lager */}
+            {/* Layers */}
             <Lane height={layerHeight} loading={false}>
               {timeline?.layers.map((l) => (
                 <LayerBar
@@ -357,7 +357,7 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
           </div>
         </div>
       </div>
-      {error && <p className="px-3 pb-2 text-[11px] text-accent select-text">Tidslinjen kunde inte visas: {error}</p>}
+      {error && <p className="px-3 pb-2 text-[11px] text-accent select-text">The timeline couldn’t be shown: {error}</p>}
     </section>
   )
 }
@@ -439,7 +439,7 @@ function LayerBar({
         type="button"
         data-layer
         onClick={() => setOpen((o) => !o)}
-        title={`${LAYER_KIND[layer.kind] ?? 'Ljud'}: ${layer.label}`}
+        title={`${LAYER_KIND[layer.kind] ?? 'Sound'}: ${layer.label}`}
         className={`absolute h-[15px] overflow-hidden whitespace-nowrap rounded border px-1 text-left text-[10px] leading-[13px] text-text/90 transition hover:brightness-125 ${
           LAYER_TONE[layer.kind] ?? LAYER_TONE.audio
         } ${open ? 'ring-1 ring-white/60' : ''}`}
@@ -470,35 +470,35 @@ function LayerMenu({ layer, player, onDone }: { layer: LayerInfo; player: Player
       <div>
         <p className="truncate font-medium">{layer.label}</p>
         <p className="text-[11px] text-muted">
-          {LAYER_KIND[layer.kind] ?? 'Ljud'} · {formatClock(layer.start)}–{formatClock(layer.end)}
+          {LAYER_KIND[layer.kind] ?? 'Sound'} · {formatClock(layer.start)}–{formatClock(layer.end)}
         </p>
       </div>
       <GainSlider value={gain} onChange={setGain} min={-30} max={12} />
       <button
         type="button"
         disabled={!!busy || gain === Math.round(layer.gainDb)}
-        onClick={() => void go('gain', { gainDb: gain }, 'Volym på lagret')}
+        onClick={() => void go('gain', { gainDb: gain }, 'Layer volume')}
         className={row}
       >
-        {busy === 'gain' ? 'Skapar version…' : 'Ändra volymen'}
+        {busy === 'gain' ? 'Creating version…' : 'Change the volume'}
       </button>
       <button
         type="button"
         disabled={!!busy}
-        onClick={() => void go('move', { at: Math.round(player.getTime() * 100) / 100 }, 'Flytta lagret')}
+        onClick={() => void go('move', { at: Math.round(player.getTime() * 100) / 100 }, 'Move the layer')}
         className={row}
       >
-        {busy === 'move' ? 'Skapar version…' : `Flytta till spelhuvudet (${formatClock(player.getTime())})`}
+        {busy === 'move' ? 'Creating version…' : `Move to the playhead (${formatClock(player.getTime())})`}
       </button>
       <button
         type="button"
         disabled={!!busy}
-        onClick={() => void go('remove', { remove: true }, 'Ta bort lagret')}
+        onClick={() => void go('remove', { remove: true }, 'Remove the layer')}
         className={`${row} text-muted hover:text-accent`}
       >
-        {busy === 'remove' ? 'Skapar version…' : 'Ta bort lagret'}
+        {busy === 'remove' ? 'Creating version…' : 'Remove the layer'}
       </button>
-      <p className="text-[11px] text-muted">Gratis – varje ändring blir en ny version.</p>
+      <p className="text-[11px] text-muted">Free – every change becomes a new version.</p>
       <PlanNotes error={card.error} />
     </div>
   )

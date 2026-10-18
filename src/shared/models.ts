@@ -6,8 +6,8 @@ export type Kind = 'text-to-video' | 'image-to-video' | 'reference-to-video'
 
 export const KINDS: { id: Kind; label: string }[] = [
   { id: 'text-to-video', label: 'Text' },
-  { id: 'image-to-video', label: 'Startbild' },
-  { id: 'reference-to-video', label: 'Referens' }
+  { id: 'image-to-video', label: 'Start image' },
+  { id: 'reference-to-video', label: 'References' }
 ]
 
 export const DEFAULT_MODEL: Record<Kind, string> = {

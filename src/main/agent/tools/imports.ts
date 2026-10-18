@@ -8,7 +8,7 @@ import { callService } from '../local-ipc'
 import { errorText, localTime, q, requireLibrary, seconds } from '../studio'
 import { READ_ONLY, WRITE, defineTool, type ToolContext } from './kit'
 
-// Own clips from agents: video uploads imported into Egna klipp exactly as the user's own drop imports them – into the
+// Own clips from agents: video uploads imported as own clips exactly as the user's own drop imports them – into the
 // feed, as new clips of a sequence, or as a (selected) take of a clip – with the import's own checks and working
 // copies. An import of large files can take minutes, so the tool answers after wait_seconds with an import_id that
 // get_import follows and cancel_import stops (the user's ✕ on a file card, per file).
@@ -59,7 +59,7 @@ async function settled(run: ImportRun, ms: number): Promise<boolean> {
   return run.finishedAt !== undefined
 }
 
-/** Each file's share done, from Pågår och klart (the import reports per file); undefined when it can't be read. */
+/** Each file's share done, from Activity (the import reports per file); undefined when it can't be read. */
 async function fractions(run: ImportRun): Promise<Map<string, number> | undefined> {
   try {
     const summary = await callService<WorkSummary>('work:summary')
@@ -121,7 +121,7 @@ function doneInfo(run: ImportRun, result: ImportResult): Record<string, unknown>
     ...(errors.length ? { errors } : {}),
     ...(cancelled ? { cancelled } : {}),
     note: result.generationIds.length
-      ? 'The clips are in Egna klipp (list_generations({source: "import"})). Discard large video uploads now (discard_upload) unless you need them again.'
+      ? 'The clips are among the own clips (list_generations({source: "import"})). Discard large video uploads now (discard_upload) unless you need them again.'
       : 'Nothing was imported; files says why.'
   }
 }
@@ -155,7 +155,7 @@ export function registerImportTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Import own clips',
       description:
-        'Imports video uploads (begin_upload with kind "video") as the user\'s own clips (Egna klipp), exactly as the user\'s own drop does: target {feed: true} only adds them to the clip feed (the Mediabank\'s Videor, and Generera\'s list this session); {sequence_id, after_segment_id?, fit?} adds one new clip per file (in name order) to a sequence; {segment_id, fit?} adds each as a take of that clip, the last one selected. Not into storyboards. Studio checks every file first (working_copy_reasons says why a working copy is made: HDR, 10-bit, 4K → 1080p, rotation, variable frame rate…); a file imported before is used again. Free and local. Answers when done within wait_seconds ({status: "done", generation_ids, segment_ids, errors}), else {status: "running", import_id} – follow it with get_import, stop it with cancel_import. Discard large uploads (discard_upload) once done.',
+        'Imports video uploads (begin_upload with kind "video") as the user\'s own clips, exactly as the user\'s own drop does: target {feed: true} only adds them to the clip feed (Media\'s Videos, and Generate\'s list this session); {sequence_id, after_segment_id?, fit?} adds one new clip per file (in name order) to a sequence; {segment_id, fit?} adds each as a take of that clip, the last one selected. Not into storyboards. Studio checks every file first (working_copy_reasons says why a working copy is made: HDR, 10-bit, 4K → 1080p, rotation, variable frame rate…); a file imported before is used again. Free and local. Answers when done within wait_seconds ({status: "done", generation_ids, segment_ids, errors}), else {status: "running", import_id} – follow it with get_import, stop it with cancel_import. Discard large uploads (discard_upload) once done.',
       input: {
         upload_ids: z.array(z.string()).min(1).max(10).describe('Ready video uploads, one own clip each.'),
         target: targetInput,
@@ -163,7 +163,7 @@ export function registerImportTools(server: McpServer, ctx: ToolContext): void {
       },
       annotations: WRITE,
       summary: ({ upload_ids }) =>
-        `importerade ${upload_ids.length === 1 ? 'ett eget klipp' : `${upload_ids.length} egna klipp`}`
+        `imported ${upload_ids.length === 1 ? 'an own clip' : `${upload_ids.length} own clips`}`
     },
     async ({ upload_ids, target, wait_seconds }) => {
       requireLibrary()
@@ -192,7 +192,7 @@ export function registerImportTools(server: McpServer, ctx: ToolContext): void {
       if (refused.length === files.length) {
         throw new Error(
           refused
-            .map((f) => `${f.name}: ${byPath.get(f.path)?.error?.replace(/^[^:]*:\s*/, '') ?? 'kan inte importeras'}`)
+            .map((f) => `${f.name}: ${byPath.get(f.path)?.error?.replace(/^[^:]*:\s*/, '') ?? 'can\'t be imported'}`)
             .join(' ')
         )
       }
@@ -228,14 +228,14 @@ export function registerImportTools(server: McpServer, ctx: ToolContext): void {
             : { refused: info?.error?.replace(/^[^:]*:\s*/, '') })
         }
       })
-      const names = files.length === 1 ? q(files[0].name) : `${files.length} filer`
+      const names = files.length === 1 ? q(files[0].name) : `${files.length} files`
       if (await settled(run, wait_seconds * 1000)) {
         if (run.error) throw new Error(run.error)
         const done = doneInfo(run, run.result!)
         const outcome = new Map((done.files as FileOutcome[]).map((f) => [f.upload_id, f]))
         return {
           data: { ...done, files: checked.map((c) => ({ ...c, ...outcome.get(c.upload_id) })) },
-          summary: `importerade ${names} som egna klipp`
+          summary: `imported ${names} as own clips`
         }
       }
       return {
@@ -245,7 +245,7 @@ export function registerImportTools(server: McpServer, ctx: ToolContext): void {
           files: checked,
           next: 'Follow it with get_import({import_id}); cancel_import stops it.'
         },
-        summary: `började importera ${names} som egna klipp`
+        summary: `started importing ${names} as own clips`
       }
     }
   )
@@ -260,12 +260,12 @@ export function registerImportTools(server: McpServer, ctx: ToolContext): void {
         "How an import_own_clips import is going: status (running, done or failed), each file's progress (fraction 0–1) and error, and once done the generation_ids (the own clips), segment_ids (the clips or takes in the sequence) and errors. Kept for two hours.",
       input: { import_id: z.string() },
       annotations: { ...READ_ONLY, idempotentHint: true },
-      summary: () => 'följde en import'
+      summary: () => 'followed an import'
     },
     async ({ import_id }) => {
       sweep()
       const run = runs.get(import_id)
-      if (!run) throw new Error('Det finns ingen import med det id:t (de sparas i två timmar).')
+      if (!run) throw new Error('There is no import with that id (they are kept for two hours).')
       if (run.error) return { data: { status: 'failed', import_id: run.id, error: run.error } }
       if (run.result) return { data: { ...doneInfo(run, run.result), finished: localTime(run.finishedAt) } }
       const shares = await fractions(run)
@@ -294,12 +294,12 @@ export function registerImportTools(server: McpServer, ctx: ToolContext): void {
         'Stops an import_own_clips import that is still running, like the ✕ on a file card in Studio: every file not imported yet is stopped (the half-made file removed) or skipped. Files already imported stay in the library. Answers how many files were stopped.',
       input: { import_id: z.string() },
       annotations: { ...WRITE, idempotentHint: true },
-      summary: () => 'avbröt en import'
+      summary: () => 'cancelled an import'
     },
     async ({ import_id }) => {
       sweep()
       const run = runs.get(import_id)
-      if (!run) throw new Error('Det finns ingen import med det id:t (de sparas i två timmar).')
+      if (!run) throw new Error('There is no import with that id (they are kept for two hours).')
       if (run.finishedAt !== undefined) {
         return {
           data: {
@@ -316,7 +316,7 @@ export function registerImportTools(server: McpServer, ctx: ToolContext): void {
         const done = doneInfo(run, run.result)
         return {
           data: { ...done, cancelled: (done.cancelled as number | undefined) ?? 0 },
-          summary: 'avbröt en import'
+          summary: 'cancelled an import'
         }
       }
       return {
@@ -326,7 +326,7 @@ export function registerImportTools(server: McpServer, ctx: ToolContext): void {
           ...(run.error ? { error: run.error } : {}),
           note: ended ? 'The import ended with an error.' : 'Stopping: follow it with get_import.'
         },
-        summary: 'avbröt en import'
+        summary: 'cancelled an import'
       }
     }
   )

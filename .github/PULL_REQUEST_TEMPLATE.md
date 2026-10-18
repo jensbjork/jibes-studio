@@ -32,7 +32,7 @@ without them. Add screenshots or a short recording for UI changes.
 - [ ] Every new path that spends Venice credits runs the same `@ImageN` / `@AudioN` check, and agent requests still need approval in the app.
 - [ ] New user-facing capabilities have matching agent tools and guide text in `src/main/agent/` (and docs/AGENTS.md).
 - [ ] Changes to the MCP server or agent tools keep it bound to `127.0.0.1` and the Tailscale interface, behind the bearer token.
-- [ ] UI text is in Swedish and addresses the user as "du"; code comments and docs are in English.
+- [ ] UI text is in English (short, plain, sentence case for buttons and headings); code comments and docs are in English too.
 - [ ] README, `docs/` and `CHANGELOG.md` (*Unreleased*) are updated if behaviour, settings or agent tools changed.
 - [ ] No API keys, tokens, personal names, personal paths or private library content in code, screenshots or logs.
 - [ ] If an AI tool helped: the commits carry an `Assisted-by:` trailer (not `Co-authored-by:`) and the summary says so.

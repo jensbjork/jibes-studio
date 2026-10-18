@@ -43,19 +43,19 @@ export default function SequenceList({ sequences, selectedId, creating, onSelect
 
   return (
     <SideList
-      title="Sekvenser"
-      createLabel="Ny sekvens"
-      createTitle="Skapa en ny sekvens"
+      title="Sequences"
+      createLabel="New sequence"
+      createTitle="Create a new sequence"
       onCreate={onCreate}
       creating={creating}
       headerExtra={newCount > 0 && <MarkViewSeen view="sequences" />}
       items={sequences}
       selectedId={selectedId}
       onSelect={onSelect}
-      searchPlaceholder="Sök sekvenser"
-      emptyText="Inga sekvenser ännu. En sekvens sätter ihop flera klipp till en längre video."
+      searchPlaceholder="Search sequences"
+      emptyText="No sequences yet. A sequence puts several clips together into a longer video."
       deleteNote={() =>
-        'Tagningarna och exporterade filmer finns kvar; sekvensens bilder som inget annat använder flyttas till papperskorgen.'
+        "The takes and exported films are kept; the sequence's images that nothing else uses are moved to the Trash."
       }
       onDelete={(s, next) => onDelete(s.id, next?.id)}
       renderRow={(s, control) => (
@@ -88,10 +88,10 @@ function SequenceRow({
       control={control}
       visual={<SideListThumb path={s.thumbPath} fallback={<FilmIcon size={16} className="text-muted/60" />} />}
       name={s.name}
-      meta={`${s.segmentCount} klipp${s.totalDuration > 0 ? ` · ${formatSeconds(s.totalDuration * 1000)}` : ''}`}
+      meta={`${s.segmentCount} ${s.segmentCount === 1 ? 'clip' : 'clips'}${s.totalDuration > 0 ? ` · ${formatSeconds(s.totalDuration * 1000)}` : ''}`}
       status={<StatusMark variant="inline" running={counts.running} fresh={counts.unseen} failed={counts.failed} />}
       title={ownerStatusText('sequence', running, unseen, counts)}
-      deleteTitle="Radera sekvensen"
+      deleteTitle="Delete sequence"
     />
   )
 }

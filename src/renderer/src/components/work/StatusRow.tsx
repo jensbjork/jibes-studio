@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { fade, useRailTooltip } from '../RailTooltip'
 
-// The sidebar's status rows above Inställningar: Pågår och klart and the agent connection. Slimmer than the
+// The sidebar's status rows above Settings: Activity and the agent connection. Slimmer than the
 // navigation rows (28 px, 12 px text) so they read as status rather than places, with the icon in the same 16 px
 // column at x = 36 as every other row, expanded or collapsed. In the icon rail a row is its icon with badges, and
 // its words go into the accessible name and the rail tooltip.
