@@ -12,6 +12,7 @@ import {
   type Storyboard
 } from '@shared/types'
 import { ASSET_VIEW } from '../../lib/assets'
+import { withBudgetConfirm } from '../../lib/budget'
 import { ipcErrorMessage, useAssets } from '../../lib/hooks'
 import { samePath } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
@@ -391,7 +392,11 @@ function CreateImageDialogBody({
         ? { segmentId: slotTarget.segmentId, slot: slotTarget.slot }
         : undefined
     try {
-      const still = await window.studio.generateStill({ ...sent, workToken, target })
+      // Past the budget the user is asked first (Send anyway / Cancel); undefined: they kept to it.
+      const still = await withBudgetConfirm((confirmed) =>
+        window.studio.generateStill({ ...sent, workToken, target }, confirmed ? { confirmOverBudget: true } : undefined)
+      )
+      if (!still) return
       madeHere.current.push(still.path)
       if (mounted.current) {
         setResults((r) => [still, ...r])

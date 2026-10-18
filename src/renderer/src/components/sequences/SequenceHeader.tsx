@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ExportSummary, Sequence } from '@shared/types'
+import type { AssetKind, ExportSummary, Sequence } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd } from '../../lib/media'
 import { markAllSeen, useOwnerWork } from '../../lib/work'
@@ -8,6 +8,7 @@ import OpenFolderButton from '../library/OpenFolderButton'
 import Popover from '../pickers/Popover'
 import { menuRow, onMenuKeyDown } from '../storyboards/ui'
 import { Spinner } from '../work/StatusMark'
+import CastButton, { type CastPatch } from './CastPanel'
 import { CheckAllIcon, MoreIcon, PlayIcon } from './icons'
 
 interface Props {
@@ -41,6 +42,10 @@ interface Props {
   onError: (message: string) => void
   /** "Delete sequence…", after its question. */
   onDelete: () => void
+  /** A change to the cast (shared/cast.ts); rejects with main's refusal, which the Cast panel shows. */
+  onCastChange: (patch: CastPatch) => Promise<void>
+  /** Opens the library view of a kind (from the Cast panel's picker). */
+  onManageAssets?: (kind: AssetKind) => void
 }
 
 /** The heights "Export format" offers; Automatic (null) keeps the first clip's own size. */
@@ -84,7 +89,9 @@ export default function SequenceHeader({
   onExportHeight,
   onEditExport,
   onError,
-  onDelete
+  onDelete,
+  onCastChange,
+  onManageAssets
 }: Props) {
   const count = sequence.segments.length
   const exporting = exportProgress !== undefined
@@ -104,6 +111,7 @@ export default function SequenceHeader({
       </span>
 
       <div className="no-drag ml-auto flex shrink-0 items-center gap-2">
+        <CastButton sequence={sequence} onChange={onCastChange} onManage={onManageAssets} />
         <OpenFolderButton
           target="sequences"
           id={sequence.id}

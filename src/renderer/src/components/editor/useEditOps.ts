@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConsentRequest, EditOperation, EditPlan, EditRunResult } from '@shared/types'
+import { withBudgetConfirm } from '../../lib/budget'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { parseConsent, stableJson } from '../sequences/sequenceUtils'
 import { needsConfirm, priceCheck, type PriceCheck } from './editorUtils'
@@ -138,10 +139,11 @@ export interface PendingConsent {
 
 /** What a run needs from the outside world: main's IPC and the user's answers. */
 export interface RunDeps {
+  /** Resolves undefined when the user kept to the budget rather than send it (see lib/budget.ts). */
   runOperation: (
     op: EditOperation,
     opts: { baseId?: string; expectedPriceUsd?: number; expectedPartial?: boolean }
-  ) => Promise<EditRunResult>
+  ) => Promise<EditRunResult | undefined>
   plan: (op: EditOperation, baseId?: string) => Promise<EditPlan>
   acceptConsent: (flow: string, version: string) => Promise<void>
   /** Resolves true when the price needs no question, or the user said yes. */
@@ -194,6 +196,8 @@ async function send(
       baseId,
       ...(seen ? { expectedPriceUsd: seen.usd, expectedPartial: seen.partial } : {})
     })
+    // Past the budget, and the user said no: nothing was sent.
+    if (!result) return { ok: false }
     return { ok: true, result }
   } catch (e) {
     const message = ipcErrorMessage(e)
@@ -246,7 +250,11 @@ export function useRunner(editId: string, currentId: string | undefined) {
       busy.current.add(key)
       try {
         return await executeRun(req, {
-          runOperation: (op, opts) => window.studio.runEditOperation(editId, op, opts),
+          // Past the budget the user is asked first, and it is sent again confirmed (or not at all).
+          runOperation: (op, opts) =>
+            withBudgetConfirm((confirmed) =>
+              window.studio.runEditOperation(editId, op, confirmed ? { ...opts, confirmOverBudget: true } : opts)
+            ),
           plan: (op, baseId) => window.studio.planEditOperation(editId, op, baseId),
           acceptConsent: (flow, version) => window.studio.acceptConsent(flow, version),
           confirmPrice,

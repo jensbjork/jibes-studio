@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { audioForModel, pickOption, PREFERRED, supportsEndImage } from '@shared/models'
 import { workKey, type Generation, type Storyboard, type StoryboardTransition, type VideoModel } from '@shared/types'
+import { variantsPrice } from '@shared/variants'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
+import { useVariantCount, withVariants } from '../../lib/variants'
 import { markSeen } from '../../lib/work'
+import VariantPicker from '../VariantPicker'
 import { pauseOthers } from '../feed/playback'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { ArrowRightIcon, CloseIcon } from '../sequences/icons'
@@ -66,7 +69,8 @@ interface Props {
   /** Why the last Generate failed. */
   error?: string
   onDismissError: () => void
-  onGenerate: () => void
+  /** Sends `count` takes of the transition (the variants chosen beside the button). */
+  onGenerate: (count: number) => void
   /** Makes the take the transition's (main's answer applied); rejects with main's refusal. */
   onCommitTake: (transitionId: string, takeId: string) => Promise<void>
   onDeleteTake: (take: Generation) => void
@@ -172,6 +176,8 @@ export default function TransitionEditor({
   if (model?.offline) problems.push('The model is offline – choose another')
   const blocked = problems[0]
   const quote = useClipQuote(t.ready ? params : undefined)
+  // ×1–×4 beside Generate (⌘+Enter in the prompt sends as many): each variant becomes a take of the transition.
+  const [count, setCount] = useVariantCount('transition')
 
   // ── "Suggest" ──────────────────────────────────────────────────────────────
 
@@ -452,7 +458,7 @@ export default function TransitionEditor({
             onChange={(v) => set('prompt', v)}
             onBlur={() => void draft.flush()}
             onSubmit={() => {
-              if (!blocked && !submitting) onGenerate()
+              if (!blocked && !submitting) onGenerate(count)
             }}
             context="video"
             minRows={4}
@@ -560,24 +566,32 @@ export default function TransitionEditor({
               ))}
             </ul>
           )}
-          <button
-            type="button"
-            onClick={onGenerate}
-            disabled={!!blocked || submitting}
-            title={blocked ?? 'Sends the clip to Venice (⌘ + Enter in the prompt)'}
-            className={`${primaryButton} w-full py-2`}
-          >
-            {submitting ? (
-              'Sending…'
-            ) : blocked ? (
-              blocked
-            ) : (
-              <>
-                {ready || t.takes.length ? 'Generate again' : 'Generate'}
-                <span className="opacity-80">· {formatUsd(quote)}</span>
-              </>
-            )}
-          </button>
+          <div className="flex items-stretch gap-2">
+            <VariantPicker count={count} onChange={setCount} each={quote} />
+            <button
+              type="button"
+              onClick={() => onGenerate(count)}
+              disabled={!!blocked || submitting}
+              title={
+                blocked ??
+                (count > 1
+                  ? `Sends ${count} takes of the clip to Venice at once (⌘ + Enter in the prompt)`
+                  : 'Sends the clip to Venice (⌘ + Enter in the prompt)')
+              }
+              className={`${primaryButton} min-w-0 flex-1 py-2`}
+            >
+              {submitting ? (
+                'Sending…'
+              ) : blocked ? (
+                <span className="truncate">{blocked}</span>
+              ) : (
+                <>
+                  {withVariants(ready || t.takes.length ? 'Generate again' : 'Generate', count)}
+                  <span className="opacity-80">· {formatUsd(variantsPrice(quote, count))}</span>
+                </>
+              )}
+            </button>
+          </div>
           {error && (
             <p className="flex items-start gap-2 text-[12px] leading-relaxed text-accent select-text">
               <span className="min-w-0 flex-1">{error}</span>

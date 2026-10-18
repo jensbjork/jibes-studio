@@ -5,6 +5,7 @@ import LibrarySection from './library/LibrarySection'
 import AboutSettings from './settings/AboutSettings'
 import GenerationSettings from './settings/GenerationSettings'
 import LibraryArchiveSection from './settings/LibraryArchiveSection'
+import SpendingSettings from './settings/SpendingSettings'
 import {
   SETTINGS_SECTION as SECTION,
   SettingsNav,
@@ -32,6 +33,7 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
         label: 'Venice',
         attention: settings.hasApiKey ? undefined : 'No API key yet'
       },
+      { id: SECTION.spending, label: 'Spending' },
       { id: SECTION.generation, label: 'Generation' },
       { id: SECTION.library, label: 'Library' },
       { id: SECTION.archive, label: 'Export & import' },
@@ -74,6 +76,14 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
               description="Studio generates video, images and sound through your Venice account."
             >
               <VeniceSettings hasApiKey={settings.hasApiKey} onChanged={onChanged} />
+            </SettingsSection>
+
+            <SettingsSection
+              id={SECTION.spending}
+              title="Spending"
+              description="What Studio has paid Venice for, and an optional budget it keeps you to."
+            >
+              <SpendingSettings budget={settings.budget ?? {}} onChanged={onChanged} />
             </SettingsSection>
 
             <SettingsSection

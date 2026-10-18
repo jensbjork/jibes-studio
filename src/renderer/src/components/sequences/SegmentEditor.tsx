@@ -10,13 +10,18 @@ import type {
   Sequence,
   VideoModel
 } from '@shared/types'
+import { variantsPrice, variantsText } from '@shared/variants'
+import { withBudgetConfirm } from '../../lib/budget'
 import { ipcErrorMessage, useQuote } from '../../lib/hooks'
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { useVariantCount, withVariants } from '../../lib/variants'
 import { useReportOpenSegment } from '../../lib/workspace'
 import ConsentDialog from '../ConsentDialog'
 import ParamsForm from '../ParamsForm'
+import VariantPicker from '../VariantPicker'
 import { workingCopyNote } from '../feed/ownClips'
+import CastLine from './CastLine'
 import { clipBlocked } from './clipChecks'
 import ConfirmButton from './ConfirmButton'
 import { CameraIcon, ChevronDownIcon, PlayIcon } from './icons'
@@ -141,12 +146,21 @@ export default function SegmentEditor({
   const sent = effectiveParams({ ...segment, params }, index, sequence)
   const model = models.find((m) => m.id === sent.model)
   const quote = useQuote(sent, model)
+  // ×1–×4 beside "Generate take" (⌘+Enter sends as many): each variant becomes a take of the clip.
+  const [count, setCount] = useVariantCount('clip')
+  const total = variantsPrice(quote, count)
 
   const [submitting, setSubmitting] = useState(false)
   const [toggling, setToggling] = useState(false)
   const [error, setError] = useState<string>()
-  // Venice's consent request, with the clip as main had it when it asked: accepting generates only that clip.
-  const [consent, setConsent] = useState<{ request: ConsentRequest; clip: string }>()
+  // Venice's consent request, with the clip as main had it when it asked: accepting generates only that clip, as many
+  // variants as were asked for (and over the budget if that was confirmed already).
+  const [consent, setConsent] = useState<{
+    request: ConsentRequest
+    clip: string
+    count: number
+    overBudgetOk: boolean
+  }>()
   // The clip as main has it now (what segments:generate would send, including the frames it starts and ends on
   // from the neighbours), for comparing after the consent dialog.
   const clipNow = clipKey(sequence, index)
@@ -158,18 +172,25 @@ export default function SegmentEditor({
   // Checked as main will send it: a continuation is image-to-video, where @ImageN tokens point at nothing.
   const blocked = clipBlocked({ sequence, index, params, models, modelsError, ffmpegOk })
 
-  const generate = async () => {
+  /** Sends `n` takes of the clip (the count chosen): the first comes back, the others arrive as updates. */
+  const generate = async (n = count, overBudgetOk = false) => {
     if (blocked || submitting) return
     setSubmitting(true)
     setError(undefined)
+    let confirmed = overBudgetOk
     try {
       // main generates from the stored params, so the latest edits must be saved first.
       if (!(await flush())) throw new Error("The changes couldn't be saved. Try again.")
-      addTake(await window.studio.generateSegment(segmentId))
+      const take = await withBudgetConfirm((yes) => {
+        confirmed ||= yes
+        return window.studio.generateSegment(segmentId, { count: n, confirmOverBudget: confirmed })
+      })
+      // Undefined: over the budget, and the user said no – nothing was sent.
+      if (take) addTake(take)
     } catch (e) {
       const message = ipcErrorMessage(e)
       const request = parseConsent(message)
-      if (request) setConsent({ request, clip: clipNowRef.current })
+      if (request) setConsent({ request, clip: clipNowRef.current, count: n, overBudgetOk: confirmed })
       else setError(message)
     } finally {
       setSubmitting(false)
@@ -178,7 +199,7 @@ export default function SegmentEditor({
 
   const acceptConsent = async () => {
     if (!consent) return
-    const { request, clip } = consent
+    const { request, clip, count: asked, overBudgetOk } = consent
     setConsent(undefined)
     try {
       await window.studio.acceptConsent(request.flow, request.version)
@@ -192,7 +213,7 @@ export default function SegmentEditor({
       setError('The clip changed while the terms were shown. Check it and press Generate again.')
       return
     }
-    await generate()
+    await generate(asked, overBudgetOk)
   }
 
   const toggleContinue = async (on: boolean) => {
@@ -201,6 +222,20 @@ export default function SegmentEditor({
     try {
       await flush()
       await patchSegment(segmentId, { continueFromPrevious: on })
+    } catch (e) {
+      setError(ipcErrorMessage(e))
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  // "Use the cast": main gives the clip the sequence's cast as its references (its prompt's tokens follow them).
+  const applyCast = async () => {
+    setToggling(true)
+    setError(undefined)
+    try {
+      if (!(await flush())) throw new Error("The changes couldn't be saved. Try again.")
+      await mutate(() => window.studio.applyCastToSegment(segmentId))
     } catch (e) {
       setError(ipcErrorMessage(e))
     } finally {
@@ -272,7 +307,11 @@ export default function SegmentEditor({
       {consent && (
         <ConsentDialog
           request={consent.request}
-          cost={`clip ${index + 1} · ${formatUsd(quote)}`}
+          cost={`clip ${index + 1} · ${
+            consent.count > 1
+              ? `${variantsText(consent.count)} · ${formatUsd(variantsPrice(quote, consent.count))}`
+              : formatUsd(quote)
+          }`}
           onAccept={acceptConsent}
           onCancel={() => setConsent(undefined)}
         />
@@ -356,6 +395,14 @@ export default function SegmentEditor({
               onBridge={() => void bridge()}
             />
 
+            <CastLine
+              sequence={sequence}
+              segment={{ ...segment, params }}
+              index={index}
+              busy={toggling}
+              onUseCast={() => void applyCast()}
+            />
+
             <ParamsForm
               models={models}
               modelsError={modelsError}
@@ -389,17 +436,30 @@ export default function SegmentEditor({
       {formOpen && (
         <div className="border-t border-line p-4">
           {error && <p className="mb-3 max-h-32 overflow-y-auto text-accent select-text">{error}</p>}
-          <button
-            onClick={() => void generate()}
-            disabled={!!blocked || submitting}
-            className="flex w-full items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-          >
-            <span className="truncate" title={blocked}>
-              {submitting ? 'Sending…' : (blocked ?? (segment.takes.length ? 'Generate new take' : 'Generate take'))}
-            </span>
-            <span className="shrink-0 text-white/80">{formatUsd(quote)}</span>
-          </button>
-          <p className="mt-2 text-center text-[11px] text-muted">⌘ + Enter to generate</p>
+          <div className="flex items-stretch gap-2">
+            <VariantPicker count={count} onChange={setCount} each={quote} />
+            <button
+              onClick={() => void generate()}
+              disabled={!!blocked || submitting}
+              className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
+            >
+              <span className="truncate" title={blocked}>
+                {/* With variants the count says what is made: "Generate ×3" (the long label wouldn't fit beside them). */}
+                {submitting
+                  ? 'Sending…'
+                  : (blocked ??
+                    (count > 1
+                      ? withVariants('Generate', count)
+                      : segment.takes.length
+                        ? 'Generate new take'
+                        : 'Generate take'))}
+              </span>
+              <span className="shrink-0 text-white/80">{formatUsd(total)}</span>
+            </button>
+          </div>
+          <p className="mt-2 text-center text-[11px] text-muted">
+            ⌘ + Enter to generate{count > 1 ? ` ${variantsText(count)}` : ''}
+          </p>
         </div>
       )}
     </div>

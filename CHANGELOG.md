@@ -10,6 +10,47 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **A sequence's cast**: *Cast* in the sequence's header chooses the characters, outfits (and who wears them),
+  environments, products and poses once for the whole sequence instead of per clip – add (at the end, a character with
+  its default outfit and voice), remove, move, swap for another asset, a voice on or off, who wears an outfit. New clips
+  start with the cast as their references (a clip continuing in reference mode carries them from the clip before), and
+  every clip whose references are exactly the cast's *follows* it: changing the cast changes those clips in the same
+  step, their prompts kept on the same pictures – an addition keeps every number, a removal takes its tokens out, a
+  reorder renumbers, a swap keeps every number and the name in front follows. The clip editor says *Follows the cast*,
+  *Carries the cast from clip N* or *Own references* with *Use the cast*. Kept in the sequence's defaults, no schema
+  change. Agents: `update_sequence` takes `cast` (asset items like `set_references`', `outfit_wearers`) and
+  `swap_cast_asset`, `get_sequence` shows the `cast` and each clip's `follows_cast`, `add_segment` starts a new shot
+  from the cast unless `references` are given, and `update_segment` takes `use_cast: true`.
+- **Spending and a budget** (*Settings → Spending*): what Studio has paid Venice for today, this month and per day
+  over the last 30 days (a small chart, with a table view), and this month by kind (videos, images, Editor jobs,
+  voices, transcripts), by place (Generate, each sequence, storyboard and edit) and by who asked (you, or the agent
+  whose request you approved). Finished videos count at their price, failed ones not at all; work still rendering is
+  *on its way*, not spent. An optional daily and monthly budget, per profile: anything paid that would take the
+  spending past one – a video and its variants, a clip, a transition, *Create image…*, the Editor's paid cards and
+  *Continue*, *Design a voice with AI…*, and *Generate missing* with the run's total – asks first (*Over your budget:
+  This costs $0.56 and takes today’s spending past your budget of $5.00 ($4.80 spent). Send it anyway?*). An agent's
+  request past the budget says so in its approval dialog, and approving it is the yes. Agents: `get_spending` (the
+  same numbers, the caps and the room left), and a paid request's answer carries `over_budget` and a `budget_note`;
+  only you set the budget. 91 tools in all (36 read, 46 write, 9 ask for approval).
+- **⌘K: search everywhere and go there**: one field, from any view (a text field too) or the search button by the
+  wordmark (also in the rail), that finds the views, Media's tabs, Settings' sections, *Activity* and the agent, the
+  actions (*New sequence*, *New storyboard*, *New edit*, *New character* … – the same as the list's *＋ New*, the
+  sidebar's toggle) and everything in the library: characters, environments, products, outfits and poses by name and
+  description, saved prompts by title, text and tags (*Use in Generate*), sequences by name and their clips by notes
+  and prompt, storyboards with their boards' notes and transitions' prompts, edits, clips (newest first), images by
+  their prompt and exported films. Letter case and accents don't matter (*cafe* finds *Café*), every word must start a
+  word, and the matches are marked; results come grouped, the best group first, with a picture where there is one.
+  ↑ / ↓ and Enter or the mouse open it where the rest of Studio does (a clip's drawer in Media, a sequence on that
+  clip, a board or transition, an edit); Esc closes. Agents already find all of this with their list and get tools.
+- **Several variants at once**: *×1 ×2 ×3 ×4* beside *Generate*, a sequence clip's *Generate take* and a storyboard
+  transition's *Generate* sends that many takes of the same settings at once – each its own generation, with its own
+  seed, at the full price. The button shows the total (*Generate ×3 · $3.09*), ⌘ + Enter sends as many, and each
+  place remembers its choice (×1 to begin with). In a clip or transition every variant becomes a take, and the first to
+  finish is chosen only when there was no usable take. The whole amount is checked against the budget before anything
+  is sent; a consent Venice asks for comes before the first variant, and if a later one can't be sent the error says
+  how many were. Agents: `request_generation`, `request_segment_generation` and `request_transition_generation` take
+  `count` (1–4); the approval dialog shows *3 variants · $3.09*, approving sends them all, and `get_approval` returns
+  every `generation_id`.
 - **Check an agent's request against its references**: in the approval dialog, hovering (or tabbing to) an `@ImageN`
   or `@AudioN` token in the prompt or the References legend shows a card with the picture large enough to recognise –
   the asset, *foto 2 av 3*, *skickas inte* past the model's limit – or the voice with its window and a play button for

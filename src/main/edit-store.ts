@@ -15,6 +15,7 @@ import type {
 } from '@shared/types'
 import * as db from './db'
 import { fromStoredPath, toStoredPath } from './paths'
+import { noteRequestedBy } from './requested-by'
 
 const conn = (): ReturnType<typeof db.getDb> => db.getDb()
 
@@ -497,6 +498,8 @@ export function insertJob(job: {
       now,
       now
     )
+  // A paid job an agent's approved request started: Spending names the agent (see requested-by.ts).
+  noteRequestedBy(id)
   return getJob(id)!
 }
 

@@ -454,6 +454,7 @@ export function asPreviewSequence(storyboard: Storyboard): Sequence {
     id: storyboard.id,
     name: storyboard.name,
     defaults: {},
+    cast: { referenceImages: [], referenceAudios: [] },
     running: storyboard.running,
     createdAt: storyboard.createdAt,
     updatedAt: storyboard.updatedAt,

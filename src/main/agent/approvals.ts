@@ -9,6 +9,7 @@ import {
   type GenerationParams,
   type SequenceKind
 } from '@shared/types'
+import { runConfirmed } from '../requested-by'
 import { errorText } from './studio'
 
 // What an agent asked for that needs the user's OK: paid generations (videos, pictures, the Editor's paid operations,
@@ -95,7 +96,10 @@ export interface ApprovalPlan {
   sequenceName?: string
   segmentIds?: string[]
   clipNumbers?: number[]
+  /** All of it: with `variants`, the price of one times the count. */
   priceUsd?: number
+  /** 'generation' and 'segment': how many takes of the same settings it sends (ApprovalRequest.variants); 1: left out. */
+  variants?: number
   /** Identifies what would be generated; an identical pending request is reused instead of asking twice. */
   fingerprint: string
   /** What it generates (e.g. a clip): a newer request for the same target replaces a pending older one. */
@@ -137,13 +141,14 @@ interface Entry {
 function executingSummary(r: ApprovalRequest): string {
   const named = r.sequenceName ? ` in “${r.sequenceName}”` : ''
   const storyboard = r.sequenceKind === 'storyboard'
+  const variants = r.variants && r.variants > 1 ? ` (${r.variants} variants)` : ''
   switch (r.kind) {
     case 'generation':
-      return 'A video from Generate'
+      return variants ? `${r.variants} videos from Generate` : 'A video from Generate'
     case 'segment': {
       const n = r.clipNumbers?.[0]
       const what = storyboard ? (n ? `Transition ${n}` : 'A transition') : n ? `Clip ${n}` : 'A clip'
-      return `${what}${named}`
+      return `${what}${named}${variants}`
     }
     case 'generate-all':
       return `Generate missing${named}`
@@ -226,6 +231,7 @@ export class ApprovalStore {
       segmentIds: plan.segmentIds,
       clipNumbers: plan.clipNumbers,
       priceUsd: plan.priceUsd,
+      ...(plan.variants && plan.variants > 1 ? { variants: plan.variants } : {}),
       status: 'pending'
     }
     const entry: Entry = { request, plan, executing: false }
@@ -333,7 +339,9 @@ export class ApprovalStore {
     this.executingChanged()
     try {
       await entry.plan.verify?.()
-      const outcome = await entry.plan.execute()
+      // The user's OK is their yes to the price, also past the budget (the dialog warns): what the request sends – now
+      // or later, in a run it starts – isn't asked about again, and is noted as this agent's (Settings → Spending).
+      const outcome = await runConfirmed(() => entry.plan.execute(), entry.request.client)
       const { generationIds, stillId, notice, edit, deleteItems, failedError } = Array.isArray(outcome)
         ? { generationIds: outcome, edit: undefined, deleteItems: undefined, failedError: undefined }
         : outcome

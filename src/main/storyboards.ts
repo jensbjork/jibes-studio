@@ -39,6 +39,7 @@ import {
   type VideoModel
 } from '@shared/types'
 import { isAgentCall } from './agent/local-ipc'
+import { assertRunWithinBudget, confirmedOf, quoteTotal, runConfirmed } from './budget'
 import * as db from './db'
 import { probe } from './ffmpeg'
 import { ratioOf } from './images'
@@ -54,6 +55,7 @@ import {
   type SubmitGuard
 } from './sequences'
 import { assertAgentFiles } from './upload-paths'
+import { sendOptionsOf, type SendOptions } from './variants'
 
 // The formats a storyboard can have live in the shared types (the window offers them too); re-exported for main.
 export { DEFAULT_STORYBOARD_ASPECT_RATIO, STORYBOARD_ASPECT_RATIOS }
@@ -945,15 +947,18 @@ export class StoryboardService {
     return this.get(storyboard.id)
   }
 
-  /** Queues a new take of the transition (paid). Refused, before anything is paid for, when it can't be made. */
-  async generateTransition(transitionId: string, guard?: SubmitGuard): Promise<Generation> {
+  /**
+   * Queues a new take of the transition (paid) – or several, `variants` (see SequenceService.generateSegment);
+   * resolves with the first. Refused, before anything is paid for, when it can't be made.
+   */
+  async generateTransition(transitionId: string, guard?: SubmitGuard, variants?: SendOptions): Promise<Generation> {
     const { row, storyboard } = requireTransitionRow(transitionId)
     const problem = this.problemsOf(storyboard.id, row.id)[0]
     if (problem) throw new Error(problem)
     if (this.deps.sequences.isSubmitting(row.id)) {
       throw new Error('A take of the transition is already being sent to Venice. Wait until it shows among the takes.')
     }
-    return this.deps.sequences.generateSegment(row.id, this.transitionGuard(storyboard.id, guard))
+    return this.deps.sequences.generateSegment(row.id, this.transitionGuard(storyboard.id, guard), undefined, variants)
   }
 
   /**
@@ -1334,9 +1339,10 @@ function guardImageFile(e: IpcMainInvokeEvent, image: unknown): void {
 }
 
 /**
- * Registers the storyboard IPC handlers and returns the service behind them. 'transitions:generate' and
- * 'storyboards:generateAll' take an approval's submit guard as an extra argument (in-process calls only), and
- * 'storyboards:missing' (not part of StudioApi) tells the agent connection what "Generate missing" would pay for.
+ * Registers the storyboard IPC handlers and returns the service behind them. 'transitions:generate' (after its
+ * GenerateOptions) and 'storyboards:generateAll' take an approval's submit guard as an extra argument (in-process
+ * calls only), and 'storyboards:missing' (not part of StudioApi) tells the agent connection what "Generate missing"
+ * would pay for.
  */
 export function registerStoryboardIpc(deps: StoryboardDeps): StoryboardService {
   const s = new StoryboardService(deps)
@@ -1365,12 +1371,25 @@ export function registerStoryboardIpc(deps: StoryboardDeps): StoryboardService {
   ipcMain.handle('transitions:update', (e, transitionId: string, patch: TransitionPatch) =>
     s.updateTransition(transitionId, patch ?? {}, callerOf(e))
   )
-  ipcMain.handle('transitions:generate', (_e, transitionId: string, guard?: unknown) =>
-    s.generateTransition(transitionId, asGuard(guard))
+  // `opts`: GenerateOptions (the variants, the over-budget confirmation); the guard comes from an approval only.
+  ipcMain.handle('transitions:generate', (_e, transitionId: string, opts?: unknown, guard?: unknown) =>
+    s.generateTransition(transitionId, asGuard(guard), sendOptionsOf(opts))
   )
-  ipcMain.handle('storyboards:generateAll', (_e, storyboardId: string, guard?: unknown) =>
-    s.start(storyboardId, asGuard(guard))
-  )
+  // `opts`: {confirmOverBudget} from the window, after the guard an approval in this process passes. Checked against the
+  // budget once, with every missing transition's price, before the run starts; what it then sends isn't asked about
+  // again (runConfirmed). A run that can't start as the transitions stand is left to say so itself.
+  ipcMain.handle('storyboards:generateAll', async (_e, storyboardId: string, guard?: unknown, opts?: unknown) => {
+    const missing = s.missingTransitions(storyboardId)
+    if (missing.length && !missing.some((m) => m.problem)) {
+      const prices = (): Promise<number | undefined> =>
+        quoteTotal(
+          missing.map((m) => m.params),
+          (p) => deps.sequences.quoteTake(p)
+        )
+      await assertRunWithinBudget(prices, confirmedOf(opts))
+    }
+    runConfirmed(() => s.start(storyboardId, asGuard(guard)))
+  })
   ipcMain.handle('storyboards:missing', (_e, storyboardId: string) => s.missingTransitions(storyboardId))
   ipcMain.handle('storyboards:stop', (_e, storyboardId: string) => s.stop(storyboardId))
   ipcMain.handle('storyboards:export', (_e, storyboardId: string) => s.export(storyboardId))

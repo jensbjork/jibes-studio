@@ -9,6 +9,7 @@ import { blockingPromptError, canonicalizeParams } from '@shared/prompt-refs'
 import type {
   ApprovalImageReference,
   ApprovalRequest,
+  GenerateOptions,
   Generation,
   GenerationParams,
   SegmentFramePreview,
@@ -19,6 +20,7 @@ import type {
   Storyboard,
   StoryboardTransition
 } from '@shared/types'
+import { MAX_VARIANTS, variantsPrice } from '@shared/variants'
 import * as db from '../../db'
 import { composeSubmission, continuationLeadInFor, prepareSubmission } from '../../jobs'
 import {
@@ -34,7 +36,8 @@ import { getImageSafeMode } from '../../settings'
 import { planStill } from '../../stills'
 import { ensureImagesExist, resolveReferenceAudios } from '../../venice'
 import { type MissingTransition } from '../../storyboards'
-import type { ApprovalPlan } from '../approvals'
+import type { SentListener } from '../../variants'
+import type { ApprovalOutcome, ApprovalPlan } from '../approvals'
 import { callService } from '../local-ipc'
 import { boardImagePath, boardIndex, isStoryboardId, storyboardOfBoard, transitionPair } from '../storyboard-rows'
 import {
@@ -49,6 +52,7 @@ import {
   requireLibrary
 } from '../studio'
 import { READ_ONLY, defineTool, priceValue, quote, readForm, usd, type ToolContext } from './kit'
+import { overBudgetAnswer } from './spending'
 import { deleteApprovalInfo } from './delete'
 import { editApprovalInfo } from './editor-paid'
 import {
@@ -300,7 +304,53 @@ function pendingAnswer(request: ApprovalRequest, reused: boolean): Record<string
     ...(reused ? { reused: true } : {}),
     message: reused
       ? 'An identical request is already waiting for the user; this is that one.'
-      : 'Waiting for the user to approve it in Studio. Tell them briefly what is waiting, then poll get_approval every 15–30 seconds.'
+      : 'Waiting for the user to approve it in Studio. Tell them briefly what is waiting, then poll get_approval every 15–30 seconds.',
+    // Past the user's budget: still only a request, but the agent should say so.
+    ...(request.status === 'pending' ? overBudgetAnswer(request.priceUsd) : {})
+  }
+}
+
+// ── Variants ─────────────────────────────────────────────────────────────────
+
+/** The `count` input of the requests that can send several variants (GenerateOptions.count). */
+const COUNT_INPUT = z
+  .number()
+  .int()
+  .min(1)
+  .max(MAX_VARIANTS)
+  .optional()
+  .describe(
+    `Variants: how many takes of exactly the same settings to send at once (1–${MAX_VARIANTS}, default 1). Each is its own generation – Venice picks a new seed for each – and costs the full price; price_usd is the total.`
+  )
+
+/** What a request for `count` variants adds to its answer: the count and the price of one. */
+function variantsAnswer(count: number, each: number | undefined): Record<string, unknown> {
+  return count > 1 ? { variants: count, price_each_usd: priceValue(each) } : {}
+}
+
+/** The price in a request's summary for Activity: "$1.03", or "3 variants, $3.09". */
+function priceWords(count: number, total: number | undefined): string {
+  return count > 1 ? `${count} variants, ${usd(total)}` : usd(total)
+}
+
+/**
+ * Carries out an approved request through a generate handler ('video:generate', 'segments:generate',
+ * 'transitions:generate') and resolves with every generation it started. When a later variant can't be sent, the ones
+ * sent stand (they are paid for) and the notice says what happened; when the first can't, nothing was sent and the
+ * error stands – a consent Venice asks for first keeps the request pending, so the user can approve it again.
+ * Going over the budget is confirmed: the dialog showed the user the whole price before their OK.
+ */
+async function sendApproved(
+  count: number,
+  send: (opts: GenerateOptions & { onSent: SentListener }) => Promise<unknown>
+): Promise<ApprovalOutcome> {
+  const ids: string[] = []
+  try {
+    await send({ count, confirmOverBudget: true, onSent: (g) => void ids.push(g.id) })
+    return ids
+  } catch (err) {
+    if (!ids.length) throw err
+    return { generationIds: ids, notice: errorText(err) }
   }
 }
 
@@ -466,12 +516,15 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request generation (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating the current Generate form (as get_workspace shows it). Nothing is generated or paid for until they approve in Studio. The form is checked first (prompt, start image or references, @ImageN / @AudioN tokens); problems come back as an error and no request is made. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. The form is captured now: later changes to it don't change this request. The prompt is sent with the descriptions of its referenced assets appended (composed_prompt in get_workspace); the user approves exactly that text, and the request lapses if a description (or the prompt language) changes before they answer. Add a short note for the user saying what this generation is for.",
-      input: { note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.') },
+        "💰 Asks the user to approve generating the current Generate form (as get_workspace shows it). Nothing is generated or paid for until they approve in Studio. The form is checked first (prompt, start image or references, @ImageN / @AudioN tokens); problems come back as an error and no request is made. With count 2–4 it sends that many variants of the form at once (each its own generation; price_usd is the total) – get_approval then lists every generation_id. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. The form is captured now: later changes to it don't change this request. The prompt is sent with the descriptions of its referenced assets appended (composed_prompt in get_workspace); the user approves exactly that text, and the request lapses if a description (or the prompt language) changes before they answer. Add a short note for the user saying what this generation is for.",
+      input: {
+        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.'),
+        count: COUNT_INPUT
+      },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       summary: () => 'wants to generate'
     },
-    async ({ note }) => {
+    async ({ note, count = 1 }) => {
       const epoch = ctx.approvals.epoch()
       // Before the read: renames from here on are followed (see db.followRewrites).
       const mark = db.rewriteMark()
@@ -492,14 +545,16 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       // What Venice will get: the prompt with the descriptions of its references as they are now. The user approves
       // exactly this text, so a description edited before they answer makes the request lapse.
       const sent = sentPromptOf(params)
+      const total = variantsPrice(price, count)
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'generation',
         client: ctx.clientName(),
         note,
         params,
         ...composedFields(sent),
-        priceUsd: price,
-        fingerprint: `generation:${paramsKey(params)}`,
+        priceUsd: total,
+        variants: count,
+        fingerprint: `generation:${paramsKey(params)}${count > 1 ? `:x${count}` : ''}`,
         paramsNow: () => db.followRewrites(params, mark),
         // Pictures renamed along with their asset while the request waited are followed to their new place,
         // but they must still be the very files the request was made with.
@@ -512,14 +567,15 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         },
         // The approved text goes along, so what Venice gets is exactly what verify compared – not the prompt
         // composed again after the quote's round trip, from descriptions that may have been edited meanwhile.
-        execute: async () => [
-          (await callService<Generation>('video:generate', db.followRewrites(params, mark), sent.prompt)).id
-        ]
+        execute: () =>
+          sendApproved(count, (opts) =>
+            callService<Generation>('video:generate', db.followRewrites(params, mark), opts, sent.prompt)
+          )
       })
       return {
-        data: pendingAnswer(request, reused),
+        data: { ...pendingAnswer(request, reused), ...variantsAnswer(count, price) },
         approvalId: request.id,
-        summary: `wants to generate (${usd(price)}) – waiting for your OK`
+        summary: `wants to generate (${priceWords(count, total)}) – waiting for your OK`
       }
     }
   )
@@ -531,15 +587,16 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request clip generation (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating a new take of one sequence clip. Nothing is generated or paid for until they approve in Studio. The clip is checked first; a clip that continues from the previous one needs that clip's finished selected take, and one with end_from_next the next clip's (use request_generate_all to generate clips in order). The dialog shows the user the clip's start and end frames. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. If the clip – or the selected take or trim of a neighbour it takes a frame from, or a description appended to its prompt (composed_prompt in get_sequence) – is changed before the user approves, the request lapses. A newer request for the same clip replaces a pending older one.",
+        "💰 Asks the user to approve generating a new take of one sequence clip – or, with count 2–4, that many takes of it at once (variants: each its own generation, all of them takes of the clip; price_usd is the total, and get_approval lists every generation_id). Nothing is generated or paid for until they approve in Studio. The clip is checked first; a clip that continues from the previous one needs that clip's finished selected take, and one with end_from_next the next clip's (use request_generate_all to generate clips in order). The dialog shows the user the clip's start and end frames. Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval. If the clip – or the selected take or trim of a neighbour it takes a frame from, or a description appended to its prompt (composed_prompt in get_sequence) – is changed before the user approves, the request lapses. A newer request for the same clip replaces a pending older one. The first take to finish becomes the selected take only when the clip has no usable one.",
       input: {
         segment_id: z.string(),
-        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
+        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.'),
+        count: COUNT_INPUT
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       summary: () => 'wants to generate a clip'
     },
-    async ({ segment_id, note }) => {
+    async ({ segment_id, note, count = 1 }) => {
       const epoch = ctx.approvals.epoch()
       const mark = db.rewriteMark()
       const { sequence, index, segment } = await loadClip(segment_id)
@@ -612,6 +669,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         withFrame && leadIn
           ? { ...paramsForSubmit(withFrame), prompt: `${leadIn}\n\n${generated.prompt.trimEnd()}` }
           : paramsForSubmit(generated)
+      const total = variantsPrice(price, count)
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'segment',
         client: ctx.clientName(),
@@ -623,8 +681,9 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         sequenceName: sequence.name,
         segmentIds: [segment.id],
         clipNumbers: [clip],
-        priceUsd: price,
-        fingerprint: `segment:${segment.id}:${key}`,
+        priceUsd: total,
+        variants: count,
+        fingerprint: `segment:${segment.id}:${key}${count > 1 ? `:x${count}` : ''}`,
         target: `segment:${segment.id}`,
         verify: () => {
           const problem = changed()
@@ -632,12 +691,13 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         },
         // Checked again on the row the take is built from: a change landing while the take waits for the file
         // queue must not be paid for either.
-        execute: async () => [(await callService<Generation>('segments:generate', segment.id, guard)).id]
+        execute: () =>
+          sendApproved(count, (opts) => callService<Generation>('segments:generate', segment.id, opts, guard))
       })
       return {
-        data: { ...pendingAnswer(request, reused), clip_number: clip },
+        data: { ...pendingAnswer(request, reused), clip_number: clip, ...variantsAnswer(count, price) },
         approvalId: request.id,
-        summary: `wants to generate clip ${clip} in ${q(sequence.name)} (${usd(price)}) – waiting for your OK`
+        summary: `wants to generate clip ${clip} in ${q(sequence.name)} (${priceWords(count, total)}) – waiting for your OK`
       }
     }
   )
@@ -774,15 +834,16 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request a storyboard transition (paid, needs approval)',
       description:
-        "💰 Asks the user to approve generating a new take of one storyboard transition: the clip from one board's picture (its start image) to the next board's picture (its end image), with the transition's prompt, model, duration, resolution and audio. Nothing is generated or paid for until they approve in Studio; the dialog shows both pictures, the prompt and the price. Both boards need pictures and the prompt must be written (get_storyboard: ready). Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval, then get_storyboard / review_generation. If a board's picture or the transition changes (or the boards are moved apart) before the user approves, the request lapses. A newer request for the same transition replaces a pending older one. The new take becomes the transition's selected take when it has none that is usable; otherwise pick it with update_transition({selected_take_id}).",
+        "💰 Asks the user to approve generating a new take of one storyboard transition: the clip from one board's picture (its start image) to the next board's picture (its end image), with the transition's prompt, model, duration, resolution and audio. Nothing is generated or paid for until they approve in Studio; the dialog shows both pictures, the prompt and the price. Both boards need pictures and the prompt must be written (get_storyboard: ready). Returns immediately with {approval_id, status: \"pending\", price_usd}; follow it with get_approval, then get_storyboard / review_generation. If a board's picture or the transition changes (or the boards are moved apart) before the user approves, the request lapses. A newer request for the same transition replaces a pending older one. The new take becomes the transition's selected take when it has none that is usable; otherwise pick it with update_transition({selected_take_id}). With count 2–4 it sends that many takes at once (variants: each its own generation; price_usd is the total, get_approval lists every generation_id) and the first to finish is the one selected that way.",
       input: {
         transition_id: z.string(),
-        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.')
+        note: z.string().max(500).optional().describe('Shown to the user in the approval dialog.'),
+        count: COUNT_INPUT
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       summary: () => 'wants to generate a transition'
     },
-    async ({ transition_id, note }) => {
+    async ({ transition_id, note, count = 1 }) => {
       const epoch = ctx.approvals.epoch()
       const mark = db.rewriteMark()
       const { storyboard, index, transition } = await loadTransition(transition_id)
@@ -797,6 +858,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const shown = paramsForSubmit(params)
       const label = transitionLabel(storyboard, index)
       const guard: SubmitGuard = (id) => (id === transition.id ? transitionChanged(pin, mark, silent) : 'Wrong transition.')
+      const total = variantsPrice(price, count)
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'segment',
         client: ctx.clientName(),
@@ -809,8 +871,11 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         sequenceName: storyboard.name,
         segmentIds: [transition.id],
         clipNumbers: [index + 1],
-        priceUsd: price,
-        fingerprint: `transition:${transition.id}:${pin.key}:${pin.identity}:${pin.fromBoardId}:${pin.toBoardId}`,
+        priceUsd: total,
+        variants: count,
+        fingerprint: `transition:${transition.id}:${pin.key}:${pin.identity}:${pin.fromBoardId}:${pin.toBoardId}${
+          count > 1 ? `:x${count}` : ''
+        }`,
         // The same target as a clip's request: a newer request for the transition replaces a pending older one.
         target: `segment:${transition.id}`,
         verify: () => {
@@ -818,12 +883,13 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
           if (problem) throw new Error(problem)
         },
         // Checked again on the row the take is built from, right before it is sent.
-        execute: async () => [(await callService<Generation>('transitions:generate', transition.id, guard)).id]
+        execute: () =>
+          sendApproved(count, (opts) => callService<Generation>('transitions:generate', transition.id, opts, guard))
       })
       return {
-        data: { ...pendingAnswer(request, reused), transition_number: index + 1 },
+        data: { ...pendingAnswer(request, reused), transition_number: index + 1, ...variantsAnswer(count, price) },
         approvalId: request.id,
-        summary: `wants to generate ${label} in ${q(storyboard.name)} (${usd(price)}) – waiting for your OK`
+        summary: `wants to generate ${label} in ${q(storyboard.name)} (${priceWords(count, total)}) – waiting for your OK`
       }
     }
   )
@@ -1270,6 +1336,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         status: request.status,
         kind: transitions ? (request.kind === 'segment' ? 'transition' : 'generate-storyboard') : request.kind,
         price_usd: priceValue(request.priceUsd),
+        ...(request.variants ? { variants: request.variants } : {}),
         created: localTime(request.createdAt),
         ...(request.status === 'pending' ? { expires: localTime(request.expiresAt) } : {}),
         note: request.note,

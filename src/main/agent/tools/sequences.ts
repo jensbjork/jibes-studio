@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
+import { castFollowAt, castIsEmpty, followTokensToCast, swapCastAsset, withCastReferences } from '@shared/cast'
 import {
   continuationPlan,
   continuationProblem,
@@ -25,6 +26,7 @@ import {
   supportsEndImage
 } from '@shared/models'
 import { generationTitle } from '@shared/generation-label'
+import { resolveOutfitWearers } from '@shared/outfits'
 import { explainedReferences } from '@shared/prompt-compose'
 import {
   audioToken,
@@ -36,6 +38,7 @@ import {
 } from '@shared/prompt-refs'
 import { reorderReferences } from '@shared/prompt-remap'
 import type {
+  Asset,
   ContinueMode,
   ExportSummary,
   Generation,
@@ -45,6 +48,7 @@ import type {
   SegmentImageSource,
   SegmentPatch,
   Sequence,
+  SequenceCast,
   SequenceSummary,
   Storyboard,
   VideoModel,
@@ -116,6 +120,7 @@ import {
 import {
   READ_ONLY,
   WRITE,
+  assetReferenceItem,
   defineTool,
   excludedDescriptionsInput,
   includeDescriptionsInput,
@@ -319,10 +324,15 @@ export function clipInfo(
   const references = plan?.mode === 'references'
   // In reference mode the prompt is sent with the instruction to start on the frame in front of it.
   const composed = references ? composeTakePrompt(generated, plan) : undefined
+  const cast = castFollowAt(sequence.segments, index, sequence.cast)
   return {
     segment_id: segment.id,
     clip_number: index + 1,
     notes: segment.notes ?? '',
+    // Whether its references are the sequence's cast and change with it; a continuation that carries the cast from a
+    // clip that follows it names that clip.
+    follows_cast: cast.state === 'follows',
+    ...(cast.state === 'carries' ? { carries_cast_from_clip: cast.fromClip } : {}),
     continue_from_previous: continuing,
     ...(plan ? continuationInfo(plan, assets) : {}),
     end_from_next: ending,
@@ -398,6 +408,54 @@ function defaultsInfo(sequence: Sequence): Record<string, unknown> {
   }
 }
 
+/**
+ * The sequence's cast as the tools show it: its token maps (the pictures and voices every clip that follows it has, in
+ * that order), who wears each outfit, and which clips follow it.
+ */
+export function castInfo(sequence: Sequence, assets: AssetIndex): Record<string, unknown> {
+  const cast = sequence.cast
+  const following = sequence.segments.flatMap((_, i) =>
+    castFollowAt(sequence.segments, i, cast).state === 'follows' ? [i + 1] : []
+  )
+  if (castIsEmpty(cast)) {
+    return {
+      references: [],
+      note: 'No cast chosen yet: update_sequence({cast}) chooses the characters, outfits and places for the whole sequence.'
+    }
+  }
+  const present = new Map<string, Asset>()
+  for (const path of cast.referenceImages) {
+    const asset = assets.photo(path)?.asset
+    if (asset && !present.has(asset.id)) present.set(asset.id, asset)
+  }
+  const wearers = resolveOutfitWearers(
+    [...present.values()].map((a) => ({
+      id: a.id,
+      kind: a.kind,
+      ...(a.defaultOutfitId ? { defaultOutfitId: a.defaultOutfitId } : {})
+    })),
+    cast.outfitWearers
+  )
+  const outfits = [...present.values()].filter((a) => a.kind === 'outfit')
+  return {
+    references: tokenMap(cast.referenceImages, assets),
+    ...(cast.referenceAudios.length ? { audio_references: audioTokenMap(cast.referenceAudios, assets) } : {}),
+    ...(outfits.length
+      ? {
+          outfit_wearers: outfits.map((o) => {
+            const wearer = wearers.get(o.id)
+            return {
+              outfit_asset_id: o.id,
+              outfit_name: o.name,
+              worn_by: wearer ? { asset_id: wearer, name: assets.get(wearer)?.name } : null
+            }
+          })
+        }
+      : {}),
+    following_clips: following
+  }
+}
+
 export function sequenceInfo(sequence: Sequence, assets: AssetIndex, stills: StillIndex): Record<string, unknown> {
   const missing = sequence.segments.flatMap((s, i) => (isUsableTake(selectedTake(s)) ? [] : [i + 1]))
   return {
@@ -409,6 +467,7 @@ export function sequenceInfo(sequence: Sequence, assets: AssetIndex, stills: Sti
     // "Export format": the exported film's height, or null = the first clip's own size (update_sequence sets it).
     export_height: sequence.exportHeight ?? null,
     defaults: defaultsInfo(sequence),
+    cast: castInfo(sequence, assets),
     generate_all_running: sequence.running,
     ...(sequence.runError ? { last_run_error: readableRunError(sequence.runError) } : {}),
     still_count: stills.stills.filter((s) => s.sequenceId === sequence.id).length,
@@ -1086,7 +1145,7 @@ const clipFields = {
     .array(referenceItem)
     .optional()
     .describe(
-      "The clip's own references, like set_references items: photos in @Image order and audio (characters' voices by default, with a model that takes audio) in @Audio order. Replaces the clip's references. A clip that continues in reference mode may have them (they replace the ones it would carry from the clip before; [] goes back to carrying those); not allowed on a clip sent image-to-video (an exact continuation, an end frame, a start or end image)."
+      "The clip's own references, like set_references items: photos in @Image order and audio (characters' voices by default, with a model that takes audio) in @Audio order. Replaces the clip's references (a clip whose references differ from the sequence's cast no longer follows it). Left out on a new shot, the clip starts with the cast. A clip that continues in reference mode may have them (they replace the ones it would carry from the clip before; [] goes back to carrying those); not allowed on a clip sent image-to-video (an exact continuation, an end frame, a start or end image)."
     ),
   model: z
     .string()
@@ -1213,7 +1272,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Get sequence',
       description:
-        "One sequence with its clips in order (for a storyboard use get_storyboard). Each clip has its notes (\"What happens\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next – a continuing clip also has continue_mode (\"references\" or \"exact\"), sent_as (how it goes now; continue_mode_note says why it differs or doesn't apply) and in reference mode carried_references (from_clip, inherited, the references and audio_references it sends – its own, or those of the clip it continues from – and start_frame_token, the @Image token of the previous clip's last frame, sent after them; not_sent when a reference gives way for it), while references / composed_prompt show what is sent, the instruction to start on the frame included –, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error, source; own_clip: true when it is the user's own film or a version from the Editor rather than a generation of the clip's prompt). The sequence's export_height is its Export format (null = the first clip's own size; update_sequence changes it), defaults what new clips start from. With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
+        "One sequence with its clips in order (for a storyboard use get_storyboard). Each clip has its notes (\"What happens\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next – a continuing clip also has continue_mode (\"references\" or \"exact\"), sent_as (how it goes now; continue_mode_note says why it differs or doesn't apply) and in reference mode carried_references (from_clip, inherited, the references and audio_references it sends – its own, or those of the clip it continues from – and start_frame_token, the @Image token of the previous clip's last frame, sent after them; not_sent when a reference gives way for it), while references / composed_prompt show what is sent, the instruction to start on the frame included –, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error, source; own_clip: true when it is the user's own film or a version from the Editor rather than a generation of the clip's prompt). The sequence's export_height is its Export format (null = the first clip's own size; update_sequence changes it), defaults what new clips start from, and cast its cast – the assets chosen for the whole sequence as token maps (references, audio_references), who wears each outfit (outfit_wearers) and following_clips; each clip's follows_cast says whether its references are exactly the cast's (it changes when the cast changes; with no cast chosen, a clip in reference mode without references follows the empty cast), and carries_cast_from_clip names the clip a continuation carries the cast from. With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
       input: {
         sequence_id: z.string(),
         include_thumbnails: z.boolean().default(true)
@@ -1268,7 +1327,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Add clip to sequence',
       description:
-        "Adds a clip (a shot) to a sequence, at the end or after after_segment_id, with its notes (\"What happens\") and prompt – or, with from_generation_id, a clip whose selected take is a finished video that already exists (the user's own film, a version from the Editor). Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false (pass it true together with references to give a continuing clip references of its own). A continuing clip starts from the previous clip's last frame. By default (continue_mode \"references\") it is sent reference-to-video with the references it carries – its own, or else those of the clip it continues from (up the chain) – plus that frame as the last reference image, which Studio's instruction in front of the prompt says to start on: use the carried @Image / @Audio tokens (get_sequence: carried_references) and describe what happens next. With continue_mode \"exact\" it is image-to-video from the frame and takes no references or tokens. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) unless it should reuse the previous clip's. The descriptions of its referenced assets are appended to its prompt when it is generated, with who wears each outfit (include_descriptions / excluded_description_asset_ids choose which, outfit_wearers who wears what; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
+        "Adds a clip (a shot) to a sequence, at the end or after after_segment_id, with its notes (\"What happens\") and prompt – or, with from_generation_id, a clip whose selected take is a finished video that already exists (the user's own film, a version from the Editor). Settings you leave out come from the previous clip (or the sequence defaults for the first clip). continue_from_previous defaults to true when there is a previous clip and you pass neither references nor a start_image, otherwise false (pass it true together with references to give a continuing clip references of its own). A continuing clip starts from the previous clip's last frame. By default (continue_mode \"references\") it is sent reference-to-video with the references it carries – its own, or else those of the clip it continues from (up the chain) – plus that frame as the last reference image, which Studio's instruction in front of the prompt says to start on: use the carried @Image / @Audio tokens (get_sequence: carried_references) and describe what happens next. With continue_mode \"exact\" it is image-to-video from the frame and takes no references or tokens. A clip with a start_image and/or end_image (a still, a library photo, a frame of a finished clip, or \"next\" for the next clip's first frame) is image-to-video too: the look comes from the pictures. A clip without any of these is a new shot: without references it starts with the sequence's cast (get_sequence: cast) and follows it; give it references (its own @Image1… / @Audio1… numbering; characters' voices come along by default with a model that takes audio) for a shot with others. The descriptions of its referenced assets are appended to its prompt when it is generated, with who wears each outfit (include_descriptions / excluded_description_asset_ids choose which, outfit_wearers who wears what; they carry over from the previous clip) – don't repeat them in the prompt. The clip is validated like a generation; problems are returned as an error and nothing is saved.",
       input: {
         sequence_id: z.string(),
         after_segment_id: z.string().optional().describe('Insert after this clip; at the end when left out.'),
@@ -1313,11 +1372,48 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         stills,
         !!previous && !ownShot && input.continue_from_previous === undefined
       )
-      const result = await clipParams(base, input, slots, assets, clipNumber, {
-        sequence,
-        index: afterIndex + 1,
-        insert: true
-      })
+      // A new shot without references of its own starts with the sequence's cast (a continuation carries the
+      // references of the clip it continues from instead; a clip with pictures takes none).
+      const castShot =
+        input.references === undefined &&
+        !castIsEmpty(sequence.cast) &&
+        !slots.continuing &&
+        !slots.ending &&
+        slots.start.path === undefined &&
+        slots.end.path === undefined &&
+        (!input.model || kindOfModelId(input.model) === 'reference-to-video')
+      // In another mode it is switched to its family's reference-to-video model, as a model chosen here would be.
+      const castModel =
+        castShot && !input.model && kindOfModelId(base.model) !== 'reference-to-video'
+          ? (referenceToVideoVariant(base.model, usableModels(await loadModels()).map((m) => m.id)) ??
+            DEFAULT_PARAMS.model)
+          : undefined
+      // A negative prompt copied from the clip before keeps its tokens on the same pictures (or loses them).
+      const castBase: GenerationParams | undefined = castShot
+        ? withCastReferences(
+            {
+              ...base,
+              negativePrompt:
+                previous && base.negativePrompt && input.negative_prompt === undefined
+                  ? followTokensToCast(sequence.segments, afterIndex, base.negativePrompt, sequence.cast) || undefined
+                  : base.negativePrompt
+            },
+            sequence.cast
+          )
+        : undefined
+      const result = await clipParams(
+        castBase ?? base,
+        castModel ? { ...input, model: castModel } : input,
+        slots,
+        assets,
+        clipNumber,
+        { sequence, index: afterIndex + 1, insert: true }
+      )
+      if (castShot) {
+        result.notes.unshift(
+          "The clip starts with the sequence's cast as its references (cast in get_sequence) and follows it: it changes when the cast changes, until its references are changed by hand."
+        )
+      }
 
       const before = new Set(sequence.segments.map((s) => s.id))
       let updated = await callService<Sequence>('segments:add', sequence.id, {
@@ -1350,7 +1446,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update clip',
       description:
-        "Changes a clip: only the fields you pass change. notes is the clip's \"What happens\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt, outfit_wearers who wears each outfit (the legend says it); reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens; swap_reference({target: {segment_id}}) swaps one of them (or a whole asset) for another, keeping every number. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
+        "Changes a clip: only the fields you pass change. notes is the clip's \"What happens\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt, outfit_wearers who wears each outfit (the legend says it); reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens; swap_reference({target: {segment_id}}) swaps one of them (or a whole asset) for another, keeping every number. Changing a clip's references by hand stops it following the sequence's cast; use_cast: true gives it the cast again. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
       input: {
         segment_id: z.string(),
         ...clipFields,
@@ -1360,14 +1456,30 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           .optional()
           .describe("One of the clip's finished takes (a generation_id) to use in the cut."),
         trim_start: z.number().min(0).optional().describe('Seconds cut off the start of the selected take in the cut.'),
-        trim_end: z.number().min(0).optional().describe('Seconds cut off the end of the selected take in the cut.')
+        trim_end: z.number().min(0).optional().describe('Seconds cut off the end of the selected take in the cut.'),
+        use_cast: z
+          .literal(true)
+          .optional()
+          .describe(
+            "\"Use the cast\": the clip's references become the sequence's cast (get_sequence: cast), so it follows the cast again; its prompt's tokens follow their pictures (a picture the cast lacks loses its tokens – check the prompt). A clip in another mode is switched to its family's reference-to-video model. Applied before the other fields; not together with references. Not for a clip that sends no references (an exact continuation, an end frame, start or end images)."
+          )
       },
       annotations: { ...WRITE, idempotentHint: true },
       summary: () => 'changed a clip'
     },
-    async ({ segment_id, notes, selected_take_id, trim_start, trim_end, ...raw }) => {
-      const { sequence, index, segment } = await loadClip(segment_id)
+    async ({ segment_id, notes, selected_take_id, trim_start, trim_end, use_cast, ...raw }) => {
+      let { sequence, index, segment } = await loadClip(segment_id)
       assertNotRunning(sequence)
+      if (use_cast) {
+        if (raw.references !== undefined) {
+          throw new Error('Give either use_cast (the sequence\'s cast) or references (references of its own) – not both.')
+        }
+        if (castIsEmpty(sequence.cast)) {
+          throw new Error('The sequence has no cast yet. Choose one with update_sequence({cast}) first.')
+        }
+        await callService<Sequence>('segments:useCast', segment.id)
+        ;({ sequence, index, segment } = await loadClip(segment_id))
+      }
       const [assets, stills] = await Promise.all([AssetIndex.load(), StillIndex.load()])
       const clipNumber = index + 1
       const touchesClip = Object.entries(raw).some(([, v]) => v !== undefined)
@@ -1447,11 +1559,13 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         trimNotes.push(`trim_end became ${seconds(saved.trimEnd)} s – ${kept}`)
       }
       const what =
-        !result && take && notes === undefined && !trims
-          ? `selected a take for clip ${clipNumber}`
-          : !result && trims && notes === undefined && !take
-            ? `trimmed clip ${clipNumber}`
-            : `changed clip ${clipNumber}`
+        use_cast && !result && !take && !trims && notes === undefined
+          ? `gave clip ${clipNumber} the cast`
+          : !result && take && notes === undefined && !trims
+            ? `selected a take for clip ${clipNumber}`
+            : !result && trims && notes === undefined && !take
+              ? `trimmed clip ${clipNumber}`
+              : `changed clip ${clipNumber}`
       return {
         data: {
           ...(at >= 0 ? clipInfo(updated, at, assets, stillsNow) : { segment_id }),
@@ -1508,7 +1622,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update sequence',
       description:
-        "Changes a sequence: its name (its folder follows), its defaults – the settings its first clip (and an own clip added to it) starts from: model (a reference-to-video or text-to-video model; a clip gets image-to-video from its own start image), duration, resolution, aspect_ratio, audio, checked against the model as Studio does, with what you leave out fitted to the model – and its Export format (export_height: 480, 720 or 1080 pixels high, or null for the first clip's own size), which decides the film's size when own clips and AI clips are mixed. Only the fields you pass change. Free.",
+        "Changes a sequence: its name (its folder follows), its defaults – the settings its first clip (and an own clip added to it) starts from: model (a reference-to-video or text-to-video model; a clip gets image-to-video from its own start image), duration, resolution, aspect_ratio, audio, checked against the model as Studio does, with what you leave out fitted to the model – its Export format (export_height: 480, 720 or 1080 pixels high, or null for the first clip's own size), which decides the film's size when own clips and AI clips are mixed – and its cast: the characters, outfits (and who wears them), environments, products and poses chosen once for the whole sequence. New clips start with the cast as their references (a continuation carries the references of the clip it continues from instead), and every clip that follows the cast (get_sequence: follows_cast – its references are exactly the cast's) changes with it in the same step, its prompt's tokens kept on their pictures: cast replaces the whole cast (keep the assets that stay in their order and add new ones at the end, so the numbers in the prompts stay; a removed asset's tokens leave the prompts, a reorder renumbers them), swap_cast_asset swaps one asset for another without changing any number (the name before its tokens follows; one character for another hands over the outfit, as swap_reference does). Clips whose references were changed by hand don't follow; update_segment({use_cast: true}) brings one back. Only the fields you pass change. Free.",
       input: {
         sequence_id: z.string(),
         name: z.string().min(1).max(120).optional(),
@@ -1525,26 +1639,95 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         export_height: z
           .union([z.literal(480), z.literal(720), z.literal(1080), z.null()])
           .optional()
-          .describe("480, 720, 1080, or null = Automatic (the first clip's own size).")
+          .describe("480, 720, 1080, or null = Automatic (the first clip's own size)."),
+        cast: z
+          .object({
+            items: z
+              .array(assetReferenceItem)
+              .max(20)
+              .describe(
+                "The cast's assets in order, like set_references' asset items: each adds all photos of an asset (or the image_ids you list) as @Image1, @Image2 … and – with a default model that takes reference audio – a character's first voice clip (include_voice / audio_ids choose) as @Audio1 …. A character's default outfit is not added by itself: add it (or another outfit). [] removes the cast."
+              ),
+            outfit_wearers: outfitWearersInput
+          })
+          .strict()
+          .optional()
+          .describe('The whole new cast (replaces it). Not together with swap_cast_asset.'),
+        swap_cast_asset: z
+          .object({
+            from_asset_id: z.string().describe('An asset in the cast.'),
+            to_asset_id: z.string().describe('The asset that takes its places (its photos in order, its voice).')
+          })
+          .strict()
+          .optional()
+          .describe('Swaps one asset of the cast for another, keeping every @Image / @Audio number in the clips that follow it.')
       },
       annotations: { ...WRITE, idempotentHint: true },
       summary: () => 'changed a sequence'
     },
-    async ({ sequence_id, name, defaults, export_height }) => {
+    async ({ sequence_id, name, defaults, export_height, cast, swap_cast_asset }) => {
       const sequence = await loadSequence(sequence_id)
-      if (name === undefined && defaults === undefined && export_height === undefined) {
-        throw new Error('Give name, defaults or export_height – otherwise there is nothing to change.')
+      if (
+        name === undefined &&
+        defaults === undefined &&
+        export_height === undefined &&
+        cast === undefined &&
+        swap_cast_asset === undefined
+      ) {
+        throw new Error('Give name, defaults, export_height, cast or swap_cast_asset – otherwise there is nothing to change.')
       }
+      if (cast && swap_cast_asset) throw new Error('Give either cast (the whole cast) or swap_cast_asset – not both.')
+      const castChange = !!cast || !!swap_cast_asset
+      if (castChange) assertNotRunning(sequence)
       const nextDefaults = defaults ? await checkedDefaults(sequence, defaults) : undefined
+      const assets = await AssetIndex.load()
+      const notes: string[] = []
+      let nextCast: SequenceCast | undefined
+      if (cast) {
+        const model = nextDefaults?.model ?? sequence.defaults.model ?? DEFAULT_PARAMS.model
+        const resolved = resolveReferences(cast.items, assets, audioTarget(model, await modelsIfAvailable()))
+        const max = maxReferenceImages(model)
+        if (resolved.paths.length > max) {
+          throw new Error(`The cast has ${resolved.paths.length} images, but ${model} takes at most ${max}. Leave some photos out (image_ids).`)
+        }
+        notes.push(...resolved.notes)
+        nextCast = {
+          referenceImages: resolved.paths,
+          referenceAudios: resolved.audios,
+          outfitWearers: applyOutfitWearers(sequence.cast.outfitWearers, cast.outfit_wearers, resolved.paths, assets)
+        }
+        if (!nextCast.outfitWearers) delete nextCast.outfitWearers
+        if (resolved.skippedAudio.length) notes.push(...resolved.skippedAudio.map((a) => `${a.asset_name ?? a.file}: ${a.reason}`))
+      }
+      if (swap_cast_asset) {
+        const from = assets.require(swap_cast_asset.from_asset_id.trim())
+        const to = assets.require(swap_cast_asset.to_asset_id.trim())
+        // The notes of the very swap main makes (the same shared rules on the same cast); main says what is wrong.
+        try {
+          notes.push(...swapCastAsset(sequence.cast, { from, to }, assets.assets).notes)
+        } catch {
+          // Refused by main below, with its reason.
+        }
+      }
       const updated = await callService<Sequence>('sequences:update', sequence.id, {
         ...(name !== undefined ? { name: name.trim() } : {}),
         ...(nextDefaults ? { defaults: nextDefaults } : {}),
-        ...(export_height !== undefined ? { exportHeight: export_height } : {})
+        ...(export_height !== undefined ? { exportHeight: export_height } : {}),
+        ...(nextCast ? { cast: nextCast } : {}),
+        ...(swap_cast_asset
+          ? { castSwap: { fromAssetId: swap_cast_asset.from_asset_id.trim(), toAssetId: swap_cast_asset.to_asset_id.trim() } }
+          : {})
       })
+      // The clips whose settings the cast change rewrote (they followed the cast).
+      const before = new Map(sequence.segments.map((s) => [s.id, store.serializeParams(s.params)]))
+      const changed = updated.segments.flatMap((s, i) =>
+        before.has(s.id) && before.get(s.id) !== store.serializeParams(s.params) ? [i + 1] : []
+      )
       const what = [
         name !== undefined ? 'the name' : undefined,
         defaults ? 'the defaults' : undefined,
-        export_height !== undefined ? 'the export format' : undefined
+        export_height !== undefined ? 'the export format' : undefined,
+        castChange ? 'the cast' : undefined
       ].filter((w): w is string => !!w)
       const said = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what[what.length - 1]}` : what[0]
       return {
@@ -1552,7 +1735,17 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           sequence_id: updated.id,
           name: updated.name,
           defaults: defaultsInfo(updated),
-          export_height: updated.exportHeight ?? null
+          export_height: updated.exportHeight ?? null,
+          ...(castChange
+            ? {
+                cast: castInfo(updated, assets),
+                changed_clips: changed,
+                ...(notes.length ? { notes } : {}),
+                next: changed.length
+                  ? 'The clips that follow the cast changed with it: read their prompts again (get_sequence) before generating.'
+                  : 'No clip follows the cast yet: new clips start with it, and update_segment({use_cast: true}) gives a clip the cast.'
+              }
+            : {})
         },
         summary: `changed ${said} of ${q(updated.name)}`
       }

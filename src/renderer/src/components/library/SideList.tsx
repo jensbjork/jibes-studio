@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, type ReactNode } from 'react'
+import { useCreateRequest } from '../../lib/createRequest'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import Popover from '../pickers/Popover'
@@ -242,6 +243,8 @@ export default function SideList<T extends SideListItem>({
   }
 
   const createAction = createPanel ? () => setCreateOpen((open) => !open) : onCreate
+  // "New sequence", "New character" … chosen in ⌘K: the same as a press on the button, once the list has loaded.
+  useCreateRequest(!!items && !creating, () => (createPanel ? setCreateOpen(true) : onCreate?.()))
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-line">

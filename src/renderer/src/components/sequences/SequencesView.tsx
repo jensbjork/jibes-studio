@@ -11,6 +11,8 @@ import {
   type Segment,
   type Sequence
 } from '@shared/types'
+import { withBudgetConfirm } from '../../lib/budget'
+import { ASSET_VIEW } from '../../lib/assets'
 import { ipcErrorMessage, useModels } from '../../lib/hooks'
 import { LAST_SEQUENCE_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
@@ -27,6 +29,7 @@ import { ownEndImageRefused, sendInputProblem } from './clipChecks'
 import { CloseIcon, FilmIcon } from './icons'
 import PreviewPlayer from './PreviewPlayer'
 import SegmentEditor, { type EditorHandle } from './SegmentEditor'
+import type { CastPatch } from './CastPanel'
 import SequenceHeader from './SequenceHeader'
 import SequenceList from './SequenceList'
 import Timeline, { type ClipSource } from './Timeline'
@@ -377,6 +380,16 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   const deleteSequence = (id: string) =>
     removeSequence(id).catch((e: unknown) => setNotice({ text: ipcErrorMessage(e) }))
 
+  /**
+   * A change to the cast: the clip editor's edits are saved first, since main rewrites the clips that follow the cast
+   * in the same step. A refusal goes back to the Cast panel, which shows it.
+   */
+  const changeCast = async (patch: CastPatch): Promise<void> => {
+    if (!sequenceId) return
+    if (!(await flushAll())) throw new Error("The clip's changes couldn't be saved. Try again.")
+    await store.mutate(() => window.studio.updateSequence(sequenceId, patch))
+  }
+
   const rename = (name: string) => {
     if (!sequenceId) return
     store.update((s) => ({ ...s, name }))
@@ -419,7 +432,10 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     if (runFailure) markSeen([runFailure.key])
     store.update((s) => ({ ...s, running: true, runError: undefined }))
     try {
-      await window.studio.generateAllSegments(sequenceId)
+      // Checked against the budget once, with the run's total: past it the user is asked first (no starts nothing).
+      await withBudgetConfirm((confirmed) =>
+        window.studio.generateAllSegments(sequenceId, confirmed ? { confirmOverBudget: true } : undefined)
+      )
     } catch (e) {
       setNotice({ text: ipcErrorMessage(e), sequenceId })
     }
@@ -504,7 +520,9 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     await flushAll()
     // A sequence with nothing in it yet (the empty Clip 1 of a new sequence): the films take the empty clip's place,
     // and there is no shape to ask about – the first film gives the sequence its shape.
-    const placeholders = sequence.segments.every(isUntouchedClip) ? sequence.segments.map((s) => s.id) : []
+    const placeholders = sequence.segments.every((s) => isUntouchedClip(s, sequence.cast))
+      ? sequence.segments.map((s) => s.id)
+      : []
     const outcome = await importFlow.begin(
       paths,
       { kind: 'sequence', sequenceId: id, afterSegmentId },
@@ -940,6 +958,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               onEditExport={(exportId) => navigate('editor', { type: 'open-editor', exportId })}
               onError={(text) => setNotice({ text, sequenceId: sequence.id })}
               onDelete={() => void deleteSequence(sequence.id)}
+              onCastChange={changeCast}
+              onManageAssets={(kind) => navigate(ASSET_VIEW[kind])}
             />
             {banners}
             <Timeline

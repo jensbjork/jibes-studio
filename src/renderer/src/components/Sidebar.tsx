@@ -7,8 +7,10 @@ import DevBadge from './DevBadge'
 import AgentIndicator from './agent/AgentIndicator'
 import AssetIcon from './assets/AssetIcon'
 import { ScissorsIcon } from './editor/icons'
+import { SearchIcon } from './feed/icons'
 import { FilmIcon, GearIcon, MediaIcon, QuoteIcon, SidebarIcon } from './icons'
 import { fade, IconBox, rowClass, useRailTooltip } from './RailTooltip'
+import { openCommandPalette } from './search/CommandPalette'
 import { SparkleIcon } from './sequences/icons'
 import { StoryboardIcon } from './storyboards/icons'
 import { StatusMark } from './work/StatusMark'
@@ -160,8 +162,9 @@ interface Props {
  * The window's navigation: Create (the places that make things) and Library (what was made, and what it is made
  * from), each row
  * with what runs there and what is new. At the bottom two slim status rows – Activity and the agent
- * connection – and, below a divider, Settings as the last row. Collapses to a 72 px icon rail (⌃⌘S) whose rows
- * keep their status as badges and explain themselves in tooltips.
+ * connection – and, below a divider, Settings as the last row. By the wordmark, search (⌘K, the command palette) and
+ * the toggle. Collapses to a 72 px icon rail (⌃⌘S) whose rows keep their status as badges and explain themselves in
+ * tooltips.
  */
 export default function Sidebar({
   view,
@@ -174,6 +177,8 @@ export default function Sidebar({
 }: Props) {
   const toggleLabel = collapsed ? 'Expand the sidebar (⌃⌘S)' : 'Collapse the sidebar (⌃⌘S)'
   const toggleTip = useRailTooltip(collapsed, toggleLabel)
+  const searchLabel = 'Search (⌘K)'
+  const searchTip = useRailTooltip(collapsed, searchLabel)
 
   return (
     <aside
@@ -191,14 +196,27 @@ export default function Sidebar({
           Studio
           {devProfile && <DevBadge />}
         </div>
-        {/* Follows the moving edge while expanded and ends centred under the traffic lights in the rail. */}
+        {/* Search (⌘K) and the toggle follow the moving edge while expanded and end side by side, centred under
+            the traffic lights, in the rail. */}
+        <button
+          onClick={openCommandPalette}
+          aria-label={searchLabel}
+          aria-haspopup="dialog"
+          title={collapsed ? undefined : searchLabel}
+          style={{ left: collapsed ? -2 : 'calc(var(--sidebar-w) - 80px)' }}
+          className="no-drag absolute top-0.5 flex h-6 w-6 items-center justify-center rounded-md text-muted transition-[left,color,background-color] duration-200 ease-[cubic-bezier(0.2,0,0,1)] hover:bg-raised hover:text-text motion-reduce:transition-none"
+          {...searchTip.trigger}
+        >
+          <SearchIcon size={15} />
+        </button>
+        {searchTip.tooltip}
         <button
           onClick={onToggleCollapsed}
           aria-label={toggleLabel}
           title={collapsed ? undefined : toggleLabel}
           aria-expanded={!collapsed}
           aria-controls={SIDEBAR_ID}
-          style={{ left: collapsed ? 12 : 'calc(var(--sidebar-w) - 52px)' }}
+          style={{ left: collapsed ? 26 : 'calc(var(--sidebar-w) - 52px)' }}
           className="no-drag absolute top-0.5 flex h-6 w-6 items-center justify-center rounded-md text-muted transition-[left,color,background-color] duration-200 ease-[cubic-bezier(0.2,0,0,1)] hover:bg-raised hover:text-text motion-reduce:transition-none"
           {...toggleTip.trigger}
         >

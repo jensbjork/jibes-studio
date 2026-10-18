@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObjec
 /** The sections' element ids, for the navigation and for opening Settings at one of them. */
 export const SETTINGS_SECTION = {
   venice: 'settings-venice',
+  spending: 'settings-spending',
   generation: 'settings-generation',
   library: 'settings-library',
   archive: 'settings-archive',

@@ -11,6 +11,19 @@ import { copyFile, lstat, mkdir, rm, stat, utimes } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { ipcMain, shell } from 'electron'
 import {
+  castAppliedAt,
+  castFollowAt,
+  castIsEmpty,
+  followCastChange,
+  followTokensToCast,
+  sameCast,
+  sanitizeCast,
+  swapCastAsset,
+  wearersKey,
+  withCastReferences,
+  type CastSwap
+} from '@shared/cast'
+import {
   CONTINUATION_FRAME_PLACEHOLDER,
   continuationPlan,
   continuationProblem,
@@ -29,6 +42,8 @@ import {
   endImageVariant,
   imageToVideoVariant,
   kindOfModelId,
+  maxReferenceAudios,
+  maxReferenceImages,
   paramsForSubmit,
   pickOption,
   PREFERRED,
@@ -36,6 +51,7 @@ import {
   supportsAudioInput,
   supportsEndImage
 } from '@shared/models'
+import { outfitWearersAmong } from '@shared/outfits'
 import { knowsPromptLimit, rememberPromptLimits } from '@shared/prompt-compose'
 import { blockingContinuationError, blockingPromptError, findAudioTokens, findImageTokens } from '@shared/prompt-refs'
 import { NEEDS_CONSENT } from '@shared/types'
@@ -52,13 +68,17 @@ import type {
   SegmentInit,
   SegmentPatch,
   Sequence,
+  SequenceCast,
+  SequenceCastSwap,
   SequenceKind,
   SequenceSummary,
   Still,
   VideoModel
 } from '@shared/types'
+import { variantsPrice } from '@shared/variants'
 import { isAgentCall } from './agent/local-ipc'
 import { listAssets } from './assets'
+import { assertRunWithinBudget, assertWithinBudget, confirmedOf, quoteTotal, runConfirmed } from './budget'
 import * as db from './db'
 import { concatClips, extractFrame, extractFrameAtOrAfter, frameStartAtOrAfter, probe } from './ffmpeg'
 import { composeSubmission, prepareSubmission, toPublic, videoLocation, type JobManager } from './jobs'
@@ -94,6 +114,7 @@ import {
 } from './sequence-export'
 import * as store from './sequence-store'
 import { assertAgentFiles } from './upload-paths'
+import { sendOptionsOf, sendVariants, type SendOptions } from './variants'
 import { ensureImagesExist, type VeniceClient } from './venice'
 
 /**
@@ -157,6 +178,10 @@ interface SequencePatch {
   defaults?: Partial<GenerationParams>
   /** "Exportformat": 480, 720 or 1080; null = Automatiskt (the first clip's own size). */
   exportHeight?: number | null
+  /** The whole new cast (shared/cast.ts); the clips that follow the cast change with it. */
+  cast?: SequenceCast
+  /** One asset of the cast swapped for another, keeping every number in the clips that follow it. */
+  castSwap?: SequenceCastSwap
 }
 
 /**
@@ -542,6 +567,75 @@ function hasOwnEndImage(params: GenerationParams): boolean {
   return kindOfModelId(params.model) === 'image-to-video' && !!params.endImage
 }
 
+// ── The cast ─────────────────────────────────────────────────────────────────
+
+/** A cast swap from the window or an agent, or a refusal; undefined stays undefined (no swap). */
+function cleanCastSwap(value: unknown): SequenceCastSwap | undefined {
+  if (value === undefined || value === null) return undefined
+  const v = value as Partial<SequenceCastSwap>
+  if (typeof v !== 'object' || typeof v.fromAssetId !== 'string' || typeof v.toAssetId !== 'string') {
+    throw new Error('Name the asset of the cast to swap and the asset to swap it for.')
+  }
+  return { fromAssetId: v.fromAssetId, toAssetId: v.toAssetId }
+}
+
+/** The assets of a swap, checked: `from` among the cast's pictures, `to` another asset with photos. */
+function castSwapOf(swap: SequenceCastSwap, cast: SequenceCast, library: readonly Asset[]): CastSwap {
+  const from = library.find((a) => a.id === swap.fromAssetId)
+  const to = library.find((a) => a.id === swap.toAssetId)
+  if (!from) throw new Error('The asset to swap no longer exists.')
+  if (!to) throw new Error('The asset to swap it for no longer exists.')
+  const photos = new Set(from.images.map((i) => i.path))
+  if (!cast.referenceImages.some((p) => photos.has(p))) throw new Error(`${from.name} is not in the cast.`)
+  if (!to.images.length) throw new Error(`${to.name} has no photos to swap to.`)
+  return { from, to }
+}
+
+/**
+ * A new cast as it may be stored: the library's own pictures and audio clips (a picture or clip the cast had already –
+ * of an asset deleted since, say – may stay), within the default model's limits, and the "worn by" choices kept to the
+ * outfits and characters in it. Refused otherwise, naming what is wrong.
+ */
+function checkedCast(
+  input: unknown,
+  current: SequenceCast,
+  defaults: Partial<GenerationParams>,
+  library: readonly Asset[]
+): SequenceCast {
+  const cast = sanitizeCast(input)
+  const photos = new Map<string, Asset>()
+  const clips = new Set<string>()
+  for (const asset of library) {
+    for (const image of asset.images) if (!photos.has(image.path)) photos.set(image.path, asset)
+    for (const clip of asset.audio ?? []) clips.add(clip.path)
+  }
+  const strange = cast.referenceImages.filter((p) => !photos.has(p) && !current.referenceImages.includes(p))
+  if (strange.length) {
+    throw new Error(`The cast is made of the library's assets: ${basename(strange[0])} is not one of their photos.`)
+  }
+  const strangeAudio = cast.referenceAudios.filter(
+    (a) => !clips.has(a.path) && !current.referenceAudios.some((c) => c.path === a.path)
+  )
+  if (strangeAudio.length) {
+    throw new Error(
+      `The cast is made of the library's assets: ${basename(strangeAudio[0].path)} is not one of their audio clips.`
+    )
+  }
+  const model = defaults.model ?? DEFAULT_PARAMS.model
+  const maxImages = maxReferenceImages(model)
+  if (cast.referenceImages.length > maxImages) {
+    throw new Error(`The cast has ${cast.referenceImages.length} images, but ${model} takes at most ${maxImages}.`)
+  }
+  const maxAudios = maxReferenceAudios(model)
+  if (cast.referenceAudios.length > maxAudios) {
+    throw new Error(`The cast has ${cast.referenceAudios.length} audio clips, but a clip takes at most ${maxAudios}.`)
+  }
+  const present = new Set(cast.referenceImages.flatMap((p) => photos.get(p)?.id ?? []))
+  const wearers = outfitWearersAmong(cast.outfitWearers, present)
+  const { outfitWearers: _, ...rest } = cast
+  return wearers ? { ...rest, outfitWearers: wearers } : rest
+}
+
 /**
  * Params just switched to another model, with the options that model offers (the list decides, when it could
  * be had): the same rule as the Generate form uses when the model changes, so a clip moved to another family
@@ -830,19 +924,44 @@ export class SequenceService {
     return id
   }
 
-  async update(id: string, patch: SequencePatch): Promise<Sequence> {
+  /**
+   * Renames the sequence, sets its defaults, its Export format, or its cast. A cast change (the whole new cast, or one
+   * asset swapped for another) changes every clip that follows the cast in the same transaction (shared/cast.ts
+   * followCastChange), and the clips that carry their references from those keep their tokens (keepInheritedTokens).
+   */
+  async update(id: string, patch: SequencePatch, caller: Caller = {}): Promise<Sequence> {
+    patch = patch ?? {}
     const row = store.requireSequenceRow(id)
-    const name = patch?.name !== undefined ? store.cleanSequenceName(patch.name, store.kindOf(row)) : row.name
-    const defaults = patch?.defaults
-      ? { ...store.parseDefaults(row.defaults), ...store.pickDefaults(patch.defaults) }
-      : store.parseDefaults(row.defaults)
+    const name = patch.name !== undefined ? store.cleanSequenceName(patch.name, store.kindOf(row)) : row.name
     // Checked before anything is written: a wrong height must not leave the name changed and the format not.
-    const height = patch?.exportHeight !== undefined ? store.cleanExportHeight(patch.exportHeight) : undefined
+    const height = patch.exportHeight !== undefined ? store.cleanExportHeight(patch.exportHeight) : undefined
+    const swap = cleanCastSwap(patch.castSwap)
+    if (patch.cast !== undefined && swap) throw new Error('Change the cast or swap one of its assets – not both at once.')
+    const castChange = patch.cast !== undefined || !!swap
+    if (castChange) {
+      if (store.kindOf(row) !== 'sequence') throw new Error(store.IS_STORYBOARD)
+      this.refuseWhileRunning(id, caller)
+    }
+    const library = castChange ? listAssets() : []
     this.sql().transaction(() => {
+      // Read in the transaction, so the clips are changed from exactly the cast they followed.
+      const current = store.requireSequenceRow(id)
+      const defaults = patch.defaults
+        ? { ...store.parseDefaults(current.defaults), ...store.pickDefaults(patch.defaults) }
+        : store.parseDefaults(current.defaults)
+      const before = store.parseCast(current.defaults)
+      let after = before
+      let swapped: CastSwap | undefined
+      if (patch.cast !== undefined) after = checkedCast(patch.cast, before, defaults, library)
+      else if (swap) {
+        swapped = castSwapOf(swap, before, library)
+        after = swapCastAsset(before, swapped, library).cast
+      }
       this.sql()
         .prepare('UPDATE sequences SET name = ?, defaults = ?, updated_at = ? WHERE id = ?')
-        .run(name, JSON.stringify(defaults), Date.now(), id)
+        .run(name, store.serializeDefaults(defaults, after), Date.now(), id)
       if (height !== undefined) store.setExportHeight(id, height)
+      if (castChange && !sameCast(before, after)) this.followCast(id, before, after, swapped, library)
     })()
     // The folder follows the name, now or once the takes on their way into it have landed.
     if (name !== row.name) await this.syncFolder(id, true)
@@ -1037,6 +1156,12 @@ export class SequenceService {
       copied = true
     }
     else params = store.sanitizeParams({ ...DEFAULT_PARAMS, ...store.parseDefaults(sequence.defaults) })
+    // A clip Studio makes empty starts with the sequence's cast as its references (shared/cast.ts) – not one made from a
+    // generation, nor one given its params (an agent's add_segment works the cast in itself). One that continues in
+    // reference mode leaves them out below and carries the references of the clip it continues from instead.
+    const cast = store.parseCast(sequence.defaults)
+    const castApplies = !source && !init.params && !castIsEmpty(cast)
+    if (castApplies) params = withCastReferences(params, cast)
 
     const chosen = params.model
     const hasNext = index < rows.length
@@ -1057,6 +1182,23 @@ export class SequenceService {
     }
 
     const continuing = !!previous && (init.continueFromPrevious ?? !source)
+    if (castApplies && !continuing && !ending) {
+      // A new shot with the cast. A negative prompt copied from the clip before was written against that clip's
+      // references: its tokens move onto the cast's pictures (or go), so none names another picture now.
+      if (copied && previous && params.negativePrompt) {
+        params.negativePrompt =
+          followTokensToCast(chainOf(rows), index - 1, params.negativePrompt, cast) || undefined
+      }
+      // Sent with references, by its family's reference-to-video model.
+      if (kindOfModelId(params.model) !== 'reference-to-video') {
+        params = {
+          ...params,
+          model: referenceToVideoVariant(params.model, models?.map((m) => m.id)) ?? DEFAULT_PARAMS.model,
+          startImage: undefined,
+          endImage: undefined
+        }
+      }
+    }
     if (continuing) {
       // The start frame comes from the previous clip at generation time; image inputs would be stale. That
       // includes an end image copied from the previous clip: it is where that clip was meant to end. In reference
@@ -1235,6 +1377,21 @@ export class SequenceService {
     if (ending && !row.end_from_next) params = asKeyframed(params, true, models)
     // A clip moved to another model gets the options that model offers (when the list was fetched for a switch).
     if (params.model !== chosen) params = fitToModel(params, models)
+    // A clip that stops continuing is a new shot: without references of its own it takes the sequence's cast, as a new
+    // clip does, its prompt's tokens following from what it carried (the frame's token goes).
+    if (
+      row.continue_from_previous &&
+      !continuing &&
+      !ending &&
+      kindOfModelId(params.model) === 'reference-to-video' &&
+      !ownReferences(params)
+    ) {
+      const cast = store.parseCast(store.requireSequenceRow(row.sequence_id).defaults)
+      if (!castIsEmpty(cast)) {
+        const was = chainOf(rows).map((c, i) => (i === index ? { ...c, params } : c))
+        params = castAppliedAt(was, index, cast, undefined, { continueFromPrevious: false, endFromNext: false })
+      }
+    }
     const notes = patch.notes !== undefined ? store.cleanNotes(patch.notes) : (row.notes ?? '')
 
     let selectedId = row.selected_generation_id
@@ -1287,6 +1444,47 @@ export class SequenceService {
     })()
 
     if (adoptId) await this.adopt(adoptId)
+    return this.changed(row.sequence_id)
+  }
+
+  /**
+   * "Use the cast": the clip's references become the sequence's cast, with its prompt's tokens following their
+   * pictures (shared/cast.ts castAppliedAt), so it follows the cast again. A clip in another mode gets its family's
+   * reference-to-video model (with the options that model offers); a clip that sends no references (an exact
+   * continuation, one with frames from its neighbours or keyframes of its own) is refused. A clip that follows the cast
+   * already, or carries it from the clip it continues from, is left as it is.
+   */
+  async applyCastToSegment(segmentId: string, caller: Caller = {}): Promise<Sequence> {
+    const models = await this.modelList()
+    const row = store.requireSegmentRow(segmentId)
+    this.refuseWhileRunning(row.sequence_id, caller)
+    const cast = store.parseCast(store.requireSequenceRow(row.sequence_id).defaults)
+    if (castIsEmpty(cast)) {
+      throw new Error('The sequence has no cast yet. Choose its characters, outfits and places under Cast first.')
+    }
+    const rows = store.listSegmentRows(row.sequence_id)
+    const index = rows.findIndex((r) => r.id === row.id)
+    const clips = chainOf(rows)
+    const follow = castFollowAt(clips, index, cast)
+    if (follow.state === 'follows' || follow.state === 'carries') return this.get(row.sequence_id)
+    if (follow.state === 'none') {
+      throw new Error(
+        `Clip ${index + 1} sends no references (it starts exactly on the previous clip's last frame, or has start or end images), so it can't use the cast. Switch it to references first.`
+      )
+    }
+    const params = clips[index].params
+    const model =
+      kindOfModelId(params.model) === 'reference-to-video'
+        ? undefined
+        : (referenceToVideoVariant(params.model, models?.map((m) => m.id)) ?? DEFAULT_PARAMS.model)
+    let next = castAppliedAt(clips, index, cast, model)
+    if (model && model !== params.model) next = fitToModel(next, models)
+    this.sql().transaction(() => {
+      this.sql()
+        .prepare('UPDATE segments SET params = ? WHERE id = ?')
+        .run(store.serializeParams(store.sanitizeParams(next)), row.id)
+      this.keepInheritedTokens(row.sequence_id, rows, row.id)
+    })()
     return this.changed(row.sequence_id)
   }
 
@@ -1494,7 +1692,7 @@ export class SequenceService {
    * window and agents alike. A clip whose references now come from
    * another clip (the chain itself changed) is left as it is; its tokens are checked before anything is sent.
    */
-  private keepInheritedTokens(sequenceId: string, beforeRows: readonly store.SegmentRow[], changedId: string): void {
+  private keepInheritedTokens(sequenceId: string, beforeRows: readonly store.SegmentRow[], changedId?: string): void {
     const afterRows = store.listSegmentRows(sequenceId)
     const before = chainOf(beforeRows)
     const after = chainOf(afterRows)
@@ -1517,6 +1715,39 @@ export class SequenceService {
       const negativePrompt = params.negativePrompt === undefined ? undefined : follow(params.negativePrompt)
       if (prompt === params.prompt && negativePrompt === params.negativePrompt) return
       update.run(store.serializeParams({ ...params, prompt, negativePrompt }), row.id)
+    })
+  }
+
+  /**
+   * The clips that follow the cast `before` changed to follow `after` (shared/cast.ts followCastChange: their references
+   * and "worn by" choices become the cast's, their prompts' tokens follow – a swap keeps every number); the clips that
+   * carry their references from one of them keep their tokens on the same pictures and frame (keepInheritedTokens), and
+   * take the cast's "worn by" choices when they had the old cast's. Only inside update's transaction.
+   */
+  private followCast(
+    sequenceId: string,
+    before: SequenceCast,
+    after: SequenceCast,
+    swap: CastSwap | undefined,
+    library: readonly Asset[]
+  ): void {
+    const rows = store.listSegmentRows(sequenceId)
+    const clips = chainOf(rows)
+    const update = this.sql().prepare('UPDATE segments SET params = ? WHERE id = ?')
+    followCastChange(clips, before, after, { swap, library }).forEach((params, i) => {
+      if (params) update.run(store.serializeParams(store.sanitizeParams(params)), rows[i].id)
+    })
+    this.keepInheritedTokens(sequenceId, rows)
+    if (wearersKey(before.outfitWearers) === wearersKey(after.outfitWearers)) return
+    rows.forEach((row, i) => {
+      if (castFollowAt(clips, i, before).state !== 'carries') return
+      const now = store.getSegmentRow(row.id)
+      if (!now) return
+      const params = store.parseParams(now.params)
+      if (wearersKey(params.outfitWearers) !== wearersKey(before.outfitWearers)) return
+      const next = { ...params, outfitWearers: after.outfitWearers }
+      if (!next.outfitWearers) delete next.outfitWearers
+      update.run(store.serializeParams(next), row.id)
     })
   }
 
@@ -1667,21 +1898,36 @@ export class SequenceService {
   /**
    * Queues a new take from the segment editor's button (or an approval, with its guard). `cancelled` (in-process
    * callers only, e.g. a storyboard's "Generate missing") lets the caller call it off until right before Venice is
-   * paid; the promise then rejects with isCancelledSubmit.
+   * paid; the promise then rejects with isCancelledSubmit. `variants`: what the button (or an approval) asked for –
+   * 1–4 takes of the same settings, checked against the budget together before any is sent; resolves with the first
+   * take. A run ("Generate missing") sends one take per clip and leaves it out.
    */
-  generateSegment(segmentId: string, guard?: SubmitGuard, cancelled?: () => boolean): Promise<Generation> {
+  generateSegment(
+    segmentId: string,
+    guard?: SubmitGuard,
+    cancelled?: () => boolean,
+    variants?: SendOptions
+  ): Promise<Generation> {
     // E.g. "generate all" is uploading this very clip; a second submit would pay for it twice.
     if (this.submitting.has(segmentId)) {
       return Promise.reject(
         new Error('A take for the clip is already being sent to Venice. Wait until it shows among the takes.')
       )
     }
-    return this.submit(segmentId, typeof cancelled === 'function' ? cancelled : undefined, guard)
+    return this.submit(segmentId, typeof cancelled === 'function' ? cancelled : undefined, guard, variants)
   }
 
-  /** Starts a submit and records it in `submitting` until Venice has answered (or it failed). */
-  private submit(segmentId: string, cancelled?: () => boolean, guard?: SubmitGuard): Promise<Generation> {
-    const pending = this.submitTake(segmentId, cancelled, guard)
+  /**
+   * Starts a submit and records it in `submitting` until Venice has answered (or it failed) – for every variant: the
+   * clip counts as being sent until the last of them is.
+   */
+  private submit(
+    segmentId: string,
+    cancelled?: () => boolean,
+    guard?: SubmitGuard,
+    variants?: SendOptions
+  ): Promise<Generation> {
+    const pending = this.submitTake(segmentId, cancelled, guard, variants)
     this.submitting.set(segmentId, pending)
     this.submitStarted.set(segmentId, Date.now())
     this.workChanged()
@@ -1705,9 +1951,15 @@ export class SequenceService {
   /**
    * Queues a new take. `cancelled` lets a "generate all" run bail out before money is spent
    * when the user pressed stop while the frame was being extracted or the price quoted. `guard`: see
-   * SubmitGuard.
+   * SubmitGuard. `variants`: see generateSegment; every variant is built from the same reads (one guard check, one
+   * set of frames, one composed prompt), so they all send exactly the same.
    */
-  private async submitTake(segmentId: string, cancelled?: () => boolean, guard?: SubmitGuard): Promise<Generation> {
+  private async submitTake(
+    segmentId: string,
+    cancelled?: () => boolean,
+    guard?: SubmitGuard,
+    variants?: SendOptions
+  ): Promise<Generation> {
     // The prompt is composed with the reads below, within its model's limit: known before anything is read.
     await this.learnPromptLimits(segmentId)
     // A take that is being moved is briefly missing from its recorded path; don't mistake that for a gap.
@@ -1749,19 +2001,31 @@ export class SequenceService {
 
     const quote = await this.deps.venice.quote(p).catch(() => undefined)
     if (cancelled?.()) throw new RunStopped()
-    // Consent errors (NEEDS_CONSENT…) propagate unchanged so the renderer can ask and retry.
-    const generation = await this.deps.jobs.submit(p, {
-      quote,
-      segmentId: row.id,
-      sentPrompt,
-      ...(frameToken ? { continuationFrame: frameToken } : {})
-    })
-    this.useImportedCopies(row.id, p, generation.params)
-    if (store.getSequenceRow(row.sequence_id)) {
-      store.touchSequence(row.sequence_id)
-      this.deps.notify(row.sequence_id)
-    }
-    return generation
+    const count = variants?.count ?? 1
+    // Every variant together, before any of them is sent.
+    if (variants) assertWithinBudget(variantsPrice(quote, count), { confirmed: variants.confirmOverBudget })
+    // Consent errors (NEEDS_CONSENT…) propagate unchanged so the renderer can ask and retry: the first variant goes
+    // alone, so nothing has been sent then.
+    const takes = await sendVariants(
+      count,
+      async (i) => {
+        const generation = await this.deps.jobs.submit(p, {
+          quote,
+          segmentId: row.id,
+          sentPrompt,
+          ...(frameToken ? { continuationFrame: frameToken } : {})
+        })
+        if (i === 0) this.useImportedCopies(row.id, p, generation.params)
+        // The clip's views show each take as it is sent.
+        if (store.getSequenceRow(row.sequence_id)) {
+          store.touchSequence(row.sequence_id)
+          this.deps.notify(row.sequence_id)
+        }
+        return generation
+      },
+      variants?.onSent
+    )
+    return takes[0]
   }
 
   /**
@@ -2287,6 +2551,11 @@ export class SequenceService {
    * Venice, with what its take would be sent with and, when it can't be sent as it stands, why not. A run
    * doesn't start while any of them has a problem.
    */
+  /** Venice's price for one take with these params (free): what a run's budget check adds up. */
+  quoteTake(params: GenerationParams): Promise<number> {
+    return this.deps.venice.quote(params)
+  }
+
   missingClips(sequenceId: string): MissingClip[] {
     const rows = store.listSegmentRows(store.requireSequenceRow(sequenceId).id)
     const { order, stuck } = generationOrder(rows)
@@ -2712,7 +2981,9 @@ export function registerSequenceIpc(deps: Deps): SequenceService {
   ipcMain.handle('sequences:get', (_e, id: string) => s.get(sequence(id)))
   ipcMain.handle('sequences:create', (_e, name: string) => s.create(name))
   // Agents set the Exportformat too (update_sequence), as they export films (export_film).
-  ipcMain.handle('sequences:update', (_e, id: string, patch: SequencePatch) => s.update(sequence(id), patch ?? {}))
+  ipcMain.handle('sequences:update', (e, id: string, patch: SequencePatch) =>
+    s.update(sequence(id), patch ?? {}, { byAgent: isAgentCall(e) })
+  )
   ipcMain.handle('sequences:delete', (_e, id: string) => {
     // A storyboard deleted here would leave its runner and boards behind; nothing at all is refused silently.
     if (store.getSequenceRow(id)) sequence(id)
@@ -2724,6 +2995,9 @@ export function registerSequenceIpc(deps: Deps): SequenceService {
   )
   ipcMain.handle('segments:update', (e, segmentId: string, patch: SegmentPatch) =>
     s.updateSegment(clip(segmentId), patch, { byAgent: isAgentCall(e) })
+  )
+  ipcMain.handle('segments:useCast', (e, segmentId: string) =>
+    s.applyCastToSegment(clip(segmentId), { byAgent: isAgentCall(e) })
   )
   ipcMain.handle('segments:delete', (e, segmentId: string, opts?: { onlyIfUntouched?: unknown }) =>
     s.deleteSegment(
@@ -2747,14 +3021,23 @@ export function registerSequenceIpc(deps: Deps): SequenceService {
   ipcMain.handle('segments:bridge', (e, segmentId: string) =>
     s.bridgeSegment(clip(segmentId), { byAgent: isAgentCall(e) })
   )
-  // The guard argument only ever comes from an approval in this process (see SubmitGuard).
-  ipcMain.handle('segments:generate', (_e, segmentId: string, guard?: unknown) =>
-    s.generateSegment(segmentId, asGuard(guard))
+  // `opts`: GenerateOptions (the variants, the over-budget confirmation). The guard argument only ever comes from an
+  // approval in this process (see SubmitGuard).
+  ipcMain.handle('segments:generate', (_e, segmentId: string, opts?: unknown, guard?: unknown) =>
+    s.generateSegment(segmentId, asGuard(guard), undefined, sendOptionsOf(opts))
   )
 
-  ipcMain.handle('sequences:generateAll', (_e, sequenceId: string, guard?: unknown) =>
-    s.startGenerateAll(sequence(sequenceId), asGuard(guard))
-  )
+  // `opts`: {confirmOverBudget} from the window, after the guard an approval in this process passes. The run is checked
+  // against the budget once, with the price of every clip it would pay for, before it starts; what it then sends
+  // isn't asked about again (runConfirmed). A run that can't start as the clips stand is left to say so itself.
+  ipcMain.handle('sequences:generateAll', async (_e, sequenceId: string, guard?: unknown, opts?: unknown) => {
+    const id = sequence(sequenceId)
+    const missing = s.missingClips(id)
+    if (missing.length && !missing.some((c) => c.problem)) {
+      await assertRunWithinBudget(() => quoteTotal(missing.map((c) => c.params), (p) => s.quoteTake(p)), confirmedOf(opts))
+    }
+    runConfirmed(() => s.startGenerateAll(id, asGuard(guard)))
+  })
   // Read-only; the agent connection asks it what a "generate all" approval would pay for.
   ipcMain.handle('sequences:missingClips', (_e, sequenceId: string) => s.missingClips(sequenceId))
   ipcMain.handle('sequences:stopGenerateAll', (_e, sequenceId: string) => s.stopGenerateAll(sequenceId))

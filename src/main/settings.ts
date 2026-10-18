@@ -2,7 +2,8 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { app, safeStorage } from 'electron'
-import type { PromptLanguage, Settings } from '@shared/types'
+import { normalizeBudget } from '@shared/budget'
+import type { BudgetSettings, PromptLanguage, Settings } from '@shared/types'
 import { isLibraryReady, libraryRoot } from './paths'
 
 /** Where the agent connection (MCP server) listens unless the user picks another port. */
@@ -32,6 +33,8 @@ interface StoredSettings {
    * default; only an explicit `false` turns it off.
    */
   imageSafeMode?: boolean
+  /** Spending caps in USD (Settings → Spending); a cap left out means none. */
+  budget?: BudgetSettings
   agent?: StoredAgentSettings
 }
 
@@ -136,8 +139,33 @@ export function getSettings(): Settings {
     libraryDir: isLibraryReady() ? libraryRoot() : '',
     devProfile: isDevProfile(),
     promptLanguage: promptLanguageOf(s),
-    imageSafeMode: s.imageSafeMode !== false
+    imageSafeMode: s.imageSafeMode !== false,
+    budget: budgetOf(s)
   }
+}
+
+/** The stored caps that are usable (a file edited by hand may hold anything). */
+function budgetOf(s: StoredSettings): BudgetSettings {
+  try {
+    return normalizeBudget(s.budget)
+  } catch {
+    return {}
+  }
+}
+
+/** The spending caps of this profile (Settings → Spending); {} when none is set. */
+export function getBudget(): BudgetSettings {
+  return budgetOf(load())
+}
+
+/** Replaces both caps: a cap left out (or null) is removed. Throws for an amount that isn't one. */
+export function setBudget(raw: unknown): BudgetSettings {
+  const budget = normalizeBudget(raw)
+  const s = load()
+  if (budget.dailyUsd === undefined && budget.monthlyUsd === undefined) delete s.budget
+  else s.budget = budget
+  save(s)
+  return budget
 }
 
 function promptLanguageOf(s: StoredSettings): PromptLanguage {

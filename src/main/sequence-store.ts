@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readdir, rm, rmdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
+import { castReferences, sameCastReferences, sanitizeCast } from '@shared/cast'
 import { continueModeOf, isContinueMode, type ChainClip } from '@shared/continuation'
 import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios } from '@shared/models'
 import { sanitizeOutfitWearers } from '@shared/outfits'
@@ -16,6 +17,7 @@ import type {
   GenerationParams,
   Segment,
   Sequence,
+  SequenceCast,
   SequenceKind,
   SequenceSummary
 } from '@shared/types'
@@ -168,18 +170,22 @@ export function takeIdsForSegments(segmentIds: string[]): string[] {
 
 /**
  * A clip nothing has been put in yet (the empty Klipp 1 of a new sequence), as isUntouchedClip in the renderer: no takes
- * (of any status) or selected take, no prompt, pictures or sounds, no frame links and no notes.
+ * (of any status) or selected take, no prompt, pictures or sounds, no frame links and no notes. Pictures and sounds that
+ * are exactly the sequence's cast count as nothing: Studio put them there, not the user.
  */
 export function isUntouchedSegment(row: SegmentRow): boolean {
   const p = parseParams(row.params)
+  const sequence = getSequenceRow(row.sequence_id)
+  const onlyCast =
+    !!sequence &&
+    sameCastReferences({ images: p.referenceImages ?? [], audios: p.referenceAudios ?? [] }, parseCast(sequence.defaults))
   return (
     !row.selected_generation_id &&
     !takeIdsForSegments([row.id]).length &&
     !p.prompt?.trim() &&
     !p.startImage &&
     !p.endImage &&
-    !p.referenceImages?.length &&
-    !p.referenceAudios?.length &&
+    (onlyCast || (!p.referenceImages?.length && !p.referenceAudios?.length)) &&
     !row.continue_from_previous &&
     !row.end_from_next &&
     !(row.notes ?? '').trim()
@@ -300,6 +306,42 @@ export function parseDefaults(json: string): Partial<GenerationParams> {
   } catch {
     return {}
   }
+}
+
+/**
+ * The sequence's cast (shared/cast.ts), stored as the references of its defaults: referenceImages, referenceAudios and
+ * outfitWearers in the defaults JSON, paths in stored form (relative inside the library, so moves and "Tidy up" rewrite
+ * them with every other params path: db.mapStoredPaths), turned back into absolute paths here.
+ */
+export function parseCast(json: string): SequenceCast {
+  try {
+    const stored = JSON.parse(json) as Partial<GenerationParams> | null
+    if (!stored || typeof stored !== 'object') return sanitizeCast(undefined)
+    return sanitizeCast(
+      fromStoredParams({
+        model: '',
+        prompt: '',
+        duration: '',
+        referenceImages: stored.referenceImages,
+        referenceAudios: stored.referenceAudios,
+        outfitWearers: stored.outfitWearers
+      })
+    )
+  } catch {
+    return sanitizeCast(undefined)
+  }
+}
+
+/** The defaults JSON as stored: the output settings (pickDefaults) and the cast's references (see parseCast). */
+export function serializeDefaults(defaults: Partial<GenerationParams>, cast: SequenceCast): string {
+  const clean = sanitizeCast(cast)
+  const refs = toStoredParams({ model: '', prompt: '', duration: '', ...castReferences(clean) })
+  return JSON.stringify({
+    ...pickDefaults(defaults),
+    ...(refs.referenceImages?.length ? { referenceImages: refs.referenceImages } : {}),
+    ...(refs.referenceAudios?.length ? { referenceAudios: refs.referenceAudios } : {}),
+    ...(refs.outfitWearers ? { outfitWearers: refs.outfitWearers } : {})
+  })
 }
 
 export function cleanSequenceName(name: unknown, kind: SequenceKind = 'sequence'): string {
@@ -541,6 +583,7 @@ export function loadSequence(id: string, run: RunInfo): Sequence {
     id: row.id,
     name: row.name,
     defaults: parseDefaults(row.defaults),
+    cast: parseCast(row.defaults),
     segments,
     exportHeight: exportHeightOf(row),
     running: run.running,

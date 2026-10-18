@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Asset, EditJob, EditPlan, PromptLanguage, VoiceDesignRequest } from '@shared/types'
+import { withBudgetConfirm } from '../../lib/budget'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatPrice, needsConfirm, priceCheck } from '../editor/editorUtils'
 import { PLAN_DEBOUNCE_MS } from '../editor/useEditOps'
@@ -87,7 +88,14 @@ export default function VoiceDesignDialog({ asset, onClose, onStarted }: Props) 
     setError(undefined)
     try {
       // An unknown price was confirmed as unknown; main only compares a known one.
-      const job = await window.studio.designVoice(request, plan.priceUsd ?? 0)
+      // Past the budget the user is asked first; no leaves the dialog open with nothing sent.
+      const job = await withBudgetConfirm((confirmed) =>
+        window.studio.designVoice(request, plan.priceUsd ?? 0, confirmed ? { confirmOverBudget: true } : undefined)
+      )
+      if (!job) {
+        setSending(false)
+        return
+      }
       onStarted(job)
       onClose()
     } catch (e) {

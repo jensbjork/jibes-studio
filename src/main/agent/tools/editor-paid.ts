@@ -18,6 +18,7 @@ import { AssetIndex, audioOf, localTime, q, requireLibrary } from '../studio'
 import { operationInput, operationOutput, operationSummary, segmentIdsOf, type VoiceNames } from './edit-input'
 import { baseVersion, editOperation, jobInfo, loadEdit, planInfo, planOperation, versionInfo, versionName, within } from './editor'
 import { defineTool, priceValue, usd, type ToolContext, type ToolOutput } from './kit'
+import { overBudgetAnswer } from './spending'
 
 // The two paid requests of the Editor: a paid operation on a version (request_edit_operation) and a new voice for a
 // character (request_voice_design). Like every paid tool they only create an approval request; the user's OK in
@@ -83,7 +84,9 @@ function pendingAnswer(request: ApprovalRequest, reused: boolean): Record<string
     ...(reused ? { reused: true } : {}),
     message: reused
       ? 'An identical request is already waiting for the user; this is that one.'
-      : 'Waiting for the user to approve it in Studio. Tell them briefly what is waiting, then poll get_approval every 15–30 seconds.'
+      : 'Waiting for the user to approve it in Studio. Tell them briefly what is waiting, then poll get_approval every 15–30 seconds.',
+    // Past the user's budget: still only a request, but the agent should say so.
+    ...(request.status === 'pending' ? overBudgetAnswer(request.priceUsd) : {})
   }
 }
 

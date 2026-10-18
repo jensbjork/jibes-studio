@@ -20,6 +20,7 @@ import {
   type Still,
   type StillParams
 } from '@shared/types'
+import { assertWithinBudget, confirmedOf } from './budget'
 import * as db from './db'
 import { extractFrame } from './ffmpeg'
 import {
@@ -58,6 +59,7 @@ import {
   uniqueName
 } from './paths'
 import { fileErrorReason, importExternalReferences, placeFile } from './references'
+import { noteRequestedBy } from './requested-by'
 import { parseDefaults, removeDirIfEmpty, type StillRow } from './sequence-store'
 import { assertAgentFiles } from './upload-paths'
 
@@ -323,6 +325,8 @@ function insertStill(s: NewStill): Still {
       s.cost ?? null,
       s.createdAt
     )
+  // A picture an agent's approved request made: Spending names the agent (see requested-by.ts).
+  if (s.source === 'generated') noteRequestedBy(id)
   return getStill(id)
 }
 
@@ -774,13 +778,15 @@ export async function quoteStill(input: unknown): Promise<number | undefined> {
  * storyboard's in Storyboards/<storyboard>/Bilder/), or Referensbilder/<day>/ without one. Reference pictures from
  * outside the library are copied into Referensbilder first, so "Create again" keeps working when the originals go.
  */
-export async function generateStill(input: unknown): Promise<Still> {
+export async function generateStill(input: unknown, opts?: unknown): Promise<Still> {
   // readStillParams keeps the fields a still is made with only; the dialog's key and the picture's place are read here.
   const { workToken, target } = workFields(input)
   return stillTask(async () => {
     // Renames from here on (a sequence folder renamed while Venice works) are followed when the still is recorded.
     const mark = db.rewriteMark()
     const { plan: checked, model } = await plan(input)
+    // Refused with OVER_BUDGET before anything is sent when the picture would take the spending past the budget.
+    assertWithinBudget(checked.priceUsd, { confirmed: confirmedOf(opts) })
     const params = checked.params
     // From here on the picture shows in Activity (the dialog may be closed while it is made).
     const work: StillWork = {
@@ -1126,7 +1132,8 @@ export function registerStillsIpc(
   notifyFilesMoved = filesMoved
   ipcMain.handle('images:models', (_e, force?: unknown) => listImageModels(force === true))
   ipcMain.handle('images:quote', (_e, params: unknown) => quoteStill(params))
-  ipcMain.handle('images:generate', (_e, params: unknown) => generateStill(params))
+  // `opts`: {confirmOverBudget} once the user said yes to going over the budget.
+  ipcMain.handle('images:generate', (_e, params: unknown, opts?: unknown) => generateStill(params, opts))
   ipcMain.handle('stills:list', (_e, sequenceId?: unknown) => listStills(sequenceId))
   ipcMain.handle('stills:get', (_e, id: unknown) => getStill(id))
   ipcMain.handle('stills:delete', (_e, id: unknown) => deleteStill(id))

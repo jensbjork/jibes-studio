@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { workKey, type Edit, type EditJob, type EditProgress, type EditVersion } from '@shared/types'
+import { withBudgetConfirm } from '../../lib/budget'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { markSeen, useIsUnseen, useSeenWhenVisible } from '../../lib/work'
 import Popover from '../pickers/Popover'
@@ -254,10 +255,14 @@ function JobRow({
       // What main compares with is the priced part the button showed (an unknown price was confirmed as unknown), and
       // whether a part was left out of it. Should Venice's price have risen, or a part without a price have come in
       // since (a clone handle that ran out), main refuses and the button shows the new price after the refetch.
-      await window.studio.resumeEditJob(
-        job.id,
-        job.resumePriceUsd ?? 0,
-        job.resumePriceUsd === undefined || !!job.resumePartialPrice
+      // Past the budget the user is asked first; no means nothing is sent again.
+      await withBudgetConfirm((confirmed) =>
+        window.studio.resumeEditJob(
+          job.id,
+          job.resumePriceUsd ?? 0,
+          job.resumePriceUsd === undefined || !!job.resumePartialPrice,
+          confirmed ? { confirmOverBudget: true } : undefined
+        )
       )
       onChanged()
     } catch (e) {

@@ -9,7 +9,9 @@ import type {
   Still,
   Storyboard
 } from '@shared/types'
+import { variantsPrice, variantsText } from '@shared/variants'
 import { ASSET_VIEW } from '../../lib/assets'
+import { withBudgetConfirm } from '../../lib/budget'
 import { ipcErrorMessage, useAssets, useModels } from '../../lib/hooks'
 import { LAST_STORYBOARD_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
@@ -154,8 +156,15 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   const [submitting, setSubmitting] = useState<Record<string, boolean>>({})
   const [errors, setErrors] = useState<Record<string, string | undefined>>({})
   const [busyBoards, setBusyBoards] = useState<Record<string, boolean>>({})
-  // Venice's terms for a model, with the transition as it was when it asked: accepting generates only that one.
-  const [consent, setConsent] = useState<{ request: ConsentRequest; transitionId: string; key: string }>()
+  // Venice's terms for a model, with the transition as it was when it asked: accepting generates only that one – as
+  // many variants as were asked for, and over the budget if that was confirmed already.
+  const [consent, setConsent] = useState<{
+    request: ConsentRequest
+    transitionId: string
+    key: string
+    count: number
+    overBudgetOk: boolean
+  }>()
   const [createImageFor, setCreateImageFor] = useState<string>()
   const [framePickerFor, setFramePickerFor] = useState<string>()
   // One of the storyboard's pictures full size, opened from a board's menu: it can be put in that board or deleted.
@@ -427,23 +436,29 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   // ── Transitions ────────────────────────────────────────────────────────────
 
   // A paid call: guarded by a ref too, since two quick clicks (or ⌘+Enter) can both run before the disabled
-  // button has rendered.
+  // button has rendered. `count`: the variants the editor asked for (the card's own Generate sends one).
   const inFlight = useRef(new Set<string>())
-  const generate = async (transitionId: string) => {
+  const generate = async (transitionId: string, count = 1, overBudgetOk = false) => {
     if (inFlight.current.has(transitionId)) return
     inFlight.current.add(transitionId)
     setSubmitting((m) => ({ ...m, [transitionId]: true }))
     setErrors((m) => ({ ...m, [transitionId]: undefined }))
+    let confirmed = overBudgetOk
     try {
       // main generates from the stored transition, so what is typed in the editor must be saved first.
       if (!(await flushAll())) throw new Error(UNSAVED)
-      store.addTake(await window.studio.generateTransition(transitionId))
+      const take = await withBudgetConfirm((yes) => {
+        confirmed ||= yes
+        return window.studio.generateTransition(transitionId, { count, confirmOverBudget: confirmed })
+      })
+      // Undefined: over the budget, and the user said no – nothing was sent.
+      if (take) store.addTake(take)
     } catch (e) {
       const message = ipcErrorMessage(e)
       const request = parseConsent(message)
       const t = latest.current?.transitions.find((x) => x.id === transitionId)
       if (request && t) {
-        setConsent({ request, transitionId, key: transitionKey(t) })
+        setConsent({ request, transitionId, key: transitionKey(t), count, overBudgetOk: confirmed })
       } else {
         setErrors((m) => ({ ...m, [transitionId]: message }))
         // The editor is where a transition's errors are shown.
@@ -457,7 +472,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
 
   const acceptConsent = async () => {
     if (!consent) return
-    const { request, transitionId, key } = consent
+    const { request, transitionId, key, count, overBudgetOk } = consent
     setConsent(undefined)
     try {
       await window.studio.acceptConsent(request.flow, request.version)
@@ -477,7 +492,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
       setEditorId(transitionId)
       return
     }
-    await generate(transitionId)
+    await generate(transitionId, count, overBudgetOk)
   }
   const consentTransition = consent ? storyboard?.transitions.find((t) => t.id === consent.transitionId) : undefined
   const consentQuote = useClipQuote(consentTransition?.params)
@@ -561,7 +576,10 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     if (runFailure) markSeen([runFailure.key])
     store.update((s) => ({ ...s, running: true, runError: undefined }))
     try {
-      await window.studio.generateStoryboard(storyboardId)
+      // Checked against the budget once, with the run's total: past it the user is asked first (no starts nothing).
+      await withBudgetConfirm((confirmed) =>
+        window.studio.generateStoryboard(storyboardId, confirmed ? { confirmOverBudget: true } : undefined)
+      )
     } catch (e) {
       setNotice({ text: ipcErrorMessage(e), storyboardId })
     }
@@ -858,7 +876,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
                     submitting={!!submitting[editorTransition.id]}
                     error={errors[editorTransition.id]}
                     onDismissError={() => setErrors((m) => ({ ...m, [editorTransition.id]: undefined }))}
-                    onGenerate={() => void generate(editorTransition.id)}
+                    onGenerate={(count) => void generate(editorTransition.id, count)}
                     onCommitTake={commitTake}
                     onDeleteTake={(take) => void deleteTake(editorTransition.id, take)}
                     onEditTake={(take) => navigate('editor', { type: 'open-editor', generationId: take.id })}
@@ -952,7 +970,11 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
           request={consent.request}
           cost={`${
             consentTransition ? transitionLabel(storyboard, consentTransition).toLowerCase() : 'the transition'
-          } · ${formatUsd(consentQuote)}`}
+          } · ${
+            consent.count > 1
+              ? `${variantsText(consent.count)} · ${formatUsd(variantsPrice(consentQuote, consent.count))}`
+              : formatUsd(consentQuote)
+          }`}
           onAccept={() => void acceptConsent()}
           onCancel={() => setConsent(undefined)}
         />

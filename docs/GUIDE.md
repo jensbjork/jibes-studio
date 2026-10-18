@@ -27,8 +27,11 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 - **Generate** with Venice's video models in three modes: text-to-video, image-to-video (start and optional end
   image) and reference-to-video (up to 9 reference photos for Seedance, plus up to 3 voice or sound clips with the
   models that take reference audio). Price quote before you generate, *Use again* to reload a
-  generation's settings. The list beside the form shows what you made there this session; everything older is in
-  Media.
+  generation's settings. **Variants:** *×1 ×2 ×3 ×4* beside *Generate* (and beside a sequence clip's *Generate take*
+  and a storyboard transition's *Generate*) sends that many takes of the same settings at once — each its own
+  generation, with its own seed, at the full price; the button shows the total (*Generate ×3 · $3.09*), ⌘ + Enter sends
+  as many, and each place remembers its choice. The list beside the form shows what you made there this session;
+  everything older is in Media.
 - **Media:** everything you've made in one place, in three tabs — *Videos*, *Images* and *Films* (see
   [Media](#media)). *Videos* is a live clip feed built for many clips: queued, rendering and finished videos
   as big cards or a compact table (*Cards* / *Table*, with keyboard navigation), search in the prompts, filters
@@ -111,6 +114,11 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   lists everything that runs — with its progress and an estimate —, what is ready to watch and what failed, with
   *Mark all as seen* (and *Undo*). A video counts as seen once it has played for a second or you chose it; the
   Dock icon shows the number of new results.
+- **Spending and a budget:** *Settings → Spending* shows what Studio has paid Venice for today, this month and per
+  day over the last 30 days, and this month by kind (videos, images, Editor jobs, voices, transcripts), by place
+  (Generate, each sequence, storyboard and edit) and by who asked (you, or the agent whose request you approved).
+  An optional daily and monthly budget: anything paid that would take the spending past one asks first (*Send
+  anyway* / *Cancel*), and an agent's request shows the same warning in its approval dialog.
 - **The same list on the left** in Characters, Environments, Products, Outfits, Poses, Sequences, Storyboards and
   the Editor: *＋ New …* at the top, a search field (⌘F) that looks in the names — and in the descriptions of the
   library kinds and where a film came from in the Editor —, ↑ / ↓ to move between the rows and Enter to open one. **✕ on a row**
@@ -121,6 +129,12 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   (Media, the five kinds and Prompts), one icon set, two slim status rows at the bottom — *Activity* and the agent
   connection — above *Settings*, and a 72 px icon rail (⌃⌘S, or the button by the wordmark) that gives the
   views more room.
+- **⌘K — search everywhere:** from any view, also while typing in a field (or with the search button by the
+  wordmark), one field finds the views and Settings' sections, actions such as *New sequence* or *New character*, and
+  the library: assets by name and description, saved prompts (Enter puts one in Generate's form), sequences and their
+  clips' notes, storyboards' boards and transitions, edits, clips (newest first), images by prompt and exported films.
+  Case and accents don't matter and each word matches the start of a word; ↑ / ↓ and Enter (or a click) open the
+  result where Studio always shows it, Esc closes. It is for you only: agents search with their own list tools.
 - **Your own folder:** a base folder you choose, with human-readable folder and file names (the folder names are
   Swedish). Paths in the
   database are stored relative to it, so the library can be moved, switched or tidied up from Settings.
@@ -196,8 +210,8 @@ which is enough to run it on the Mac that built it. Studio.app uses the real pro
 ## Where things are stored
 
 **Settings** live in `~/Library/Application Support/Studio/settings.json`: the base folder, the prompt language,
-*Safe mode for images* (Venice blurs adult content in pictures it makes; on by default), accepted
-Venice consents and the agent connection's port. The Venice API key and the agent token are stored
+*Safe mode for images* (Venice blurs adult content in pictures it makes; on by default), the spending budget,
+accepted Venice consents and the agent connection's port. The Venice API key and the agent token are stored
 encrypted with Electron `safeStorage` (macOS Keychain).
 
 **The library** lives in a base folder you choose on first launch (suggested: `~/Movies/Studio`). It can be switched
@@ -242,6 +256,7 @@ every file the library knows about back where it belongs.
 │   └── Underlag/                           the frames and short proxies that were sent to Venice
 └── .studio/                                Hidden app data:
     ├── studio.db                           the SQLite database
+    ├── requested-by.json                   which agent asked for each paid item you approved (Spending)
     ├── miniatyrer/                         poster frames (thumbnails)
     ├── bildrutor/                          extracted frames used to continue clips or end on the next one
     ├── stammar/                            separated voice and background stems (a cache, at most 4 GB)
@@ -416,13 +431,29 @@ selected take, each after the clips whose frames it needs, waiting for each one;
 frames it says which switch to turn off before anything is paid for. **Export** renders the selected, trimmed
 takes into one H.264/AAC mp4 in the sequence's folder, showing a picture two clips share at a cut only once.
 
+**The cast.** *Cast* in the sequence's header holds the characters, outfits (and who wears them), environments,
+products and poses of the whole sequence, chosen once instead of per clip: *+ Add* adds an asset at the end (a character
+with its default outfit and voice, as the pickers do), and each row has its `@Image` / `@Audio` numbers, *Voice*, ↑ / ↓,
+*Swap* (another asset takes its places, as clicking a reference does) and ✕; an outfit says who wears it. New clips
+start with the cast as their references — a clip that continues in reference mode needs none of its own: it carries
+those of the clip it continues from. A clip **follows** the cast while its references are exactly the cast's (the same
+pictures and sounds in the same order); the clip editor says *Follows the cast* (or *Carries the cast from clip 1*), and
+the panel lists which clips follow. Change the cast and every clip that follows it changes in the same step, its prompt
+kept on the same pictures: an asset added goes last, so no number changes; a removed one takes its tokens out of the
+prompts and the later numbers move down; a reorder renumbers; a swap keeps every number, and the name written in front
+of its tokens follows ("Anna (@Image1)" → "Bo (@Image1)"). Change a clip's references by hand and it stops following
+(*Own references*); *Use the cast* there gives it the cast again, its tokens following their pictures. The cast is kept
+in the sequence's defaults (no schema change) and moves with the library like a clip's pictures.
+
 **Takes.** Every take of a clip is a thumbnail in the strip under the player, newest first (so one being made comes
 first), each keeping its place when it finishes. Click one and it becomes the clip's take and plays from its kept start,
 with sound; click it again to start over. ← / → (and Home / End) choose takes at once without playing them, ⌥-click or
 the take's preview button plays one without choosing it (then choose it, or go back to the chosen one), hovering
 scrubs a silent preview, and the menu (right-click or ⋯) uses the take's prompt, opens the take in the Editor,
 shows it in Finder (*Show in Finder*) or deletes it. Each take keeps its own trims: trim A, choose B, choose A again, and A's trims are back. A new take
-is chosen by itself only when the clip has no usable one; otherwise it waits in the strip, marked *New*.
+is chosen by itself only when the clip has no usable one; otherwise it waits in the strip, marked *New*. *×2*–*×4*
+beside *Generate take* makes that many takes at once (variants of the same settings, the total on the button): all
+of them land in the strip, and the first to finish is chosen only if the clip had no usable take.
 
 **Start and end images.** A clip can also start or end on a picture of its own (a file or a library photo in the
 clip editor; agents can also put in pictures made with Venice's image models or frames of takes). A clip with a
@@ -457,7 +488,8 @@ and it lives in its own view, **Storyboards** — storyboards never show up in S
   moves and how the camera travels from one picture to the other; a suggestion button fills in a plain template from
   the two boards' notes — and its length (5 s by default), resolution (480p), sound and model (only image-to-video models that
   take an end image; Seedance by default). **Generate** shows the price first; every take is kept, and you choose the
-  one that is used. Moving, inserting or removing a board removes the transitions between boards that are no longer
+  one that is used. *×2*–*×4* beside it sends that many takes at once (the total on the button); the card's own
+  *Generate* on the board row sends one. Moving, inserting or removing a board removes the transitions between boards that are no longer
   neighbours — their prompts go, their takes become ordinary clips in Media, nothing is deleted — and new
   neighbours get a new, empty transition; Studio asks first when a move or a new board would remove a transition with
   a prompt or takes. A take made before one of its boards got another picture is marked as made from an earlier picture; a new take
@@ -496,8 +528,9 @@ clips and exported films frame by frame next to the references they were made fr
 *learnings* that every later session reads before it writes a prompt. Agents **cannot generate or remove anything on
 their own** — the paid tools (videos, pictures, paid edits and designed voices) and `request_delete` only create a
 request that Studio shows you (with the prompt, references, voices and price, or with what would be removed and what
-depends on it), and nothing is sent to Venice or removed until you approve it. Settings, the library folder,
-consents and your own ratings and learnings stay yours.
+depends on it), and nothing is sent to Venice or removed until you approve it. A request that would take your
+spending past the budget says so in its dialog; approving it is your yes. Settings (the budget too), the library
+folder, consents and your own ratings and learnings stay yours.
 
 To check a request before you approve it, hover an `@ImageN` or `@AudioN` token in its prompt or in the appended
 References legend (or Tab to it): a card shows the picture large enough to recognise — the asset, *photo 2 of 3*, and
@@ -508,7 +541,7 @@ an edit's frames show a larger picture the same way when hovered or tabbed to. N
 can be looked at there, not changed — and Esc closes a card before it closes the dialog.
 
 Turn it on under **Settings → Agent connection**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 90
+Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 91
 tools, sending files, the review loop and troubleshooting.
 
 ## Security

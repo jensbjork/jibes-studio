@@ -3,6 +3,7 @@ import type { LibraryStatus, Settings } from '@shared/types'
 import AgentDrawer from './components/agent/AgentDrawer'
 import AgentPresence from './components/agent/AgentPresence'
 import ApprovalDialog from './components/agent/ApprovalDialog'
+import BudgetDialog from './components/BudgetDialog'
 import AssetsView from './components/assets/AssetsView'
 import EditorView from './components/editor/EditorView'
 import GenerateView from './components/GenerateView'
@@ -10,6 +11,7 @@ import LibrarySetup from './components/library/LibrarySetup'
 import MediaView from './components/media/MediaView'
 import SwitchingOverlay from './components/library/SwitchingOverlay'
 import PromptsView from './components/prompts/PromptsView'
+import CommandPalette from './components/search/CommandPalette'
 import SequencesView from './components/sequences/SequencesView'
 import SettingsView from './components/SettingsView'
 import Sidebar, { SIDEBAR_WIDTH } from './components/Sidebar'
@@ -214,6 +216,18 @@ function Workspace() {
       <AgentPresence hidden={panel !== undefined} onOpen={() => setPanel('agent')} />
       <SeenToast agentPillHidden={panel !== undefined} besideWorkPanel={panel === 'work'} />
       <ApprovalDialog />
+      {/* Over the budget: asked above everything, also above the approval dialog. */}
+      <BudgetDialog />
+      {/* ⌘K (or the sidebar's search button): search everything and go there. */}
+      <CommandPalette
+        navigate={(v, i) => {
+          setPanel(undefined)
+          navigate(v, i)
+        }}
+        onOpenPanel={setPanel}
+        sidebarCollapsed={collapsed}
+        onToggleSidebar={toggleCollapsed}
+      />
     </div>
   )
 }

@@ -9,6 +9,7 @@ import { SETTINGS_SECTION, showSettingsSection } from '../settings/SettingsLayou
 import {
   activityText,
   agentSummary,
+  approvalPriceText,
   approvalTitle,
   approvalVerb,
   clientDetail,
@@ -207,9 +208,7 @@ function PendingCard({ approval: a, now }: { approval: ApprovalRequest; now: num
       <div className="mt-2 flex items-center gap-3 text-[12px]">
         {!removal && (
           <span className="font-medium tabular-nums">
-            {a.priceUsd !== undefined
-              ? `${a.edit?.partialPrice ? '≈ ' : ''}${formatUsd(a.priceUsd)}${a.edit?.partialPrice ? ' +' : ''}`
-              : 'Unknown price'}
+            {approvalPriceText(a, (usd) => (a.edit?.partialPrice ? `≈ ${formatUsd(usd)} +` : formatUsd(usd)))}
           </span>
         )}
         <span className="min-w-0 flex-1 truncate text-muted">{expiresText(a.createdAt + APPROVAL_TTL_MS, now)}</span>

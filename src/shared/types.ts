@@ -285,6 +285,13 @@ export interface Settings {
    * default, like Venice's own default.
    */
   imageSafeMode: boolean
+  /** Spending caps in USD for this profile (Settings → Spending); undefined: no cap. */
+  budget: BudgetSettings
+}
+
+export interface BudgetSettings {
+  dailyUsd?: number
+  monthlyUsd?: number
 }
 
 export type PromptLanguage = 'en' | 'sv'
@@ -382,6 +389,50 @@ export interface ConsentRequest {
 
 /** Prefix on error messages that carry a ConsentRequest as JSON. */
 export const NEEDS_CONSENT = 'NEEDS_CONSENT:'
+
+/**
+ * A paid submission that would take today's or this month's spending past the budget is refused with this prefix
+ * followed by an OverBudget JSON, unless it was confirmed (GenerateOptions.confirmOverBudget). The window asks and
+ * sends it again confirmed (lib/budget.ts); an agent's request shows the same warning in the approval dialog.
+ */
+export const OVER_BUDGET = 'OVER_BUDGET:'
+
+export interface OverBudget {
+  /** The cost of what was about to be sent (all its variants); 0 when Venice gave no price. */
+  amountUsd: number
+  period: 'day' | 'month'
+  budgetUsd: number
+  /** Already spent in that period. */
+  spentUsd: number
+  /** Paid work on its way (videos rendering, the rest of a running Editor job): not spent yet, but counted against the cap. */
+  pendingUsd?: number
+}
+
+/** How a generation is sent: how many variants, and whether going over the budget was confirmed. */
+export interface GenerateOptions {
+  /** Variants: 1–4 takes of the same settings, sent at once. Default 1. */
+  count?: number
+  confirmOverBudget?: boolean
+}
+
+/** Spending (Settings → Spending, get_spending): what Studio recorded as paid, per day and per what it was for. */
+export interface SpendingSummary {
+  todayUsd: number
+  monthUsd: number
+  budget: BudgetSettings
+  /** The last 30 days, oldest first ('YYYY-MM-DD', local time). */
+  days: { day: string; usd: number }[]
+  /** Those 30 days together (summed before rounding, like todayUsd and monthUsd). */
+  last30Usd: number
+  /** This month by kind: videos, images, editor jobs, voices, transcripts … */
+  byKind: { kind: string; label: string; usd: number }[]
+  /** This month by place: a sequence, storyboard, edit, or Generate. */
+  byPlace: { label: string; usd: number; sequenceId?: string; storyboardId?: string; editId?: string }[]
+  /** This month: what agents asked for (approved) vs the user. `who` is 'user' or the agent's name. */
+  byWho: { who: string; usd: number }[]
+  /** On its way (videos rendering, the rest of a running Editor job): not spent yet, but counted against the budget. */
+  pendingUsd: number
+}
 
 // ── Assets: characters, environments, products, outfits, poses ───────────────
 
@@ -614,6 +665,11 @@ export interface Sequence {
   name: string
   /** Params used to seed new segments (model, duration, resolution, aspect ratio, audio). */
   defaults: Partial<GenerationParams>
+  /**
+   * The cast: library assets chosen once for the whole sequence, as references (shared/cast.ts). New clips start with
+   * them, and the clips whose own references are exactly these follow it when it changes. Empty when none is chosen.
+   */
+  cast: SequenceCast
   segments: Segment[]
   /**
    * "Export format": the exported film's height in pixels (480, 720 or 1080); the width follows the first clip's
@@ -627,6 +683,25 @@ export interface Sequence {
   createdAt: number
   updatedAt: number
 }
+
+/**
+ * A sequence's cast (Sequence.cast): the photos of its characters, outfits, environments, products and poses in @Image
+ * order, its characters' voices (and places' sounds) in @Audio order, and who wears each outfit – exactly what a clip
+ * that follows it has as its references. Absolute paths over IPC, stored relative in the sequence's defaults.
+ */
+export interface SequenceCast {
+  referenceImages: string[]
+  referenceAudios: ReferenceAudio[]
+  /** As GenerationParams.outfitWearers: outfit id → character id (null = nobody); left out = the defaults. */
+  outfitWearers?: Record<string, string | null>
+}
+
+/**
+ * A cast change (StudioApi.updateSequence): the whole new cast – assets added (at the end), removed or reordered,
+ * voices, who wears what – or one asset swapped for another, which keeps every @ImageN / @AudioN number in the clips
+ * that follow it (shared/reference-swap.ts swapReferenceAsset).
+ */
+export type SequenceCastSwap = { fromAssetId: string; toAssetId: string }
 
 export interface SequenceSummary {
   id: string
@@ -1198,6 +1273,8 @@ export interface EditRunOptions {
    * like a price that rose, so the extra question is asked first.
    */
   expectedPartial?: boolean
+  /** The user said yes to going over the budget (see OVER_BUDGET). */
+  confirmOverBudget?: boolean
 }
 
 export interface EditRunResult {
@@ -1807,14 +1884,22 @@ export interface ApprovalRequest {
   segmentIds?: string[]
   /** 1-based clip numbers of segmentIds, as Studio shows them ("Clip 3"). */
   clipNumbers?: number[]
-  /** USD; for 'generate-all' the sum over the clips. Undefined when Venice couldn't quote it. */
+  /** USD; for 'generate-all' the sum over the clips, with `variants` all of them. Undefined when it couldn't be quoted. */
   priceUsd?: number
+  /**
+   * 'generation' and 'segment': how many takes of the same settings it sends at once (2–4, GenerateOptions.count),
+   * each its own generation; absent for one.
+   */
+  variants?: number
   status: ApprovalStatus
   /** Why it failed or expired. */
   error?: string
   /** The user's reason when they declined. */
   reason?: string
-  /** The generations it started once approved ('generate-all' starts them one by one, so it has none). */
+  /**
+   * The generations it started once approved – every variant, also when a later one couldn't be sent (`notice` says
+   * so); 'generate-all' starts them one by one, so it has none.
+   */
   generationIds?: string[]
   /**
    * 'generation' and 'segment': the prompt exactly as it will be sent – params.prompt with the References legend
@@ -2043,6 +2128,9 @@ export interface StudioApi {
   testApiKey(): Promise<{ ok: boolean; message: string }>
   ffmpegStatus(): Promise<FfmpegStatus>
   setPromptLanguage(lang: PromptLanguage): Promise<void>
+  setBudget(budget: BudgetSettings): Promise<void>
+  /** Spending as Studio recorded it (see SpendingSummary). */
+  getSpending(): Promise<SpendingSummary>
   /** "Safe mode for images" (Venice blurs adult content in generated stills while it is on). */
   setImageSafeMode(on: boolean): Promise<void>
   /** Fires after a setting that several views show changed in one of them (so far "Safe mode for images"). */
@@ -2051,7 +2139,8 @@ export interface StudioApi {
   // Generation
   listModels(force?: boolean): Promise<VideoModel[]>
   quote(params: GenerationParams): Promise<number>
-  generate(params: GenerationParams): Promise<Generation>
+  /** The first take; with `count` > 1 the other variants arrive through onGenerationUpdate. */
+  generate(params: GenerationParams, opts?: GenerateOptions): Promise<Generation>
   acceptConsent(flow: string, version: string): Promise<void>
   /** Newest first, with the user's rating and the review count filled in. */
   listGenerations(): Promise<Generation[]>
@@ -2133,10 +2222,26 @@ export interface StudioApi {
   getSequence(id: string): Promise<Sequence>
   createSequence(name: string): Promise<Sequence>
   /** exportHeight: the "Export format" (480/720/1080, null = Automatic). */
+  /**
+   * `cast`: the whole new cast (assets added at the end, removed or reordered, voices, who wears what); `castSwap`: one
+   * asset of the cast swapped for another, keeping every number. Either way the clips that follow the cast change with
+   * it in the same step, their prompts' tokens kept on their pictures (shared/cast.ts).
+   */
   updateSequence(
     id: string,
-    patch: { name?: string; defaults?: Partial<GenerationParams>; exportHeight?: number | null }
+    patch: {
+      name?: string
+      defaults?: Partial<GenerationParams>
+      exportHeight?: number | null
+      cast?: SequenceCast
+      castSwap?: SequenceCastSwap
+    }
   ): Promise<Sequence>
+  /**
+   * "Use the cast": the clip's references become the sequence's cast (its prompt's tokens follow their pictures, as a
+   * cast change does), so it follows the cast again.
+   */
+  applyCastToSegment(segmentId: string): Promise<Sequence>
   deleteSequence(id: string): Promise<void>
   addSegment(sequenceId: string, init?: SegmentInit): Promise<Sequence>
   updateSegment(segmentId: string, patch: SegmentPatch): Promise<Sequence>
@@ -2147,12 +2252,13 @@ export interface StudioApi {
   deleteSegment(segmentId: string, opts?: { onlyIfUntouched?: boolean }): Promise<Sequence>
   moveSegment(segmentId: string, toIndex: number): Promise<Sequence>
   /** Queues a new take for the segment (extracting the previous segment's last frame if continuing). */
-  generateSegment(segmentId: string): Promise<Generation>
+  generateSegment(segmentId: string, opts?: GenerateOptions): Promise<Generation>
   /**
    * Starts generating every segment lacking a completed selected take, in order, waiting for each one.
-   * Resolves once started; progress arrives via onSequenceChange and errors via Sequence.runError.
+   * Resolves once started; progress arrives via onSequenceChange and errors via Sequence.runError. Refused with
+   * OVER_BUDGET when the run's total would take the day or the month past the budget, unless confirmed.
    */
-  generateAllSegments(sequenceId: string): Promise<void>
+  generateAllSegments(sequenceId: string, opts?: Pick<GenerateOptions, 'confirmOverBudget'>): Promise<void>
   stopGenerateAll(sequenceId: string): Promise<void>
   /** Renders the cut with ffmpeg; resolves with the output path. */
   exportSequence(sequenceId: string): Promise<string>
@@ -2203,13 +2309,13 @@ export interface StudioApi {
   deleteBoard(boardId: string): Promise<Storyboard>
   updateTransition(transitionId: string, patch: TransitionPatch): Promise<Storyboard>
   /** Queues a new take of the transition (paid; the UI confirms with the price). */
-  generateTransition(transitionId: string): Promise<Generation>
+  generateTransition(transitionId: string, opts?: GenerateOptions): Promise<Generation>
   /**
    * "Generate missing": sends every transition without a finished selected take (and none on its way) to Venice,
    * one after another without waiting for them to render. Resolves once started; progress arrives via
-   * onStoryboardChange and errors via Storyboard.runError.
+   * onStoryboardChange and errors via Storyboard.runError. Refused with OVER_BUDGET like generateAllSegments.
    */
-  generateStoryboard(storyboardId: string): Promise<void>
+  generateStoryboard(storyboardId: string, opts?: Pick<GenerateOptions, 'confirmOverBudget'>): Promise<void>
   stopStoryboard(storyboardId: string): Promise<void>
   /**
    * Renders the selected takes in order into Storyboards/<namn>/; resolves with the film's path. Progress comes
@@ -2230,7 +2336,7 @@ export interface StudioApi {
   /** USD for one still; undefined when the model's pricing doesn't say. */
   quoteStill(params: StillParams): Promise<number | undefined>
   /** Generates a still (paid; the UI confirms with the price) and saves it with the sequence. */
-  generateStill(params: StillParams): Promise<Still>
+  generateStill(params: StillParams, opts?: Pick<GenerateOptions, 'confirmOverBudget'>): Promise<Still>
   /** The sequence's stills, or every still when sequenceId is omitted; newest first. */
   listStills(sequenceId?: string): Promise<Still[]>
   /** Moves the still to the Trash (or to Referensbilder while clips or generations still use it). */
@@ -2343,7 +2449,12 @@ export interface StudioApi {
    * "Continue": sends the unsent or failed parts again (paid again for those) at a fresh price. Refused (PRICE_CHANGED)
    * when it rose above expectedPriceUsd + $0.01, or turned unknown or partial when `expectedPartial` was false.
    */
-  resumeEditJob(jobId: string, expectedPriceUsd?: number, expectedPartial?: boolean): Promise<EditJob>
+  resumeEditJob(
+    jobId: string,
+    expectedPriceUsd?: number,
+    expectedPartial?: boolean,
+    opts?: Pick<GenerateOptions, 'confirmOverBudget'>
+  ): Promise<EditJob>
   /** The version's transcript, inherited from ancestors with the same timing; null when there is none. */
   getTranscript(generationId: string): Promise<Transcript | null>
   updateTranscript(generationId: string, patch: { segmentId: string; text: string }[]): Promise<Transcript>
@@ -2358,7 +2469,11 @@ export interface StudioApi {
   separationStatus(): Promise<SeparationStatus>
   planVoiceDesign(req: VoiceDesignRequest): Promise<EditPlan>
   /** Paid: the result becomes a new voice clip of the character. */
-  designVoice(req: VoiceDesignRequest, expectedPriceUsd?: number): Promise<EditJob>
+  designVoice(
+    req: VoiceDesignRequest,
+    expectedPriceUsd?: number,
+    opts?: Pick<GenerateOptions, 'confirmOverBudget'>
+  ): Promise<EditJob>
   /** "May be cloned for new lines" (user only). */
   setVoiceCloneConsent(audioId: string, consent: boolean): Promise<Asset>
   /** Fires with the edit id whenever an edit, its versions, jobs or media change. */

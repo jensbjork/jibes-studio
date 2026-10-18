@@ -30,6 +30,7 @@ import type {
 } from '@shared/types'
 import { isAgentCall } from './agent/local-ipc'
 import { AUDIO_FILE_TYPES, setVoiceCloneConsent } from './assets'
+import { confirmedOf } from './budget'
 import * as db from './db'
 import * as mixes from './edit-mix'
 import { EditOps, isPictureOp, transcriptFor, versionParams, type EditActiveWork, type OpsDeps } from './edit-ops'
@@ -105,6 +106,11 @@ export interface EditServiceHandle {
 }
 
 const fold = (s: string): string => s.normalize('NFC').toLowerCase()
+
+/** The over-budget confirmation of a call's options ({confirmOverBudget: true}), as the Editor's operations take it. */
+function budgetOpts(opts: unknown): { confirmOverBudget: boolean } {
+  return { confirmOverBudget: confirmedOf(opts) }
+}
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -1158,8 +1164,8 @@ export function registerEditIpc(deps: EditDeps): EditServiceHandle {
   ipcMain.handle('edits:cancel', (_e, jobId: unknown): void => ops.cancel(jobId))
   ipcMain.handle(
     'edits:resume',
-    (_e, jobId: unknown, expectedPriceUsd?: unknown, expectedPartial?: unknown): Promise<EditJob> =>
-      ops.resume(jobId, expectedPriceUsd, expectedPartial)
+    (_e, jobId: unknown, expectedPriceUsd?: unknown, expectedPartial?: unknown, opts?: unknown): Promise<EditJob> =>
+      ops.resume(jobId, expectedPriceUsd, expectedPartial, budgetOpts(opts))
   )
   ipcMain.handle('edits:transcript', (_e, generationId: unknown): Transcript | null => service.transcript(generationId))
   ipcMain.handle('edits:updateTranscript', (_e, generationId: unknown, patch: unknown): Transcript =>
@@ -1178,8 +1184,8 @@ export function registerEditIpc(deps: EditDeps): EditServiceHandle {
   ipcMain.handle('audio:models', (_e, force?: unknown): Promise<AudioCatalog> => ops.catalog(force === true))
   ipcMain.handle('audio:separation', (): Promise<SeparationStatus> => separationStatus())
   ipcMain.handle('voices:plan', (_e, req: unknown): Promise<EditPlan> => ops.planVoiceDesign(req))
-  ipcMain.handle('voices:design', (_e, req: unknown, expectedPriceUsd?: unknown): Promise<EditJob> =>
-    ops.designVoice(req, expectedPriceUsd)
+  ipcMain.handle('voices:design', (_e, req: unknown, expectedPriceUsd?: unknown, opts?: unknown): Promise<EditJob> =>
+    ops.designVoice(req, expectedPriceUsd, budgetOpts(opts))
   )
   ipcMain.handle('voices:consent', async (e, audioId: unknown, consent: unknown) => {
     userOnly(e)

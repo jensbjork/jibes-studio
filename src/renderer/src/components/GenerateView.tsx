@@ -3,7 +3,9 @@ import { continuationFrameOf } from '@shared/seams'
 import { canUseAgain } from '@shared/generation-label'
 import { DEFAULT_MODEL } from '@shared/models'
 import { NEEDS_CONSENT, type ConsentRequest, type Generation, type GenerationParams } from '@shared/types'
+import { variantsPrice, variantsText } from '@shared/variants'
 import { ASSET_COPY } from '../lib/assets'
+import { withBudgetConfirm } from '../lib/budget'
 import { getGenerateParams, useGenerateParams } from '../lib/generateStore'
 import { ipcErrorMessage, useAssetsState, useModels, useQuote } from '../lib/hooks'
 import {
@@ -15,6 +17,7 @@ import {
 } from '../lib/library'
 import { formatUsd } from '../lib/media'
 import type { Intent, Navigate } from '../lib/navigation'
+import { useVariantCount, withVariants } from '../lib/variants'
 import ConsentDialog from './ConsentDialog'
 import ClipFeed from './feed/ClipFeed'
 import { useGenerations } from './feed/useGenerations'
@@ -22,6 +25,7 @@ import OpenFolderButton from './library/OpenFolderButton'
 import ParamsForm, { missingInput, modelForKind, unavailableModel } from './ParamsForm'
 import { addAssetToForm } from './pickers/assetRefs'
 import { stableJson } from './sequences/sequenceUtils'
+import VariantPicker from './VariantPicker'
 
 interface Props {
   intent?: Intent
@@ -40,12 +44,21 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
   const [error, setError] = useState<string>()
   // Non-fatal problems from an intent, e.g. a character without images.
   const [notice, setNotice] = useState<string>()
-  // Venice's consent request, with the form it was asked for: accepting it generates exactly that form.
-  const [consent, setConsent] = useState<{ request: ConsentRequest; params: GenerationParams }>()
+  // Venice's consent request, with the form it was asked for: accepting it generates exactly that form – as many
+  // variants as were asked for, and over the budget if that was confirmed already.
+  const [consent, setConsent] = useState<{
+    request: ConsentRequest
+    params: GenerationParams
+    count: number
+    overBudgetOk: boolean
+  }>()
   const [folderError, setFolderError] = useState<string>()
 
   const model = models.find((m) => m.id === params.model)
   const quote = useQuote(params, model)
+  // ×1–×4 beside Generate (⌘+Enter sends as many); the button shows what they cost together.
+  const [count, setCount] = useVariantCount('generate')
+  const total = variantsPrice(quote, count)
   // A wrong @ImageN would send the wrong picture (or none) in a paid generation, so missingInput blocks on it
   // with the words main would refuse it with.
   const missing = missingInput(params) ?? unavailableModel(model)
@@ -140,21 +153,33 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
     }
   }
 
-  const submit = async () => {
+  /** Sends the form: `n` variants (the count chosen), the first comes back and the others arrive as updates. */
+  const submit = async (n = count, overBudgetOk = false) => {
     if (missing || submitting || !model) return
     setSubmitting(true)
     setError(undefined)
     setNotice(undefined)
     const sent = params
+    let confirmed = overBudgetOk
     try {
-      const g = await window.studio.generate(sent)
+      const g = await withBudgetConfirm((yes) => {
+        confirmed ||= yes
+        return window.studio.generate(sent, { count: n, confirmOverBudget: confirmed })
+      })
+      // Over the budget, and the user said no: nothing was sent.
+      if (!g) return
       feed.upsert(g)
       // Outside pictures were copied into Referensbilder; the form uses the copies from now on.
       setParams((p) => withImportedCopies(p, params, g.params) ?? p)
     } catch (e) {
       const message = ipcErrorMessage(e)
       if (message.startsWith(NEEDS_CONSENT)) {
-        setConsent({ request: JSON.parse(message.slice(NEEDS_CONSENT.length)) as ConsentRequest, params: sent })
+        setConsent({
+          request: JSON.parse(message.slice(NEEDS_CONSENT.length)) as ConsentRequest,
+          params: sent,
+          count: n,
+          overBudgetOk: confirmed
+        })
       } else setError(message)
     } finally {
       setSubmitting(false)
@@ -171,7 +196,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
       setNotice('The form changed while the terms were shown. Check it and press Generate again.')
       return
     }
-    await submit()
+    await submit(consent.count, consent.overBudgetOk)
   }
 
   // Stable, so the feed's memoized cards don't re-render for it. Only a Venice generation's settings make a form: an
@@ -196,7 +221,11 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
       {consent && (
         <ConsentDialog
           request={consent.request}
-          cost={formatUsd(quote)}
+          cost={
+            consent.count > 1
+              ? `${variantsText(consent.count)} · ${formatUsd(variantsPrice(quote, consent.count))}`
+              : formatUsd(quote)
+          }
           onAccept={acceptConsent}
           onCancel={() => setConsent(undefined)}
         />
@@ -210,7 +239,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
             modelsError={modelsError}
             params={params}
             setParams={setParams}
-            onSubmit={submit}
+            onSubmit={() => void submit()}
             navigate={navigate}
           />
         </div>
@@ -225,17 +254,22 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
             </div>
           )}
           {error && <p className="mb-3 max-h-32 overflow-y-auto text-accent select-text">{error}</p>}
-          <button
-            onClick={submit}
-            disabled={!!missing || submitting || !model}
-            className="flex w-full items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
-          >
-            <span className="min-w-0 truncate" title={missing}>
-              {submitting ? 'Sending…' : (missing ?? 'Generate')}
-            </span>
-            <span className="shrink-0 text-white/80">{formatUsd(quote)}</span>
-          </button>
-          <p className="mt-2 text-center text-[11px] text-muted">⌘ + Enter to generate</p>
+          <div className="flex items-stretch gap-2">
+            <VariantPicker count={count} onChange={setCount} each={quote} />
+            <button
+              onClick={() => void submit()}
+              disabled={!!missing || submitting || !model}
+              className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+            >
+              <span className="min-w-0 truncate" title={missing}>
+                {submitting ? 'Sending…' : (missing ?? withVariants('Generate', count))}
+              </span>
+              <span className="shrink-0 text-white/80">{formatUsd(total)}</span>
+            </button>
+          </div>
+          <p className="mt-2 text-center text-[11px] text-muted">
+            ⌘ + Enter to generate{count > 1 ? ` ${variantsText(count)}` : ''}
+          </p>
         </div>
       </section>
 

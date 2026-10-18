@@ -70,6 +70,7 @@ import type {
 } from '@shared/types'
 import { addGeneratedAudio } from './assets'
 import { alignTo, estimateOffsetSamples } from './audio-align'
+import { assertWithinBudget, runConfirmed } from './budget'
 import * as db from './db'
 import * as mixes from './edit-mix'
 import * as store from './edit-store'
@@ -1874,7 +1875,16 @@ export class EditOps {
       if (opts?.expectedPartial === false && (plan.priceUsd === undefined || plan.partialPrice)) {
         throw new Error(PRICE_CHANGED)
       }
+      // Refused with OVER_BUDGET before anything is sent when it would take the spending past the budget.
+      assertWithinBudget(plan.priceUsd, { confirmed: opts?.confirmOverBudget === true })
+      // Checked (or confirmed) here as a whole: what the job sends, now or when it goes on, isn't asked about again.
+      return runConfirmed(() => this.execute(planned))
     }
+    return this.execute(planned)
+  }
+
+  /** Carries out a planned operation that may run (see run). */
+  private async execute(planned: Planned): Promise<EditRunResult> {
     switch (planned.exec.kind) {
       case 'free':
         return { versionId: await this.renderFree(planned) }
@@ -3227,7 +3237,12 @@ export class EditOps {
     }
   }
 
-  async resume(jobId: unknown, expectedPriceUsd?: unknown, expectedPartial?: unknown): Promise<EditJob> {
+  async resume(
+    jobId: unknown,
+    expectedPriceUsd?: unknown,
+    expectedPartial?: unknown,
+    opts?: { confirmOverBudget?: unknown }
+  ): Promise<EditJob> {
     const job = store.requireJob(jobId)
     if (job.status === 'running' || this.runs.has(job.id) || this.finishing.has(job.id)) {
       throw new Error('The job is already running.')
@@ -3288,6 +3303,8 @@ export class EditOps {
         this.notify(job.editId)
         throw new Error(PRICE_CHANGED)
       }
+      // What is sent again counts against the budget like a new job: refused with OVER_BUDGET unless confirmed.
+      assertWithinBudget(price, { confirmed: opts?.confirmOverBudget === true })
     }
     db.getDb().transaction(() => {
       for (const s of again) {
@@ -3296,7 +3313,7 @@ export class EditOps {
       store.updateJob(job.id, { status: 'running', error: null })
       keepQuotes()
     })()
-    this.startJob(job.id, 'send')
+    runConfirmed(() => this.startJob(job.id, 'send'))
     this.notify(job.editId)
     return this.jobView(store.getJob(job.id)!)
   }
@@ -3809,11 +3826,17 @@ export class EditOps {
     return { plan, prompt, model: wanted }
   }
 
-  async designVoice(raw: unknown, expectedPriceUsd?: unknown): Promise<EditJob> {
+  async designVoice(
+    raw: unknown,
+    expectedPriceUsd?: unknown,
+    opts?: { confirmOverBudget?: unknown }
+  ): Promise<EditJob> {
     const { plan, prompt, model } = await this.planVoiceDesignDetailed(raw)
     if (plan.problems.length) throw new Error(plan.problems[0])
     if (typeof expectedPriceUsd !== 'number' || !Number.isFinite(expectedPriceUsd)) throw new Error(CONFIRM_PRICE)
     if (plan.priceUsd !== undefined && plan.priceUsd > expectedPriceUsd + 0.01) throw new Error(PRICE_CHANGED)
+    // Refused with OVER_BUDGET before anything is sent when it would take the spending past the budget.
+    assertWithinBudget(plan.priceUsd, { confirmed: opts?.confirmOverBudget === true })
     const req = raw as VoiceDesignRequest
     const name =
       (db.getDb().prepare('SELECT name FROM assets WHERE id = ?').pluck().get(req.assetId) as string | undefined) ?? ''
@@ -3837,7 +3860,7 @@ export class EditOps {
         quote: plan.priceUsd
       }
     ])
-    this.startJob(job.id, 'send')
+    runConfirmed(() => this.startJob(job.id, 'send'))
     return this.jobView(store.getJob(job.id)!)
   }
 }

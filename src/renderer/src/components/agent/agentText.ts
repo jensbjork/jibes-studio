@@ -4,7 +4,9 @@
 
 import { agentDisplayName, isGenericAgentName } from '@shared/agent-name'
 import type { AgentActivity, AgentClientInfo, AgentStatus, ApprovalRequest, SegmentImageSlot } from '@shared/types'
+import { variantsText } from '@shared/variants'
 import { englishList } from '../../lib/assets'
+import { formatUsd } from '../../lib/media'
 
 /** The agent's name inside a sentence: "the agent" for a generic or missing name ("Ask the agent again"), else it. */
 export function agentInSentence(name: string | undefined): string {
@@ -129,11 +131,27 @@ export function activityText(a: AgentActivity): string {
   return own ? `${agentDisplayName(a.client)} ${own}` : agentDisplayName(a.client)
 }
 
+/** How many variants a request sends (ApprovalRequest.variants): 1 when it is one take. */
+export function variantCount(a: Pick<ApprovalRequest, 'variants'>): number {
+  return a.variants && a.variants > 1 ? a.variants : 1
+}
+
+/**
+ * A request's price as the dialog, the drawer and the approve button show it: "$1.03", "3 variants · $3.09", "Unknown
+ * price". `shown`: how the amount itself is written (the Editor's "≈ $0.45 +").
+ */
+export function approvalPriceText(a: ApprovalRequest, shown: (usd: number) => string = formatUsd): string {
+  const price = a.priceUsd !== undefined ? shown(a.priceUsd) : 'Unknown price'
+  const n = variantCount(a)
+  return n > 1 ? `${variantsText(n)} · ${price}` : price
+}
+
 /** What an approval would generate (or remove), in a few words. `sequenceName`: the sequence's or storyboard's name. */
 export function approvalTitle(a: ApprovalRequest, sequenceName?: string): string {
   const inSequence = sequenceName ? ` in “${sequenceName}”` : ''
   // A storyboard's transitions are segments to main; the user knows them as transitions.
   const storyboard = a.sequenceKind === 'storyboard'
+  const variants = variantCount(a)
   switch (a.kind) {
     case 'delete':
       return `Delete ${thingsText(a.delete?.items.length ?? 0)}`
@@ -155,11 +173,12 @@ export function approvalTitle(a: ApprovalRequest, sequenceName?: string): string
       return storyboard ? `An image for the storyboard${named}` : `An image for the sequence${named}`
     }
     case 'generation':
-      return 'A video from Generate'
+      return variants > 1 ? `${variants} videos from Generate` : 'A video from Generate'
     case 'segment': {
-      if (!storyboard) return `A new take of a clip${inSequence}`
+      const takes = variants > 1 ? `${variants} new takes` : 'A new take'
+      if (!storyboard) return `${takes} of a clip${inSequence}`
       const n = a.clipNumbers?.[0]
-      return `A new take of ${n ? `transition ${n}` : 'a transition'}${inSequence}`
+      return `${takes} of ${n ? `transition ${n}` : 'a transition'}${inSequence}`
     }
     case 'generate-all': {
       const n = a.segmentIds?.length ?? 0
@@ -279,7 +298,12 @@ export function approvalOutcome(a: ApprovalRequest): string {
       if (a.kind === 'voice-design') {
         return `Approved – the voice is being created and will be added under Voice${a.edit?.assetName ? ` for ${a.edit.assetName}` : ''} when it’s done.`
       }
-      if (a.kind !== 'image') return 'Approved – the generation has been sent.'
+      if (a.kind !== 'image') {
+        // A later variant that couldn't be sent: main says how many were.
+        if (a.notice) return `Approved – ${a.notice}`
+        const n = variantCount(a)
+        return n > 1 ? `Approved – the ${n} variants have been sent.` : 'Approved – the generation has been sent.'
+      }
       if (a.notice) return a.notice
       const board = a.image?.assignToBoard
       if (board) return `Approved – the image was created, saved and became the image of board ${board.boardNumber}.`

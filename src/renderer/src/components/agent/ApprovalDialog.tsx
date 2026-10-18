@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { agentDisplayName } from '@shared/agent-name'
+import { overBudgetFor, overBudgetText } from '@shared/budget'
 import { KINDS, kindOfModelId, maxReferenceImages, paramsForSubmit } from '@shared/models'
 import {
   composeOptionsFor,
@@ -15,6 +16,7 @@ import type {
   Asset,
   ConsentRequest,
   GenerationParams,
+  OverBudget,
   PromptLanguage,
   Segment,
   SegmentFramePreview,
@@ -32,6 +34,7 @@ import {
 import { ipcErrorMessage, useAssetsState, useModels } from '../../lib/hooks'
 import { formatUsd, mediaUrl } from '../../lib/media'
 import { blockingPromptIssue, promptIssuesOf } from '../../lib/promptIssues'
+import { BudgetMeter } from '../BudgetDialog'
 import ConsentDialog from '../ConsentDialog'
 import { KIND_TONE } from '../pickers/assetKinds'
 import AudioPlayButton from '../pickers/AudioPlayButton'
@@ -52,10 +55,12 @@ import {
   agentInSentence,
   approvalHeading,
   approvalOutcome,
+  approvalPriceText,
   approvalTitle,
   approveLabel,
   expiresText,
-  slotName
+  slotName,
+  variantCount
 } from './agentText'
 import { ImageTile, type Photo } from './ApprovalPictures'
 import { DeleteSummary, useDeleteCheck } from './DeleteApproval'
@@ -206,6 +211,8 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const pending = a.status === 'pending'
   // Main lapses it at expiresAt; don't offer to approve what it would refuse.
   const expired = pending && now > expiresAt
+  // Past the user's budget: said here, since approving is their yes to it (main doesn't ask again).
+  const overBudget = useOverBudget(a.priceUsd, pending && a.kind !== 'delete')
   // A still for a storyboard (Venice's image models) rather than a video.
   const image = a.kind === 'image' ? (a.image ?? null) : undefined
   const clips = useMemo(
@@ -534,7 +541,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
               : approveLabel(a)}
           </span>
           {(phase !== 'submitting' || declineSending) && a.priceUsd !== undefined && (
-            <span className="text-white/80">{priceShown(a.priceUsd)}</span>
+            <span className="text-white/80">{approvalPriceText(a, priceShown)}</span>
           )}
         </button>
       </>
@@ -656,12 +663,31 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
                 ? `Total for ${clips.length} clips`
                 : transitions.length > 1
                   ? `Total for ${transitions.length} transitions`
-                  : 'Cost'}
+                  : variantCount(a) > 1
+                    ? 'Total'
+                    : 'Cost'}
               <span className="ml-1.5 text-[11px]">(charged to your Venice account)</span>
             </span>
-            <span className="text-lg font-semibold tabular-nums">
-              {a.priceUsd !== undefined ? priceShown(a.priceUsd) : 'Unknown price'}
+            {/* "3 variants · $3.09": each variant is its own generation at the full price. */}
+            <span className="shrink-0 whitespace-nowrap text-lg font-semibold tabular-nums">
+              {approvalPriceText(a, priceShown)}
             </span>
+          </div>
+        )}
+        {overBudget && removal === undefined && (
+          <div className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2.5 text-[12px] leading-relaxed">
+            <p className="text-[#ffb3b5]">
+              <span className="font-medium">Over your {overBudget.period === 'day' ? 'daily' : 'monthly'} budget.</span>{' '}
+              {overBudgetText(overBudget, 'This takes')} Approving sends it anyway.
+            </p>
+            <BudgetMeter
+              className="mt-2"
+              label={overBudget.period === 'day' ? 'Today' : 'This month'}
+              spentUsd={overBudget.spentUsd}
+              pendingUsd={overBudget.pendingUsd}
+              amountUsd={overBudget.amountUsd}
+              capUsd={overBudget.budgetUsd}
+            />
           </div>
         )}
         {phase === 'submitting' && image !== undefined && (
@@ -677,6 +703,31 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
       </div>
     </Modal>
   )
+}
+
+/**
+ * Where approving a request that costs `priceUsd` would take the spending past the user's budget, read when the request
+ * is shown (and again when its price changes); undefined within the budget, without one, or while `active` is false.
+ */
+function useOverBudget(priceUsd: number | undefined, active: boolean): OverBudget | undefined {
+  const [over, setOver] = useState<OverBudget>()
+  useEffect(() => {
+    setOver(undefined)
+    if (!active) return
+    let alive = true
+    window.studio.getSpending().then(
+      (s) => {
+        if (alive) setOver(overBudgetFor(priceUsd, s, s.budget))
+      },
+      () => {
+        // Only a warning: without the spending the request is shown as it is.
+      }
+    )
+    return () => {
+      alive = false
+    }
+  }, [priceUsd, active])
+  return over
 }
 
 // ── What will be generated ──────────────────────────────────────────────────

@@ -11,8 +11,10 @@ import type {
   VideoModel,
   WorkSummary
 } from '@shared/types'
+import { variantsPrice } from '@shared/variants'
 import { AgentService, recordIpcHandlers, registerAgentIpc } from './agent'
 import { isAgentCall } from './agent/local-ipc'
+import { assertWithinBudget } from './budget'
 import * as db from './db'
 import { registerEditIpc, type EditServiceHandle } from './edits'
 import { ffmpegStatus, stopAllFfmpeg } from './ffmpeg'
@@ -25,6 +27,7 @@ import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty, toStored
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
 import { attachReviewSummary, registerReviewIpc } from './reviews'
 import { registerSessionIpc } from './session'
+import { registerSpendingIpc } from './spending'
 import { reselectTransitionTake } from './sequence-store'
 import { registerSequenceIpc, type SequenceService } from './sequences'
 import { registerStoryboardIpc, type StoryboardService } from './storyboards'
@@ -39,6 +42,7 @@ import {
 } from './stills'
 import { VeniceClient } from './venice'
 import { VeniceAudio } from './venice-audio'
+import { sendOptionsOf, sendVariants } from './variants'
 import { separationStatus } from './voice-separation'
 import { registerWorkIpc, WorkStatus } from './work'
 
@@ -270,6 +274,8 @@ function registerIpc(): void {
     // Settings and the image dialogs each show it: the others follow a change made in one of them.
     broadcast('settings:change')
   })
+  // Settings → Spending: what was paid for (also get_spending) and the budget, which only the user sets.
+  registerSpendingIpc(() => broadcast('settings:change'))
   ipcMain.handle('settings:testApiKey', async () => {
     try {
       const balances = await venice.balances()
@@ -286,7 +292,11 @@ function registerIpc(): void {
   ipcMain.handle('models:list', (_e, force?: boolean) => loadVideoModels(force === true))
 
   ipcMain.handle('video:quote', (_e, params: GenerationParams) => venice.quote(params))
-  ipcMain.handle('video:generate', async (e, params: GenerationParams, sentPrompt?: unknown) => {
+  // `opts`: GenerateOptions – the variants (1–4 takes of the same form, each its own generation) and the
+  // over-budget confirmation; resolves with the first take, the others reach the window as generation updates.
+  // `sentPrompt`: an agent's approved request only (see below).
+  ipcMain.handle('video:generate', async (e, params: GenerationParams, opts?: unknown, sentPrompt?: unknown) => {
+    const { count, confirmOverBudget, onSent } = sendOptionsOf(opts)
     // Counted as on its way from the start: a library switch must not close the database while the price
     // is quoted, or the job would be paid for and then have nowhere to be recorded.
     const release = jobs.holdSubmit()
@@ -295,10 +305,13 @@ function registerIpc(): void {
       // is refused here rather than after a network round trip (submit checks again; it is idempotent).
       const p = await prepareSubmission(params)
       const quote = await venice.quote(p).catch(() => undefined)
+      // Every variant together, before any of them is sent.
+      assertWithinBudget(variantsPrice(quote, count), { confirmed: confirmOverBudget })
       // An agent's approved request sends the composed prompt the user approved (and its check compared just
       // now), not one composed again after the quote's round trip from descriptions that may have changed since.
       const approved = isAgentCall(e) && typeof sentPrompt === 'string' ? { sentPrompt } : {}
-      return await jobs.submit(p, { quote, ...approved })
+      const [first] = await sendVariants(count, () => jobs.submit(p, { quote, ...approved }), onSent)
+      return first
     } finally {
       release()
     }

@@ -20,6 +20,7 @@ import {
   toStoredPath,
   withoutLocalPaths
 } from './paths'
+import { noteRequestedBy } from './requested-by'
 
 let db: Database.Database | undefined
 
@@ -608,6 +609,8 @@ export function insertGeneration(g: Omit<StoredGeneration, 'source'> & { source?
       recipe: recipeOrNull(g.recipe),
       originalPath: storedPathOrNull(g.originalPath)
     })
+  // A Venice generation an agent's approved request made: Spending names the agent (see requested-by.ts).
+  if (sourceOf(g.source) === 'generated') noteRequestedBy(g.id)
 }
 
 /**
@@ -820,7 +823,7 @@ function paramFilePaths(json: string): string[] {
 /**
  * Whether a row records this stored path (letter case ignored, like the disk): a generation's file or original
  * (an import's untouched copy), an export, asset image, asset audio, edit media or still file, a storyboard
- * board's image, or an image, audio clip or video in generation, segment or still params. A row
+ * board's image, or an image, audio clip or video in generation, segment or still params or a sequence's cast. A row
  * whose file was deleted in Finder still claims its name: a new file given that name would otherwise be taken
  * for the old row's file — deleting that row would take the new file with it, and an old generation or clip
  * whose picture was removed would silently use somebody else's picture on "Use again" or a regenerated take.
@@ -850,6 +853,7 @@ export function isStoredPathRecorded(stored: string, opts: { ignoreStillId?: str
     .prepare(
       `SELECT params FROM generations WHERE instr(studio_fold(params), @n) > 0
        UNION ALL SELECT params FROM segments WHERE instr(studio_fold(params), @n) > 0
+       UNION ALL SELECT defaults FROM sequences WHERE instr(studio_fold(defaults), @n) > 0
        UNION ALL SELECT params FROM stills WHERE instr(studio_fold(params), @n) > 0 AND (@i IS NULL OR id != @i)`
     )
     .pluck()
@@ -887,6 +891,7 @@ export function isStoredPrefixRecorded(folder: string): boolean {
     .prepare(
       `SELECT params FROM generations WHERE instr(studio_fold(params), @n) > 0
        UNION ALL SELECT params FROM segments WHERE instr(studio_fold(params), @n) > 0
+       UNION ALL SELECT defaults FROM sequences WHERE instr(studio_fold(defaults), @n) > 0
        UNION ALL SELECT params FROM stills WHERE instr(studio_fold(params), @n) > 0`
     )
     .pluck()
@@ -908,7 +913,8 @@ export function listStoredPaths(): string[] {
 }
 
 /**
- * Applies map to the image, audio and video paths in a params JSON string (generation, segment or still params);
+ * Applies map to the image, audio and video paths in a params JSON string (generation, segment or still params, a
+ * sequence's defaults with its cast);
  * returns undefined when nothing changed.
  */
 function mapParamsJson(json: string, map: (stored: string) => string): string | undefined {
@@ -945,8 +951,8 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
 
 /**
  * Runs map over every stored path in the library database (generation files, originals, posters and params,
- * segment params, asset images and audio, edit media, stills and the reference images in their params, storyboard
- * board images, exports) in one transaction and writes back what changed. `contains`, when given, skips rows that can't hold a
+ * segment params, sequences' casts, asset images and audio, edit media, stills and the reference images in their
+ * params, storyboard board images, exports) in one transaction and writes back what changed. `contains`, when given, skips rows that can't hold a
  * matching path. `onGeneration` hears the id of every generation changed. Returns the number of rows changed.
  */
 export function mapStoredPaths(
@@ -988,6 +994,17 @@ export function mapStoredPaths(
       const params = mapParamsJson(r.params, map)
       if (params === undefined) continue
       updateSegment.run(params, r.id)
+      changed++
+    }
+
+    // A sequence's cast: the reference images and audio of its defaults (shared/cast.ts).
+    const sequences = conn.prepare('SELECT id, defaults FROM sequences').all() as { id: string; defaults: string }[]
+    const updateDefaults = conn.prepare('UPDATE sequences SET defaults = ? WHERE id = ?')
+    for (const r of sequences) {
+      if (!hit(r.defaults)) continue
+      const defaults = mapParamsJson(r.defaults, map)
+      if (defaults === undefined) continue
+      updateDefaults.run(defaults, r.id)
       changed++
     }
 
@@ -1086,8 +1103,9 @@ export function takeRewrittenGenerations(): string[] {
 /**
  * Rewrites every stored relative path equal to or under oldRel to the same place under newRel: generations
  * (file_path, thumb_path, original_path, params incl. reference audio and source/reference videos),
- * segments.params, asset_images.file_path, asset_audio.file_path, edit_media.file_path, stills (file_path, the
- * reference images in params), storyboard_boards.image_path, exports.file_path.
+ * segments.params, sequences.defaults (the cast), asset_images.file_path, asset_audio.file_path,
+ * edit_media.file_path, stills (file_path, the reference images in params), storyboard_boards.image_path,
+ * exports.file_path.
  */
 export function rewriteStoredPrefix(oldRel: string, newRel: string): number {
   const from = cleanRelative(oldRel)
