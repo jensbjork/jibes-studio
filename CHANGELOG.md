@@ -8,8 +8,6 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-10-19
-
 ### Added
 
 - **Studio for Windows** (64-bit): an installer (`Studio-win-x64-setup.exe`, per user, no administrator needed) and a
