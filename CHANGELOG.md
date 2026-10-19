@@ -8,6 +8,8 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-19
+
 ### Added
 
 - **A music video from your song**: *＋ New sequence → From a song…* (also ⌘K, or drop an audio file on the
