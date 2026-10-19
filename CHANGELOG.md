@@ -405,6 +405,8 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- A new app icon: a camera aperture of six blades in sunset colours (pink, coral, orange) in a lens ring, on the dark
+  background (`build/icon.svg`, with `icon.png` and `icon.icns` rendered from it).
 - The whole interface is now in English (it was Swedish). Library folder names on disk are unchanged; prompts can
   still be sent in Swedish (Settings → Generation → Prompt language).
 - **One list on the left, the same everywhere, and Redigera has it too**: Karaktärer, Miljöer, Produkter, Kläder,
