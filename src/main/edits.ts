@@ -53,6 +53,7 @@ import {
   thumbsDir,
   toStoredPath
 } from './paths'
+import { FILE_MANAGER } from './platform'
 import { cloneInto, placeFile, serialized } from './references'
 import { attachReviewSummary } from './reviews'
 import type { SequenceService } from './sequences'
@@ -308,7 +309,7 @@ class EditService {
     if (!g) throw new Error('The film no longer exists.')
     if (g.status !== 'completed') throw new Error('The film is not finished yet.')
     if (!g.filePath || !existsSync(g.filePath)) {
-      throw new Error("The film's video file is missing (moved or deleted in Finder).")
+      throw new Error(`The film's video file is missing (moved or deleted in ${FILE_MANAGER}).`)
     }
     const title = cleanName(name) || cleanName(generationTitle(g, 60)) || UNNAMED
     const folder = this.freeFolder(title)
@@ -336,7 +337,7 @@ class EditService {
     const row = store.exportRow(store.safeId(exportId))
     if (!row) throw new Error('The export no longer exists.')
     const file = fromStoredPath(row.file_path)
-    if (!existsSync(file)) throw new Error("The export's file is missing (moved or deleted in Finder).")
+    if (!existsSync(file)) throw new Error(`The export's file is missing (moved or deleted in ${FILE_MANAGER}).`)
     const title = cleanName(name) || `${row.sequence_name ?? 'Export'} (export ${shortDate(row.created_at)})`
     const folder = this.freeFolder(title)
     const dir = editDir(folder)
@@ -806,7 +807,7 @@ class EditService {
 
   async timeline(generationId: unknown): Promise<EditTimeline> {
     const g = db.getGeneration(store.safeId(generationId))
-    if (!g?.filePath || !existsSync(g.filePath)) throw new Error('The video file is missing (moved or deleted in Finder).')
+    if (!g?.filePath || !existsSync(g.filePath)) throw new Error(`The video file is missing (moved or deleted in ${FILE_MANAGER}).`)
     const info = await probe(g.filePath)
     const cache = await this.timelineCache(g.filePath, info.hasAudio, info.duration)
     const recorded = g.recipe?.cuts
@@ -954,7 +955,7 @@ class EditService {
       // Every file is checked before anything is copied.
       const probed: { path: string; duration: number }[] = []
       for (const path of files) {
-        const name = path.split('/').pop() ?? path
+        const name = basename(path)
         let duration: number
         try {
           ;({ duration } = await probeAudio(path))
@@ -967,7 +968,7 @@ class EditService {
       const added: EditMedia[] = []
       for (const p of probed) {
         const ext = extname(p.path)
-        const label = (p.path.split('/').pop() ?? 'Audio').slice(0, -ext.length || undefined)
+        const label = (basename(p.path) || 'Audio').slice(0, -ext.length || undefined)
         const media = await this.ops.addMediaFile(edit, p.path, { kind: 'audio', label, duration: p.duration })
         added.push(mediaView(media))
       }
@@ -981,7 +982,7 @@ class EditService {
   async send(versionId: unknown, target: unknown): Promise<{ sequenceId: string; segmentId: string }> {
     const { edit, version } = this.versionOf(versionId)
     if (version.status !== 'completed' || !version.filePath || !existsSync(version.filePath)) {
-      throw new Error("The version's video file is missing (moved or deleted in Finder).")
+      throw new Error(`The version's video file is missing (moved or deleted in ${FILE_MANAGER}).`)
     }
     const t = (target && typeof target === 'object' ? target : {}) as Partial<SendTarget> & Record<string, unknown>
     const sequenceRow = (id: string): { id: string; kind: string; name: string } | undefined =>

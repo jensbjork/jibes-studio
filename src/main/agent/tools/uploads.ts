@@ -1,10 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { extractFrames } from '../../ffmpeg'
+import { IS_MAC } from '../../platform'
 import { MAX_URL_LENGTH } from '../fetch-url'
 import { imageBlock, jpegBlock } from '../images'
 import { localTime, q, requireLibrary } from '../studio'
-import { KIND_WORDS, UPLOAD_CAPS, UPLOAD_KINDS, type UploadKind } from '../upload-check'
+import { IMAGE_FORMATS, KIND_WORDS, UPLOAD_CAPS, UPLOAD_KINDS, type UploadKind } from '../upload-check'
 import { MAX_INLINE_BYTES, type UploadEntry } from '../uploads'
 import { READ_ONLY, WRITE, defineTool, type LabeledImage, type ToolContext } from './kit'
 import { beginUrlUpload } from './sources'
@@ -89,7 +90,7 @@ export function registerUploadTools(server: McpServer, ctx: ToolContext): void {
     'begin_upload',
     {
       title: 'Begin an upload',
-      description: `Sends Studio a file – a picture (JPG, PNG, WebP or HEIC, which becomes JPEG; at most ${UPLOAD_CAPS.image.label}, 16 384 px a side, 80 megapixels), a sound (MP3, WAV, AIFF, FLAC, OGG, M4A or AAC; at most ${UPLOAD_CAPS.audio.label}) or a video (MP4, MOV, M4V, WebM or MKV; at most ${UPLOAD_CAPS.video.label}) – to use with add_asset_images, add_asset_audio, import_still, import_own_clips, add_edit_audio, set_form/set_references, keyframes and board pictures by its upload_id. Give exactly one of: url (Studio fetches it – public addresses only, or a server on your own machine; it waits up to 20 s, else answers status "downloading" – poll get_upload), bytes (the file's exact size: Studio answers a put_url, and you PUT the raw file there, e.g. curl -T <file> -H "Authorization: Bearer <token>" <put_url>; put_path when only the path is known – use the address you reach Studio at) or data_base64 (only for files under ${Math.round(MAX_INLINE_BYTES / 1000)} KB; checked at once). Never a local path. What the file is comes from its bytes, not its name or extension, and it is checked like Studio checks its own files (a picture must decode, a sound must have sound, a video must import). A ready upload lives two hours and can be used by several tools; discard_upload throws it away sooner.`,
+      description: `Sends Studio a file – a picture (${IMAGE_FORMATS}${IS_MAC ? ', which becomes JPEG' : ''}; at most ${UPLOAD_CAPS.image.label}, 16 384 px a side, 80 megapixels), a sound (MP3, WAV, AIFF, FLAC, OGG, M4A or AAC; at most ${UPLOAD_CAPS.audio.label}) or a video (MP4, MOV, M4V, WebM or MKV; at most ${UPLOAD_CAPS.video.label}) – to use with add_asset_images, add_asset_audio, import_still, import_own_clips, add_edit_audio, set_form/set_references, keyframes and board pictures by its upload_id. Give exactly one of: url (Studio fetches it – public addresses only, or a server on your own machine; it waits up to 20 s, else answers status "downloading" – poll get_upload), bytes (the file's exact size: Studio answers a put_url, and you PUT the raw file there, e.g. curl -T <file> -H "Authorization: Bearer <token>" <put_url>; put_path when only the path is known – use the address you reach Studio at) or data_base64 (only for files under ${Math.round(MAX_INLINE_BYTES / 1000)} KB; checked at once). Never a local path. What the file is comes from its bytes, not its name or extension, and it is checked like Studio checks its own files (a picture must decode, a sound must have sound, a video must import). A ready upload lives two hours and can be used by several tools; discard_upload throws it away sooner.`,
       input: {
         kind: kindInput.describe('"image", "audio" or "video".'),
         file_name: z

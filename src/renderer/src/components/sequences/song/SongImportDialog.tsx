@@ -1,8 +1,9 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { DEFAULT_SONG_TARGET_SECONDS } from '@shared/song-window'
 import type { SongImportOptions } from '@shared/types'
-import { ipcErrorMessage, useSeparationStatus } from '../../../lib/hooks'
+import { NO_SEPARATION, ipcErrorMessage, useSeparationStatus } from '../../../lib/hooks'
 import { formatUsd, mediaUrl } from '../../../lib/media'
+import { THIS_COMPUTER, isMac } from '../../../lib/platform'
 import { pauseOthers } from '../../feed/playback'
 import Modal from '../../pickers/Modal'
 import { PauseIcon, PlayIcon } from '../icons'
@@ -154,10 +155,10 @@ export default function SongImportDialog({ path, mode, onCancel, onSubmit }: Pro
           note="Free"
           hint={
             separation === undefined
-              ? 'Checking whether this Mac can…'
+              ? `Checking whether ${THIS_COMPUTER} can…`
               : separable
-                ? 'On this Mac. Singing shots then hear only the voice, which keeps the lips in time.'
-                : (separation.message ?? "This Mac can't separate voices.")
+                ? `On ${THIS_COMPUTER}. Singing shots then hear only the voice, which keeps the lips in time.`
+                : (separation.message ?? (isMac ? "This Mac can't separate voices." : NO_SEPARATION))
           }
         />
 

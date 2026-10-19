@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import type { PromptBlockContext } from '@shared/prompt-blocks'
+import { shortcut } from '../../lib/platform'
 import FocusDialog from './FocusDialog'
 import { caretRect, replaceRange } from './textareaDom'
 import { ALL, useBlockMenu, type BlockMenuControls } from './useBlockMenu'
@@ -120,7 +121,7 @@ export function PromptToolbar({ blocks, count, onExpand, children }: ToolbarProp
           <button
             type="button"
             onClick={onExpand}
-            title="Write in a larger window (⌘⇧F)"
+            title={`Write in a larger window (${shortcut('⌘⇧F')})`}
             className="rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-text"
           >
             ⤢ Larger

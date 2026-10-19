@@ -42,6 +42,7 @@ import {
   toStoredParams,
   toStoredPath
 } from './paths'
+import { FILE_MANAGER } from './platform'
 
 /** Shortest piece of a take that trimming may leave, in seconds. */
 export const MIN_REMAINING_SECONDS = 0.2
@@ -978,7 +979,7 @@ export function ownClipMissing(row: SegmentRow): boolean {
 
 /** Said for clip `number` whose own film is gone (see ownClipMissing). */
 export function ownClipMissingMessage(number: number): string {
-  return `Clip ${number}'s own video is missing (moved or deleted in Finder). Add the file again or generate an AI take.`
+  return `Clip ${number}'s own video is missing (moved or deleted in ${FILE_MANAGER}). Add the file again or generate an AI take.`
 }
 
 /**

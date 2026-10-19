@@ -1,5 +1,6 @@
 import type { Asset } from '@shared/types'
 import { assetAudio, audioCountLabel, englishList } from '../../lib/assets'
+import { TRASH } from '../../lib/platform'
 import { imageCountLabel } from './imageUtils'
 
 // What deleting an asset says, the same in its editor (Delete) and on its row in the list (✕).
@@ -21,9 +22,9 @@ export function deleteAssetQuestion(asset: Asset, name = asset.name): string {
 export function deleteAssetFilesNote(asset: Asset): string {
   const images = asset.images.length > 0
   const audio = assetAudio(asset).length > 0
-  if (!images && !audio) return 'The folder is moved to the Trash.'
+  if (!images && !audio) return `The folder is moved to ${TRASH}.`
   const what = images && audio ? 'The images and sound clips' : images ? 'The images' : 'The sound clips'
-  return `${what} are moved to the Trash – except those generations or clips use, which go to “Referensbilder”.`
+  return `${what} are moved to ${TRASH} – except those generations or clips use, which go to “Referensbilder”.`
 }
 
 /** An outfit's wearers: "Anna and Bo have it as their default outfit and will be left without one." */

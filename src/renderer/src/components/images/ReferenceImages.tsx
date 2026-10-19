@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import type { Asset, AssetKind, Still } from '@shared/types'
+import { fileName } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import AssetPicker from '../pickers/AssetPicker'
 import { KIND_TONE } from '../pickers/assetKinds'
@@ -218,7 +219,7 @@ export default function ReferenceImages({
       ref: 'image',
       target: {
         kind: asset?.kind,
-        label: asset?.name ?? path.split('/').pop() ?? path,
+        label: asset?.name ?? fileName(path),
         path,
         name: pathLabels?.[path] ?? asset?.name ?? (still ? stillSourceLabel(still) : undefined),
         number: photo || undefined,
@@ -288,7 +289,7 @@ export default function ReferenceImages({
           const asset = byPath.get(path)
           const still = stillByPath.get(path)
           const notSent = i >= max
-          const name = path.split('/').pop() ?? path
+          const name = fileName(path)
           const role = pathLabels?.[path]
           const caption = role
             ? { text: role, className: 'bg-black/70' }

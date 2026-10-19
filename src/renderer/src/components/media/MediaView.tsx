@@ -4,6 +4,7 @@ import type { FinishedWork, Generation } from '@shared/types'
 import { useModels } from '../../lib/hooks'
 import { useMediaTab } from '../../lib/mediaTab'
 import type { Intent, Navigate } from '../../lib/navigation'
+import { FILE_MANAGER } from '../../lib/platform'
 import { useFreshGenerationIds, useUnseen } from '../../lib/work'
 import ClipFeed from '../feed/ClipFeed'
 import { useGenerations } from '../feed/useGenerations'
@@ -96,7 +97,7 @@ export default function MediaView({ intent, onIntentHandled, navigate }: Props) 
           )}
           <OpenFolderButton
             target="generations"
-            title="Open the folder “Genereringar” in Finder"
+            title={`Open the folder “Genereringar” in ${FILE_MANAGER}`}
             onError={setFolderError}
             compact
             className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"

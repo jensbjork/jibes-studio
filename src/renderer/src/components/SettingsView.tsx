@@ -1,5 +1,6 @@
 import { useMemo, useRef } from 'react'
 import type { Settings } from '@shared/types'
+import { THIS_COMPUTER } from '../lib/platform'
 import AgentSettingsSection from './agent/AgentSettingsSection'
 import LibrarySection from './library/LibrarySection'
 import AboutSettings from './settings/AboutSettings'
@@ -116,7 +117,7 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
             <SettingsSection
               id={SECTION.tools}
               title="Tools"
-              description="Programs on this Mac that Studio uses."
+              description={`Programs on ${THIS_COMPUTER} that Studio uses.`}
             >
               <ToolsSettings ffmpeg={ffmpeg} />
             </SettingsSection>

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type Ref, type RefObject } from 'react'
 import type { Asset, Still } from '@shared/types'
+import { fileName } from '../lib/library'
 import { mediaUrl } from '../lib/media'
+import { shortcut } from '../lib/platform'
 import { useSeenPictureWhenVisible } from '../lib/work'
 import { assetsByPath } from './pickers/assetRefs'
 import { possessive } from './pickers/audioRefs'
@@ -207,7 +209,7 @@ export default function ImageInput({
       ref: 'image',
       target: {
         kind: asset?.kind,
-        label: asset ? `${asset.name} (photo ${photo})` : (p.split('/').pop() ?? p),
+        label: asset ? `${asset.name} (photo ${photo})` : fileName(p),
         path: p,
         name: asset?.name,
         number: photo || undefined,
@@ -240,7 +242,7 @@ export default function ImageInput({
         role={multiple ? 'list' : undefined}
         aria-label={
           multiple
-            ? `${label}${reorder.enabled ? ' – drag or press ⌥← / ⌥→ to change the order' : ''}`
+            ? `${label}${reorder.enabled ? shortcut(' – drag or press ⌥← / ⌥→ to change the order') : ''}`
             : undefined
         }
         onDragOver={onDragOver}
@@ -260,7 +262,7 @@ export default function ImageInput({
           const renamed = dragging && at !== i
           const raw = caption?.(p)
           const cap = typeof raw === 'string' ? { text: raw } : raw
-          const name = p.split('/').pop()
+          const name = fileName(p)
           const isMissing = missing.has(p)
           const { ref, onDragStart, onKeyDown, ...item } = reorder.itemProps(i)
           const shown = cap?.text ?? name ?? p
@@ -300,7 +302,7 @@ export default function ImageInput({
               aria-label={
                 multiple
                   ? `${overflow ? 'Not sent' : `@Image${at + 1}`}: ${shown}. Enter swaps it` +
-                    (reorder.enabled ? ', move it with ⌥← and ⌥→.' : '.')
+                    (reorder.enabled ? shortcut(', move it with ⌥← and ⌥→.') : '.')
                   : `${label}: ${shown}. Enter swaps it.`
               }
               className={`group relative h-16 w-16 shrink-0 rounded bg-raised outline-none ring-offset-2 ring-offset-panel transition focus-visible:ring-2 focus-visible:ring-muted ${

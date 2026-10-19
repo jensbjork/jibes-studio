@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TranscriptSegment } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { FILE_MANAGER } from '../../lib/platform'
 import { useEditor } from './EditorContext'
 import { fileName, formatClock } from './editorUtils'
 import { usePlayheadValue } from './playerController'
@@ -86,7 +87,7 @@ export default function TextTab({ onTranscribe }: { onTranscribe: () => void }) 
         <p className="mb-2 flex items-center gap-2 text-[11px] text-emerald-300/90">
           Saved: <span className="min-w-0 truncate font-mono">{fileName(saved)}</span>
           <button type="button" onClick={() => window.studio.revealFile(saved)} className={linkButton}>
-            Show in Finder
+            Show in {FILE_MANAGER}
           </button>
         </p>
       )}

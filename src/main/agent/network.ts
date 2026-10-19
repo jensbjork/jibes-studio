@@ -51,24 +51,49 @@ function isLoopback(address: string): boolean {
 const isV4 = (e: NetworkInterfaceInfo): boolean => e.family === 'IPv4' || (e.family as unknown) === 4
 const isV6 = (e: NetworkInterfaceInfo): boolean => e.family === 'IPv6' || (e.family as unknown) === 6
 
+/** The length of an IPv4 netmask's prefix ("255.192.0.0" → 10), or undefined when it isn't one. */
+function prefixLength(netmask: string): number | undefined {
+  const n = ipv4Number(netmask)
+  if (n === undefined) return undefined
+  const bits = n.toString(2).padStart(32, '0')
+  return /^1*0*$/.test(bits) ? bits.replace(/0+$/, '').length : undefined
+}
+
 /**
  * The interfaces Tailscale has set up, by what Tailscale always gives its tunnel rather than by the address
  * range alone: other VPNs (Cloudflare WARP, NetBird) and some hotel, carrier or Starlink networks hand out
- * 100.64.0.0/10 addresses too, and Studio must never listen there. Tailscale's interface is a utun tunnel
- * with a single-address (/32) IPv4 in 100.64.0.0/10 and Tailscale's own IPv6 (fd7a:115c:a1e0::/48) beside it;
- * a Wi-Fi or Ethernet network can't put addresses on a utun interface.
+ * addresses in the same carrier-grade NAT range (100.64/10) too, and Studio must never listen there. Always with
+ * Tailscale's own IPv6 (fd7a:115c:a1e0::/48) beside an IPv4 in that range:
+ * - macOS (and Linux): a utun (tailscale0) tunnel whose IPv4 is a single address (/32); a Wi-Fi or Ethernet network
+ *   can't put addresses on a utun interface.
+ * - Windows: the adapter Tailscale installs, named "Tailscale" (Node gives the adapter's name); its IPv4 netmask may
+ *   be /32 or as wide as the whole range (/10), so it is only required to lie within the range.
+ * `platform` and `interfaces` are given by tests.
  */
-function tailscaleInterfaces(): Map<string, NetworkInterfaceInfo[]> {
+export function pickTailscaleInterfaces(
+  interfaces: NodeJS.Dict<NetworkInterfaceInfo[]>,
+  platform: NodeJS.Platform = process.platform
+): Map<string, NetworkInterfaceInfo[]> {
+  const windows = platform === 'win32'
   const found = new Map<string, NetworkInterfaceInfo[]>()
-  for (const [name, list] of Object.entries(networkInterfaces())) {
-    if (!list || !/^(?:utun|tailscale)\d*$/.test(name)) continue
+  for (const [name, list] of Object.entries(interfaces)) {
+    const named = windows ? /^tailscale(?: \d+)?$/i.test(name) : /^(?:utun|tailscale)\d*$/.test(name)
+    if (!list || !named) continue
     if (!list.some((e) => isV6(e) && isTailscaleIPv6(e.address))) continue
     const v4 = list.filter(
-      (e) => isV4(e) && !e.internal && isTailscaleIPv4(e.address) && e.netmask === '255.255.255.255'
+      (e) =>
+        isV4(e) &&
+        !e.internal &&
+        isTailscaleIPv4(e.address) &&
+        (windows ? (prefixLength(e.netmask) ?? 0) >= 10 : e.netmask === '255.255.255.255')
     )
     if (v4.length) found.set(name, v4)
   }
   return found
+}
+
+function tailscaleInterfaces(): Map<string, NetworkInterfaceInfo[]> {
+  return pickTailscaleInterfaces(networkInterfaces())
 }
 
 /** This Mac's Tailscale IPv4 addresses (normally one, on a utun interface); empty when Tailscale is off. */

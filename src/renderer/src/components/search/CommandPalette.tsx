@@ -12,6 +12,7 @@ import {
 import { createPortal } from 'react-dom'
 import { mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { isModOnly, shortcut } from '../../lib/platform'
 import { SearchIcon } from '../feed/icons'
 import { Spinner } from '../work/StatusMark'
 import { commandEntries, GROUPS, libraryEntries, recentEntries, type Entry, type PaletteActions } from './entries'
@@ -27,9 +28,12 @@ import { usePaletteData } from './usePaletteData'
 /** A dialog that waits for an answer: ⌘K doesn't open over it (it would navigate away underneath). */
 const MODAL = '[aria-modal="true"], [role="alertdialog"]'
 
-/** ⌘K. Not used by the views (⌘F searches a list, ⌘⇧F is focus mode, ⌘↵ sends) or the default macOS menu. */
+/**
+ * ⌘K (Ctrl+K on Windows). Not used by the views (⌘F searches a list, ⌘⇧F is focus mode, ⌘↵ sends) or the default
+ * menu.
+ */
 function isPaletteShortcut(e: KeyboardEvent): boolean {
-  return e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k'
+  return isModOnly(e) && e.key.toLowerCase() === 'k'
 }
 
 let openPalette: (() => void) | undefined
@@ -271,7 +275,7 @@ function Palette({
             <Key>esc</Key> to close
           </span>
           <span className="ml-auto">
-            <Key>⌘K</Key> from anywhere
+            <Key>{shortcut('⌘K')}</Key> from anywhere
           </span>
         </div>
         <span className="sr-only" aria-live="polite">

@@ -10,8 +10,9 @@ import {
   type RefObject
 } from 'react'
 import type { Segment, Sequence, SongLyricLine, SongPart, SongWindow } from '@shared/types'
-import { ipcErrorMessage, useSeparationStatus } from '../../../lib/hooks'
+import { NO_SEPARATION, ipcErrorMessage, useSeparationStatus } from '../../../lib/hooks'
 import { mediaUrl } from '../../../lib/media'
+import { THIS_COMPUTER, isMac, shortcut } from '../../../lib/platform'
 import { pauseOthers } from '../../feed/playback'
 import Popover from '../../pickers/Popover'
 import { Spinner } from '../../work/StatusMark'
@@ -456,8 +457,8 @@ export default function SongStrip({ sequence, selectedId, onSelect, store, flush
               disabled={!!busy || !separation?.available}
               title={
                 separation?.available
-                  ? 'Free, on this Mac: singing shots then hear only the voice'
-                  : (separation?.message ?? "This Mac can't separate voices")
+                  ? `Free, on ${THIS_COMPUTER}: singing shots then hear only the voice`
+                  : (separation?.message ?? (isMac ? "This Mac can't separate voices" : NO_SEPARATION))
               }
               className={button}
             >
@@ -560,7 +561,7 @@ export default function SongStrip({ sequence, selectedId, onSelect, store, flush
                   aria-disabled={!editable || undefined}
                   title={
                     blockedTitle ??
-                    `${formatFrameTime(b)} – drag to move the cut (on the beat; hold ⌥ for anywhere), or ← →`
+                    `${formatFrameTime(b)} – drag to move the cut (on the beat; hold ${shortcut('⌥')} for anywhere), or ← →`
                   }
                   onPointerDown={(e) => dragBoundary(e, i)}
                   onKeyDown={(e) => boundaryKeys(e, i)}

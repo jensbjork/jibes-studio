@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, t
 import { useCreateRequest } from '../../lib/createRequest'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
+import { isModOnly } from '../../lib/platform'
 import Popover from '../pickers/Popover'
 import { CloseIcon, PlusIcon } from '../sequences/icons'
 
@@ -162,10 +163,10 @@ export default function SideList<T extends SideListItem>({
     return () => clearTimeout(t)
   }, [asking, busy, error, held])
 
-  // ⌘F: the search, while this view is the one on screen (only one view is mounted) and no dialog is open.
+  // ⌘F (Ctrl+F on Windows): the search, while this view is the one on screen (only one view is mounted) and no dialog is open.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.defaultPrevented || e.key.toLowerCase() !== 'f') return
+      if (!isModOnly(e) || e.defaultPrevented || e.key.toLowerCase() !== 'f') return
       if (document.querySelector('[aria-modal="true"], [role="alertdialog"]')) return
       e.preventDefault()
       searchRef.current?.focus()

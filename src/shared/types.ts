@@ -2295,7 +2295,16 @@ export interface AgentOpenResult {
 
 // ── IPC surface exposed on window.studio ─────────────────────────────────────
 
+/** The operating system Studio runs on (Node's process.platform; Studio is built for macOS and Windows). */
+export type StudioPlatform = 'darwin' | 'win32' | 'linux'
+
 export interface StudioApi {
+  /**
+   * The operating system, known before anything else loads: the window shows ⌘ or Ctrl, Finder or File Explorer,
+   * and leaves out what this one can't do (voice separation is macOS only).
+   */
+  readonly platform: StudioPlatform
+
   // Settings
   getSettings(): Promise<Settings>
   setApiKey(key: string): Promise<void>

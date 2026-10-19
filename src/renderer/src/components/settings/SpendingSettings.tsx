@@ -3,6 +3,7 @@ import { agentDisplayName } from '@shared/agent-name'
 import { MAX_BUDGET_USD, roomLeft, usdText } from '@shared/budget'
 import type { BudgetSettings, SpendingSummary } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { COMPUTER } from '../../lib/platform'
 import { useWork } from '../../lib/work'
 import { BudgetMeter } from '../BudgetDialog'
 import { MoreAbout, SettingsItem } from './SettingsLayout'
@@ -44,7 +45,7 @@ export default function SpendingSettings({ budget, onChanged }: { budget: Budget
     <>
       <SettingsItem
         title="Spent"
-        help="What Studio has paid Venice for, by your Mac’s calendar. Work still rendering is on its way: it isn’t spent yet, but it counts against the budget."
+        help={`What Studio has paid Venice for, by your ${COMPUTER}’s calendar. Work still rendering is on its way: it isn’t spent yet, but it counts against the budget.`}
       >
         {error && <p className="text-[12px] text-accent">{error}</p>}
         {!spending && !error && <p className="text-[12px] text-muted">Reading…</p>}

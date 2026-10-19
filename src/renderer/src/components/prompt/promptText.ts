@@ -12,6 +12,7 @@ import {
 } from '@shared/prompt-refs'
 import { ASSET_KINDS, type Asset, type AssetKind, type PromptLanguage } from '@shared/types'
 import { ASSET_COPY } from '../../lib/assets'
+import { PATH_SEPARATOR } from '../../lib/platform'
 import { audioRole, bringsVoice, type FormAudio } from '../pickers/audioRefs'
 import {
   audioWord,
@@ -71,7 +72,7 @@ export function audioTitle(audio: FormAudio): string {
 }
 
 export function fileName(path: string): string {
-  return path.split('/').pop() ?? path
+  return path.split(PATH_SEPARATOR).pop() ?? path
 }
 
 /** The numbers in a near miss's suggested spelling ("@Image1, @Image2" for "@Image1-2"; "@Audio1" for "@Ljud1"). */

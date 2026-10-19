@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { LibraryFolderTarget } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { FILE_MANAGER } from '../../lib/platform'
 import FolderIcon from './FolderIcon'
 
 export type RevealTarget = LibraryFolderTarget
@@ -25,7 +26,7 @@ export default function OpenFolderButton({
   target,
   id,
   label = 'Open folder',
-  title = 'Show the folder in Finder',
+  title = `Show the folder in ${FILE_MANAGER}`,
   className = '',
   compact,
   onError

@@ -1,5 +1,6 @@
 import type { FolderInspection, LibraryMode, LibraryStatus } from '@shared/types'
 import { displayPath, isWithin, samePath } from '../../lib/library'
+import { FILE_MANAGER } from '../../lib/platform'
 
 /** What the user can do with a chosen folder, given the library Studio has now. */
 export interface FolderPlan {
@@ -111,7 +112,7 @@ export function planFor(ins: FolderInspection, status: LibraryStatus): FolderPla
             text:
               `The folder already has ${quotedList(ins.conflicts)} with content. Studio uses ${one ? 'that name' : 'those names'} ` +
               `for its own folders, so what is in ${one ? 'it' : 'them'} counts as part of the library and comes along ` +
-              `if you move it. Rename ${one ? 'the folder' : 'the folders'} in Finder first, or choose another folder.`
+              `if you move it. Rename ${one ? 'the folder' : 'the folders'} in ${FILE_MANAGER} first, or choose another folder.`
           }
         : {
             tone: 'info',

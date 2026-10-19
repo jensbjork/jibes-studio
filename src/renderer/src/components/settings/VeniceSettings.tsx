@@ -1,5 +1,9 @@
 import { useState } from 'react'
+import { isMac, isWindows } from '../../lib/platform'
 import { SettingsItem, StatusPill } from './SettingsLayout'
+
+/** Where the key is kept: Electron's safeStorage, which uses the keychain on a Mac and the user account on Windows. */
+const KEY_STORE = isMac ? 'in the macOS keychain' : isWindows ? 'for your Windows user account' : 'on this computer'
 
 /** Settings → Venice: the API key, saved in the macOS keychain, and a test of it. */
 export default function VeniceSettings({ hasApiKey, onChanged }: { hasApiKey: boolean; onChanged: () => void }) {
@@ -29,8 +33,8 @@ export default function VeniceSettings({ hasApiKey, onChanged }: { hasApiKey: bo
       status={hasApiKey ? <StatusPill tone="ok">Saved</StatusPill> : <StatusPill tone="missing">Missing</StatusPill>}
       help={
         <>
-          Create one under <span className="text-text">venice.ai → Settings → API</span>. It’s stored encrypted in
-          the macOS keychain and only sent to Venice.
+          Create one under <span className="text-text">venice.ai → Settings → API</span>. It’s stored encrypted{' '}
+          {KEY_STORE} and only sent to Venice.
         </>
       }
     >

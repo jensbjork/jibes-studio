@@ -109,7 +109,7 @@ export function sanitizeSequenceSong(input: unknown): SequenceSong | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
   const s = input as Record<string, unknown>
   if (typeof s.path !== 'string' || !s.path || !finite(s.duration) || !(s.duration > 0)) return undefined
-  const name = typeof s.name === 'string' && s.name.trim() ? s.name : (s.path.split('/').pop() ?? s.path)
+  const name = typeof s.name === 'string' && s.name.trim() ? s.name : (s.path.split(/[/\\]/).pop() ?? s.path)
   const lyrics = sanitizeLyrics(s.lyrics)
   return {
     path: s.path,

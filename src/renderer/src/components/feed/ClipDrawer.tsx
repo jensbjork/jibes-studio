@@ -4,8 +4,10 @@ import { durationSeconds, kindOfModelId, type Kind } from '@shared/models'
 import { workKey, type Edit, type Generation, type GenerationReview, type VideoModel } from '@shared/types'
 import { ASSET_VIEW } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { fileName } from '../../lib/library'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { markSeen, useSeenWhenVisible } from '../../lib/work'
 import { findTakeOwner, openTakeOwner, takeOwnerLabel, type TakeOwner } from '../../lib/takes'
 import { KIND_TONE } from '../pickers/assetKinds'
@@ -439,7 +441,7 @@ function Actions({
             <ConfirmButton
               question={g.segmentId ? 'Used as a take – delete?' : 'Delete the video?'}
               onConfirm={() => onDelete(g)}
-              title="Moves the video to the Trash"
+              title={`Moves the video to ${TRASH}`}
               className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-accent"
             >
               Delete
@@ -503,7 +505,7 @@ function References({
                   onClick={() => openAsset(r, r.path)}
                   onMouseEnter={() => r.token && onHover(r.token)}
                   onMouseLeave={() => onHover(undefined)}
-                  title={r.asset ? `Open ${r.asset.name} in the library` : 'Show the file in Finder'}
+                  title={r.asset ? `Open ${r.asset.name} in the library` : `Show the file in ${FILE_MANAGER}`}
                   className={`group block w-full overflow-hidden rounded-md border text-left transition ${
                     highlighted && highlighted === r.token ? 'border-white/60' : 'border-line hover:border-muted'
                   } ${r.unsent ? 'opacity-45' : ''}`}
@@ -633,7 +635,7 @@ function Settings({ g, modelName, navigate }: { g: Generation; modelName?: strin
     rows.push([
       'File',
       <span className="break-all text-muted select-text" title={g.filePath}>
-        {g.filePath.split('/').pop()}
+        {fileName(g.filePath)}
       </span>
     ])
   }
@@ -702,14 +704,14 @@ function OwnFilm({ g, navigate }: { g: Generation; navigate?: Navigate }) {
             {g.originalPath && (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="min-w-0 text-muted">
-                  Original file: <span className="break-all text-text select-text">{g.originalPath.split('/').pop()}</span>
+                  Original file: <span className="break-all text-text select-text">{fileName(g.originalPath)}</span>
                 </span>
                 <button
                   type="button"
                   onClick={() => void window.studio.revealFile(g.originalPath!)}
                   className="rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-text"
                 >
-                  Show original in Finder
+                  Show original in {FILE_MANAGER}
                 </button>
               </div>
             )}

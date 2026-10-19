@@ -1,5 +1,6 @@
 import type { KeyboardEvent, RefObject } from 'react'
 import type { Generation } from '@shared/types'
+import { FILE_MANAGER, TRASH, shortcut } from '../../lib/platform'
 import { ScissorsIcon } from '../feed/icons'
 import Popover from '../pickers/Popover'
 import { formatTakeTime } from '../sequences/sequenceUtils'
@@ -80,7 +81,7 @@ export default function TakeMenu({
           <div className="p-3">
             <p className="mb-1">{kept ? `Remove the take from ${place}?` : 'Delete the take?'}</p>
             <p className="mb-3 text-[12px] leading-relaxed text-muted">
-              {kept ? 'The film stays in the Editor.' : 'The video file goes to the Trash.'}
+              {kept ? 'The film stays in the Editor.' : `The video file goes to ${TRASH}.`}
               {!kept && active && (
                 <span className="mt-1.5 block">
                   {owner === 'storyboard'
@@ -126,7 +127,7 @@ export default function TakeMenu({
               className={menuRow}
             >
               <span className="flex-1">Preview without selecting</span>
-              <span className="text-[11px] text-muted">⌥-click</span>
+              <span className="text-[11px] text-muted">{shortcut('⌥-click')}</span>
             </button>
             {onUsePrompt && hasReusablePrompt(take) && (
               <button
@@ -173,7 +174,7 @@ export default function TakeMenu({
                 }}
                 className={menuRow}
               >
-                Show in Finder
+                Show in {FILE_MANAGER}
               </button>
             )}
             <div className="mx-2 my-1 border-t border-line" />

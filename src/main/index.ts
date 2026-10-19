@@ -1,7 +1,18 @@
 import { dirname, join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
-import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  shell,
+  type BrowserWindowConstructorOptions,
+  type MenuItemConstructorOptions,
+  type OpenDialogOptions
+} from 'electron'
 import type {
   EditProgress,
   ExportProgress,
@@ -25,6 +36,7 @@ import { archiveBusyReason, registerArchiveIpc, stopLibraryArchive } from './lib
 import { prepareLibrary, registerLibraryRootIpc } from './library-root'
 import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty, toStoredPath } from './paths'
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
+import { IS_MAC, IS_WINDOWS } from './platform'
 import { attachReviewSummary, registerReviewIpc } from './reviews'
 import { registerSessionIpc } from './session'
 import { registerSpendingIpc } from './spending'
@@ -33,6 +45,7 @@ import { registerSequenceIpc, type SequenceService } from './sequences'
 import { registerSongIpc, type SongService } from './song'
 import { registerSongSyncIpc } from './song-sync'
 import { registerStoryboardIpc, type StoryboardService } from './storyboards'
+import { setTaskbarBadge, showTaskbarBadgeOn } from './taskbar'
 import { acceptConsent, getApiKey, getSettings, setApiKey, setImageSafeMode, setPromptLanguage } from './settings'
 import {
   activeStills,
@@ -62,6 +75,13 @@ if (process.env.STUDIO_PROFILE_DIR) {
   app.setPath('userData', join(process.env.STUDIO_PROFILE_DIR, 'userData'))
   app.setPath('videos', join(process.env.STUDIO_PROFILE_DIR, 'Movies'))
 }
+
+/** electron-builder.yml's appId, put in at build time (electron.vite.config.ts). */
+declare const __STUDIO_APP_ID__: string
+
+// Windows groups the taskbar button, notifications and the Start menu shortcut by this id: the appId, which the
+// installer gives the shortcut. Studio Dev gets its own, so the two never share a button.
+if (IS_WINDOWS) app.setAppUserModelId(process.env.STUDIO_DEV_PROFILE ? `${__STUDIO_APP_ID__}.dev` : __STUDIO_APP_ID__)
 
 // Studio.app and `npm run dev` share settings and the library. Two instances would both poll and download the
 // same paid Venice jobs, so a second launch only brings the running one to the front.
@@ -107,6 +127,14 @@ let dockBadge = 0
 /** Second line of defence behind the agents' tool list: what only the user may do in Studio. */
 const USER_ONLY = 'Only you can do this in Studio.'
 
+/**
+ * macOS: the content runs up under the title bar, the traffic lights inset into it. Windows (and Linux): the system's
+ * own frame, dark on Windows (see whenReady), without a menu bar (see windowsMenu).
+ */
+const WINDOW_CHROME: BrowserWindowConstructorOptions = IS_MAC
+  ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 18 } }
+  : {}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
@@ -115,8 +143,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     backgroundColor: '#0b0b0d',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 18 },
+    ...WINDOW_CHROME,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -124,6 +151,13 @@ function createWindow(): BrowserWindow {
     }
   })
   win.on('ready-to-show', () => win.show())
+  if (IS_WINDOWS) {
+    // The menu's shortcuts work, its bar is never shown: not auto-hidden either, since Alt (Alt+click, Alt+drag in
+    // Studio's lists and timelines) would bring an auto-hidden bar up whenever it is let go.
+    win.setMenuBarVisibility(false)
+    // Windows draws the badge per window, once its taskbar button is there.
+    win.once('show', () => showTaskbarBadgeOn(win))
+  }
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
@@ -148,14 +182,15 @@ function broadcast(channel: string, payload?: unknown): void {
   if (channel !== 'work:change') work?.observe(channel, payload)
 }
 
-/** A new status summary: to the windows, and its count of new and failed work onto the Dock icon. */
+/** A new status summary: to the windows, and its count of new and failed work onto the Dock icon (taskbar button). */
 function sendWork(summary: WorkSummary): void {
   broadcast('work:change', summary)
   const count = summary.total.unseen + summary.total.failed
   if (count === dockBadge) return
   dockBadge = count
   try {
-    app.dock?.setBadge(count ? String(count) : '')
+    if (IS_WINDOWS) setTaskbarBadge(count)
+    else app.dock?.setBadge(count ? String(count) : '')
   } catch (err) {
     console.warn('Could not set the Dock badge:', err)
   }
@@ -568,8 +603,30 @@ function registerIpc(): void {
   registerAgentIpc(agent)
 }
 
+/**
+ * Windows' menu, never shown (createWindow hides its bar), only for its shortcuts: Ctrl+0, Ctrl+= and Ctrl+- zoom,
+ * F11 full screen and, in development only, Ctrl+R reload and Ctrl+Shift+I the developer tools. No Edit menu: text
+ * fields copy, paste and undo by themselves on Windows. macOS keeps Electron's default menu.
+ */
+function windowsMenu(): Menu {
+  const view: MenuItemConstructorOptions[] = [
+    { role: 'resetZoom' },
+    { role: 'zoomIn' },
+    { role: 'zoomOut' },
+    { type: 'separator' },
+    { role: 'togglefullscreen' }
+  ]
+  if (!app.isPackaged) view.push({ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' })
+  return Menu.buildFromTemplate([{ label: 'View', submenu: view }])
+}
+
 void app.whenReady().then(async () => {
   if (!isPrimaryInstance) return
+  if (IS_WINDOWS) {
+    // The native title bar follows the app's dark look rather than the system's light one.
+    nativeTheme.themeSource = 'dark'
+    Menu.setApplicationMenu(windowsMenu())
+  }
   handleMediaProtocol()
   jobs.on('update', (g: Generation) => broadcastGeneration(g))
   registerIpc()

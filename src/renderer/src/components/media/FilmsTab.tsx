@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { workKey, type ExportSummary } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { FILE_MANAGER } from '../../lib/platform'
 import { markSeen, useIsUnseen } from '../../lib/work'
 import { fileName, formatLength } from '../editor/editorUtils'
 import { formatTotalLength } from '../feed/feedText'
@@ -349,7 +350,7 @@ function FilmPlayer({
             }}
             className={action}
           >
-            Show in Finder
+            Show in {FILE_MANAGER}
           </button>
           <button type="button" onClick={onClose} className={action}>
             Close

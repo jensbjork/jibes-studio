@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, type HTMLAttributes, type KeyboardEvent, type Ref } from 'react'
 import type { Asset, AssetKind, BoardImageSource, FinishedWork, Still, StoryboardBoard } from '@shared/types'
+import { shortcut } from '../../lib/platform'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { CloseIcon } from '../sequences/icons'
 import { useDraft, useRegisterFlush, type FlushRegistry } from '../sequences/useDraft'
@@ -127,7 +128,7 @@ export default function BoardCard({
         <div className="flex w-full items-center gap-2 px-0.5" style={{ height: CARD_HEADER_HEIGHT }}>
           <span
             className="text-[12px] font-medium text-muted"
-            title={count > 1 ? 'Drag the image to move the board, or use ⌥← and ⌥→' : undefined}
+            title={count > 1 ? shortcut('Drag the image to move the board, or use ⌥← and ⌥→') : undefined}
           >
             Board {number}
           </span>

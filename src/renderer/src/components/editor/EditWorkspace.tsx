@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { workKey, type EditRange, type VideoModel } from '@shared/types'
 import { ipcErrorMessage, useAudioCatalog, useSeparationStatus } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
+import { FILE_MANAGER, isMac } from '../../lib/platform'
 import { markSeen } from '../../lib/work'
 import { useReportOpenEdit } from '../../lib/workspace'
 import ConsentDialog from '../ConsentDialog'
@@ -20,7 +21,7 @@ import VersionsPanel from './VersionsPanel'
 
 // One edit open, beside the Editor's list: the header, the player and the timeline, and Actions above Versions on the
 // right. Operations work on the current version; the player can show another one beside it (Compare ⇄). Keys: space,
-// J/K/L, ← → (frames, with ⇧ seconds), I/O, Esc, ⌘Z/⌘⇧Z.
+// J/K/L, ← → (frames, with ⇧ seconds), I/O, Esc, ⌘Z/⌘⇧Z (Ctrl+Z, Ctrl+Y on Windows).
 
 interface Notice {
   tone: 'error' | 'success'
@@ -217,6 +218,12 @@ export default function EditWorkspace({
         else k.undo()
         return
       }
+      // Ctrl+Y is redo on Windows too (Ctrl+Shift+Z above works as well).
+      if (!isMac && e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        k.redo()
+        return
+      }
       if (mod || e.altKey) return
       switch (e.key.toLowerCase()) {
         case ' ':
@@ -323,7 +330,7 @@ export default function EditWorkspace({
             onClick={() => window.studio.revealFile(path)}
             className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
           >
-            Show in Finder
+            Show in {FILE_MANAGER}
           </button>
         </span>
       )

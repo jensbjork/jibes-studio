@@ -9,6 +9,7 @@ import {
 import { workKey, type Asset, type AssetAudio, type EditJob, type FinishedWork } from '@shared/types'
 import { ASSET_COPY, ASSET_FOLDER, assetAudio, originText, type AudioCopy } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { markSeen, useIsUnseen, useSeenWhenVisible, useUnseen } from '../../lib/work'
 import OpenFolderButton from '../library/OpenFolderButton'
 import ConfirmButton from '../sequences/ConfirmButton'
@@ -308,7 +309,7 @@ export default function AssetSounds({
           <OpenFolderButton
             target={ASSET_FOLDER[asset.kind]}
             id={asset.id}
-            title={`Show the folder with the ${copy.clips} in Finder`}
+            title={`Show the folder with the ${copy.clips} in ${FILE_MANAGER}`}
             onError={onError}
             className="rounded-md px-2.5 py-1 text-muted hover:bg-raised hover:text-text disabled:opacity-40"
           />
@@ -626,7 +627,7 @@ function ClipRow({
             question={`Remove ${copy.clipDefinite}?`}
             confirmLabel="Remove"
             onConfirm={onRemove}
-            title={`Remove ${copy.clipDefinite} – the file is moved to the Trash, or to “Referensbilder” if generations have used it`}
+            title={`Remove ${copy.clipDefinite} – the file is moved to ${TRASH}, or to “Referensbilder” if generations have used it`}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-accent"
           >
             <span aria-hidden>✕</span>

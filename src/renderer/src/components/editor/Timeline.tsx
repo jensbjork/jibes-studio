@@ -10,6 +10,7 @@ import {
 } from 'react'
 import type { EditRange, EditTimeline } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { shortcut } from '../../lib/platform'
 import Popover from '../pickers/Popover'
 import { useCardRun, useEditor } from './EditorContext'
 import {
@@ -216,7 +217,7 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
             type="button"
             onClick={() => zoomBy(-1)}
             disabled={zoom === ZOOMS[0]}
-            title="Zoom out (⌘ + scroll)"
+            title={`Zoom out (${shortcut('⌘ + scroll')})`}
             aria-label="Zoom out"
             className="flex h-6 w-6 items-center justify-center rounded transition hover:bg-raised hover:text-text disabled:opacity-30 disabled:hover:bg-transparent"
           >
@@ -226,7 +227,7 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
             type="button"
             onClick={() => zoomBy(1)}
             disabled={zoom === ZOOMS[ZOOMS.length - 1]}
-            title="Zoom in (⌘ + scroll)"
+            title={`Zoom in (${shortcut('⌘ + scroll')})`}
             aria-label="Zoom in"
             className="flex h-6 w-6 items-center justify-center rounded transition hover:bg-raised hover:text-text disabled:opacity-30 disabled:hover:bg-transparent"
           >

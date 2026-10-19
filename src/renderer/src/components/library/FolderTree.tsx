@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { FILE_MANAGER, isMac } from '../../lib/platform'
 import FolderIcon from './FolderIcon'
 import type { RevealTarget } from './OpenFolderButton'
 
@@ -81,10 +82,13 @@ const ENTRIES: Entry[] = [
   }
 ]
 
+// Hidden on a Mac by its leading dot; Windows shows it.
 const HIDDEN = {
   name: '.studio',
-  explanation: "The database and thumbnails. Hidden in Finder – don't change anything there.",
-  example: 'hidden – database and thumbnails'
+  explanation: isMac
+    ? "The database and thumbnails. Hidden in Finder – don't change anything there."
+    : "The database and thumbnails – don't change anything there.",
+  example: isMac ? 'hidden – database and thumbnails' : 'database and thumbnails'
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -121,7 +125,7 @@ export default function FolderTree({ rootName, rootDetail, detail, onOpen }: Pro
 
   return (
     <div className="text-[12px] leading-[18px]">
-      <Row onClick={onOpen && (() => onOpen('root'))} title="Open the library folder in Finder">
+      <Row onClick={onOpen && (() => onOpen('root'))} title={`Open the library folder in ${FILE_MANAGER}`}>
         <FolderIcon size={14} className="mt-0.5 shrink-0 text-accent" />
         <span className="shrink-0 font-medium text-text">{rootName}</span>
         {rootDetail && (
@@ -144,7 +148,7 @@ export default function FolderTree({ rootName, rootDetail, detail, onOpen }: Pro
               <span className="absolute left-[15px] h-px w-3.5 bg-line" style={{ top: TICK_TOP }} />
               <Row
                 onClick={onOpen && row.target ? () => onOpen(row.target!) : undefined}
-                title={`Open “${row.name}” in Finder`}
+                title={`Open “${row.name}” in ${FILE_MANAGER}`}
               >
                 <FolderIcon size={13} className={`mt-0.5 shrink-0 ${hidden ? 'text-muted/50' : 'text-muted'}`} />
                 <span className={`w-28 shrink-0 ${hidden ? 'text-muted' : 'text-text'}`}>{row.name}</span>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 import type { SavedPrompt } from '@shared/types'
 import { usePromptsState } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
+import { shortcut } from '../../lib/platform'
 import { loadTab, saveTab, type PromptsTab } from './learning-utils'
 import LearningsView from './LearningsView'
 import PromptEditor from './PromptEditor'
@@ -299,7 +300,7 @@ function EmptyEditor({ hasPrompts, onNew }: { hasPrompts: boolean; onNew: () => 
         {hasPrompts ? (
           <div className="text-center text-muted">
             <p>Pick a prompt in the list, or create a new one.</p>
-            <p className="mt-1 text-[11px]">⌘ F to search · ↑ ↓ to browse · Enter to open in Generate</p>
+            <p className="mt-1 text-[11px]">{shortcut('⌘ F')} to search · ↑ ↓ to browse · Enter to open in Generate</p>
           </div>
         ) : (
           <div className="max-w-md text-center">

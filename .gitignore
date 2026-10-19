@@ -1,10 +1,14 @@
 # Dependencies
 node_modules/
 
-# Build output (electron-vite → out/, electron-builder → dist/, native helpers → build/bin/)
+# Build output (electron-vite → out/, electron-builder → dist/, native helpers → build/bin/, the Windows build's
+# ffmpeg → build/ffmpeg-win/)
 out/
 dist/
 build/bin/
+build/ffmpeg-win/
+build/ffmpeg-win.part/
+build/.ffmpeg-*.part
 *.tsbuildinfo
 
 # Test and coverage output

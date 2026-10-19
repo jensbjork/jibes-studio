@@ -3,6 +3,7 @@ import type { Sequence } from '@shared/types'
 import { withBudgetConfirm } from '../../../lib/budget'
 import { ipcErrorMessage } from '../../../lib/hooks'
 import { formatUsd } from '../../../lib/media'
+import { isMac } from '../../../lib/platform'
 import Popover from '../../pickers/Popover'
 import { LyricsOptions, useLyricsModels } from './lyricsModels'
 
@@ -91,7 +92,9 @@ export function TranscribePanel({ sequence, onTranscribe, onDone, onError }: Pan
         <p className="mt-0.5 text-[11px] leading-snug text-muted">
           {sequence.song?.vocalsPath
             ? 'From the separated vocals, which keeps the words clean.'
-            : 'From the whole song – separating the vocals first gives cleaner words.'}{' '}
+            : isMac
+              ? 'From the whole song – separating the vocals first gives cleaner words.'
+              : 'From the whole song.'}{' '}
           Each clip then knows what is sung in it.
         </p>
       </div>

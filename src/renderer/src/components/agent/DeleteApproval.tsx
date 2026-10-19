@@ -3,6 +3,7 @@ import type { ApprovalDeleteItem, ApprovalDeleteRequest, ApprovalRequest, Delete
 import { verifyApproval } from '../../lib/agent'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
+import { TRASH } from '../../lib/platform'
 import AssetIcon from '../assets/AssetIcon'
 import { clipFileName, formatDuration } from '../assets/audioUtils'
 import AudioPlayButton from '../pickers/AudioPlayButton'
@@ -41,7 +42,7 @@ const GROUP_ORDER = [
 ]
 
 const TRASH_NOTE =
-  'The files go to the Trash – whatever is used elsewhere is kept in “Referensbilder”. It can’t be undone in Studio.'
+  `The files go to ${TRASH} – whatever is used elsewhere is kept in “Referensbilder”. It can’t be undone in Studio.`
 
 /** How often the open dialog checks the request again. */
 const CHECK_MS = 2000

@@ -1,4 +1,5 @@
 import type { KeyboardEvent, ReactNode, RefObject } from 'react'
+import { shortcut } from '../../lib/platform'
 import { SearchIcon } from '../feed/icons'
 import { CloseIcon } from '../sequences/icons'
 
@@ -79,7 +80,7 @@ export function SearchField({
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         aria-label={placeholder.replace(/…$/, '')}
-        title={`${placeholder.replace(/…$/, '')} (⌘ F)`}
+        title={`${placeholder.replace(/…$/, '')} (${shortcut('⌘ F')})`}
         className="h-7 w-full rounded-md border border-line bg-raised pl-7 pr-7 text-[12px] outline-none focus:border-muted"
       />
       {value && (

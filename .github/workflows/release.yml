@@ -1,8 +1,10 @@
 name: Release
 
-# Pushing a version tag (v0.2.0) builds Studio.app on an Apple Silicon runner and publishes it as a GitHub release:
-# Studio-mac-arm64.zip (what install.sh downloads) and Studio-mac-arm64.dmg (for a download by hand).
-# "Run workflow" builds the same files without publishing anything, as an artifact of the run.
+# Pushing a version tag (v0.3.0) builds Studio on GitHub's runners and publishes one release with four files:
+#   Studio-mac-arm64.zip (what install.sh downloads) and Studio-mac-arm64.dmg (for a download by hand) – Apple Silicon
+#   Studio-win-x64-setup.exe (the installer) and Studio-win-x64.zip (portable) – 64-bit Windows
+# The Windows build is started and checked first (scripts/smoke-test.mjs); nothing is published unless both builds pass.
+# "Run workflow" builds the same files without publishing anything, as artifacts of the run.
 
 on:
   push:
@@ -10,14 +12,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build:
+  mac:
     name: Build Studio.app
     runs-on: macos-latest
     timeout-minutes: 30
@@ -66,14 +68,102 @@ jobs:
           path: |
             dist/Studio-mac-arm64.zip
             dist/Studio-mac-arm64.dmg
+          if-no-files-found: error
           retention-days: 14
 
-      - name: Publish the release
+  windows:
+    name: Build Studio for Windows
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Check the version
         if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          want="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match package.json ($want)." >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The pinned ffmpeg build (URL and SHA-256 in the script), unpacked into build/ffmpeg-win; --check runs it and
+      # fails unless it has every encoder, muxer and filter Studio uses.
+      - name: Fetch ffmpeg
+        run: node scripts/fetch-ffmpeg-win.mjs --check
+
+      # The Swift voice separation helper is macOS only: build-helpers isn't run here.
+      - name: Build
+        run: npx electron-vite build
+
+      # Unsigned: SmartScreen asks once ("More info → Run anyway", see the README). Nothing native is rebuilt: Studio
+      # loads better-sqlite3's own Node-API binary (prebuilds/win32-x64.node), which works in Electron as it is.
+      - name: Package
+        run: npx electron-builder --win nsis zip --x64 --publish never -c.npmRebuild=false
+
+      # Starts dist/win-unpacked/Studio.exe with a throwaway profile and checks over the DevTools protocol that the
+      # window shows Studio, that the bundled ffmpeg reports its version, that a new library opens and Settings renders.
+      - name: Smoke test
+        run: node scripts/smoke-test.mjs dist/win-unpacked/Studio.exe --bundled-ffmpeg --screenshot dist/smoke-test-windows.png
+
+      - name: Upload the smoke test's screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-windows
+          path: dist/smoke-test-windows.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Studio-win-x64
+          path: |
+            dist/Studio-win-x64-setup.exe
+            dist/Studio-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download the builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Studio-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
             dist/Studio-mac-arm64.zip dist/Studio-mac-arm64.dmg \
+            dist/Studio-win-x64-setup.exe dist/Studio-win-x64.zip \
             --title "Studio $GITHUB_REF_NAME" \
             --generate-notes

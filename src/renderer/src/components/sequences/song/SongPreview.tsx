@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { Sequence } from '@shared/types'
 import { mediaUrl } from '../../../lib/media'
+import { isMac } from '../../../lib/platform'
 import { pauseOthers } from '../../feed/playback'
 import { CloseIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon } from '../icons'
 import { formatClock, readyTake } from '../sequenceUtils'
@@ -190,7 +191,8 @@ export default function SongPreview({ sequence, startSegmentId, onClose }: Props
         onEnded={() => setEnded(true)}
         className="hidden"
       />
-      <div className="drag flex h-12 shrink-0 items-center gap-3 pl-24 pr-4">
+      {/* Over the whole window: on a Mac the traffic lights are at the left of this bar. */}
+      <div className={`drag flex h-12 shrink-0 items-center gap-3 pr-4 ${isMac ? 'pl-24' : 'pl-4'}`}>
         <span className="truncate font-medium text-white/90">{sequence.name}</span>
         <span className="shrink-0 text-[12px] text-white/50">Preview · with the song</span>
         <button

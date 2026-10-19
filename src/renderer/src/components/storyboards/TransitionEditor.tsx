@@ -4,6 +4,7 @@ import { workKey, type Generation, type Storyboard, type StoryboardTransition, t
 import { variantsPrice } from '@shared/variants'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
+import { shortcut } from '../../lib/platform'
 import { useVariantCount, withVariants } from '../../lib/variants'
 import { markSeen } from '../../lib/work'
 import VariantPicker from '../VariantPicker'
@@ -575,8 +576,8 @@ export default function TransitionEditor({
               title={
                 blocked ??
                 (count > 1
-                  ? `Sends ${count} takes of the clip to Venice at once (⌘ + Enter in the prompt)`
-                  : 'Sends the clip to Venice (⌘ + Enter in the prompt)')
+                  ? `Sends ${count} takes of the clip to Venice at once (${shortcut('⌘ + Enter')} in the prompt)`
+                  : `Sends the clip to Venice (${shortcut('⌘ + Enter')} in the prompt)`)
               }
               className={`${primaryButton} min-w-0 flex-1 py-2`}
             >

@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { EditVersion } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { FILE_MANAGER, shortcut } from '../../lib/platform'
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon } from '../sequences/icons'
 import { useEditor } from './EditorContext'
 import { formatClock, markedIn, markedOut, versionName } from './editorUtils'
@@ -56,7 +57,7 @@ export default function Player({ current, other, comparing, onCompare, canUndo, 
           <IconButton title="To the start" onClick={() => player.seek(selection?.start ?? 0)}>
             <PrevIcon size={12} />
           </IconButton>
-          <IconButton title="One frame back (←, ⇧← one second)" onClick={() => player.stepFrames(-1)}>
+          <IconButton title={`One frame back (←, ${shortcut('⇧←')} one second)`} onClick={() => player.stepFrames(-1)}>
             <FrameBackIcon size={13} />
           </IconButton>
           <button
@@ -68,7 +69,7 @@ export default function Player({ current, other, comparing, onCompare, canUndo, 
           >
             {state.playing ? <PauseIcon size={12} /> : <PlayIcon size={12} className="translate-x-px" />}
           </button>
-          <IconButton title="One frame forward (→, ⇧→ one second)" onClick={() => player.stepFrames(1)}>
+          <IconButton title={`One frame forward (→, ${shortcut('⇧→')} one second)`} onClick={() => player.stepFrames(1)}>
             <FrameForwardIcon size={13} />
           </IconButton>
           <IconButton title="To the end" onClick={() => player.seek(selection?.end ?? duration)}>
@@ -112,10 +113,10 @@ export default function Player({ current, other, comparing, onCompare, canUndo, 
             <CompareIcon size={12} />
             {other ? `Compare${comparing ? '' : ` with v${other.number}`}` : 'Compare'}
           </TextButton>
-          <IconButton title="Undo – go back to the version before (⌘Z)" onClick={onUndo} disabled={!canUndo}>
+          <IconButton title={`Undo – go back to the version before (${shortcut('⌘Z')})`} onClick={onUndo} disabled={!canUndo}>
             <UndoIcon size={13} />
           </IconButton>
-          <IconButton title="Redo – go to the newest version after (⌘⇧Z)" onClick={onRedo} disabled={!canRedo}>
+          <IconButton title={`Redo – go to the newest version after (${shortcut('⌘⇧Z')})`} onClick={onRedo} disabled={!canRedo}>
             <RedoIcon size={13} />
           </IconButton>
         </div>
@@ -146,7 +147,7 @@ function VideoOf({ version, player, visible }: { version: EditVersion; player: P
 
   if (!path || version.generation.fileMissing) {
     return visible ? (
-      <p className="px-6 text-center text-muted">The film file for {versionName(version)} is missing (moved or deleted in Finder).</p>
+      <p className="px-6 text-center text-muted">The film file for {versionName(version)} is missing (moved or deleted in {FILE_MANAGER}).</p>
     ) : null
   }
   return (

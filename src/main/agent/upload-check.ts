@@ -5,11 +5,12 @@ import { promisify } from 'node:util'
 import { probeAudio } from '../ffmpeg'
 import { inspectVideoFiles } from '../imports'
 import { decodeImageFile } from '../input-image'
+import { IS_MAC } from '../platform'
 
 // What an agent's upload is, told from its bytes – never from its name or a server's Content-Type – and then checked
 // the way Studio itself would read it: a picture must decode (and not be a decompression bomb), a sound must have
 // sound, a video must pass the own-clip import's inspection. HEIC photos (iPhone) are converted to JPEG with macOS'
-// own `sips`, since nothing else in Studio reads them.
+// own `sips`, since nothing else in Studio reads them; elsewhere (Windows) they are refused with a plain reason.
 
 const execFileAsync = promisify(execFile)
 
@@ -36,6 +37,12 @@ const MIN_SOUND_SECONDS = 0.05
 const SIPS = '/usr/bin/sips'
 const SIPS_TIMEOUT_MS = 120_000
 
+/** The picture formats Studio takes: HEIC only where macOS converts it. */
+export const IMAGE_FORMATS = IS_MAC ? 'JPG, PNG, WebP or HEIC' : 'JPG, PNG or WebP'
+
+/** A HEIC photo where there is no macOS to convert it. */
+export const HEIC_UNSUPPORTED = 'HEIC images can only be converted on macOS. Send the picture as JPG or PNG instead.'
+
 /** "an image" / "images" … for the messages. */
 export const KIND_WORDS: Readonly<Record<UploadKind, { one: string; plural: string }>> = {
   image: { one: 'an image', plural: 'images' },
@@ -45,7 +52,7 @@ export const KIND_WORDS: Readonly<Record<UploadKind, { one: string; plural: stri
 
 /** Says that the bytes are not what the agent said they were. */
 export function notOfKind(kind: UploadKind): string {
-  if (kind === 'image') return 'The file is not an image in JPG, PNG, WebP or HEIC.'
+  if (kind === 'image') return `The file is not an image in ${IMAGE_FORMATS}.`
   if (kind === 'audio') return 'The file is not a sound in MP3, WAV, AIFF, FLAC, OGG, M4A or AAC.'
   return 'The file is not a video in MP4, MOV, M4V, WebM or MKV.'
 }
@@ -302,6 +309,7 @@ export async function checkUpload(kind: UploadKind, path: string, sniffed: Sniff
     let file = path
     let mime = sniffed.mime
     if (sniffed.heic) {
+      if (!IS_MAC) throw new Error(HEIC_UNSUPPORTED)
       const stated = await sipsSize(path)
       if (!stated) throw new Error(notOfKind('image'))
       if (!sizeAllowed(stated)) throw new Error(IMAGE_TOO_LARGE)

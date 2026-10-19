@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ArchiveProgress, LibraryStatus } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { displayPath, folderName } from '../../lib/library'
+import { ARCHIVE_UNAVAILABLE, FILE_MANAGER } from '../../lib/platform'
 import DevBadge from '../DevBadge'
 import FolderDecision from './FolderDecision'
 import FolderTree from './FolderTree'
@@ -88,8 +89,8 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
                 </span>
               </p>
               <p className="mt-2 leading-relaxed text-muted">
-                If it's on an external disk, connect the disk and try again. If you moved or renamed the folder in
-                Finder, you can choose it where it is now.
+                If it's on an external disk, connect the disk and try again. If you moved or renamed the folder in{' '}
+                {FILE_MANAGER}, you can choose it where it is now.
               </p>
             </>
           ) : (
@@ -98,7 +99,7 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
               <p className="mt-2 leading-relaxed text-muted">
                 Choose a library folder on your computer. Studio keeps characters, environments, products, outfits,
                 poses, reference images, generated videos, own clips, sequences, storyboards and edits there in
-                clearly named folders, so you can look around in Finder whenever you like.
+                clearly named folders, so you can look around in {FILE_MANAGER} whenever you like.
               </p>
               {legacy && (
                 <p className="mt-3 rounded-md border border-line bg-panel px-3 py-2 text-[12px] leading-relaxed text-muted">
@@ -171,7 +172,8 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
             {choice.error && <p className="mt-3 text-[12px] text-accent select-text">{choice.error}</p>}
           </div>
 
-          <ImportArchive disabled={busy || choice.checking} />
+          {/* Off a Mac main can't unpack an exported library (ARCHIVE_UNAVAILABLE): not offered. */}
+          {!ARCHIVE_UNAVAILABLE && <ImportArchive disabled={busy || choice.checking} />}
 
           <p className="mt-8 text-[11px] leading-relaxed text-muted">
             You can change the folder later in Settings. Everything you do is saved in the library folder, so it can

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { FinishedWork, RunningWork, StoryboardSummary } from '@shared/types'
+import { TRASH } from '../../lib/platform'
 import { useOwnerWork, useRunning, useUnseen, useViewWork } from '../../lib/work'
 import SideList, { SideListRow, SideListThumb, type SideRowControl } from '../library/SideList'
 import MarkViewSeen from '../takes/MarkViewSeen'
@@ -80,7 +81,7 @@ export default function StoryboardList({ storyboards, selectedId, creating, onSe
       searchPlaceholder="Search storyboards"
       emptyText="No storyboards yet. Lay out a film’s key moments as images and generate the clips between them."
       deleteNote={() =>
-        'The clips and exported films stay; the storyboard’s images that nothing else uses are moved to the Trash.'
+        `The clips and exported films stay; the storyboard’s images that nothing else uses are moved to ${TRASH}.`
       }
       onDelete={(s, next) => onDelete(s.id, next?.id)}
       renderRow={(s, control) => (

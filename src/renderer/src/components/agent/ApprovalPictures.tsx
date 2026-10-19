@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
 import type { Asset, AssetKind } from '@shared/types'
+import { fileName } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import { KIND_TONE } from '../pickers/assetKinds'
 import { useTokenCard } from '../pickers/ReferenceCard'
@@ -54,7 +55,7 @@ export function PictureHover({
       ref: 'image',
       target: {
         kind: photo?.asset.kind ?? kind,
-        label: photo ? `${photo.asset.name} (photo ${photo.number})` : (name ?? path.split('/').pop() ?? path),
+        label: photo ? `${photo.asset.name} (photo ${photo.number})` : (name ?? fileName(path)),
         path,
         name: photo?.asset.name ?? name,
         number: photo?.number,
@@ -63,7 +64,7 @@ export function PictureHover({
     },
     onLight && { highlight: badge, onHighlight: (key) => onLight(key !== undefined) }
   )
-  const what = photo ? `${photo.asset.name}, photo ${photo.number}` : (name ?? path.split('/').pop() ?? path)
+  const what = photo ? `${photo.asset.name}, photo ${photo.number}` : (name ?? fileName(path))
   return (
     <>
       <div tabIndex={0} aria-label={`${badge}: ${what}`} {...hover} className={className} style={style}>

@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { encodeAudioClip, extractAudioPreview, extractFrames, probe } from '../ffmpeg'
+import { FILE_MANAGER } from '../platform'
 import { jpegBlock, mp3Block, type AudioBlock } from './images'
 import type { LabeledImage } from './tools/kit'
 
@@ -53,7 +54,7 @@ export function spreadTimes(from: number, to: number, count: number): number[] {
 /** The video exists on disk; tools say so when it doesn't. */
 export function requireVideoFile(path: string | undefined, what: string): string {
   if (!path) throw new Error(`${what} has no video file.`)
-  if (!existsSync(path)) throw new Error(`${what} is no longer on disk (moved or deleted in Finder?).`)
+  if (!existsSync(path)) throw new Error(`${what} is no longer on disk (moved or deleted in ${FILE_MANAGER}?).`)
   return path
 }
 

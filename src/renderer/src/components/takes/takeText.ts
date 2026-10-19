@@ -5,6 +5,7 @@
 import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-label'
 import type { FinishedWork, Generation, RunningWork, WorkCounts } from '@shared/types'
 import { formatUsd } from '../../lib/media'
+import { FILE_MANAGER } from '../../lib/platform'
 import { formatClock, formatTakeTime, isPending, takeDuration, takeProgress } from '../sequences/sequenceUtils'
 
 /** A take that can be played and chosen: finished, with its file on disk. */
@@ -80,7 +81,7 @@ export function takeInfo(take: Generation, modelName: string): { text: string; t
   const title = generationTitle(take)
   if (take.fileMissing) {
     const when = formatTakeTime(take.createdAt)
-    return { text: `${when} · The video file is gone (moved or deleted in Finder).`, tone: 'muted' }
+    return { text: `${when} · The video file is gone (moved or deleted in ${FILE_MANAGER}).`, tone: 'muted' }
   }
   if (kind === 'own') {
     const parts = ['Own clip', title]

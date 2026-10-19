@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FfmpegStatus } from '@shared/types'
-import { ipcErrorMessage, useSeparationStatus } from '../../lib/hooks'
+import { NO_SEPARATION, ipcErrorMessage, useSeparationStatus } from '../../lib/hooks'
+import { FILE_MANAGER, isMac } from '../../lib/platform'
 import CopyButton from '../agent/CopyButton'
 import { SettingsItem, StatusPill } from './SettingsLayout'
 
@@ -36,7 +37,7 @@ export function useFfmpegStatus(): FfmpegCheck {
   return { status, checking, check }
 }
 
-/** Settings → Tools: the programs on this Mac that Studio uses, ffmpeg and Apple's voice separation. */
+/** Settings → Tools: the programs on this Mac (or PC) that Studio uses, ffmpeg and Apple's voice separation. */
 export default function ToolsSettings({ ffmpeg }: { ffmpeg: FfmpegCheck }) {
   return (
     <>
@@ -75,7 +76,7 @@ function FfmpegSetting({ status, checking, check }: FfmpegCheck) {
           {status.path && (
             <button
               onClick={() => window.studio.revealFile(status.path!)}
-              title="Show in Finder"
+              title={`Show in ${FILE_MANAGER}`}
               className="mt-1.5 block max-w-full truncate pl-4 font-mono text-xs text-muted hover:text-text"
             >
               {status.path}
@@ -88,16 +89,21 @@ function FfmpegSetting({ status, checking, check }: FfmpegCheck) {
             <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />
             <span className="select-text">{status.message ?? 'ffmpeg wasn’t found.'}</span>
           </p>
-          <p className="mt-3 text-muted">Install it with Homebrew in Terminal:</p>
-          <div className="mt-1.5 flex items-center gap-2">
-            <code className="flex-1 rounded-md border border-line bg-bg px-3 py-2 font-mono text-xs select-text">
-              {INSTALL_COMMAND}
-            </code>
-            <CopyButton text={INSTALL_COMMAND} className="rounded-md border border-line px-3 py-2 hover:bg-raised" />
-          </div>
+          {/* On Windows ffmpeg comes with Studio: the message says how to get it back. */}
+          {isMac && (
+            <>
+              <p className="mt-3 text-muted">Install it with Homebrew in Terminal:</p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <code className="flex-1 rounded-md border border-line bg-bg px-3 py-2 font-mono text-xs select-text">
+                  {INSTALL_COMMAND}
+                </code>
+                <CopyButton text={INSTALL_COMMAND} className="rounded-md border border-line px-3 py-2 hover:bg-raised" />
+              </div>
+            </>
+          )}
           <p className="mt-2 text-[11px] leading-relaxed text-muted">
-            Without ffmpeg you can still generate, but not continue from the previous clip or export sequences. If it
-            isn’t found after installing, restart Studio.
+            Without ffmpeg you can still generate, but not continue from the previous clip or export sequences.
+            {isMac && ' If it isn’t found after installing, restart Studio.'}
           </p>
         </div>
       )}
@@ -117,7 +123,8 @@ function FfmpegSetting({ status, checking, check }: FfmpegCheck) {
 
 /**
  * Voice separation: whether this Mac can tell the voice from the background (Apple's built-in sound isolation, used
- * by the Editor for Remove the voice, Only the voice and keeping the background under a new voice).
+ * by the Editor for Remove the voice, Only the voice and keeping the background under a new voice). Never on Windows,
+ * where main says so.
  */
 function VoiceSeparationSetting() {
   const status = useSeparationStatus()
@@ -129,7 +136,7 @@ function VoiceSeparationSetting() {
         (status.available ? (
           <StatusPill tone="ok">Available</StatusPill>
         ) : (
-          <StatusPill tone="neutral">Missing</StatusPill>
+          <StatusPill tone="neutral">{isMac ? 'Missing' : 'macOS only'}</StatusPill>
         ))
       }
       help="Used in the Editor to remove the voice, keep only the voice, or change the voice and keep music and effects."
@@ -146,7 +153,7 @@ function VoiceSeparationSetting() {
             <span className="select-text">
               {status.available
                 ? `Apple (built in, ${status.quality === 'standard' ? 'standard quality' : 'high quality'})`
-                : (status.message ?? "Voice separation isn't available on this Mac.")}
+                : (status.message ?? NO_SEPARATION)}
             </span>
           </p>
           {!status.available && (

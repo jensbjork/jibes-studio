@@ -110,6 +110,7 @@ import {
   timeStamp,
   tmpDir
 } from './paths'
+import { FILE_MANAGER, IS_MAC } from './platform'
 import { cloneInto, placeFile, serialized } from './references'
 import { getApiKey } from './settings'
 import { imageRequestBytes, type VeniceClient } from './venice'
@@ -167,7 +168,9 @@ export const CLOSED = 'Studio was closed before all parts were sent. Continue to
 export const PRICE_CHANGED = 'The price has changed – check it and try again.'
 export const BUSY = 'An edit is in progress. Wait until it is done and try again.'
 const CONFIRM_PRICE = 'Confirm the price before the operation runs.'
-const NO_SEPARATION = "Voice separation isn't available on this Mac."
+const NO_SEPARATION = IS_MAC
+  ? "Voice separation isn't available on this Mac."
+  : 'Voice separation is only available on macOS.'
 const NO_KEY = 'Add the API key in Settings.'
 const NO_VOICE_CHANGER = "Venice doesn't offer voice change right now — use Re-record lines instead."
 const CONSENT_MISSING = 'Tick that you have the right to use the voice (Characters → Voice).'
@@ -650,7 +653,7 @@ export class EditOps {
     }
     if (!base) throw new Error('The edit has no versions left.')
     if (base.status !== 'completed' || !base.filePath || !existsSync(base.filePath)) {
-      throw new Error("The version's video file is missing (moved or deleted in Finder).")
+      throw new Error(`The version's video file is missing (moved or deleted in ${FILE_MANAGER}).`)
     }
     return base as db.StoredGeneration & { filePath: string }
   }
@@ -874,7 +877,7 @@ export class EditOps {
         if (typeof source.mediaId === 'string') {
           const media = store.getMedia(source.mediaId)
           if (!media || media.editId !== edit.id) d.problem('The audio is not in the edit.')
-          else if (!existsSync(media.path)) d.problem('The audio file is missing (moved or deleted in Finder).')
+          else if (!existsSync(media.path)) d.problem(`The audio file is missing (moved or deleted in ${FILE_MANAGER}).`)
           else duration = media.duration ?? (await probeAudio(media.path).catch(() => ({ duration: 0 }))).duration
           src = { mediaId: source.mediaId }
         } else if (typeof source.assetAudioId === 'string') {

@@ -1,5 +1,6 @@
 import { MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
 import type { AssetAudio } from '@shared/types'
+import { PATH_SEPARATOR } from '../../lib/platform'
 
 // Pure helpers for an asset's sound clips: which files count as audio, the reference window (the part of a
 // clip that is sent to Venice) and how times are written and read.
@@ -110,5 +111,5 @@ export function parseTime(text: string): number | undefined {
 
 /** The file name shown for a clip (its copy keeps the original name). */
 export function clipFileName(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1)
+  return path.split(PATH_SEPARATOR).pop() ?? path
 }

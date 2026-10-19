@@ -2,14 +2,30 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readdirSync, rmSync } from 'node:fs'
 import { access, constants, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, delimiter, dirname, extname, join, resolve } from 'node:path'
+import { basename, delimiter, dirname, extname, join, resolve, win32 } from 'node:path'
 import type { AudioLayer, EditRange, FfmpegStatus, GainSpan } from '@shared/types'
+import { IS_MAC, IS_WINDOWS } from './platform'
 
-// Thin wrappers around the ffmpeg/ffprobe binaries (from Homebrew; nothing is bundled).
+// Thin wrappers around the ffmpeg/ffprobe binaries. On a Mac they are Homebrew's (nothing is bundled); on Windows
+// Studio ships its own in resources/ffmpeg (scripts/fetch-ffmpeg-win.mjs), and a PATH one is the fallback.
 
-const NOT_FOUND = 'ffmpeg was not found. Install it with: brew install ffmpeg'
+/**
+ * How to get ffmpeg: Homebrew's on a Mac. On Windows it comes with Studio; a development build (started by electron
+ * with the app's folder, so process.defaultApp is set) uses the one scripts/fetch-ffmpeg-win.mjs puts in build/.
+ */
+const INSTALL_HINT = !IS_WINDOWS
+  ? 'Install it with: brew install ffmpeg'
+  : process.defaultApp
+    ? 'Run node scripts/fetch-ffmpeg-win.mjs in the repository, or put ffmpeg.exe and ffprobe.exe on PATH.'
+    : 'It comes with Studio: reinstall Studio.'
+const NOT_FOUND = `ffmpeg was not found. ${INSTALL_HINT}`
 /** Checked before PATH: an app started from Finder doesn't inherit the shell's Homebrew PATH. */
 const KNOWN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
+/**
+ * Hardware decoding where every Mac has it (VideoToolbox; twice as fast for 4K HEVC). Elsewhere none: software
+ * decoding takes anything, and a GPU decoder that may or may not be there isn't worth a failed first attempt.
+ */
+const HWACCEL: readonly string[] = IS_MAC ? ['-hwaccel', 'videotoolbox'] : []
 const MAX_STDERR = 16 * 1024
 const PROBE_TIMEOUT_MS = 30_000
 const IMAGE_TIMEOUT_MS = 60_000
@@ -51,14 +67,54 @@ async function findIn(dirs: string[], name: string): Promise<string | undefined>
   return undefined
 }
 
+/** What the lookup reads from the system, given so that another platform's lookup can be tested. */
+export interface FfmpegSearch {
+  platform: NodeJS.Platform
+  /** PATH as the app got it. */
+  path?: string
+  /** process.resourcesPath: the packaged Windows app has ffmpeg in its resources/ffmpeg. */
+  resourcesPath?: string
+  /** The repository's build/ffmpeg-win, where scripts/fetch-ffmpeg-win.mjs puts it for a development build. */
+  devDir?: string
+}
+
+/**
+ * The folders ffmpeg and ffprobe are looked for in, first match wins. macOS: Homebrew's and the system's, then PATH.
+ * Windows: the copy that comes with Studio, then (developing) the fetched one, then PATH.
+ */
+export function ffmpegSearchDirs(s: FfmpegSearch): string[] {
+  if (s.platform !== 'win32') {
+    const pathDirs = (s.path ?? '').split(delimiter).filter(Boolean)
+    return [...new Set([...KNOWN_DIRS, ...pathDirs])]
+  }
+  // Windows PATH entries are separated by ";" and may be quoted ("C:\Program Files\…").
+  const pathDirs = (s.path ?? '')
+    .split(';')
+    .map((d) => d.trim().replace(/^"(.*)"$/, '$1'))
+    .filter(Boolean)
+  const bundled = [s.resourcesPath ? win32.join(s.resourcesPath, 'ffmpeg') : '', s.devDir ?? ''].filter(Boolean)
+  return [...new Set([...bundled, ...pathDirs])]
+}
+
+/** The program's file name: "ffmpeg", or "ffmpeg.exe" on Windows. */
+export function ffmpegExecutable(name: 'ffmpeg' | 'ffprobe', platform: NodeJS.Platform): string {
+  return platform === 'win32' ? `${name}.exe` : name
+}
+
 async function locate(): Promise<Binaries> {
-  const pathDirs = (process.env.PATH ?? '').split(delimiter).filter(Boolean)
-  const dirs = [...new Set([...KNOWN_DIRS, ...pathDirs])]
-  const ffmpeg = await findIn(dirs, 'ffmpeg')
+  const platform = process.platform
+  const dirs = ffmpegSearchDirs({
+    platform,
+    path: process.env.PATH,
+    resourcesPath: process.resourcesPath,
+    // out/main → the repository's build/ffmpeg-win (nothing there in a packaged app).
+    devDir: platform === 'win32' ? join(__dirname, '..', '..', 'build', 'ffmpeg-win') : undefined
+  })
+  const ffmpeg = await findIn(dirs, ffmpegExecutable('ffmpeg', platform))
   if (!ffmpeg) throw new Error(NOT_FOUND)
   // Prefer the ffprobe installed next to this ffmpeg so the two versions match.
-  const ffprobe = await findIn([dirname(ffmpeg), ...dirs], 'ffprobe')
-  if (!ffprobe) throw new Error('ffprobe was not found (it comes with ffmpeg). Install it with: brew install ffmpeg')
+  const ffprobe = await findIn([dirname(ffmpeg), ...dirs], ffmpegExecutable('ffprobe', platform))
+  if (!ffprobe) throw new Error(`ffprobe was not found (it comes with ffmpeg). ${INSTALL_HINT}`)
   let stdout: string
   try {
     ;({ stdout } = await run(ffmpeg, ['-hide_banner', '-version'], { timeoutMs: 10_000 }))
@@ -195,7 +251,8 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
   return new Promise((resolvePromise, reject) => {
     if (opts.signal?.aborted) return reject(abortError())
     const name = basename(bin)
-    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    // windowsHide: on Windows a console program started from a windowed app would flash a console window.
+    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     killOnExit(child)
 
     let stdout = ''
@@ -1173,7 +1230,8 @@ function audioDecoders(): Promise<Set<string>> {
 }
 
 function hasFilter(name: string): Promise<boolean> {
-  filterNames ??= listed('-filters', /^\s*[T.][S.][C.]\s+(\S+)/).catch((err: unknown) => {
+  // The flag columns before the name: "TSC" up to ffmpeg 7, "TS" since 8 (the command column went).
+  filterNames ??= listed('-filters', /^\s*[T.][S.][C.]?\s+(\S+)/).catch((err: unknown) => {
     filterNames = undefined
     throw err
   })
@@ -1446,7 +1504,9 @@ export async function normalizeVideo(input: string, out: string, o: NormalizeOpt
 
   if (o.hdr && !((await hasFilter('zscale')) && (await hasFilter('tonemap')))) {
     throw new Error(
-      'This ffmpeg version cannot convert HDR video to standard colours (zscale is missing). Install ffmpeg with: brew install ffmpeg'
+      IS_WINDOWS
+        ? 'This ffmpeg version cannot convert HDR video to standard colours (zscale is missing). Reinstall Studio.'
+        : 'This ffmpeg version cannot convert HDR video to standard colours (zscale is missing). Install ffmpeg with: brew install ffmpeg'
     )
   }
   const audio =
@@ -1456,7 +1516,7 @@ export async function normalizeVideo(input: string, out: string, o: NormalizeOpt
   const resampler = await resamplerOption()
   const encode = (tmp: string, hwaccel: boolean): string[] => [
     '-nostdin', '-hide_banner', '-v', 'error',
-    ...(hwaccel ? ['-hwaccel', 'videotoolbox'] : []),
+    ...(hwaccel ? HWACCEL : []),
     '-i', resolve(input),
     '-map', '0:V:0',
     ...(audio ? ['-map', `0:${audio.index}`] : []),
@@ -1482,7 +1542,7 @@ export async function normalizeVideo(input: string, out: string, o: NormalizeOpt
   try {
     await ffmpegToFile(out, (tmp) => encode(tmp, true), { failure, signal: o.signal, onStdout })
   } catch (err) {
-    if (isAbortError(err) || errorMessage(err) === NOT_FOUND) throw err
+    if (isAbortError(err) || errorMessage(err) === NOT_FOUND || !HWACCEL.length) throw err
     // VideoToolbox can refuse an unusual stream mid-way; software decoding is slower but takes anything.
     await ffmpegToFile(out, (tmp) => encode(tmp, false), { failure, signal: o.signal, onStdout })
   }
@@ -2574,7 +2634,7 @@ export async function sceneCuts(path: string, threshold = 10, o: { signal?: Abor
       ffmpeg,
       [
         '-nostdin', '-hide_banner', '-nostats', '-v', 'info',
-        '-hwaccel', 'videotoolbox',
+        ...HWACCEL,
         '-i', resolve(path),
         '-map', '0:V:0', '-an', '-sn', '-dn',
         '-vf', `scale=320:-2,scdet=threshold=${t}`,

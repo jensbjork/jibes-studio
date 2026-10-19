@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import type { Sequence } from '@shared/types'
 import { ipcErrorMessage, useSeparationStatus } from '../../../lib/hooks'
 import { formatUsd } from '../../../lib/media'
+import { THIS_COMPUTER } from '../../../lib/platform'
 import Popover from '../../pickers/Popover'
 import { NoteIcon } from '../icons'
 import { formatFrameTime } from '../sequenceUtils'
@@ -129,7 +130,7 @@ export default function SongChip({ sequence, onReplace, onRemove, onSeparate, on
                     type="button"
                     onClick={() => void separate()}
                     disabled={busy || working || !separation?.available}
-                    title={separation?.available ? 'Free, on this Mac' : separation?.message}
+                    title={separation?.available ? `Free, on ${THIS_COMPUTER}` : separation?.message}
                     className={rowButton}
                   >
                     Separate the vocals

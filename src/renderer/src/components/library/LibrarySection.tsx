@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { LibraryStatus, ReorganizeReport } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { displayPath, folderName } from '../../lib/library'
+import { FILE_MANAGER } from '../../lib/platform'
 import Modal from '../pickers/Modal'
 import FolderDecision from './FolderDecision'
 import FolderTree from './FolderTree'
@@ -43,7 +44,7 @@ export default function LibrarySection() {
     <section className="mb-8">
       <h2 className="mb-1 font-medium">Library</h2>
       <p className="mb-3 text-muted">
-        Everything Studio saves is in the library folder below, sorted into folders you can browse right in Finder.
+        Everything Studio saves is in the library folder below, sorted into folders you can browse right in {FILE_MANAGER}.
         Click a folder to open it.
       </p>
 
@@ -197,7 +198,7 @@ function Cleanup() {
           {report.missing > 0 && (
             <p className="mt-1.5 text-muted">
               {count(report.missing, 'file', 'files')} that Studio knows about {report.missing === 1 ? 'is' : 'are'} no
-              longer on disk (for example deleted in Finder) and {report.missing === 1 ? 'was' : 'were'} skipped.
+              longer on disk (for example deleted in {FILE_MANAGER}) and {report.missing === 1 ? 'was' : 'were'} skipped.
             </p>
           )}
           {report.errors.length > 0 && (

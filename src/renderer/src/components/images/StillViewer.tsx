@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { workKey, type Still } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { fileName } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
+import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { useSeenWhenVisible } from '../../lib/work'
 import ConfirmButton from '../sequences/ConfirmButton'
 import {
@@ -143,14 +145,14 @@ export default function StillViewer({
         <div className="flex flex-wrap items-center justify-end gap-1">
           {actions?.(current)}
           <button onClick={() => void window.studio.revealFile(current.path)} className={button}>
-            Show in Finder
+            Show in {FILE_MANAGER}
           </button>
           {deletable && (
             <ConfirmButton
               question="Delete the image?"
               onConfirm={() => void remove(current)}
               disabled={deleting}
-              title="Moves the image to the Trash (to “Referensbilder” if a clip or a board uses it)"
+              title={`Moves the image to ${TRASH} (to “Referensbilder” if a clip or a board uses it)`}
               className={`${button} hover:text-accent`}
             >
               Delete
@@ -242,7 +244,7 @@ function StillInfo({ still, position, children }: { still: Still; position?: str
             {referenceImages.map((path, i) => (
               <span
                 key={path + i}
-                title={i === 0 ? `Base image · ${path.split('/').pop()}` : path.split('/').pop()}
+                title={i === 0 ? `Base image · ${fileName(path)}` : fileName(path)}
                 className={`h-8 w-8 overflow-hidden rounded bg-raised ${i === 0 ? 'ring-1 ring-accent/70' : ''}`}
               >
                 <img src={mediaUrl(path)} alt="" draggable={false} className="h-full w-full object-cover" />

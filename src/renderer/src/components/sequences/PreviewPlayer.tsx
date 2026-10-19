@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import { durationSeconds } from '@shared/models'
 import type { Sequence } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { isMac } from '../../lib/platform'
 import { CloseIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon } from './icons'
 import { MIN_CLIP_SECONDS, formatClock, readyTake } from './sequenceUtils'
 import SongPreview from './song/SongPreview'
@@ -215,7 +216,8 @@ function ClipPreview({ sequence, startSegmentId, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-black/95" role="dialog" aria-label="Preview">
-      <div className="drag flex h-12 shrink-0 items-center gap-3 pl-24 pr-4">
+      {/* Over the whole window: on a Mac the traffic lights are at the left of this bar. */}
+      <div className={`drag flex h-12 shrink-0 items-center gap-3 pr-4 ${isMac ? 'pl-24' : 'pl-4'}`}>
         <span className="truncate font-medium text-white/90">{sequence.name}</span>
         <span className="shrink-0 text-[12px] text-white/50">Preview</span>
         <button

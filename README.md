@@ -1,6 +1,6 @@
 # Studio
 
-Make films with [Venice.ai](https://venice.ai)'s video models, on your Mac.
+Make films with [Venice.ai](https://venice.ai)'s video models, on your Mac or Windows PC.
 
 ![Studio](docs/images/generate.png)
 
@@ -16,6 +16,10 @@ installs ffmpeg with Homebrew if it's missing, puts Studio in Applications and o
 Rather download it yourself? Get `Studio-mac-arm64.dmg` from
 [Releases](https://github.com/jensbjork/studio/releases/latest). The app isn't notarized, so the first time macOS
 stops it: open **System Settings → Privacy & Security** and click **Open Anyway**.
+
+**Windows** (10 or 11, 64-bit): download `Studio-win-x64-setup.exe` from the same Releases page and run it, or
+unzip `Studio-win-x64.zip` anywhere. ffmpeg comes with it. The app isn't signed, so SmartScreen warns the first
+time: click **More info → Run anyway**.
 
 ## Get started
 
@@ -57,4 +61,4 @@ Everything is stored as plain files in the folder you chose.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The Windows build includes FFmpeg, under the GPL: see [third-party notices](THIRD_PARTY_NOTICES.md).

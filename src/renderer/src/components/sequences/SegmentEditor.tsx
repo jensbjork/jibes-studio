@@ -15,6 +15,7 @@ import { withBudgetConfirm } from '../../lib/budget'
 import { ipcErrorMessage, useQuote } from '../../lib/hooks'
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { FILE_MANAGER, shortcut } from '../../lib/platform'
 import { useVariantCount, withVariants } from '../../lib/variants'
 import { useReportOpenSegment } from '../../lib/workspace'
 import ConsentDialog from '../ConsentDialog'
@@ -499,7 +500,7 @@ export default function SegmentEditor({
             </button>
           </div>
           <p className="mt-2 text-center text-[11px] text-muted">
-            ⌘ + Enter to generate{count > 1 ? ` ${variantsText(count)}` : ''}
+            {shortcut('⌘ + Enter')} to generate{count > 1 ? ` ${variantsText(count)}` : ''}
           </p>
         </div>
       )}
@@ -566,7 +567,7 @@ function OwnClipInfo({ take }: { take: Generation }) {
       </p>
       {take.fileMissing ? (
         <p className="mt-0.5 text-[11px] leading-snug text-amber-300">
-          The film is no longer where it was (moved or deleted in Finder). Add the file again or generate an AI
+          The film is no longer where it was (moved or deleted in {FILE_MANAGER}). Add the file again or generate an AI
           take.
         </p>
       ) : (

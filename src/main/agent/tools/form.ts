@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import {
@@ -689,7 +690,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         ...(imagesMove ? { images: leading('image', images!, paths) } : {}),
         ...(audiosMove ? { audios: leading('audio', audios!, clips.map((a) => a.path)) } : {})
       }
-      const byPath = [...(args.images ?? []), ...(args.audios ?? [])].filter((entry) => entry.startsWith('/'))
+      const byPath = [...(args.images ?? []), ...(args.audios ?? [])].filter((entry) => isAbsolute(entry))
       const state = await ctx.bridge.send<AgentFormState>('reorder_references', args).catch((err: unknown) => {
         // A picture or clip named by path that the window no longer has: the user removed it meanwhile.
         if (byPath.some((path) => errorText(err).includes(path))) {

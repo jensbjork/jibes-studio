@@ -4,6 +4,7 @@
 
 import { durationSeconds } from '@shared/models'
 import type { Generation, Sequence, Storyboard, StoryboardBoard, StoryboardTransition } from '@shared/types'
+import { FFMPEG_INSTALL, isMac } from '../../lib/platform'
 import { freshestTake, isPending, takeProgress } from '../sequences/sequenceUtils'
 
 export {
@@ -294,7 +295,7 @@ export function runKeys(storyboard: Storyboard): string[] {
 
 /** Why the storyboard can't be exported now, or undefined. */
 export function exportBlocked(storyboard: Storyboard, ffmpegOk: boolean): string | undefined {
-  if (!ffmpegOk) return 'ffmpeg is missing – install it with brew install ffmpeg'
+  if (!ffmpegOk) return `ffmpeg is missing – ${isMac ? 'install it with ' : ''}${FFMPEG_INSTALL}`
   const transitions = orderedTransitions(storyboard)
   if (!transitions.length) return 'Add at least two boards with images and generate the clips between them'
   const missing = transitions.filter((t) => !readyTake(t))

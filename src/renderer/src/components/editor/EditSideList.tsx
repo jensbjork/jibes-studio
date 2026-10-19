@@ -1,4 +1,5 @@
 import type { EditSummary } from '@shared/types'
+import { TRASH } from '../../lib/platform'
 import { useViewWork } from '../../lib/work'
 import SideList, { SideListRow, SideListThumb, type SideRowControl } from '../library/SideList'
 import { FilmIcon } from '../sequences/icons'
@@ -84,7 +85,7 @@ export default function EditSideList({
       searchText={(e) => originLabel(e.origin)}
       emptyText="No edits yet. An edit changes a finished film – every change becomes a new version, and the original is left untouched."
       deleteNote={() =>
-        'The original, the AI takes and versions used elsewhere are kept; the rest goes to the Trash.'
+        `The original, the AI takes and versions used elsewhere are kept; the rest goes to ${TRASH}.`
       }
       onDelete={onDelete}
       renderRow={(e, control) => <EditRow edit={e} control={control} />}

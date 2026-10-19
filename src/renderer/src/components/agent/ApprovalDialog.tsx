@@ -32,6 +32,7 @@ import {
   useAgentState
 } from '../../lib/agent'
 import { ipcErrorMessage, useAssetsState, useModels } from '../../lib/hooks'
+import { fileName } from '../../lib/library'
 import { formatUsd, mediaUrl } from '../../lib/media'
 import { blockingPromptIssue, promptIssuesOf } from '../../lib/promptIssues'
 import { BudgetMeter } from '../BudgetDialog'
@@ -947,7 +948,7 @@ function ClipSummary({
     const photo = photos.get(path)
     return {
       kind: photo?.asset.kind,
-      label: photo ? `${photo.asset.name} (photo ${photo.number})` : (path.split('/').pop() ?? path),
+      label: photo ? `${photo.asset.name} (photo ${photo.number})` : fileName(path),
       path,
       name: photo?.asset.name,
       number: photo?.number,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AssetKind, ExportSummary, Sequence } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatSeconds, formatUsd } from '../../lib/media'
+import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { markAllSeen, useOwnerWork } from '../../lib/work'
 import { ScissorsIcon } from '../feed/icons'
 import OpenFolderButton from '../library/OpenFolderButton'
@@ -139,7 +140,7 @@ export default function SequenceHeader({
           target="sequences"
           id={sequence.id}
           compact
-          title="Show the sequence's folder with takes and exports in Finder"
+          title={`Show the sequence's folder with takes and exports in ${FILE_MANAGER}`}
           onError={onError}
           className="rounded-md px-2 py-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
         />
@@ -227,7 +228,7 @@ async function latestExport(sequenceId: string): Promise<ExportSummary | undefin
 
 /** What deleting a sequence does, for its question (also asked from the list's ✕). */
 export const DELETE_SEQUENCE_TEXT =
-  "The clips leave the sequence. The takes stay in Media, and exported films stay in the folder. The sequence's images that nothing else uses are moved to the Trash."
+  `The clips leave the sequence. The takes stay in Media, and exported films stay in the folder. The sequence's images that nothing else uses are moved to ${TRASH}.`
 
 /**
  * ⋯: the Export format, the latest export into the Editor, a song for a sequence without one, marking what is new

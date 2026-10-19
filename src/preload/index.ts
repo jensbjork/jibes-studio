@@ -25,6 +25,8 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 }
 
 const api: StudioApi = {
+  platform: process.platform === 'win32' || process.platform === 'linux' ? process.platform : 'darwin',
+
   // Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setApiKey: (key) => ipcRenderer.invoke('settings:setApiKey', key),

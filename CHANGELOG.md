@@ -8,6 +8,27 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-19
+
+### Added
+
+- **Studio for Windows** (64-bit): an installer (`Studio-win-x64-setup.exe`, per user, no administrator needed) and a
+  portable zip (`Studio-win-x64.zip`) on every release, next to the Mac app. ffmpeg comes with the Windows app (a
+  pinned FFmpeg build, GPL; see `THIRD_PARTY_NOTICES.md`), so nothing else has to be installed. On Windows the window
+  has a native dark title bar, shortcuts use Ctrl (⌘K is Ctrl+K, ⌃⌘S is Ctrl+Shift+S, ⌘⇧Z is also Ctrl+Y …), the
+  copy says File Explorer, the Recycle Bin and the taskbar (the count of new results is a dot on the taskbar button, and
+  an agent's request flashes it), the library's `.studio` folder is hidden, and agents reach Studio over Tailscale's
+  Windows adapter as on a Mac. macOS only for now: voice separation (and what needs it: removing or keeping only the
+  voice, a song's separated vocals), library export and import, and agents' HEIC uploads. The app isn't signed:
+  SmartScreen asks once (*More info → Run anyway*). Every release is built on GitHub, and the Windows app is started
+  and checked there before anything is published.
+
+### Fixed
+
+- With ffmpeg 8, Studio found none of ffmpeg's filters (ffmpeg 8 lists them differently), so an HDR clip couldn't be
+  imported ("zscale is missing") and the Editor never used rubberband for time stretching. Both versions are read
+  now; ffmpeg 7 behaves as before.
+
 ## [0.2.0] - 2026-10-19
 
 ### Added

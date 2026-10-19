@@ -17,6 +17,7 @@ import { ipcErrorMessage, useAssets } from '../../lib/hooks'
 import { samePath } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { FILE_MANAGER, shortcut } from '../../lib/platform'
 import { markSeen, newWorkToken, useUnseen } from '../../lib/work'
 import ConsentDialog from '../ConsentDialog'
 import Modal from '../pickers/Modal'
@@ -593,8 +594,8 @@ function CreateImageDialogBody({
                 placeholder="Wide shot of a woman by a rainy window at dusk, warm lamp light, shallow depth of field"
               />
               <span className="mt-1 block text-[11px] leading-relaxed text-muted">
-                English works best. Describe the image like a film still: framing, composition, light and mood.
-                ⌘ + Enter creates the image.
+                English works best. Describe the image like a film still: framing, composition, light and mood.{' '}
+                {shortcut('⌘ + Enter')} creates the image.
               </span>
             </label>
 
@@ -929,7 +930,7 @@ function ResultPanel({
             onClick={() => void window.studio.revealFile(current.path)}
             className="rounded-md px-2.5 py-1.5 text-muted hover:bg-raised hover:text-text"
           >
-            Show in Finder
+            Show in {FILE_MANAGER}
           </button>
           <span className="ml-auto text-[11px] text-muted">
             {current.costUsd !== undefined && `${formatImagePrice(current.costUsd)} · `}Saved

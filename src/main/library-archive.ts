@@ -43,6 +43,7 @@ import {
   libraryOperationSettled,
   libraryRoot
 } from './paths'
+import { IS_MAC } from './platform'
 import { fileErrorReason } from './references'
 
 /** At the zip's root: what the zip is (see ArchiveManifest). */
@@ -54,6 +55,10 @@ const FORMAT_VERSION = 1
 const ZIP = '/usr/bin/zip'
 const UNZIP = '/usr/bin/unzip'
 const DITTO = '/usr/bin/ditto'
+/** zip, unzip and ditto are macOS' own: elsewhere (Windows) a library can't be exported or imported yet. */
+export const ARCHIVE_UNAVAILABLE = IS_MAC
+  ? undefined
+  : 'Exporting and importing a library is only available on macOS for now.'
 
 /** Where the database sits in the zip, as in the library. */
 const DATABASE_ENTRY = `${FOLDERS.appData}/${DB_FILE_NAME}`
@@ -403,6 +408,7 @@ async function listArchive(zip: string, j?: Job): Promise<ArchiveListing> {
 
 /** Reads and checks studio-archive.json in a zip: refused unless it is a Studio export this version can open. */
 export function readArchiveManifest(zip: string): Promise<ArchiveManifest> {
+  if (ARCHIVE_UNAVAILABLE) return Promise.reject(new Error(ARCHIVE_UNAVAILABLE))
   return readManifest(zip)
 }
 
@@ -708,6 +714,7 @@ function exportTarget(path: string, root: string): string {
 
 /** Why an export can't start now. */
 function exportRefusal(): string | undefined {
+  if (ARCHIVE_UNAVAILABLE) return ARCHIVE_UNAVAILABLE
   if (job) return RUNNING
   if (!isLibraryReady()) return NO_LIBRARY
   return deps.busy()
@@ -805,6 +812,7 @@ async function runExport(j: Job, target: string): Promise<ArchiveResult> {
 
 /** Why an import can't start now (it ends by switching libraries, which would be refused). */
 function importRefusal(): string | undefined {
+  if (ARCHIVE_UNAVAILABLE) return ARCHIVE_UNAVAILABLE
   if (job) return RUNNING
   return deps.busy()
 }

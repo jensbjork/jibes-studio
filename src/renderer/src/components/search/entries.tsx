@@ -16,6 +16,7 @@ import type {
 import { ASSET_COPY, ASSET_KINDS, ASSET_VIEW } from '../../lib/assets'
 import { requestCreate } from '../../lib/createRequest'
 import type { Navigate, View } from '../../lib/navigation'
+import { ARCHIVE_UNAVAILABLE, shortcut } from '../../lib/platform'
 import AssetIcon from '../assets/AssetIcon'
 import { fileName, formatLength, originLabel, summaryLine } from '../editor/editorUtils'
 import { ScissorsIcon } from '../editor/icons'
@@ -186,7 +187,11 @@ export function commandEntries(sidebarCollapsed: boolean): Entry[] {
     icon: t.tab === 'pictures' ? <PictureIcon /> : t.tab === 'films' ? <FilmIcon /> : <MediaIcon />,
     run: ({ navigate }) => navigate('media', { type: 'open-media', tab: t.tab })
   }))
-  const sections: Entry[] = (Object.keys(SETTINGS_SECTIONS) as (keyof typeof SETTINGS_SECTION)[]).map((key) => ({
+  // Export & import is left out where it can't run (it only says so there).
+  const sectionKeys = (Object.keys(SETTINGS_SECTIONS) as (keyof typeof SETTINGS_SECTION)[]).filter(
+    (key) => key !== 'archive' || !ARCHIVE_UNAVAILABLE
+  )
+  const sections: Entry[] = sectionKeys.map((key) => ({
     key: `settings:${key}`,
     group: 'goto',
     title: SETTINGS_SECTIONS[key].title,
@@ -253,7 +258,7 @@ export function commandEntries(sidebarCollapsed: boolean): Entry[] {
       group: 'actions',
       title: sidebarCollapsed ? 'Expand the sidebar' : 'Collapse the sidebar',
       keywords: 'rail toggle hide show',
-      hint: '⌃⌘S',
+      hint: shortcut('⌃⌘S'),
       icon: <SidebarIcon size={15} />,
       keepsFocus: true,
       run: ({ toggleSidebar }) => toggleSidebar()

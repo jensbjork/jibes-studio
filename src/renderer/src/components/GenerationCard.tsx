@@ -3,6 +3,7 @@ import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-la
 import { workKey, type Generation, type VideoModel } from '@shared/types'
 import { formatSeconds, formatUsd, mediaUrl } from '../lib/media'
 import type { Navigate } from '../lib/navigation'
+import { TRASH } from '../lib/platform'
 import { findTakeOwner, openTakeOwner } from '../lib/takes'
 import { markSeen, useIsUnseen, useSeenWhenVisible } from '../lib/work'
 import { isPending, progressOf, reviewCountText } from './feed/feedText'
@@ -404,7 +405,7 @@ function GenerationCard({
                       setPickerOpen(false)
                       setConfirmingDelete(true)
                     }}
-                    title="Moves the video to the Trash"
+                    title={`Moves the video to ${TRASH}`}
                     className="rounded px-1.5 py-0.5 hover:bg-raised hover:text-accent"
                   >
                     Delete

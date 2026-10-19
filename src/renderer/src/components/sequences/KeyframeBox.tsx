@@ -4,6 +4,7 @@ import { endImageVariant, supportsEndImage } from '@shared/models'
 import type { Asset, ContinueMode, Segment, Sequence, VideoModel } from '@shared/types'
 import { useAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
+import { FFMPEG_INSTALL } from '../../lib/platform'
 import { assetsByPath } from '../pickers/assetRefs'
 import { audioSourcesByPath } from '../pickers/audioRefs'
 import { BridgeIcon } from './icons'
@@ -125,7 +126,7 @@ export default function KeyframeBox({
   const startText = !previous
     ? 'The first clip starts from your prompt and your own images.'
     : !ffmpegOk && !startOn
-      ? 'Needs ffmpeg (brew install ffmpeg).'
+      ? `Needs ffmpeg (${FFMPEG_INSTALL}).`
       : startOn
         ? references
           ? `The last frame of clip ${index}${trimmed} is sent as a reference image after the clip's references, and the clip starts on it – close, but not always exactly the same picture.`
@@ -135,7 +136,7 @@ export default function KeyframeBox({
   const endText = !next
     ? 'The last clip has no next clip to end on.'
     : !ffmpegOk && !endOn
-      ? 'Needs ffmpeg (brew install ffmpeg).'
+      ? `Needs ffmpeg (${FFMPEG_INSTALL}).`
       : endOn
         ? `The end image is taken from the start of clip ${index + 2}${next.trimStart > 0 ? ' (after trim)' : ''}, so the clip ends exactly where the next one starts.`
         : endModel

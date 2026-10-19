@@ -7,25 +7,27 @@ directories:
 files:
   - out/**
   - package.json
-  # better-sqlite3 ships prebuilt Node-API binaries for every platform plus its C sources; only darwin-arm64 is needed.
+  # better-sqlite3 ships prebuilt Node-API binaries for every platform plus its C sources; each platform's build keeps
+  # only its own binary (mac.files, win.files).
   - '!node_modules/better-sqlite3/{deps,src,build}/**'
-  - '!node_modules/better-sqlite3/prebuilds/{win32,linux,linuxmusl,darwin-x64}*'
 electronLanguages:
   - en
 # Native modules can't be loaded from inside the asar archive.
 asarUnpack:
   - '**/*.node'
-# Native helpers built by scripts/build-helpers.mjs (npm run build:helpers, run first by `npm run app`), found at
-# Contents/Resources/bin by src/main (voice-separation.ts). A build without the Swift compiler has none: electron-builder
-# only warns, and Studio then runs without voice separation.
-extraResources:
-  - from: build/bin/studio-voice-isolate
-    to: bin/studio-voice-isolate
 mac:
   # `npm run app` builds the app folder only (dist/mac-arm64/Studio.app); the release workflow asks for zip and dmg.
   target:
     - target: dir
       arch: arm64
+  files:
+    - '!node_modules/better-sqlite3/prebuilds/{win32,linux,linuxmusl,darwin-x64}*'
+  # Native helpers built by scripts/build-helpers.mjs (npm run build:helpers, run first by `npm run app`), found at
+  # Contents/Resources/bin by src/main (voice-separation.ts). A build without the Swift compiler has none:
+  # electron-builder only warns, and Studio then runs without voice separation.
+  extraResources:
+    - from: build/bin/studio-voice-isolate
+      to: bin/studio-voice-isolate
   # Fixed names, so https://github.com/<owner>/studio/releases/latest/download/Studio-mac-arm64.zip always points at
   # the newest release (install.sh downloads it).
   artifactName: ${productName}-mac-${arch}.${ext}
@@ -43,3 +45,44 @@ mac:
     NSDownloadsFolderUsageDescription: Studio needs access to images you choose in Downloads.
     NSRemovableVolumesUsageDescription: Studio can keep its library on an external drive.
     NSNetworkVolumesUsageDescription: Studio can keep its library on a network drive.
+win:
+  # x64 only: an installer (Studio-win-x64-setup.exe) and a portable zip (Studio-win-x64.zip), unsigned (SmartScreen
+  # asks once, see the README). Fixed names, like the Mac files, so …/releases/latest/download/<name> always works.
+  target:
+    - target: nsis
+      arch: x64
+    - target: zip
+      arch: x64
+  artifactName: ${productName}-win-${arch}.${ext}
+  # electron-builder turns the 1024 × 1024 PNG into a multi-size .ico for the program, the installer and shortcuts.
+  icon: build/icon.png
+  files:
+    - '!node_modules/better-sqlite3/prebuilds/{darwin,linux,linuxmusl,win32-arm64}*'
+  # Chromium on Windows names its locale files en-US.pak etc.; "en" alone would match none of them.
+  electronLanguages:
+    - en-US
+  # ffmpeg comes with the Windows app (a Mac uses Homebrew's): ffmpeg.exe, ffprobe.exe, the FFmpeg libraries, its
+  # licence and SOURCE.txt, fetched by scripts/fetch-ffmpeg-win.mjs into build/ffmpeg-win and found at
+  # resources/ffmpeg by src/main/ffmpeg.ts.
+  extraResources:
+    - from: build/ffmpeg-win
+      to: ffmpeg
+      filter:
+        - '*.exe'
+        - '*.dll'
+        - LICENSE.txt
+        - SOURCE.txt
+nsis:
+  artifactName: ${productName}-win-${arch}-setup.${ext}
+  # The assisted installer, per user by default (no administrator needed, installed under %LOCALAPPDATA%\Programs),
+  # where the folder can be chosen.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Studio
+  # English only, like the app.
+  multiLanguageInstaller: false
+  # Settings stay when Studio is uninstalled (the library lives in its own folder and is never touched).
+  deleteAppDataOnUninstall: false

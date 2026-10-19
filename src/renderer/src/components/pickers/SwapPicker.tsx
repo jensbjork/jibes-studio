@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { ASSET_KINDS, type Asset, type AssetKind, type Still } from '@shared/types'
 import { ASSET_COPY } from '../../lib/assets'
 import { mediaUrl } from '../../lib/media'
+import { THIS_COMPUTER } from '../../lib/platform'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
 import { useStills } from '../images/imageModels'
@@ -160,7 +161,7 @@ export function SwapImagePicker({
         <button
           onClick={() => void pickFile()}
           className="shrink-0 rounded-md border border-line px-2.5 py-1.5 text-[12px] transition hover:bg-raised"
-          title="Choose an image file on this Mac"
+          title={`Choose an image file on ${THIS_COMPUTER}`}
         >
           From file…
         </button>

@@ -17,6 +17,7 @@ import {
 } from '../lib/library'
 import { formatUsd } from '../lib/media'
 import type { Intent, Navigate } from '../lib/navigation'
+import { FILE_MANAGER, shortcut } from '../lib/platform'
 import { useVariantCount, withVariants } from '../lib/variants'
 import ConsentDialog from './ConsentDialog'
 import ClipFeed from './feed/ClipFeed'
@@ -268,7 +269,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
             </button>
           </div>
           <p className="mt-2 text-center text-[11px] text-muted">
-            ⌘ + Enter to generate{count > 1 ? ` ${variantsText(count)}` : ''}
+            {shortcut('⌘ + Enter')} to generate{count > 1 ? ` ${variantsText(count)}` : ''}
           </p>
         </div>
       </section>
@@ -293,7 +294,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
               )}
               <OpenFolderButton
                 target="generations"
-                title="Open the folder “Genereringar” in Finder"
+                title={`Open the folder “Genereringar” in ${FILE_MANAGER}`}
                 onError={setFolderError}
                 compact
                 className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"

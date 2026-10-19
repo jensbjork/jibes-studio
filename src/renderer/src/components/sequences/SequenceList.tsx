@@ -1,6 +1,7 @@
 import { useMemo, useState, type DragEvent } from 'react'
 import type { FinishedWork, RunningWork, SequenceSummary } from '@shared/types'
 import { formatSeconds } from '../../lib/media'
+import { TRASH } from '../../lib/platform'
 import { useOwnerWork, useRunning, useUnseen, useViewWork } from '../../lib/work'
 import { AUDIO_EXT, AUDIO_FORMATS } from '../assets/audioUtils'
 import { carriesFiles } from '../feed/ownClips'
@@ -137,7 +138,7 @@ export default function SequenceList({
       searchPlaceholder="Search sequences"
       emptyText="No sequences yet. A sequence puts several clips together into a longer video."
       deleteNote={() =>
-        "The takes and exported films are kept; the sequence's images that nothing else uses are moved to the Trash."
+        `The takes and exported films are kept; the sequence's images that nothing else uses are moved to ${TRASH}.`
       }
       onDelete={(s, next) => onDelete(s.id, next?.id)}
       renderRow={(s, control) => (

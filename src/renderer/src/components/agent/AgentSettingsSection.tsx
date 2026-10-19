@@ -3,6 +3,7 @@ import { agentDisplayName } from '@shared/agent-name'
 import type { AgentStatus } from '@shared/types'
 import { refreshAgentStatus, restartAgent, setAgentEnabled, setAgentPort, useAgentState } from '../../lib/agent'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { COMPUTER, THIS_COMPUTER } from '../../lib/platform'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { MoreAbout, SettingsItem } from '../settings/SettingsLayout'
 import Switch from '../settings/Switch'
@@ -34,7 +35,7 @@ function endpointsOf(status: AgentStatus): Endpoint[] {
       id: 'tailscale',
       label: 'Tailscale address',
       url: `http://${status.tailscaleAddress}:${port}/mcp`,
-      hint: 'For agents on other computers in your tailnet, such as a server or another Mac.'
+      hint: `For agents on other computers in your tailnet, such as a server or another ${COMPUTER}.`
     })
   }
   if (status.tailscaleDnsName) {
@@ -47,7 +48,7 @@ function endpointsOf(status: AgentStatus): Endpoint[] {
   }
   list.push({
     id: 'local',
-    label: 'This Mac',
+    label: `This ${COMPUTER}`,
     url: `http://127.0.0.1:${port}/mcp`,
     hint: 'Only for agents running on this computer.'
   })
@@ -169,7 +170,7 @@ export default function AgentSettingsSection() {
                 Allow agents to connect
               </span>
               <span className="mt-0.5 block text-[12px] leading-snug text-muted">
-                Off by default. When it’s on, Studio can only be reached from this Mac and from computers in your
+                Off by default. When it’s on, Studio can only be reached from {THIS_COMPUTER} and from computers in your
                 tailnet (Tailscale) – and only with the token below.
               </span>
             </span>
@@ -236,7 +237,7 @@ export default function AgentSettingsSection() {
         {!status.tailscaleAddress &&
           (status.enabled && status.running ? (
             <p className="mt-2 text-[12px] leading-relaxed text-amber-300">
-              Tailscale isn’t running on this Mac, so agents on other computers can’t reach Studio. Start Tailscale
+              Tailscale isn’t running on {THIS_COMPUTER}, so agents on other computers can’t reach Studio. Start Tailscale
               and press Check again above.
             </p>
           ) : (
@@ -367,7 +368,7 @@ function StatusLines({ status, busy, onRestart }: { status: AgentStatus; busy: b
       {status.running && !status.tailscaleAddress && (
         <div className="flex items-start gap-2">
           <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-400" />
-          <span className="min-w-0 text-amber-300">Tailscale isn’t running – only this Mac can connect.</span>
+          <span className="min-w-0 text-amber-300">Tailscale isn’t running – only {THIS_COMPUTER} can connect.</span>
           {restartButton('Check again')}
         </div>
       )}

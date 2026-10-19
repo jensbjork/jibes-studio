@@ -2,6 +2,7 @@ import { useId, type ReactNode } from 'react'
 import type { WorkView } from '@shared/types'
 import { ASSET_COPY, ASSET_KINDS, ASSET_VIEW } from '../lib/assets'
 import type { View } from '../lib/navigation'
+import { isMac, shortcut } from '../lib/platform'
 import { useRunning, useUnseen, useViewWork } from '../lib/work'
 import DevBadge from './DevBadge'
 import AgentIndicator from './agent/AgentIndicator'
@@ -175,9 +176,9 @@ export default function Sidebar({
   panel,
   onTogglePanel
 }: Props) {
-  const toggleLabel = collapsed ? 'Expand the sidebar (⌃⌘S)' : 'Collapse the sidebar (⌃⌘S)'
+  const toggleLabel = shortcut(collapsed ? 'Expand the sidebar (⌃⌘S)' : 'Collapse the sidebar (⌃⌘S)')
   const toggleTip = useRailTooltip(collapsed, toggleLabel)
-  const searchLabel = 'Search (⌘K)'
+  const searchLabel = shortcut('Search (⌘K)')
   const searchTip = useRailTooltip(collapsed, searchLabel)
 
   return (
@@ -185,9 +186,10 @@ export default function Sidebar({
       id={SIDEBAR_ID}
       aria-label="Sidebar"
       style={{ width: 'var(--sidebar-w)' }}
-      className="drag relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel px-3 pb-3 pt-12 transition-[width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none"
+      className={`drag relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel px-3 pb-3 transition-[width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${isMac ? 'pt-12' : 'pt-2.5'}`}
     >
-      {/* The top 48 px stay a plain drag strip for the traffic lights, in both widths. */}
+      {/* The top 48 px stay a plain drag strip for the traffic lights, in both widths. Windows has its own title bar
+          above the window: there the row sits in the middle of the views' 48 px top bars. */}
       <div className="relative h-7 shrink-0">
         <div
           className={`flex h-full items-center gap-2 whitespace-nowrap pl-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted ${fade(collapsed)}`}

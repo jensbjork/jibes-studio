@@ -5,6 +5,7 @@ import { longPlaceNote, placesOf } from '@shared/song'
 import { lyricsInWindow, MAX_SONG_WINDOW_SECONDS, MIN_SONG_WINDOW_SECONDS } from '@shared/song-window'
 import type { ApprovalRequest, AudioCatalog, Sequence, SequenceSong, SongOverview } from '@shared/types'
 import { lyricsModelOf } from '../../song'
+import { THIS_COMPUTER } from '../../platform'
 import type { ApprovalPlan } from '../approvals'
 import { callService } from '../local-ipc'
 import { localTime, q, requireLibrary } from '../studio'
@@ -122,11 +123,11 @@ export function registerSongTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'New sequence from a song',
       description:
-        "Makes a new sequence cut to a song (\"New sequence from a song…\"), for a music video: the audio file – {upload_id} (a ready audio upload, begin_upload) or {url} – is copied into the sequence's folder as its song. Then, in the background (free, on this Mac): the vocals are separated (separate_vocals, default on when this Mac can), the beat and bars are found, and the song is split into empty clips of about clip_seconds (default 8, 2–15) between its phrases, on the beat; every clip has its place in the song and starts with the sequence's cast (set it with update_sequence({cast}) – the artist, the outfit, the stage). A clip sends its place of the song as its reference audio (@Audio1): the vocals for lip sync, or the music for mood and rhythm; get_sequence shows the places. The lyrics are paid, so they are not transcribed here: ask for them with request_song_lyrics, then adjust the cut points with suggest_song_sections / set_song_sections. Returns at once with the new sequence_id while the work goes on (working); poll get_sequence or suggest_song_sections.",
+        `Makes a new sequence cut to a song (\"New sequence from a song…\"), for a music video: the audio file – {upload_id} (a ready audio upload, begin_upload) or {url} – is copied into the sequence's folder as its song. Then, in the background (free, on ${THIS_COMPUTER}): the vocals are separated (separate_vocals, default on when ${THIS_COMPUTER} can), the beat and bars are found, and the song is split into empty clips of about clip_seconds (default 8, 2–15) between its phrases, on the beat; every clip has its place in the song and starts with the sequence's cast (set it with update_sequence({cast}) – the artist, the outfit, the stage). A clip sends its place of the song as its reference audio (@Audio1): the vocals for lip sync, or the music for mood and rhythm; get_sequence shows the places. The lyrics are paid, so they are not transcribed here: ask for them with request_song_lyrics, then adjust the cut points with suggest_song_sections / set_song_sections. Returns at once with the new sequence_id while the work goes on (working); poll get_sequence or suggest_song_sections.`,
       input: {
         audio: z.union([uploadSource, urlSource]).describe('The song: {upload_id} or {url}.'),
         name: z.string().min(1).max(120).optional().describe("The sequence's name; default the file's name."),
-        separate_vocals: z.boolean().optional().describe('Separate the vocals (free, on this Mac). Default: when this Mac can.'),
+        separate_vocals: z.boolean().optional().describe(`Separate the vocals (free, on ${THIS_COMPUTER}). Default: when ${THIS_COMPUTER} can.`),
         clip_seconds: z
           .number()
           .min(MIN_SONG_WINDOW_SECONDS)

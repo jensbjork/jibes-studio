@@ -153,10 +153,29 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 Early, personal project, now open source. Things work and are used daily, but expect rough edges and breaking
 changes.
 
-- **macOS on Apple Silicon only** for now (the build targets `arm64`, ffmpeg comes from Homebrew, secrets use the
-  macOS Keychain through Electron's `safeStorage`).
+- **macOS on Apple Silicon and Windows x64.** On a Mac ffmpeg comes from Homebrew and secrets use the macOS
+  Keychain through Electron's `safeStorage`; on Windows ffmpeg comes with Studio (see [On Windows](#on-windows)).
 - There is no automated test suite yet (CI typechecks and builds every pull request); see
   [docs/DEVELOPMENT.md](DEVELOPMENT.md) for how changes are tested without spending money.
+
+## On Windows
+
+Studio for Windows works like the Mac version; this guide is written for the Mac, so read it with Windows' keys and
+places:
+
+- **Ctrl instead of ⌘, Alt instead of ⌥, Shift for ⇧** — the app's own hints and tooltips say so. Ctrl+K searches
+  everywhere, Ctrl+F searches a list, Ctrl+Enter generates, Ctrl+Shift+F opens focus mode, Ctrl+Z goes back a
+  version in the Editor, Ctrl+scroll zooms its timeline, Alt+← / Alt+→ move a reference, a sound or a board, and
+  Alt+click previews a take. Two are different: **Ctrl+Shift+S** folds the sidebar (⌃⌘S on a Mac) and **Ctrl+Y**
+  redoes in the Editor (Ctrl+Shift+Z works too). The menu bar is hidden; Alt shows it.
+- **Voice separation is macOS only** (it is Apple's sound isolation). *Remove the voice*, *Only the voice*, keeping
+  the background under a new voice and *Separate the vocals* of a song stay off and say why — where a voice changes,
+  the original sound is lowered instead, and lyrics are transcribed from the whole song. Everything else works.
+- **Where things are:** *Show in File Explorer* wherever this guide says *Show in Finder*; deleted files go to the
+  **Recycle Bin**; the suggested library folder is *Studio* in your **Videos** folder; settings are in
+  `%APPDATA%\Studio\settings.json`, the API key and the agent token encrypted for your Windows user account; new or
+  failed results show as a dot on Studio's **taskbar** button (the Dock counts them on a Mac). ffmpeg comes with
+  Studio (*Settings → Tools* shows it); if it is ever missing, reinstall Studio.
 
 ## Requirements
 

@@ -19,6 +19,7 @@ import { ipcErrorMessage, useModels } from '../../lib/hooks'
 import { LAST_SEQUENCE_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
 import type { Intent, Navigate } from '../../lib/navigation'
+import { FFMPEG_INSTALL, FILE_MANAGER, isMac } from '../../lib/platform'
 import { markSeen, useRunning, useSeenWhenVisible, useUnseen } from '../../lib/work'
 import ConsentDialog from '../ConsentDialog'
 import GenerationPickerDialog from '../feed/GenerationPickerDialog'
@@ -112,7 +113,7 @@ function findRunProblem(sequence: Sequence, ffmpegOk: boolean): { segmentId: str
     if (isOwnTake(chosen) && chosen?.fileMissing && input) {
       return {
         segmentId: s.id,
-        message: `Clip ${i + 1}'s own video is missing (moved or deleted in Finder). Add the file again or generate an AI take.`
+        message: `Clip ${i + 1}'s own video is missing (moved or deleted in ${FILE_MANAGER}). Add the file again or generate an AI take.`
       }
     }
     // A song clip that can't hear its window of the song says so before its references do (after a missing prompt).
@@ -832,7 +833,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   const notReady = sequence ? sequence.segments.flatMap((s, i) => (readyTake(s) ? [] : [i + 1])) : []
   const readyCount = (sequence?.segments.length ?? 0) - notReady.length
   const exportBlocked = !ffmpegOk
-    ? 'ffmpeg is missing – install it with brew install ffmpeg'
+    ? `ffmpeg is missing – ${isMac ? 'install it with ' : ''}${FFMPEG_INSTALL}`
     : !sequence?.segments.length
       ? 'Add clips first'
       : notReady.length
@@ -955,8 +956,13 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
           {ffmpeg.message && !ffmpeg.message.includes('brew install') && (
             <span className="opacity-80">{ffmpeg.message} </span>
           )}
-          Install it with <code className="rounded bg-black/30 px-1 py-px font-mono">brew install ffmpeg</code> and
-          restart Studio.
+          {/* On Windows ffmpeg comes with Studio, and the message says how to get it back. */}
+          {isMac && (
+            <>
+              Install it with <code className="rounded bg-black/30 px-1 py-px font-mono">brew install ffmpeg</code>{' '}
+              and restart Studio.
+            </>
+          )}
         </Banner>
       )}
       {visibleNotice && (
@@ -1008,7 +1014,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               onClick={() => void exportStatus.reveal()}
               className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
             >
-              Show in Finder
+              Show in {FILE_MANAGER}
             </button>
             {exportStatus.done.exportId && (
               <button

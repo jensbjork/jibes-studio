@@ -9,6 +9,7 @@ import type {
   SeparationStatus,
   VideoModel
 } from '@shared/types'
+import { isMac } from './platform'
 
 // The model list rarely changes; share one request across all views (and the agent bridge). Venice does add and
 // retire models, and a window can stay open for days, so the copy is dropped after as long as main keeps its own.
@@ -243,6 +244,11 @@ export function useAudioCatalog(): {
 }
 
 let separationPromise: Promise<SeparationStatus> | undefined
+
+/** Why voice separation can't run, where main gave no reason; it is Apple's sound isolation, so never on Windows. */
+export const NO_SEPARATION = isMac
+  ? "Voice separation isn't available on this Mac."
+  : 'Voice separation is only available on macOS.'
 
 /**
  * Whether this Mac can separate voice and background (Remove the voice, Only the voice, keeping the background under a

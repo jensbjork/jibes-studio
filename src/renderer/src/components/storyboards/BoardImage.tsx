@@ -9,6 +9,7 @@ import {
   type StoryboardBoard
 } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { FFMPEG_INSTALL } from '../../lib/platform'
 import { markSeen, useIsUnseen, useSeenWhenVisible } from '../../lib/work'
 import StillThumb, { isStillDrag, stillIdFromDrop } from '../images/StillThumb'
 import AssetPicker from '../pickers/AssetPicker'
@@ -374,7 +375,7 @@ export default function BoardImage({
                 close()
                 onPickFrame()
               }}
-              title={ffmpegOk ? undefined : 'Needs ffmpeg (brew install ffmpeg)'}
+              title={ffmpegOk ? undefined : `Needs ffmpeg (${FFMPEG_INSTALL})`}
               className={menuRow}
             >
               Frame from a clip…

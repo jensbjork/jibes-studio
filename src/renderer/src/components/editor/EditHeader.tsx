@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Edit, EditVersion } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { FILE_MANAGER } from '../../lib/platform'
 import FolderIcon from '../library/FolderIcon'
 import Popover from '../pickers/Popover'
 import { MoreIcon } from '../sequences/icons'
@@ -76,11 +77,11 @@ export default function EditHeader({
         <button
           type="button"
           onClick={() => void reveal()}
-          title="Show the edit’s folder with its versions in Finder"
+          title={`Show the edit’s folder with its versions in ${FILE_MANAGER}`}
           className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-muted transition hover:bg-raised hover:text-text"
         >
           <FolderIcon size={13} />
-          <span className="hidden @min-[67rem]/main:inline">Show in Finder</span>
+          <span className="hidden @min-[67rem]/main:inline">Show in {FILE_MANAGER}</span>
         </button>
         <button
           ref={sendAnchor}

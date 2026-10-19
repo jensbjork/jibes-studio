@@ -12,6 +12,8 @@ import {
   isAudioClipTooShort
 } from '@shared/models'
 import type { Asset, AssetAudio, AssetKind, PromptLanguage, ReferenceAudio } from '@shared/types'
+import { fileName } from '../../lib/library'
+import { isWindows } from '../../lib/platform'
 import { formatClipSeconds } from './text'
 
 /** A library audio clip with the asset it belongs to. */
@@ -132,7 +134,7 @@ export function audioRole(kind: AssetKind | undefined): string {
 }
 
 /** A sequence's song or its vocals (kept in the sequence's Ljud/ folder; the library's folder names are Swedish). */
-const SONG_FILE = /\/Sekvenser\/[^/]+\/Ljud\/[^/]+$/
+const SONG_FILE = isWindows ? /[\\/]Sekvenser[\\/][^\\/]+[\\/]Ljud[\\/][^\\/]+$/ : /\/Sekvenser\/[^/]+\/Ljud\/[^/]+$/
 
 /**
  * What a clip is, in two parts: "Anna" and "voice" ("voice 2" when it has several), "Song" and its file (a sequence's
@@ -141,7 +143,7 @@ const SONG_FILE = /\/Sekvenser\/[^/]+\/Ljud\/[^/]+$/
 export function audioLabelParts(audio: Pick<FormAudio, 'path' | 'source'>): { name: string; detail: string } {
   const s = audio.source
   if (!s) {
-    return { name: SONG_FILE.test(audio.path) ? 'Song' : 'Own sound', detail: audio.path.split('/').pop() ?? audio.path }
+    return { name: SONG_FILE.test(audio.path) ? 'Song' : 'Own sound', detail: fileName(audio.path) }
   }
   const several = clipsOf(s.asset).length > 1
   return { name: s.asset.name, detail: `${audioRole(s.asset.kind)}${several ? ` ${s.clip}` : ''}` }
@@ -195,7 +197,7 @@ export interface AudiosChange {
 
 /** "the voice of Anna", "the soundscape of Stranden", "the sound interview.mp3": a clip named in a note. */
 function clipName(ref: ReferenceAudio, source: AudioSource | undefined): string {
-  if (!source) return `the sound ${ref.path.split('/').pop() ?? ref.path}`
+  if (!source) return `the sound ${fileName(ref.path)}`
   const kind = source.asset.kind
   const what = kind === 'character' ? 'the voice' : kind === 'environment' ? 'the soundscape' : 'the sound'
   return `${what} of ${source.asset.name}`

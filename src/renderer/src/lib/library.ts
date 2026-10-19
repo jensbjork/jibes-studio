@@ -1,4 +1,5 @@
 import type { Asset, AssetKind, GenerationParams, LibraryMode } from '@shared/types'
+import { PATH_SEPARATOR, isWindows } from './platform'
 
 // localStorage keys that hold library data. Paths and ids in them belong to one library, so switching
 // libraries has to rewrite or forget them (see rememberAfterSwitch).
@@ -21,7 +22,7 @@ export const SELECTED_ASSET_KEYS: Record<AssetKind, string> = {
 }
 
 function trimSlash(path: string): string {
-  return path.length > 1 ? path.replace(/\/+$/, '') : path
+  return path.length > 1 ? path.replace(isWindows ? /[\\/]+$/ : /\/+$/, '') : path
 }
 
 export function samePath(a: string | undefined, b: string | undefined): boolean {
@@ -31,18 +32,29 @@ export function samePath(a: string | undefined, b: string | undefined): boolean 
 /** True when path is dir itself or anything below it. */
 export function isWithin(path: string, dir: string): boolean {
   const d = trimSlash(dir)
-  return trimSlash(path) === d || path.startsWith(`${d}/`)
+  return trimSlash(path) === d || path.startsWith(`${d}/`) || (isWindows && path.startsWith(`${d}\\`))
 }
 
 /** Shortens the home folder to "~" for display ("/Users/me/Movies/Studio" → "~/Movies/Studio"). */
 export function displayPath(path: string): string {
-  return trimSlash(path).replace(/^\/Users\/[^/]+(?=\/|$)/, '~')
+  // Windows paths are shown whole, as Windows writes them.
+  return isWindows ? trimSlash(path) : trimSlash(path).replace(/^\/Users\/[^/]+(?=\/|$)/, '~')
 }
 
 /** Last path segment, e.g. the folder name shown at the top of the folder tree. */
 export function folderName(path: string): string {
   const trimmed = trimSlash(path)
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || trimmed
+  return trimmed.split(PATH_SEPARATOR).pop() || trimmed
+}
+
+/** Whether the text is an absolute path: "/…", on Windows "C:\…" (or "C:/…") and a network share's "\\server\…". */
+export function isAbsolutePath(path: string): boolean {
+  return isWindows ? /^(?:[A-Za-z]:[\\/]|\\\\)/.test(path) : path.startsWith('/')
+}
+
+/** A file's name, the last part of its path ("/…/Genereringar/a.mp4" → "a.mp4"). */
+export function fileName(path: string): string {
+  return path.split(PATH_SEPARATOR).pop() ?? path
 }
 
 /** Applies fn to every image path in the params; fn returning undefined drops that image. */
@@ -223,7 +235,7 @@ const LEGACY_FOLDERS = new Set(['characters', 'generations', 'thumbs', 'exports'
 
 /** The top-level folder of path inside root ("Karaktärer" for <root>/Karaktärer/Anna/a.jpg). */
 function topFolder(path: string, root: string): string {
-  return path.slice(trimSlash(root).length + 1).split('/')[0].normalize('NFC')
+  return path.slice(trimSlash(root).length + 1).split(PATH_SEPARATOR)[0].normalize('NFC')
 }
 
 /**

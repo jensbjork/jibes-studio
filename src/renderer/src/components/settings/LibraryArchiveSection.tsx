@@ -3,6 +3,7 @@ import type { ArchiveProgress, ArchiveResult } from '@shared/types'
 import { freezeGenerateParams } from '../../lib/generateStore'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { readRememberedParams, rememberAfterSwitch } from '../../lib/library'
+import { ARCHIVE_UNAVAILABLE, FILE_MANAGER, PATH_SEPARATOR } from '../../lib/platform'
 import SwitchingOverlay from '../library/SwitchingOverlay'
 
 // Settings → Export & import: the whole library to one zip file, and such a zip opened as the library (main's
@@ -145,7 +146,7 @@ function sizeText(bytes: number): string {
 }
 
 function fileName(path: string): string {
-  return path.split('/').filter(Boolean).pop() ?? path
+  return path.split(PATH_SEPARATOR).filter(Boolean).pop() ?? path
 }
 
 function countsTitle(c: ArchiveResult['counts']): string {
@@ -164,6 +165,9 @@ export default function LibraryArchiveSection() {
   const progress = running?.progress
   const busy = !!running || !!s.reloading
   const opening = progress?.kind === 'import' && progress.phase === 'opening'
+
+  // Off a Mac main can't pack or unpack the zip: nothing is offered, only why.
+  if (ARCHIVE_UNAVAILABLE) return <p className="text-muted">{ARCHIVE_UNAVAILABLE}</p>
 
   return (
     <div>
@@ -200,7 +204,7 @@ export default function LibraryArchiveSection() {
               onClick={() => void window.studio.revealFile(s.exported!.result.path)}
               className="text-muted transition hover:text-text"
             >
-              Show in Finder
+              Show in {FILE_MANAGER}
             </button>
           </p>
           {s.exported.note && <p className="mt-1 pl-4 leading-relaxed text-muted select-text">{s.exported.note}</p>}

@@ -227,8 +227,8 @@ There is no formatter configuration beyond `.editorconfig`; match the code aroun
 
 ## Reporting bugs
 
-Use the *Bug report* issue form. Include the Studio version (or commit), how you run it, the macOS version, the
-exact message you saw, and steps to reproduce. Redact API keys, the agent token and personal paths from
+Use the *Bug report* issue form. Include the Studio version (or commit), how you run it, the macOS or Windows
+version, the exact message you saw, and steps to reproduce. Redact API keys, the agent token and personal paths from
 logs and screenshots. Vulnerabilities go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## License

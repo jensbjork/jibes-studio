@@ -70,6 +70,7 @@ import {
   toStoredPath,
   uniqueName
 } from './paths'
+import { FILE_MANAGER, hideFolderOnWindows, IS_WINDOWS } from './platform'
 import { fileErrorReason } from './references'
 import {
   getLibraryRoot,
@@ -526,7 +527,7 @@ function missingDatabaseMessage(root: string): string {
   return LIBRARY_FOLDERS.some((name) => isOccupied(join(root, name)))
     ? `The library database (${FOLDERS.appData}/${DB_FILE_NAME}) is missing from the folder, so Studio doesn't know ` +
         'what the files in it belong to. Was it deleted, or was the library moved? Choose the folder where the library is now.'
-    : 'The folder holds no Studio library. Was the library moved or renamed in Finder? Choose the folder ' +
+    : `The folder holds no Studio library. Was the library moved or renamed in ${FILE_MANAGER}? Choose the folder ` +
         'where it is now.'
 }
 
@@ -562,7 +563,7 @@ function refuseOwnAssetFolders(root: string): void {
   throw new Error(
     `The library folder already contains ${quotedList(own.map((f) => f.name))} with files of your own. This version ` +
       `of Studio keeps ${andList(own.map((f) => f.what))} in ${where}, so rename ${one ? 'the folder' : 'the folders'} ` +
-      'in Finder and try again.'
+      `in ${FILE_MANAGER} and try again.`
   )
 }
 
@@ -647,6 +648,8 @@ async function openLibraryAt(root: string, create = false): Promise<ReorganizeRe
   if (!create && db.isNewerSchema(db.schemaVersion(dbFile(root)))) throw new Error(db.NEWER_LIBRARY_MESSAGE)
   if (!create) refuseOwnAssetFolders(root)
   ensureStructure(root)
+  // On Windows a leading dot doesn't hide .studio (the database and caches) from File Explorer: an attribute does.
+  hideFolderOnWindows(join(root, FOLDERS.appData))
   clearTmp(root)
   activate(root, create)
   let conversion: ReorganizeReport | undefined
@@ -1027,8 +1030,11 @@ function unmovableReason(root: string, conversion?: ReorganizeReport): string | 
       : undefined
   return (
     'The library cannot be moved yet: some files from the earlier version of Studio could not be sorted into ' +
-    `the new folders${examples ? ` (${examples})` : ''}. If they are locked in Finder (Get Info → Locked), unlock ` +
-    'them and try again. Nothing has been moved.'
+    `the new folders${examples ? ` (${examples})` : ''}. ` +
+    (IS_WINDOWS
+      ? 'If they are read-only (Properties → Read-only in File Explorer), clear that and try again. '
+      : 'If they are locked in Finder (Get Info → Locked), unlock them and try again. ') +
+    'Nothing has been moved.'
   )
 }
 
@@ -1908,7 +1914,7 @@ export async function revealLibraryFolder(target: LibraryFolderTarget, id?: stri
   const error = await shell.openPath(dir)
   if (error) {
     console.warn(`Could not open ${dir}:`, error)
-    throw new Error(`The folder “${basename(dir)}” could not be opened in Finder.`)
+    throw new Error(`The folder “${basename(dir)}” could not be opened in ${FILE_MANAGER}.`)
   }
 }
 

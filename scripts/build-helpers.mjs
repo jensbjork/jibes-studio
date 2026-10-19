@@ -55,7 +55,7 @@ function main() {
     return
   }
   if (process.platform !== 'darwin') {
-    log(`skipped on ${process.platform}: the helpers use macOS frameworks.`)
+    log(`skipped on ${process.platform}: the helpers use macOS frameworks (voice separation is macOS only).`)
     return
   }
   const swiftc = swiftCompiler()

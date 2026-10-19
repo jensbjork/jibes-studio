@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { app, BrowserWindow } from 'electron'
 import type { AgentStatus, ApprovalRequest } from '@shared/types'
+import { IS_WINDOWS } from '../platform'
 import {
   getAgentSettings,
   getAgentToken,
@@ -9,6 +10,7 @@ import {
   setAgentEnabledSetting,
   setAgentPortSetting
 } from '../settings'
+import { flashTaskbar } from '../taskbar'
 import { ActivityLog } from './activity'
 import { ApprovalStore } from './approvals'
 import { FormBridge } from './bridge'
@@ -342,10 +344,12 @@ export class AgentService {
 
   private onApproval(request: ApprovalRequest, created: boolean): void {
     this.opts.broadcast('agent:approval', request)
-    // A new request while the user is in another app: the Dock icon bounces once (the window shows the dialog).
+    // A new request while the user is in another app: the Dock icon bounces once, on Windows the taskbar button
+    // flashes until Studio is in front (the window shows the dialog).
     if (created && !BrowserWindow.getFocusedWindow()) {
       try {
-        app.dock?.bounce('informational')
+        if (IS_WINDOWS) flashTaskbar()
+        else app.dock?.bounce('informational')
       } catch {
         // Only a nudge.
       }

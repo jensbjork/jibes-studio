@@ -3,9 +3,17 @@ import { stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { Readable } from 'node:stream'
 import { protocol } from 'electron'
+import { IS_WINDOWS } from './platform'
 
 // Serves local media files to the renderer as media://local/<encoded absolute path>.
-// Handles Range requests so <video> can seek.
+// Handles Range requests so <video> can seek. A Windows path comes the way a file URL writes it (the renderer's
+// mediaUrl): C:\Videos\a.mp4 as /C:/Videos/a.mp4, a network share's \\server\share\a.mp4 as //server/share/a.mp4.
+
+/** The file a media:// URL's (decoded) path names. */
+export function mediaFilePath(urlPath: string, windows = IS_WINDOWS): string {
+  if (!windows) return urlPath
+  return urlPath.replace(/^\/(?=[A-Za-z]:)/, '').replace(/\//g, '\\')
+}
 
 export const MEDIA_SCHEME = 'media'
 
@@ -42,7 +50,7 @@ export function registerMediaScheme(): void {
 
 export function handleMediaProtocol(): void {
   protocol.handle(MEDIA_SCHEME, async (request) => {
-    const path = decodeURIComponent(new URL(request.url).pathname)
+    const path = mediaFilePath(decodeURIComponent(new URL(request.url).pathname))
     let size: number
     try {
       size = (await stat(path)).size

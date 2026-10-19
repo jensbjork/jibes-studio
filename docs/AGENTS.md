@@ -22,6 +22,10 @@ price, or with everything that would be removed and what depends on it — and n
 until you click *Approve and generate* — *Approve and create* for a picture or a voice, *Approve and run* for an
 edit, *Approve and delete* for a removal.
 
+This document speaks of a Mac. On Windows everything works the same, except that Studio's tools and guide say
+*this PC* (and *the Recycle Bin* for the Trash), voice separation – the vocals of a song, the voice and background
+targets – isn't available, and HEIC pictures are refused.
+
 - [Enabling the server](#enabling-the-server)
 - [Addresses and token](#addresses-and-token)
 - [Client configuration](#client-configuration)
@@ -47,7 +51,8 @@ edit, *Approve and delete* for a removal.
    requests.
 
 The first time Studio listens on the Tailscale address, the macOS firewall may ask whether to allow incoming
-connections — answer *Allow*.
+connections — answer *Allow*. On Windows, Windows Defender Firewall asks the same ("Allow Studio to communicate on
+these networks"): allow it on private networks, which is what Tailscale's network is.
 
 ## Addresses and token
 
@@ -57,7 +62,7 @@ The server speaks **MCP over Streamable HTTP** at the path `/mcp`, on port **877
 | Address | For |
 | --- | --- |
 | `http://127.0.0.1:8770/mcp` | Agents running on the same Mac. |
-| `http://100.x.y.z:8770/mcp` | Agents on other devices in your [Tailscale](https://tailscale.com) tailnet (this Mac's Tailscale IPv4). |
+| `http://100.x.y.z:8770/mcp` | Agents on other devices in your [Tailscale](https://tailscale.com) tailnet (this computer's Tailscale IPv4). |
 | `http://<your-mac>.<tailnet>.ts.net:8770/mcp` | The same, by MagicDNS name, when Studio can resolve it. |
 
 Settings shows the actual addresses with copy buttons. Traffic is plain HTTP: loopback never leaves the Mac, and
@@ -422,7 +427,7 @@ Agents usually run on another machine than Studio, so no tool takes a local path
 
 | Kind | Types | At most |
 | --- | --- | --- |
-| Picture | JPG, PNG, WebP, HEIC (converted to JPEG with macOS's `sips`) | 30 MB, 16 384 px a side, 80 megapixels |
+| Picture | JPG, PNG, WebP, HEIC (converted to JPEG with macOS's `sips`; refused on Windows) | 30 MB, 16 384 px a side, 80 megapixels |
 | Sound | MP3, WAV, AIFF, FLAC, OGG, M4A, AAC | 100 MB |
 | Video | MP4, MOV, M4V, WebM, MKV | 4 GB |
 
@@ -750,17 +755,19 @@ one to three stars — is what `list_generations({min_rating})`, `list_generatio
 
 **Tailscale is not found.** Studio looks for Tailscale's tunnel interface (a `utun` interface with a single
 `100.64.0.0/10` IPv4 address next to an `fd7a:115c:a1e0::/48` IPv6 address); other VPNs or networks that happen to
-use `100.x` addresses are deliberately ignored. Make sure Tailscale is running and connected, then search
-again in Agent connection — Studio also re-checks every 30 seconds. Until then only agents on the
-same Mac can connect.
+use `100.x` addresses are deliberately ignored. On Windows it is the network adapter Tailscale installs, named
+*Tailscale*, with an IPv4 address in Tailscale's range and an `fd7a:115c:a1e0::/48` IPv6 address (renaming the
+adapter hides it from Studio). Make sure Tailscale is running and connected, then search again in Agent connection —
+Studio also re-checks every 30 seconds. Until then only agents on the same computer can connect.
 
 **The port is in use.** Studio reports that the port is used by another program. Choose another port in
 Agent connection and update your agents' URLs. Note that Studio.app and Studio Dev both default to 8770, so give one
 of them another port if both have the connection switched on. To see what holds the port:
-`lsof -nP -iTCP:8770 -sTCP:LISTEN`.
+`lsof -nP -iTCP:8770 -sTCP:LISTEN` (on Windows: `netstat -ano | findstr :8770`).
 
 **Studio could not listen on the Tailscale address.** The connection still works on `127.0.0.1`; the status line
-explains the error. Check the macOS firewall (System Settings → Network → Firewall) and allow Studio.
+explains the error. Check the macOS firewall (System Settings → Network → Firewall) and allow Studio; on Windows,
+allow Studio in Windows Defender Firewall (*Allow an app through firewall*).
 
 **HTTP 401 Unauthorized.** The `Authorization: Bearer <token>` header is missing or the token is wrong — typically
 after the token was replaced. Copy the current token from Agent connection.

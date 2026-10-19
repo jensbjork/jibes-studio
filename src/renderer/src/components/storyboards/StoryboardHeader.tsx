@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ExportSummary, Storyboard } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatUsd } from '../../lib/media'
+import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { markAllSeen, useOwnerWork } from '../../lib/work'
 import { ScissorsIcon } from '../feed/icons'
 import FolderIcon from '../library/FolderIcon'
@@ -268,7 +269,7 @@ function MoreMenu({
             <p className="mb-1 truncate">Delete “{storyboard.name}”?</p>
             <p className="mb-3 text-[12px] leading-relaxed text-muted">
               The boards and transitions are removed. The clips stay in Media, and finished films stay in the
-              folder. The storyboard’s images that nothing else uses are moved to the Trash.
+              folder. The storyboard’s images that nothing else uses are moved to {TRASH}.
             </p>
             <div className="flex justify-end gap-1.5">
               <button
@@ -336,7 +337,7 @@ function MoreMenu({
             </button>
             <button type="button" role="menuitem" data-menu-item onClick={() => void reveal()} className={menuRow}>
               <FolderIcon size={13} className="shrink-0 text-muted" />
-              Open folder in Finder
+              Open folder in {FILE_MANAGER}
             </button>
             <button
               type="button"

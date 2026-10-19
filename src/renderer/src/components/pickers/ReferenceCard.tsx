@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { AssetKind } from '@shared/types'
 import { ASSET_COPY } from '../../lib/assets'
 import { mediaUrl } from '../../lib/media'
+import { PATH_SEPARATOR } from '../../lib/platform'
 import { placeBeside } from '../prompt/textareaDom'
 import AudioPlayButton, { toggleClip } from './AudioPlayButton'
 import { KIND_TONE } from './assetKinds'
@@ -207,7 +208,7 @@ const TEXT_ROOM = 76
 const HINT_ROOM = 18
 
 function fileName(path: string): string {
-  return path.split('/').pop() ?? path
+  return path.split(PATH_SEPARATOR).pop() ?? path
 }
 
 /** "photo 2 of 3" (nothing for an asset's only photo); "voice", "voice 2" for its second voice clip. */

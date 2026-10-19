@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react'
+import { fileName } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import { pauseOthers, registerOffPagePlayer } from '../feed/playback'
 
@@ -174,7 +175,7 @@ export default function AudioPlayButton({
     [path, start, length, keepPlaying]
   )
   const title = state.failed
-    ? `The file can’t be played: ${path.split('/').pop() ?? path}`
+    ? `The file can’t be played: ${fileName(path)}`
     : playingNow
       ? `Stop ${label}`
       : `Listen to ${label}`

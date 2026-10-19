@@ -52,6 +52,31 @@ jobs:
       - name: Build
         run: npm run build
 
+  # The Windows build's main process and window, typechecked and built on every push (no packaging: release.yml
+  # packages and starts it). build:helpers skips the macOS-only Swift helper there.
+  windows:
+    name: Typecheck and build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
   commitlint:
     name: Conventional Commits
     if: github.event_name == 'pull_request'

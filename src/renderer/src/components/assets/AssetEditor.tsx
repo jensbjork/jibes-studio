@@ -3,6 +3,7 @@ import type { Asset } from '@shared/types'
 import { ASSET_COPY, ASSET_FOLDER, assetAudio, audioCountLabel } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
+import { FILE_MANAGER } from '../../lib/platform'
 import OpenFolderButton from '../library/OpenFolderButton'
 import AssetAvatar from './AssetAvatar'
 import AssetImages from './AssetImages'
@@ -201,7 +202,7 @@ export default function AssetEditor({
             <OpenFolderButton
               target={ASSET_FOLDER[asset.kind]}
               id={asset.id}
-              title={`Show ${copy.possessive} folder with the images and the description in Finder`}
+              title={`Show ${copy.possessive} folder with the images and the description in ${FILE_MANAGER}`}
               onError={onError}
               className="rounded-md border border-line px-4 py-2 hover:bg-raised disabled:opacity-40"
             />

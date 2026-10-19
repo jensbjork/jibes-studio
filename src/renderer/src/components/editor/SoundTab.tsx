@@ -1,14 +1,15 @@
 import { useState } from 'react'
 import type { EditOperation } from '@shared/types'
+import { NO_SEPARATION } from '../../lib/hooks'
+import { THIS_COMPUTER, isMac } from '../../lib/platform'
 import { useOpenCard, useReportRange } from './cards'
 import AddAudioDialog from './AddAudioDialog'
 import { useCardRun, useEditor } from './EditorContext'
 import { Choice, CostTag, Field, GainSlider, OpCard, PlanNotes, Target } from './ui'
 
 // Sound: free, local changes to the sound. Each makes a new version with the picture copied as it is, so they take
-// seconds and lose nothing; the voice and the background can be handled apart where this Mac can separate them.
-
-const NO_SEPARATION = "Voice separation isn't available on this Mac."
+// seconds and lose nothing; the voice and the background can be handled apart where this Mac can separate them (never
+// on Windows: separation is Apple's).
 
 const actionButton =
   'rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent'
@@ -160,9 +161,11 @@ function MuteCard({ open, onToggle }: CardProps) {
             {busy === 'background' ? 'Creating version…' : 'Only the voice'}
           </button>
         </div>
-        <p className="text-[11px] leading-relaxed text-muted">
-          The voice is separated from the background on this Mac – the first time takes a while for a long film.
-        </p>
+        {(separated || isMac) && (
+          <p className="text-[11px] leading-relaxed text-muted">
+            The voice is separated from the background on {THIS_COMPUTER} – the first time takes a while for a long film.
+          </p>
+        )}
       </div>
       <PlanNotes error={card.error} />
     </OpCard>

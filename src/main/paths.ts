@@ -9,6 +9,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { AssetKind, GenerationParams, SequenceKind } from '@shared/types'
 import * as db from './db'
+import { FILE_MANAGER, IS_WINDOWS } from './platform'
 
 /** The folders the user sees in Finder, plus the hidden app data folder. */
 export const FOLDERS = {
@@ -106,7 +107,7 @@ export const DB_FILE_NAME = 'studio.db'
 
 export const LIBRARY_NOT_READY = 'Choose a library folder first.'
 export const LIBRARY_LOST =
-  'The library folder no longer exists where it was. Was it moved or renamed in Finder, or disconnected?'
+  `The library folder no longer exists where it was. Was it moved or renamed in ${FILE_MANAGER}, or disconnected?`
 export const LIBRARY_OPERATION_RUNNING =
   'The library is already being moved or tidied. Wait a moment and try again.'
 
@@ -147,11 +148,14 @@ export function withoutLocalPaths(text: string): string {
     }
   }
   let out = text.normalize('NFC')
+  // Folders end in "/"; on Windows in a backslash or "/" (both are used there), and letter case doesn't matter.
+  const slash = IS_WINDOWS ? '[\\\\/]' : '/'
+  const nameChar = IS_WINDOWS ? `[^\\\\/\n'":]` : `[^/\n'":]`
   // The longest first: the library usually lies inside the home folder.
   for (const root of [...roots].filter((r) => r.length > 1).sort((a, b) => b.length - a.length)) {
     const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     // The root and every folder after it, up to the file name (names may hold spaces, not quotes, colons or newlines).
-    out = out.replace(new RegExp(`${escaped}(?:/[^/\n'":]*)*/`, 'g'), '')
+    out = out.replace(new RegExp(`${escaped}(?:${slash}${nameChar}*)*${slash}`, IS_WINDOWS ? 'gi' : 'g'), '')
     out = out.split(root).join('…')
   }
   return out
@@ -321,13 +325,29 @@ function trimName(s: string): string {
   return s.replace(/^[\s.]+/u, '').replace(/[\s.]+$/u, '')
 }
 
+/** Names Windows keeps for devices, case-insensitive and also with an extension ("nul.txt" is NUL). */
+const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])[ ]*(?=\.|$)/i
+/** On Windows a name is kept shorter, so paths stay well within MAX_PATH (260) under the library's folders. */
+const WINDOWS_MAX_NAME = 80
+
+/** A name Windows would take for a device gets an underscore: "Con" → "Con_", "NUL.txt" → "NUL_.txt". */
+export function avoidReservedName(name: string): string {
+  return name.replace(WINDOWS_RESERVED, (device) => `${device.trimEnd()}_`)
+}
+
 /**
  * A file or folder name that reads like the text: å ä ö and ordinary punctuation are kept; characters that
- * macOS or external (exFAT) drives reject become "-" or disappear; whitespace collapses; long text is cut
- * at a word boundary with "…". Empty → fallback.
+ * macOS, Windows or external (exFAT) drives reject become "-" or disappear; whitespace collapses; long text is cut
+ * at a word boundary with "…". Empty → fallback. On Windows (`platform`, given only by tests) names are at most 80
+ * characters and never a device name (CON, NUL, COM1 …).
  */
-export function safeName(text: string, opts: { max?: number; fallback?: string } = {}): string {
-  const max = Math.max(2, Math.floor(opts.max ?? 60))
+export function safeName(
+  text: string,
+  opts: { max?: number; fallback?: string; platform?: NodeJS.Platform } = {}
+): string {
+  const windows = (opts.platform ?? process.platform) === 'win32'
+  const wanted = opts.max ?? 60
+  const max = Math.max(2, Math.floor(windows ? Math.min(wanted, WINDOWS_MAX_NAME) : wanted))
   const fallback = opts.fallback ?? 'Namnlös'
   let s = (typeof text === 'string' ? text : '')
     .normalize('NFC')
@@ -349,7 +369,8 @@ export function safeName(text: string, opts: { max?: number; fallback?: string }
     cut = trimName(cut.replace(/[\s,;.\-–—]+$/u, ''))
     s = cut ? `${cut}…` : ''
   }
-  return s || fallback
+  const name = s || fallback
+  return windows ? avoidReservedName(name) : name
 }
 
 /** Destinations of moves in progress, so two concurrent moves never pick the same free name. */
@@ -375,7 +396,8 @@ function entryExists(p: string): boolean {
  */
 export function uniqueName(dir: string, base: string, ext = ''): string {
   const suffix = ext && !ext.startsWith('.') ? `.${ext}` : ext
-  const stem = trimName(base.replace(/[/\\]/g, '-')) || 'Namnlös'
+  const trimmed = trimName(base.replace(/[/\\]/g, '-')) || 'Namnlös'
+  const stem = IS_WINDOWS ? avoidReservedName(trimmed) : trimmed
   for (let n = 1; ; n++) {
     const name = n === 1 ? `${stem}${suffix}` : `${stem} (${n})${suffix}`
     const path = join(dir, name)

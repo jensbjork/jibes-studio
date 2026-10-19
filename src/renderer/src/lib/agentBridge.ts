@@ -38,7 +38,7 @@ import { addAudios, audioSourcesByPath, sameAudios, windowOf } from '../componen
 import { ASSET_VIEW } from './assets'
 import { followGenerateAudio, generateParamsFrozen, getGenerateParams, setGenerateParams } from './generateStore'
 import { ipcErrorMessage, loadModels } from './hooks'
-import { SELECTED_ASSET_KEYS, followAssetImages, readRememberedImageIds } from './library'
+import { SELECTED_ASSET_KEYS, fileName, followAssetImages, isAbsolutePath, readRememberedImageIds } from './library'
 import { getMediaTab, setMediaTab } from './mediaTab'
 import type { Intent, Navigate, View } from './navigation'
 import { promptIssuesOf } from './promptIssues'
@@ -332,7 +332,7 @@ export function applySetForm(
     else {
       const path = typeof startValue === 'string' ? startValue : asArgs(startValue).path
       const kind = kindOfModelId(next.model)
-      if (typeof path !== 'string' || !path.startsWith('/')) errors.push("The start image couldn't be found in the library.")
+      if (typeof path !== 'string' || !isAbsolutePath(path)) errors.push("The start image couldn't be found in the library.")
       else if (kind !== 'image-to-video') {
         errors.push(`A start image is only used in the mode ${modeName('image-to-video')}, not ${modeName(kind)}.`)
       } else next.startImage = path
@@ -345,7 +345,7 @@ export function applySetForm(
     else {
       const path = typeof endValue === 'string' ? endValue : asArgs(endValue).path
       const kind = kindOfModelId(next.model)
-      if (typeof path !== 'string' || !path.startsWith('/')) errors.push("The end image couldn't be found in the library.")
+      if (typeof path !== 'string' || !isAbsolutePath(path)) errors.push("The end image couldn't be found in the library.")
       else if (kind !== 'image-to-video') {
         errors.push(`An end image is only used in the mode ${modeName('image-to-video')}, not ${modeName(kind)}.`)
       } else if (!supportsEndImage(next.model)) {
@@ -409,7 +409,7 @@ function parseAudios(value: unknown): ReferenceAudio[] | undefined {
     const a = typeof item === 'string' ? { path: item } : asArgs(item)
     const start = seconds(a.start)
     const length = seconds(a.length)
-    if (typeof a.path !== 'string' || !a.path.startsWith('/') || Number.isNaN(start) || Number.isNaN(length)) {
+    if (typeof a.path !== 'string' || !isAbsolutePath(a.path) || Number.isNaN(start) || Number.isNaN(length)) {
       throw new BridgeError(unreadable)
     }
     return {
@@ -436,7 +436,7 @@ export function applySetReferences(
 ): FormChange {
   const args = asArgs(rawArgs)
   const paths = args.paths
-  if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string' || !p.startsWith('/'))) {
+  if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string' || !isAbsolutePath(p))) {
     throw new BridgeError("The reference images couldn't be read (paths must be a list of image paths).")
   }
   const mode = args.mode ?? 'replace'
@@ -549,7 +549,7 @@ function orderEntries(
       throw new BridgeError(`${list} contains an empty or unreadable entry.`)
     }
     const entry = raw.trim()
-    if (entry.startsWith('/')) return [formPath(entry) ?? entry]
+    if (isAbsolutePath(entry)) return [formPath(entry) ?? entry]
     for (const asset of assets) {
       if (kind === 'image') {
         const photo = asset.images.findIndex((img) => img.id === entry)
@@ -672,7 +672,7 @@ export function applySwapReference(current: GenerationParams, rawArgs: unknown, 
     const image = field(args, 'image')
     const path = field(args, 'path')
     const hint = field(args, 'index')
-    if (typeof image !== 'string' || typeof path !== 'string' || !image.startsWith('/') || !path.startsWith('/')) {
+    if (typeof image !== 'string' || typeof path !== 'string' || !isAbsolutePath(image) || !isAbsolutePath(path)) {
       throw new BridgeError("The swap couldn't be read (image and path must be image paths).")
     }
     const images = current.referenceImages ?? []
@@ -699,7 +699,7 @@ function capNotes(before: readonly string[], after: readonly string[], max: numb
   const photos = photoIndex(assets)
   const name = (path: string): string => {
     const photo = photos.get(path)
-    return photo?.assetName ? `${photo.assetName}, image ${photo.photoNumber}` : (path.split('/').pop() ?? path)
+    return photo?.assetName ? `${photo.assetName}, image ${photo.photoNumber}` : fileName(path)
   }
   const out: string[] = []
   after.forEach((path, i) => {

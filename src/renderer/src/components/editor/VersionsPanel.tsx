@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { workKey, type Edit, type EditJob, type EditProgress, type EditVersion } from '@shared/types'
 import { withBudgetConfirm } from '../../lib/budget'
 import { ipcErrorMessage } from '../../lib/hooks'
+import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { markSeen, useIsUnseen, useSeenWhenVisible } from '../../lib/work'
 import Popover from '../pickers/Popover'
 import { MoreIcon } from '../sequences/icons'
@@ -495,7 +496,7 @@ function VersionRow({
           <div className="p-3">
             <p className="mb-1">Delete {versionName(version)}?</p>
             <p className="mb-3 text-[12px] leading-relaxed text-muted">
-              The file goes to the Trash. Versions made from it move up one step in the tree.
+              The file goes to {TRASH}. Versions made from it move up one step in the tree.
               {pausedPaid && (
                 <span className="mt-1.5 block text-[#ffb3b5]">
                   The job “{pausedPaid.label}” starts from it and has already paid {formatPrice(pausedPaid.costUsd)}. It
@@ -542,11 +543,11 @@ function VersionRow({
               role="menuitem"
               data-menu-item
               disabled={!version.generation.filePath || version.generation.fileMissing}
-              title={version.generation.fileMissing ? 'The film file is missing (moved or deleted in Finder)' : undefined}
+              title={version.generation.fileMissing ? `The film file is missing (moved or deleted in ${FILE_MANAGER})` : undefined}
               onClick={reveal}
               className={menuRow}
             >
-              Show in Finder
+              Show in {FILE_MANAGER}
             </button>
             <button type="button" role="menuitem" data-menu-item onClick={() => setMenu('send')} className={menuRow}>
               Send to…
@@ -643,7 +644,7 @@ export function PruneConfirm({
         {found.count} {found.count === 1 ? 'version' : 'versions'} · {formatBytes(found.bytes)}
       </p>
       <p className="mb-3 text-[12px] leading-relaxed text-muted">
-        These go to the Trash. The original, the current version, the versions it builds on and those used in
+        These go to {TRASH}. The original, the current version, the versions it builds on and those used in
         sequences or by other edits are kept.
       </p>
       <div className="flex justify-end gap-1.5">
@@ -688,7 +689,7 @@ function PruneButton({
         type="button"
         onClick={() => void prune.check()}
         disabled={prune.busy || count < 2}
-        title="Move versions that aren’t needed to the Trash"
+        title={`Move versions that aren’t needed to ${TRASH}`}
         className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40 disabled:hover:bg-transparent"
       >
         Clean up versions…

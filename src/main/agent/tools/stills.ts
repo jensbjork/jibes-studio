@@ -16,6 +16,7 @@ import * as db from '../../db'
 import { DEFAULT_EDIT_MODEL, DEFAULT_IMAGE_MODEL } from '../../images'
 import { frameStartAtOrAfter } from '../../ffmpeg'
 import { getImageSafeMode } from '../../settings'
+import { FILE_MANAGER } from '../../platform'
 import * as store from '../../sequence-store'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
@@ -373,7 +374,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: {
           ...stillInfo(still, assets, stills, owners, imageUses(owners)),
-          ...(image ? {} : { note: 'The picture could not be read (moved or deleted in Finder?).' })
+          ...(image ? {} : { note: `The picture could not be read (moved or deleted in ${FILE_MANAGER}?).` })
         },
         images
       }

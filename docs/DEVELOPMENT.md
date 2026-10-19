@@ -10,7 +10,7 @@ IPC surface safely. For how the code is organised, see [ARCHITECTURE.md](ARCHITE
   uploads, harnesses)
 - [Typecheck and build](#typecheck-and-build)
 - [Native helper](#native-helper) (voice separation)
-- [Packaging](#packaging)
+- [Packaging](#packaging) (macOS, Windows)
 - [Database migrations](#database-migrations)
 - [Adding an asset kind](#adding-an-asset-kind)
 - [Adding an IPC method](#adding-an-ipc-method)
@@ -33,6 +33,22 @@ npm run dev
 `npm install` runs `electron-rebuild -f -w better-sqlite3` afterwards, so the native SQLite module is built for
 Electron's Node ABI. A consequence: plain `node` cannot load it — scripts that use the database run under Electron
 (see [Electron-as-Node harnesses](#electron-as-node-harnesses)).
+
+### On Windows
+
+Studio also builds and runs on 64-bit Windows 10 or 11 (see [ARCHITECTURE.md](ARCHITECTURE.md#platforms) for what
+differs):
+
+- Node.js as above, and Visual Studio's C++ build tools ("Desktop development with C++") with Python, which
+  `npm install`'s `electron-rebuild` uses.
+- ffmpeg: `node scripts/fetch-ffmpeg-win.mjs` puts the same pinned build the Windows app ships into
+  `build/ffmpeg-win/` (gitignored), where a development build finds it; otherwise `ffmpeg.exe` and `ffprobe.exe` on
+  `PATH`.
+- No Swift helper: `build:helpers` skips itself, and voice separation is off (it is macOS only).
+- The `dev` scripts set variables the POSIX way, which `cmd.exe` (npm's default shell on Windows) doesn't
+  understand. In PowerShell run `$env:STUDIO_DEV_PROFILE = '1'; npx electron-vite dev -w` instead, or point npm at
+  Git Bash once: `npm config set script-shell "C:\Program Files\Git\bin\bash.exe"`. `npm run typecheck`,
+  `npm run build` and the scripts in `scripts/` work as they are.
 
 ## Scripts
 
@@ -76,6 +92,9 @@ suggested location of the library. Each library carries its own database inside 
   Use it for anything you want to delete afterwards, e.g. `STUDIO_PROFILE_DIR=/tmp/studio-test npm run dev`.
 - Both Studio and Studio Dev default to agent port 8770. If both have the agent connection on, give one of them
   another port.
+
+On Windows the settings are in `%APPDATA%\Studio\` (`Studio Dev\`) and the suggested library is
+`Videos\Studio` (`Videos\Studio Dev`).
 
 **Never point development work at a library you care about.** Copy it into a throwaway profile instead.
 
@@ -445,7 +464,8 @@ npm run check       # both of the above
 
 `npm run check` must pass before a pull request (see [CONTRIBUTING.md](../CONTRIBUTING.md)); CI
 (`.github/workflows/ci.yml`) runs the same steps on macOS for every pull request and push to `main`, plus
-`npm run build:helpers` and the helper's `--probe`.
+`npm run build:helpers` and the helper's `--probe`, and typechecks and builds on Windows too, so code that only
+works on a Mac shows up there (packaging and starting the Windows app are left to the release workflow).
 `tsconfig.node.json` covers `src/main`, `src/preload` and `src/shared`; `tsconfig.web.json` covers
 `src/renderer`, the preload's type declaration and `src/shared`.
 
@@ -480,6 +500,8 @@ times over as 32-bit float at 48 kHz) fit on the library's disk with 1 GB to spa
 
 ## Packaging
 
+### macOS
+
 `npm run app` runs `electron-vite build` and then electron-builder with `electron-builder.yml`:
 
 - **Target:** a plain `.app` folder for `arm64` (`dist/mac-arm64/Studio.app`). The release workflow asks for a ZIP
@@ -494,12 +516,54 @@ times over as 32-bit float at 48 kHz) fit on the library's disk with 1 GB to spa
 - **Native helper:** `build/bin/studio-voice-isolate` is copied to `Contents/Resources/bin/` (`extraResources`). A
   build without it only gets a warning from electron-builder, and that app runs without voice separation.
 - **Info.plist:** the folder-access usage descriptions (Documents, Desktop, Downloads, removable and network
-  volumes) are set in `electron-builder.yml`; `electronLanguages` keeps `sv` and `en`.
+  volumes) are set in `electron-builder.yml`; `electronLanguages` keeps only `en`.
 - **Node and `require(esm)`:** electron-builder 26 `require()`s ES-module-only dependencies. Node 22.12 and later
   allow that by default (hence `"engines": { "node": ">=22.12" }`); the `app` script also sets
   `NODE_OPTIONS=--experimental-require-module` so it works where the feature is still behind that flag. The
   `ExperimentalWarning` printed during packaging is expected.
 - `npm run app:install` deletes `/Applications/Studio.app` and copies the new build there; quit Studio first.
+
+### Windows
+
+The release workflow builds the Windows app on a Windows runner; on Windows (or, for a look at the files, even on a
+Mac) it is:
+
+```bash
+node scripts/fetch-ffmpeg-win.mjs        # the pinned ffmpeg into build/ffmpeg-win (--check also runs it, Windows only)
+npx electron-vite build
+npx electron-builder --win nsis zip --x64 --publish never -c.npmRebuild=false
+node scripts/smoke-test.mjs dist/win-unpacked/Studio.exe --bundled-ffmpeg
+```
+
+- **Targets:** `Studio-win-x64-setup.exe` (NSIS, `nsis.artifactName`) and `Studio-win-x64.zip` (portable), x64
+  only; `--dir` gives just `dist/win-unpacked/`.
+- **Installer:** the assisted NSIS installer, per user by default (no administrator rights; installed under
+  `%LOCALAPPDATA%\Programs\Studio`), where the folder can be changed; Start menu and desktop shortcuts; English only.
+  Uninstalling keeps the settings, and never touches a library.
+- **Signing:** none. SmartScreen warns the first time ("Windows protected your PC" → *More info* → *Run anyway*, as
+  the README says); a code-signing certificate in the workflow would remove that.
+- **Icon:** electron-builder turns `build/icon.png` (1024 × 1024) into a multi-size `.ico` itself; no `.ico` is kept
+  in the repository.
+- **ffmpeg:** comes with the app in `resources/ffmpeg/` (`win.extraResources` from `build/ffmpeg-win`), which
+  `src/main/ffmpeg.ts` tries before `PATH`. `scripts/fetch-ffmpeg-win.mjs` downloads one pinned
+  [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) GPL build of FFmpeg's release branch (the "shared"
+  variant: `ffmpeg.exe` and `ffprobe.exe` share one set of FFmpeg DLLs, about half the size of two static
+  programs), checks its SHA-256 before unpacking, and adds FFmpeg's licence and a `SOURCE.txt` with the source links
+  (see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)). `--check` runs it and fails unless it has every encoder,
+  muxer and filter Studio uses; the list is in the script. To move to a newer build, take a month's last
+  `autobuild-…` release (BtbN keeps those for two years, daily ones for two weeks), its
+  `…-win64-gpl-shared-<branch>.zip` and that file's SHA-256 from the release's `checksums.sha256`; the script's
+  header says how.
+- **Native module:** better-sqlite3's own Node-API binary for Windows (`prebuilds/win32-x64.node`) is kept and the
+  other platforms' are left out (`win.files`); it loads in Electron as it is, so nothing is rebuilt
+  (`-c.npmRebuild=false`, which also lets a Mac package the Windows app).
+- **Languages:** Chromium's Windows locale files are named `en-US.pak` …, so `win.electronLanguages` keeps `en-US`.
+- **Smoke test:** `scripts/smoke-test.mjs [app] [--bundled-ffmpeg] [--screenshot file.png]` starts a built app
+  (default `dist/win-unpacked/Studio.exe` on Windows, `dist/mac-arm64/Studio.app` on a Mac) with a new temporary
+  profile and a remote-debugging port, and checks over the DevTools protocol that the window shows Studio, that
+  ffmpeg is found and reports its version (with `--bundled-ffmpeg`: the copy in the app's `resources/ffmpeg`),
+  that a new, empty library opens (the SQLite database is created) and that Settings renders with ffmpeg in it;
+  then it closes Studio and deletes the profile. It never reads your settings or library and uses no API key.
 
 ## Releasing
 
@@ -513,9 +577,16 @@ Releases are built on GitHub, not on a laptop (`.github/workflows/release.yml`):
    git tag v0.2.0 && git push origin v0.2.0
    ```
 
-3. The workflow checks that the tag matches `package.json`, typechecks, builds the native helper, packages
-   `Studio-mac-arm64.zip` and `.dmg` on an Apple Silicon runner and publishes them as the GitHub release `v0.2.0`
-   with generated notes. *Run workflow* on the Actions tab builds the same files as an artifact without publishing.
+3. The workflow builds both platforms side by side, each checking that the tag matches `package.json` and
+   typechecking first:
+   - `mac` (an Apple Silicon runner): builds the native helper and packages `Studio-mac-arm64.zip` and `.dmg`;
+   - `windows` (a Windows runner): fetches and checks the pinned ffmpeg, packages `Studio-win-x64-setup.exe` and
+     `Studio-win-x64.zip`, and runs the smoke test on `dist/win-unpacked/Studio.exe` (its screenshot is kept as the
+     `smoke-test-windows` artifact, also when it fails);
+   - `publish` (tags only, once both have passed) creates the GitHub release `v0.2.0` with all four files and
+     generated notes.
+
+   *Run workflow* on the Actions tab builds the same files as artifacts of the run without publishing anything.
 
 The builds are signed ad hoc, not notarized. `install.sh` downloads the ZIP with `curl`, which sets no quarantine
 flag, so the app opens without Gatekeeper's prompt; a DMG downloaded in a browser needs *Open Anyway* once (the

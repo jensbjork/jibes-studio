@@ -25,7 +25,7 @@ Please give us a reasonable time to fix the issue before disclosing it.
 
 ## Threat model
 
-Studio is a local desktop app for macOS. What it protects:
+Studio is a local desktop app for macOS and Windows. What it protects:
 
 - **Money** — the Venice API key spends real money on every generation.
 - **Secrets** — the Venice API key and the agent connection's bearer token.
@@ -34,7 +34,8 @@ Studio is a local desktop app for macOS. What it protects:
 ### Secrets
 
 - The Venice API key and the agent token are stored in the profile's `settings.json`, encrypted with Electron
-  `safeStorage` (backed by the macOS Keychain). Nothing else in `settings.json` is secret.
+  `safeStorage` (backed by the macOS Keychain; on Windows by DPAPI, tied to the user's Windows account). Nothing else
+  in `settings.json` is secret.
 - The API key never reaches the renderer (it only learns *whether* a key is set). The agent token is sent to the
   renderer only when the user shows or copies it in Settings.
 - Venice is called over HTTPS. The pre-signed download URLs Venice returns are kept in the main process.
@@ -59,7 +60,8 @@ Mac it wasn't given, and so that nothing outside the user's devices can reach it
 - **Loopback and Tailscale only.** It binds explicitly to `127.0.0.1` and to this Mac's Tailscale IPv4 addresses,
   never to `0.0.0.0` or a LAN address. Tailscale is recognised by its tunnel interface (a `utun` interface with a
   single `100.64.0.0/10` address next to Tailscale's own IPv6 range), so other VPNs or carrier networks that use
-  `100.x` addresses are not listened on.
+  `100.x` addresses are not listened on. On Windows it is the network adapter named *Tailscale*, with Tailscale's
+  IPv6 range beside an address in Tailscale's range.
 - **Per-socket peer checks.** The loopback socket only accepts loopback peers; the Tailscale socket only accepts
   Tailscale IPv4 peers that are not on a network the Mac is directly attached to. Anything else gets 403.
 - **Bearer token.** Every request needs `Authorization: Bearer <token>`: 256 random bits, stored encrypted,
@@ -105,17 +107,17 @@ Mac it wasn't given, and so that nothing outside the user's devices can reach it
   activity log and an asset file's recorded origin keep only the host, never the URL (which may carry a token), and
   a fetched file is named after the URL's last path segment only when that looks like a file name (the kind's
   extension, no token-like run of letters and digits); otherwise it gets a plain name.
-- **Uploads are checked and contained.** What an upload is comes from its bytes, not its name or `Content-Type`:
-  JPEG, PNG, WebP or HEIC pictures (dimensions read from the header and refused above 16 384 px a side or 80
-  megapixels before any decoder runs; HEIC converted with macOS's `sips`; then decoded), MP3, WAV, AIFF, FLAC, OGG,
-  AAC or MP4 sound (probed with ffprobe), MP4/MOV, WebM or MKV video (the own-clip inspection); SVG, GIF and TIFF are
-  refused. Caps: 30 MB per picture, 100 MB per sound, 4 GB per video; at most 16 live uploads and 8 GB staged, and 2
-  GB must stay free on the disk — counting what transfers under way have declared but not yet written, and checked
-  again while a URL downloads (its size is only known as it arrives), so neither many URLs nor overlapping `PUT`s can
-  fill the disk. Uploads are staged in the library's `.studio/tmp/agent-uploads/`, live two hours once ready, and are
-  thrown away when the token is replaced, the library is switched or moved, the connection is turned off or Studio
-  quits (`.studio/tmp` is also cleared at every library open). What a content tool fetches from a `{url}` source is
-  thrown away once the call has answered, unless its error names it for the agent to go on with.
+- **Uploads are checked and contained.** What an upload is comes from its bytes, not its name or `Content-Type`: JPEG,
+  PNG, WebP or HEIC pictures (dimensions read from the header and refused above 16 384 px a side or 80 megapixels
+  before any decoder runs; HEIC converted with macOS's `sips`, refused on Windows; then decoded), MP3, WAV, AIFF,
+  FLAC, OGG, AAC or MP4 sound (probed with ffprobe), MP4/MOV, WebM or MKV video (the own-clip inspection); SVG, GIF
+  and TIFF are refused. Caps: 30 MB per picture, 100 MB per sound, 4 GB per video; at most 16 live uploads and 8 GB
+  staged, and 2 GB must stay free on the disk — counting what transfers under way have declared but not yet written,
+  and checked again while a URL downloads (its size is only known as it arrives), so neither many URLs nor overlapping
+  `PUT`s can fill the disk. Uploads are staged in the library's `.studio/tmp/agent-uploads/`, live two hours once
+  ready, and are thrown away when the token is replaced, the library is switched or moved, the connection is turned
+  off or Studio quits (`.studio/tmp` is also cleared at every library open). What a content tool fetches from a
+  `{url}` source is thrown away once the call has answered, unless its error names it for the agent to go on with.
 - **Removals need approval in the app.** No tool removes anything. `request_delete` only creates a request listing
   every item with what else would change; nothing is removed until the user approves it, all or nothing. While the
   dialog is open the request is checked again every 2 seconds and on focus, and on approval it is checked once more;

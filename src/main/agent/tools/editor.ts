@@ -21,6 +21,7 @@ import type {
   Transcript
 } from '@shared/types'
 import * as db from '../../db'
+import { THIS_COMPUTER } from '../../platform'
 import * as store from '../../sequence-store'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
@@ -377,7 +378,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get edit',
       description:
-        "One edit in the Editor: its versions as a tree (v1 is the untouched original; each version has its parent_version_id, the operation that made it, its cost and which sequence clips use it), which one is current, the paid jobs (running or done, with errors), the AI takes made for picture operations, the edit's audio media (reusable with add_audio media_id), every version's added sound layers (layer_id for the layer op), and for the current version its cut markers, its layers and muted spans as the timeline draws them, and a summary of its transcript – plus whether this Mac can separate voice and background and whether Venice offers a voice changer. With include_thumbnails (default true) the poster frames of the current version and the original come as images. Look at a version itself with review_generation(version_id) – frames and, with include_audio and audio_start, its sound.",
+        `One edit in the Editor: its versions as a tree (v1 is the untouched original; each version has its parent_version_id, the operation that made it, its cost and which sequence clips use it), which one is current, the paid jobs (running or done, with errors), the AI takes made for picture operations, the edit's audio media (reusable with add_audio media_id), every version's added sound layers (layer_id for the layer op), and for the current version its cut markers, its layers and muted spans as the timeline draws them, and a summary of its transcript – plus whether ${THIS_COMPUTER} can separate voice and background and whether Venice offers a voice changer. With include_thumbnails (default true) the poster frames of the current version and the original come as images. Look at a version itself with review_generation(version_id) – frames and, with include_audio and audio_start, its sound.`,
       input: {
         edit_id: editIdInput,
         include_thumbnails: z.boolean().default(true)
@@ -511,7 +512,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List audio models',
       description:
-        "Venice's audio models for the Editor, with their voices, limits and prices: speech (text-to-speech for speak_lines: voices, max characters per line, price per 1000 characters, whether it clones a voice or takes a style prompt), music and effects (durations per model), transcription (price per minute; word or segment timestamps), voice_changers (speech-to-speech for change_voice; empty while Venice lists none) and voice_design (request_voice_design). Also whether this Mac can separate voice and background (separation: needed for the voice/background targets and to keep music under a new voice) and the default models. Exact prices for a given film come from plan_edit_operation (free).",
+        `Venice's audio models for the Editor, with their voices, limits and prices: speech (text-to-speech for speak_lines: voices, max characters per line, price per 1000 characters, whether it clones a voice or takes a style prompt), music and effects (durations per model), transcription (price per minute; word or segment timestamps), voice_changers (speech-to-speech for change_voice; empty while Venice lists none) and voice_design (request_voice_design). Also whether ${THIS_COMPUTER} can separate voice and background (separation: needed for the voice/background targets and to keep music under a new voice) and the default models. Exact prices for a given film come from plan_edit_operation (free).`,
       input: {
         refresh: z.boolean().default(false).describe('Fetch the list again instead of the ten-minute cache.')
       },
@@ -637,7 +638,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Apply a free edit',
       description:
-        "Makes a free operation on a version (default the current one) and saves the result as a new version (it becomes current when its base was current; otherwise a branch): trim, cut, fade, volume, mute, denoise, loudness, add_audio (media_id: audio already in the edit – add_edit_audio puts a sound you send there first; asset_audio_id: a library clip) or layer. Rendered on this Mac; nothing is paid. Paid operations are refused: plan them with plan_edit_operation and ask with request_edit_operation. Check first with plan_edit_operation; problems come back as an error and nothing is made. Answers with the new version.",
+        `Makes a free operation on a version (default the current one) and saves the result as a new version (it becomes current when its base was current; otherwise a branch): trim, cut, fade, volume, mute, denoise, loudness, add_audio (media_id: audio already in the edit – add_edit_audio puts a sound you send there first; asset_audio_id: a library clip) or layer. Rendered on ${THIS_COMPUTER}; nothing is paid. Paid operations are refused: plan them with plan_edit_operation and ask with request_edit_operation. Check first with plan_edit_operation; problems come back as an error and nothing is made. Answers with the new version.`,
       input: {
         edit_id: editIdInput,
         base_version_id: baseVersionInput,

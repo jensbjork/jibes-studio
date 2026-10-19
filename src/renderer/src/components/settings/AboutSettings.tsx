@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { INSTALLED_APP } from '../../lib/platform'
 
 interface Versions {
   studio?: string
@@ -38,7 +39,7 @@ export default function AboutSettings({ devProfile }: { devProfile: boolean }) {
       {engine && <p className="mt-0.5 text-[12px] text-muted select-text tabular-nums">{engine}</p>}
       {devProfile && (
         <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
-          Has its own settings and its own library, separate from Studio.app.
+          Has its own settings and its own library, separate from {INSTALLED_APP}.
         </p>
       )}
     </div>

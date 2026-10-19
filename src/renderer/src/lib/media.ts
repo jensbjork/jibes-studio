@@ -1,6 +1,13 @@
-/** URL for a local file, served by the main process's media:// protocol. */
+import { isWindows } from './platform'
+
+/**
+ * URL for a local file, served by the main process's media:// protocol. A Windows path goes in the way a file URL
+ * writes it (D:\Studio\a.mp4 as /D:/Studio/a.mp4, a network share's \\server\share as //server/share): main turns
+ * it back into the path.
+ */
 export function mediaUrl(path: string): string {
-  return `media://local${path.split('/').map(encodeURIComponent).join('/')}`
+  const urlPath = isWindows ? `${/^[A-Za-z]:/.test(path) ? '/' : ''}${path.replace(/\\/g, '/')}` : path
+  return `media://local${urlPath.split('/').map(encodeURIComponent).join('/')}`
 }
 
 /**
@@ -13,7 +20,8 @@ export function mediaPathOf(url: string | undefined): string | undefined {
   const end = url.search(/[?#]/)
   const encoded = (end < 0 ? url : url.slice(0, end)).slice('media://local'.length)
   try {
-    return encoded.split('/').map(decodeURIComponent).join('/').normalize('NFC')
+    const path = encoded.split('/').map(decodeURIComponent).join('/').normalize('NFC')
+    return isWindows ? path.replace(/^\/(?=[A-Za-z]:)/, '').replace(/\//g, '\\') : path
   } catch {
     // A malformed escape: not one of ours.
     return undefined

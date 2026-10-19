@@ -10,6 +10,7 @@ import type {
   EditVersion,
   TranscriptSegment
 } from '@shared/types'
+import { PATH_SEPARATOR, TRASH } from '../../lib/platform'
 
 // Pure helpers for the Editor: how times, prices and versions are written, the version tree, snapping a
 // marked range on the timeline, and what a plan needs before its button may send anything. No DOM, no IPC.
@@ -23,7 +24,7 @@ export const formatClock = formatTimecode
 
 /** What deleting an edit does, for its question (in the edit's ⋯ menu and in the list). */
 export const DELETE_EDIT_TEXT =
-  'Versions used in sequences or by other edits, and the AI takes, are kept. The rest goes to the Trash. The film you started from is left untouched.'
+  `Versions used in sequences or by other edits, and the AI takes, are kept. The rest goes to ${TRASH}. The film you started from is left untouched.`
 
 /** "1:04" (whole seconds), for lengths in lists and cards. */
 export function formatLength(seconds: number | undefined): string {
@@ -391,5 +392,5 @@ export function suggestRegeneratePrompt(segments: readonly TranscriptSegment[], 
 
 /** The file's name without its folder. */
 export function fileName(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1)
+  return path.split(PATH_SEPARATOR).pop() ?? path
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { ASSET_KINDS, type Asset, type Generation, type VideoModel } from '@shared/types'
 import { ASSET_COPY } from '../../lib/assets'
+import { shortcut } from '../../lib/platform'
 import AssetAvatar from '../assets/AssetAvatar'
 import { KIND_TONE } from '../pickers/assetKinds'
 import { CloseIcon } from '../sequences/icons'
@@ -118,7 +119,7 @@ export default function FeedToolbar({
             onKeyDown={onSearchKey}
             placeholder="Search prompts and names…"
             aria-label="Search prompts and names"
-            title="Search prompts and names (⌘ F)"
+            title={`Search prompts and names (${shortcut('⌘ F')})`}
             className="h-7 w-full rounded-md border border-line bg-raised pl-7 pr-7 text-[12px] outline-none focus:border-muted"
           />
           {filters.query && (

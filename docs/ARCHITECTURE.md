@@ -10,6 +10,7 @@ all of it — with agents' uploads and their approved removals. It reflects the 
 code wins — please fix the document.
 
 - [Processes](#processes)
+- [Platforms](#platforms)
 - [Module map](#module-map)
 - [Data model](#data-model)
 - [Stored paths](#stored-paths)
@@ -54,6 +55,34 @@ paid jobs), registers the `media://` scheme and every IPC handler, opens the con
 the agent server, kills running ffmpeg processes (removing their partial files) and closes the database, which
 folds the SQLite WAL back into `studio.db`.
 
+## Platforms
+
+Studio is built for macOS on Apple Silicon and for 64-bit Windows (`StudioApi.platform` tells the window which:
+`'darwin' | 'win32' | 'linux'`, set by the preload from `process.platform`). Main keeps every difference behind a
+platform check, so the Mac build behaves exactly as it always has; `src/main/platform.ts` holds the words and
+`src/renderer/src/lib/platform.ts` the window's (shortcuts, Finder or File Explorer).
+
+| | macOS | Windows |
+| --- | --- | --- |
+| ffmpeg | Homebrew's (`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, then `PATH`) | Ships with the app in `resources/ffmpeg` (a pinned BtbN GPL build; `scripts/fetch-ffmpeg-win.mjs`), then a development build's `build/ffmpeg-win`, then `PATH` (`ffmpeg.exe`); spawned with `windowsHide` so no console window flashes |
+| Hardware decoding | VideoToolbox for working copies and scene cuts | None: software decoding |
+| Window | Hidden title bar with the traffic lights inset | The native frame, dark (`nativeTheme.themeSource = 'dark'`), no menu bar: a hidden menu (not auto-hidden, which Alt+click would bring up) keeps its shortcuts – Ctrl+0, Ctrl+Plus and Ctrl+- zoom, F11 full screen, and in development Ctrl+R and Ctrl+Shift+I |
+| New and failed work | The Dock badge's number | A red dot over the taskbar button (its description has the number) |
+| A new agent request | The Dock icon bounces once | The taskbar button flashes until Studio is in front |
+| App identity | The bundle id | `app.setAppUserModelId` with `electron-builder.yml`'s `appId`, as the installer's shortcuts (Studio Dev: `<appId>.dev`) |
+| Voice separation | AUSoundIsolation through the Swift helper (macOS 13+) | Off, with the reason in *Settings → Tools* |
+| HEIC from agents | Converted to JPEG with `sips` | Refused with a reason; formats are said as JPG, PNG or WebP |
+| Library export & import | `/usr/bin/zip`, `unzip`, `ditto` | Not available yet: both refuse with a reason (`ARCHIVE_UNAVAILABLE`) |
+| Own clips on the same disk | APFS clones (from `mount`'s file system type) | Always copied |
+| Tailscale | A `utun` with a /32 Tailscale IPv4 and Tailscale's IPv6 | The adapter named "Tailscale" with Tailscale's IPv6 and an IPv4 within Tailscale's range, its netmask /32 or up to /10 (`pickTailscaleInterfaces`) |
+| File names | `safeName` as before | Also never a device name (`CON`, `NUL`, `COM1`, `LPT1` … — an underscore is added) and at most 80 characters, so paths stay within `MAX_PATH` |
+| Words | Finder, the Trash, this Mac | File Explorer, the Recycle Bin, this PC |
+
+Stored paths stay portable: inside the library they are relative and always written with `/` (see
+[Stored paths](#stored-paths)), so a library folder can be opened on either system; `fromStoredPath` joins them with
+the system's separator. `withoutLocalPaths` also strips `\`-separated folders on Windows, in either letter case. Media
+reach the window as `media://local/<path>`, a Windows path written like a file URL (`/C:/…`).
+
 ## Module map
 
 ### `src/main`
@@ -90,7 +119,9 @@ folds the SQLite WAL back into `studio.db`.
 | `song.ts` | `SongService` and the `songs:*` handlers but `songs:syncTake` (`registerSongIpc`): *New sequence from a song…* and a sequence's song — copied into `Sekvenser/<name>/Ljud/` through the sequence service's file queue (`placeSongFile`), its vocals separated, its lyrics transcribed (priced first, the budget applies, recorded as a `media_jobs` row), analysed and split into clips, one step after another per sequence in the background (`songWork`, `songError`, Activity's `song` items, busy for a library switch); lyric lines corrected by hand. See [Songs: data, analysis, lyrics](#songs-data-analysis-lyrics). |
 | `song-analysis.ts` | A song's peaks, beat, bars and vocal activity (onset envelope, tempo by autocorrelation, Ellis's beat tracker, bar accents, a loudness threshold on the vocals), cached in `.studio/tidslinje` by the files' identity (`analyseSong`, `cachedSongAnalysis`). |
 | `ffmpeg.ts` | Finds `ffmpeg`/`ffprobe`, probes videos and audio files (decoding when the header only estimates the length), extracts frames (the frame showing at a moment, and the first frame at or after a start trim: `extractFrameAtOrAfter`, `frameStartAtOrAfter`) and posters, decodes still pictures to PNG (`stillToPng`), cuts reference audio windows to mono MP3 (`encodeAudioClip`), JPEG frames and sound previews for agents' reviews (`extractFrames`, `extractAudioPreview`), renders the concat export (at the sequence's *Export format* height), and kills/cleans up running processes on quit. For own clips and the Editor: `probeMedia` (HDR, bit depth, rotation, variable frame rate, every audio stream and whether it decodes), `normalizeVideo` (the working copy: tone-mapped H.264 SDR, ≤1080p, constant frame rate, upright, square pixels, picture and sound both from the file's time zero, mono at full level on both sides, metadata stripped), `makeProxy` and `makeStandIn` (what a picture operation sends, and the stand-in its free quote uses), sample-exact audio (`extractAudio`, `encodeUpload`, `silences`, `loudness`, `timeStretch`, `renderMix` — the layered mix with gain envelopes, ducking, noise reduction and loudness —, `assembleAt`, `replaceAudioTrack`) and pictures (`spliceVideo`, frame-exact, and the timeline's `waveform` — placed by time over the film's length —, `filmstrip` and `sceneCuts`). The concat export upmixes mono at full level too. Partial files of every kind (`.part.mp4`, `.part.wav` …) are cleaned up. |
-| `media-protocol.ts` | The `media://` scheme (video — `.mp4`, `.mov`, `.m4v`, `.webm`, `.mkv` —, image and audio types). |
+| `media-protocol.ts` | The `media://` scheme (video — `.mp4`, `.mov`, `.m4v`, `.webm`, `.mkv` —, image and audio types). A Windows path arrives the way a file URL writes it (`/C:/…`, `//server/share/…`) and `mediaFilePath` turns it back. |
+| `platform.ts` | What differs by operating system in main's words: `IS_MAC`, `IS_WINDOWS`, `FILE_MANAGER` (Finder / File Explorer), `TRASH` (the Trash / the Recycle Bin), `THIS_COMPUTER` and `USERS_COMPUTER` (this Mac / this PC), used in messages, approval effects and the agent guide. See [Platforms](#platforms). |
+| `taskbar.ts` | Windows' stand-ins for the Dock: the count of new and failed work as a red dot over the taskbar button (`setTaskbarBadge`, drawn as a PNG in code), and a flashing taskbar button for a new agent request (`flashTaskbar`). |
 | `imports.ts` | Own clips, from the window or an agent's video uploads (both handlers check an agent's files with `assertAgentFiles`), with `active()` for *Activity*: `imports:inspect` (probes every file, says whether it can be cloned — on the library's volume and that volume APFS, read from `mount` — and why a working copy is needed, finds an earlier import of the same file by size and SHA-256), `imports:import` (copy or APFS clone through the scratch folder into `Egna klipp/<day>/`, a working copy when needed or when cropping to the sequence's shape, poster, a completed `source = 'import'` row; into the feed, as new clips of a sequence or as a take of a clip; a disk-space check; *Cancel* leaves nothing behind) and `imports:cancel` (one file by path — its card's *Cancel*, the others go on — or every import), with `import:progress` events. |
 | `edits.ts` | The Editor's service and its `edits:*`, `audio:*` and `voices:*` handlers (`registerEditIpc`): edits (from a generation used where it is, or an export cloned in as v1), renaming (folder and version titles follow), versions (current, delete, prune with a dry run), the timeline (filmstrip, waveform and cut markers, cached in `.studio/tidslinje` up to 512 MB), transcripts (inherited along versions with the same timing, SRT through a save dialog), added audio, sending a version to a sequence, deleting an edit by the rules below (`deleteRefusal`, the side-effect-free check, is also `edits:deleteRefusal` for agents' removal plans), the busy state, `resume()` at library open and `onGenerationDeleted`. The user-only handlers refuse agents; an agent may run `edits:prune` as a dry run and add audio files it uploaded (`assertAgentFiles`). `EditSummary.running` covers free renders too. |
 | `edit-ops.ts` | The Editor's operations: the plan (the single check for the window and agents: snapped range, defaults, price from Venice's free quotes or the published prices, notes, warnings, problems, a fingerprint), free renders (one at a time), paid audio jobs made of steps (written before they are sent, at most three in flight, polled with backoff, never resent; continuing a stopped job quotes again), picture operations through the job manager (frames, proxies in `Underlag/` sized to leave room for the pictures sent with them, the take spliced in when it settles, a failed finish done again for free when the job is continued) and voice design; a paid run, a continued job and a voice design are checked against the budget with their price first (`OVER_BUDGET` unless `confirmOverBudget`) and run inside `runConfirmed`; `activeWork()` (paid jobs and free renders, `liveRenders`) and an `unseen` row for a version a paid job made. |
@@ -125,6 +156,8 @@ folds the SQLite WAL back into `studio.db`.
 | Module | Responsibility |
 | --- | --- |
 | `native/voice-isolate/main.swift` | `studio-voice-isolate`, a small command-line helper around macOS's AUSoundIsolation audio unit: `--probe` answers `{ok, hq, latency}`; `<in.wav> <voice.wav> <background.wav>` writes both stems at the input's rate and length, latency-compensated, with background = input − voice, and prints `progress=…` lines. See [Voice separation helper](#voice-separation-helper). |
+| `scripts/fetch-ffmpeg-win.mjs` | The ffmpeg the Windows app ships: one pinned BtbN GPL build of FFmpeg's release branch (shared libraries), checked against its SHA-256, unpacked into `build/ffmpeg-win/` with FFmpeg's licence and `SOURCE.txt`; `--check` runs it on Windows and fails unless it has every encoder, muxer and filter Studio uses. See [DEVELOPMENT.md](DEVELOPMENT.md#windows). |
+| `scripts/smoke-test.mjs` | Starts a built app with a throwaway profile and checks over the DevTools protocol that it shows Studio, finds ffmpeg (with `--bundled-ffmpeg` the app's own), opens a new library and renders Settings; the release workflow runs it on the Windows build. |
 | `scripts/build-helpers.mjs` | `npm run build:helpers` (also run first by `dev`, `dev:real`, `build` and `app`): compiles the helper with `xcrun --sdk macosx swiftc` into `build/bin/` (gitignored), signs it ad hoc, and skips it when a stamp says it is up to date, when `STUDIO_SKIP_HELPERS=1`, or with a note when there is no Swift compiler (`--force` rebuilds). |
 
 ### `src/preload`

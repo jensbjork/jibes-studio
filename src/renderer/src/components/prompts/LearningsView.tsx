@@ -3,6 +3,7 @@ import type { Generation, Learning } from '@shared/types'
 import { setGenerateParams } from '../../lib/generateStore'
 import { useAssetsState, useModels } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
+import { shortcut } from '../../lib/platform'
 import ClipDrawer from '../feed/ClipDrawer'
 import { BulbIcon, PinIcon } from '../feed/icons'
 import { buildLibraryIndex } from '../feed/references'
@@ -401,7 +402,7 @@ function EmptyLearnings({ hasLearnings, onNew }: { hasLearnings: boolean; onNew:
         {hasLearnings ? (
           <div className="text-center text-muted">
             <p>Pick a learning in the list, or write a new one.</p>
-            <p className="mt-1 text-[11px]">⌘ F to search · ↑ ↓ to browse</p>
+            <p className="mt-1 text-[11px]">{shortcut('⌘ F')} to search · ↑ ↓ to browse</p>
           </div>
         ) : (
           <div className="max-w-md text-center">

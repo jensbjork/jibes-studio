@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { SavedPrompt } from '@shared/types'
+import { shortcut } from '../../lib/platform'
 import { ConfirmDeleteButton, CopyButton, FavoriteButton, secondaryButton } from './controls'
 import { formatUses, formatWhen, titleFromBody } from './prompt-utils'
 import TagInput from './TagInput'
@@ -88,7 +89,7 @@ export default function PromptEditor({
             type="button"
             onClick={onUse}
             disabled={!savable}
-            title="Open in Generate (⌘ + Enter)"
+            title={`Open in Generate (${shortcut('⌘ + Enter')})`}
             className="ml-1 rounded-md bg-accent px-3.5 py-1.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
           >
             Use

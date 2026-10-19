@@ -16,6 +16,7 @@ import { ipcErrorMessage, useAssets, useModels } from '../../lib/hooks'
 import { LAST_STORYBOARD_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
 import type { Intent, Navigate } from '../../lib/navigation'
+import { FFMPEG_INSTALL, FILE_MANAGER, isMac } from '../../lib/platform'
 import { markSeen, useRunning, useSeenWhenVisible, useUnseen } from '../../lib/work'
 import ConsentDialog from '../ConsentDialog'
 import CreateImageDialog from '../images/CreateImageDialog'
@@ -694,8 +695,15 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     <>
       {ffmpeg && !ffmpeg.ok && (
         <Banner tone="warning">
-          <span className="font-medium">ffmpeg is missing</span> – export and frames from clips are turned off. Install it
-          with <code className="rounded bg-black/30 px-1 py-px font-mono">brew install ffmpeg</code> and restart Studio.
+          <span className="font-medium">ffmpeg is missing</span> – export and frames from clips are turned off.{' '}
+          {isMac ? (
+            <>
+              Install it with <code className="rounded bg-black/30 px-1 py-px font-mono">brew install ffmpeg</code> and
+              restart Studio.
+            </>
+          ) : (
+            `It comes with Studio: ${FFMPEG_INSTALL}.`
+          )}
         </Banner>
       )}
       {visibleNotice && (
@@ -746,7 +754,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               onClick={() => void exportStatus.reveal()}
               className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
             >
-              Show in Finder
+              Show in {FILE_MANAGER}
             </button>
             {exportStatus.done.exportId && (
               <button

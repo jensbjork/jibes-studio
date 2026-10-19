@@ -4,6 +4,7 @@ import { DEFAULT_MODEL, supportsEndImage } from '@shared/models'
 import type { EditOperation, EditPlan, VideoModel } from '@shared/types'
 import { useAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
+import { shortcut } from '../../lib/platform'
 import PromptField from '../prompt/PromptField'
 import { useOpenCard, useReportRange } from './cards'
 import { useCardRun, useEditor } from './EditorContext'
@@ -690,7 +691,7 @@ function CutCard({ open, onToggle }: CardProps) {
         </div>
         {fadeTooLong && <p className="mt-1.5 text-[11px] text-muted">A fade can be at most half the film.</p>}
       </div>
-      <p className="text-[11px] leading-relaxed text-muted">Free. Every change becomes a new version – ⌘Z goes back.</p>
+      <p className="text-[11px] leading-relaxed text-muted">Free. Every change becomes a new version – {shortcut('⌘Z')} goes back.</p>
       <PlanNotes error={card.error} />
     </OpCard>
   )

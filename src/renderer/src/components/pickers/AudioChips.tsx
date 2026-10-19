@@ -1,5 +1,6 @@
 import type { Ref } from 'react'
 import type { PromptLanguage } from '@shared/types'
+import { shortcut } from '../../lib/platform'
 import AudioPlayButton from './AudioPlayButton'
 import { KIND_TONE } from './assetKinds'
 import { audioInsertText, audioLabel, audioLabelParts, type FormAudio } from './audioRefs'
@@ -63,7 +64,7 @@ export default function AudioChips({ audios, language, onInsert, onRemove, onMov
     <>
       <div
         role="list"
-        aria-label={`Sound references${reorder.enabled ? ' – drag or press ⌥← / ⌥→ on a sound to change the order' : ''}`}
+        aria-label={`Sound references${reorder.enabled ? shortcut(' – drag or press ⌥← / ⌥→ on a sound to change the order') : ''}`}
         onDragOver={(e) => void reorder.onDragOver(e)}
         onDrop={(e) => void reorder.onDrop(e)}
         onDragLeave={reorder.onDragLeave}
@@ -92,7 +93,7 @@ export default function AudioChips({ audios, language, onInsert, onRemove, onMov
               title={
                 sent
                   ? reorder.enabled && !dragging
-                    ? 'Drag to change the order (or ⌥← / ⌥→)'
+                    ? shortcut('Drag to change the order (or ⌥← / ⌥→)')
                     : undefined
                   : 'Not sent with this model'
               }
@@ -102,7 +103,7 @@ export default function AudioChips({ audios, language, onInsert, onRemove, onMov
               </span>
               <button
                 onClick={() => onInsert(text)}
-                title={`Insert “${text}” in the prompt${reorder.enabled ? ' – drag to change the order (⌥← / ⌥→)' : ''}`}
+                title={`Insert “${text}” in the prompt${reorder.enabled ? shortcut(' – drag to change the order (⌥← / ⌥→)') : ''}`}
                 className="flex min-w-0 items-center gap-1.5 py-0.5 pl-1.5 pr-1.5"
               >
                 <span className="min-w-0 truncate font-medium">{name}</span>

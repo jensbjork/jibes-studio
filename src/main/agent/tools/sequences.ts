@@ -61,6 +61,7 @@ import type {
   WorkSummary
 } from '@shared/types'
 import * as db from '../../db'
+import { FILE_MANAGER, THIS_COMPUTER } from '../../platform'
 import * as store from '../../sequence-store'
 import { composeTakePrompt, withoutReferenceTokens } from '../../sequences'
 import { cachedSongAnalysis } from '../../song-analysis'
@@ -1317,7 +1318,7 @@ async function addClipFrom(
     throw new Error('Only a finished video can become a clip in the sequence.')
   }
   if (take.fileMissing || !existsSync(take.filePath)) {
-    throw new Error('The video file is no longer on disk (moved or deleted in Finder?).')
+    throw new Error(`The video file is no longer on disk (moved or deleted in ${FILE_MANAGER}?).`)
   }
   const before = new Set(sequence.segments.map((s) => s.id))
   const updated = await callService<Sequence>('segments:add', sequence.id, {
@@ -1951,7 +1952,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Export a film',
       description:
-        "Exports a sequence (sequence_id) or a storyboard (storyboard_id) as one film – the selected takes back to back, trimmed, at its Export format – into its folder, exactly as Studio's Export does. Free and local (ffmpeg on this Mac); every clip (transition) needs a finished selected take. Waits up to wait_seconds (default 30): {status: \"done\", export_id, duration, cuts}, or {status: \"running\", progress} – then follow it with get_work_status or list_exports. An export already running for it answers running. Review the film with review_export({export_id}).",
+        `Exports a sequence (sequence_id) or a storyboard (storyboard_id) as one film – the selected takes back to back, trimmed, at its Export format – into its folder, exactly as Studio's Export does. Free and local (ffmpeg on ${THIS_COMPUTER}); every clip (transition) needs a finished selected take. Waits up to wait_seconds (default 30): {status: \"done\", export_id, duration, cuts}, or {status: \"running\", progress} – then follow it with get_work_status or list_exports. An export already running for it answers running. Review the film with review_export({export_id}).`,
       input: {
         sequence_id: z.string().optional(),
         storyboard_id: z.string().optional(),

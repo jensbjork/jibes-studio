@@ -34,11 +34,14 @@ textarea,
   user-select: text;
 }
 
-/* Window drag region for the hidden-inset title bar. */
+/* Window drag region for the hidden-inset title bar (macOS). Windows has its own title bar to drag. */
 .drag {
   -webkit-app-region: drag;
 }
 .no-drag {
+  -webkit-app-region: no-drag;
+}
+:root[data-platform='win32'] .drag {
   -webkit-app-region: no-drag;
 }
 

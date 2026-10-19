@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import type { AssetImage } from '@shared/types'
 import { originText } from '../../lib/assets'
 import { mediaUrl } from '../../lib/media'
+import { FILE_MANAGER } from '../../lib/platform'
 import { imageIssues, type Size } from './imageUtils'
 
 interface Props {
@@ -95,7 +96,7 @@ export default function ImagePreview({ images, index, size, onSize, onIndex, onC
             </button>
           )}
           <button onClick={() => void window.studio.revealFile(image.path)} className={button}>
-            Show in Finder
+            Show in {FILE_MANAGER}
           </button>
           <button onClick={onRemove} className={`${base} hover:text-accent`}>
             Remove

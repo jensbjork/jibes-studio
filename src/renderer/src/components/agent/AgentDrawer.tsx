@@ -4,6 +4,7 @@ import type { AgentStatus, ApprovalRequest } from '@shared/types'
 import { APPROVAL_TTL_MS, pendingApprovals, showApproval, useAgentState } from '../../lib/agent'
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
+import { THIS_COMPUTER } from '../../lib/platform'
 import { CloseIcon } from '../sequences/icons'
 import { SETTINGS_SECTION, showSettingsSection } from '../settings/SettingsLayout'
 import {
@@ -173,7 +174,7 @@ function StatusCard({
           )}
           {!status.tailscaleAddress && (
             <p className="mt-2 text-[12px] leading-relaxed text-amber-300">
-              Tailscale isn’t running – only agents on this Mac can connect.
+              Tailscale isn’t running – only agents on {THIS_COMPUTER} can connect.
             </p>
           )}
         </>

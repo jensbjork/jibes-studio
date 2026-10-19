@@ -17,6 +17,7 @@ import {
   type Storyboard
 } from '@shared/types'
 import * as db from '../../db'
+import { FILE_MANAGER } from '../../platform'
 import { agentAuthor } from '../../reviews'
 import * as store from '../../sequence-store'
 import { imageBlock } from '../images'
@@ -156,7 +157,7 @@ async function listExports(): Promise<ExportSummary[]> {
 async function requireExport(id: string): Promise<ExportSummary> {
   const exp = (await listExports()).find((e) => e.id === id)
   if (!exp) throw new Error(`There is no exported film with id ${id}. Use list_exports to see the ones there are.`)
-  if (!exp.exists) throw new Error('The film is no longer on disk (moved or deleted in Finder?).')
+  if (!exp.exists) throw new Error(`The film is no longer on disk (moved or deleted in ${FILE_MANAGER}?).`)
   return exp
 }
 

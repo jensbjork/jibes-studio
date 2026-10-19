@@ -24,6 +24,7 @@ import { useAgentBridge } from './lib/agentBridge'
 import { assetKindOfView } from './lib/assets'
 import { ipcErrorMessage } from './lib/hooks'
 import type { Intent, Navigate, View } from './lib/navigation'
+import { isMac } from './lib/platform'
 import { startWorkFeed } from './lib/work'
 
 export default function App() {
@@ -99,9 +100,14 @@ function readSidebarCollapsed(): boolean {
   }
 }
 
-/** ⌃⌘S, wherever the focus is (text fields too): nothing else in Studio or the default macOS menu uses it. */
+/**
+ * ⌃⌘S, wherever the focus is (text fields too): nothing else in Studio or the default macOS menu uses it. On
+ * Windows Ctrl+Shift+S (⌃ and ⌘ are both Ctrl there), which nothing else uses either; never with Alt, as Ctrl+Alt is
+ * AltGr, which types characters.
+ */
 function isSidebarShortcut(e: KeyboardEvent): boolean {
-  return e.metaKey && e.ctrlKey && !e.altKey && !e.shiftKey && e.code === 'KeyS' && !e.repeat
+  const held = isMac ? e.metaKey && e.ctrlKey && !e.shiftKey : e.ctrlKey && e.shiftKey && !e.metaKey
+  return held && !e.altKey && e.code === 'KeyS' && !e.repeat
 }
 
 /** What slides out beside the sidebar; one at a time. */
