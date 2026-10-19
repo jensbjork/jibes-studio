@@ -26,7 +26,8 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 
 - **Generate** with Venice's video models in three modes: text-to-video, image-to-video (start and optional end
   image) and reference-to-video (up to 9 reference photos for Seedance, plus up to 3 voice or sound clips with the
-  models that take reference audio). Price quote before you generate, *Use again* to reload a
+  models that take reference audio, and with Seedance 2.x up to 3 or 10 **reference videos** for motion, camera and
+  style, `@Video1` …). Price quote before you generate, *Use again* to reload a
   generation's settings. **Variants:** *×1 ×2 ×3 ×4* beside *Generate* (and beside a sequence clip's *Generate take*
   and a storyboard transition's *Generate*) sends that many takes of the same settings at once — each its own
   generation, with its own seed, at the full price; the button shows the total (*Generate ×3 · $3.09*), ⌘ + Enter sends
@@ -322,7 +323,7 @@ empty — the clips are all in Media, which Generate links to. *Activity* counts
 Generate while they are in its list and under Media after that, together with pictures that belong to no
 sequence or storyboard.
 
-## Prompts, `@ImageN` and `@AudioN` references
+## Prompts, `@ImageN`, `@AudioN` and `@VideoN` references
 
 In **reference mode** the model receives the reference images in order, and the prompt refers to them as
 `@Image1`, `@Image2` … in that order. Picking a character, environment, product, outfit or pose adds its photos to
@@ -343,6 +344,22 @@ environment's soundscape comes along when you switch it on there), and the promp
 At most 3 clips, each 2–15 s, 15 s in all, and only together with at least one reference image; Studio cuts each
 clip's window out of the file and sends it as mono MP3. A voice from a recording shorter than 2 s can't be sent, so
 it doesn't come along (a note says so).
+
+**Reference videos.** With a Seedance 2.x reference model, **Reference videos** (under the reference images) takes
+videos whose motion, camera movement or style the clip should follow: *＋ Video* adds a clip from Media, a take of a
+sequence clip, an exported film, or a file (or drop one on the row). They are references only – never edited,
+extended or shown in the result – and the prompt refers to them as `@Video1`, `@Video2` … in order: `the camera
+moves as in @Video1`. Each tile shows the part that is sent and plays it while you point at it; click it to choose
+the part (drag the window or its edges, *Start here*, *Whole video*), drag it or press ⌥← / ⌥→ to change the order
+(the tokens follow, like the pictures'), ✕ removes it. A new video sends its first 5 s (or all of it when it is
+shorter). Seedance 2.0 takes at most 3 videos of 2–15 s, 15 s together; Seedance 2.5 at most 10 of 2–30 s, 30 s
+together – the row counts along and says what is over. The video seconds are priced too, so a clip with reference
+videos costs more; the price beside *Generate* follows the parts you choose. Studio cuts each part to a small MP4,
+sends it as `<Video 1>` …, and the legend tells the model what to take from it (`Refer to the action, camera
+movement and style in @Video1`). Other reference models take no videos: the row then offers the family's Seedance
+reference model. A sequence clip takes videos the same way (the cast doesn't: videos aren't library assets), and a
+clip that continues the previous one with references carries them along like its pictures – but references of its
+own, even a single video, replace everything it would carry (the clip editor says so).
 
 **Poses.** A pose chip applies to the characters you choose (all of them by default):
 `Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)` (`… och … i posen …` in Swedish).
@@ -407,13 +424,14 @@ Swedish). A clip's drawer keeps both texts: the prompt you wrote and the sent pr
 
 In the prompt editor:
 
-- each `@ImageN` and `@AudioN` is coloured like the asset it points at; hover to see the photo or play the voice;
-  wrong references turn red;
-- typing `@` opens a menu with the selected photos and *Add from the library*;
+- each `@ImageN` and `@AudioN` is coloured like the asset it points at, `@VideoN` in a colour of its own; hover to
+  see the photo, play the voice or watch the part of the video that is sent; wrong references turn red;
+- typing `@` opens a menu with the selected photos, sounds and videos and *Add from the library*;
 - the list under the editor shows every reference with its token, marks photos and clips the prompt never mentions
   (*not mentioned*) — only those the legend doesn't explain: one whose description (or wearer) is appended is marked
   *described* instead, and isn't warned about — and offers quick fixes such as changing a token to `@Image3`,
-  removing `@Image7`, or removing `@Audio2` when the voices add up to more than 15 s;
+  removing `@Image7`, removing `@Audio2` when the voices add up to more than 15 s, or switching to a model that
+  takes reference videos;
 - **Generate** is disabled while a reference is wrong, and says why.
 
 The rules live in [`src/shared/prompt-refs.ts`](../src/shared/prompt-refs.ts) and are applied by the editor, by the

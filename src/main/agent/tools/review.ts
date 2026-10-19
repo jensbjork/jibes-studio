@@ -1,7 +1,7 @@
 import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { kindOfModelId } from '@shared/models'
+import { kindOfModelId, referenceVideosOf } from '@shared/models'
 import { generationTitle } from '@shared/generation-label'
 import { ratingLabel } from '@shared/rating'
 import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
@@ -20,7 +20,8 @@ import * as db from '../../db'
 import { FILE_MANAGER } from '../../platform'
 import { agentAuthor } from '../../reviews'
 import * as store from '../../sequence-store'
-import { imageBlock } from '../images'
+import { extractFrames } from '../../ffmpeg'
+import { imageBlock, jpegBlock } from '../images'
 import { callService } from '../local-ipc'
 import {
   FRAME_WIDTH,
@@ -47,7 +48,8 @@ import {
   referenceSummary,
   requireLibrary,
   seconds,
-  tokenMap
+  tokenMap,
+  videoTokenMap
 } from '../studio'
 import { READ_ONLY, WRITE, defineTool, priceValue, type LabeledAudio, type LabeledImage, type ToolContext } from './kit'
 import { isStoryboardId } from '../storyboard-rows'
@@ -229,6 +231,19 @@ async function referenceMedia(
         } catch (err) {
           missing.push(`${label}: ${errorText(err)}`)
         }
+      }
+    }
+    // A reference video: one frame from the middle of the window it was sent, with the window.
+    for (const [i, t] of videoTokenMap(referenceVideosOf(p)).entries()) {
+      const ref = referenceVideosOf(p)[i]
+      const at = t.start + t.length / 2
+      const label = `Reference ${t.token} = a reference video (${t.title ?? t.file}, window ${t.start}–${seconds(t.start + t.length)} s), frame at ${seconds(at)} s`
+      try {
+        const [frame] = await extractFrames(ref.path, [at], FRAME_WIDTH)
+        if (frame) images.push({ label, image: jpegBlock(frame.jpeg) })
+        else missing.push(label)
+      } catch {
+        missing.push(label)
       }
     }
   } else if (mode === 'image-to-video') {

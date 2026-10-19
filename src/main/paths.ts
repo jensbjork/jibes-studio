@@ -7,6 +7,7 @@ import { copyFile, cp, lstat, mkdir, readdir, rename, rm, rmdir, stat, utimes } 
 import type { Stats } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { referenceVideosOf } from '@shared/models'
 import type { AssetKind, GenerationParams, SequenceKind } from '@shared/types'
 import * as db from './db'
 import { FILE_MANAGER, IS_WINDOWS } from './platform'
@@ -303,8 +304,9 @@ function mapParamPaths(p: GenerationParams, map: (path: string) => string): Gene
     )
   }
   if (typeof out.sourceVideo === 'string' && out.sourceVideo) out.sourceVideo = map(out.sourceVideo)
+  // Plain path strings (rows from before windows existed) are read as { path } windows (referenceVideosOf).
   if (Array.isArray(out.referenceVideos)) {
-    out.referenceVideos = out.referenceVideos.map((v) => (typeof v === 'string' && v ? map(v) : v))
+    out.referenceVideos = referenceVideosOf(out).map((v) => ({ ...v, path: map(v.path) }))
   }
   return out
 }

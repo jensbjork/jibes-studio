@@ -9,10 +9,16 @@ import {
   kindOfModelId,
   maxReferenceAudios,
   maxReferenceImages,
+  paramsForSubmit,
   referenceAudioWindow,
+  referenceVideoLimits,
+  referenceVideosOf,
+  referenceVideoWindow,
   supportsAudioInput,
   supportsEndImage,
-  type Kind
+  supportsReferenceVideos,
+  type Kind,
+  type ReferenceVideoLimits
 } from '@shared/models'
 import { outfitWearersAmong, withOutfitWearer } from '@shared/outfits'
 import {
@@ -39,11 +45,15 @@ import {
   type AssetKind,
   type GenerationParams,
   type ReferenceAudio,
+  type ReferenceVideo,
   type Still,
   type VideoModel
 } from '@shared/types'
+import * as db from '../db'
+import { generationTitle } from '@shared/generation-label'
 import { composeSubmission } from '../jobs'
-import { isLibraryReady } from '../paths'
+import { isLibraryReady, toStoredPath } from '../paths'
+import { knownVideoDuration } from '../reference-videos'
 import { getPromptLanguage } from '../settings'
 import { callService } from './local-ipc'
 
@@ -339,6 +349,89 @@ export function referenceAudioOf(audio: AssetAudio): ReferenceAudio {
   return { path: audio.path, start: audio.clipStart, length: audio.clipLength }
 }
 
+/**
+ * A reference video as the agent sees it (@VideoN, Seedance 2.x): which film it is – a generation (a take, a clip
+ * from the feed, an own clip, a version: generation_id), an exported film (export_id) or a file copied in from an
+ * upload – and the window that is sent.
+ */
+export interface VideoInfo {
+  generation_id?: string
+  export_id?: string
+  /** A generation's title (its prompt, or an own clip's or version's name); an export's sequence. */
+  title?: string
+  file: string
+  /** The window that is sent: seconds into the file, and how long. */
+  start: number
+  length: number
+  /** The file's length, when Studio has measured it. */
+  duration?: number
+}
+
+/** The generation or export whose file this is (by its stored path, letter case ignored), if any. */
+function videoSource(path: string): { generationId?: string; exportId?: string; title?: string; duration?: number } {
+  if (!db.isDbOpen()) return {}
+  try {
+    const stored = toStoredPath(path)
+    const g = db
+      .getDb()
+      .prepare('SELECT id FROM generations WHERE file_path = ? COLLATE NOCASE LIMIT 1')
+      .pluck()
+      .get(stored) as string | undefined
+    if (g) {
+      const generation = db.getGeneration(g)
+      return generation
+        ? {
+            generationId: generation.id,
+            title: generationTitle(generation).slice(0, 120),
+            ...(generation.videoDuration ? { duration: generation.videoDuration } : {})
+          }
+        : {}
+    }
+    const e = db
+      .getDb()
+      .prepare(
+        `SELECT e.id, s.name FROM exports e LEFT JOIN sequences s ON s.id = e.sequence_id
+         WHERE e.file_path = ? COLLATE NOCASE LIMIT 1`
+      )
+      .get(stored) as { id: string; name: string | null } | undefined
+    return e ? { exportId: e.id, ...(e.name ? { title: e.name } : {}) } : {}
+  } catch {
+    return {}
+  }
+}
+
+/** The window of a reference video in seconds, as it is sent (the shared rule, with the file's length when known). */
+export function videoWindow(ref: ReferenceVideo): { start: number; length: number } {
+  return referenceVideoWindow(ref, knownVideoDuration(ref.path) ?? videoSource(ref.path).duration)
+}
+
+export function describeVideo(ref: ReferenceVideo): VideoInfo {
+  const source = videoSource(ref.path)
+  const duration = knownVideoDuration(ref.path) ?? source.duration
+  const { start, length } = referenceVideoWindow(ref, duration)
+  return {
+    ...(source.generationId ? { generation_id: source.generationId } : {}),
+    ...(source.exportId ? { export_id: source.exportId } : {}),
+    ...(source.title ? { title: source.title } : {}),
+    file: basename(ref.path),
+    start: seconds(start),
+    length: seconds(length),
+    ...(duration ? { duration: seconds(duration) } : {})
+  }
+}
+
+export type VideoTokenEntry = { token: string } & VideoInfo
+
+/** What each @VideoN points at: @Video1 is the first reference video, and so on. */
+export function videoTokenMap(videos: readonly ReferenceVideo[] | undefined): VideoTokenEntry[] {
+  return (videos ?? []).map((ref, i) => ({ token: `@Video${i + 1}`, ...describeVideo(ref) }))
+}
+
+/** Total seconds of the reference video windows that are sent. */
+export function videoSeconds(videos: readonly ReferenceVideo[] | undefined): number {
+  return (videos ?? []).reduce((sum, ref) => sum + videoWindow(ref).length, 0)
+}
+
 /** `added_by` for a photo or clip an agent added (the agent, and the host a fetched file came from); {} otherwise. */
 export function addedBy(origin: AssetFileOrigin | undefined): Record<string, unknown> {
   return origin ? { added_by: { agent: origin.agent, ...(origin.host ? { host: origin.host } : {}) } } : {}
@@ -380,7 +473,15 @@ export interface PictureReferenceItem {
   picture: string
 }
 
-export type ReferenceItem = AssetReferenceItem | PictureReferenceItem
+/**
+ * A reference video (@VideoN), already resolved to its file and window: a generation's or an export's film, or an
+ * upload copied into Referensbilder (sources.ts resolvePictureReferences).
+ */
+export interface VideoReferenceItem {
+  video: ReferenceVideo
+}
+
+export type ReferenceItem = AssetReferenceItem | PictureReferenceItem | VideoReferenceItem
 
 /** What the references are chosen for: whether the model takes reference audio, and how much. */
 export interface AudioTarget {
@@ -391,6 +492,12 @@ export interface AudioTarget {
   maxAudios: number
   /** Audio already in place (the form's, when appending); counted against the limits. */
   existing?: readonly ReferenceAudio[]
+  /** Whether the model takes reference videos (@VideoN: Seedance 2.x reference-to-video). */
+  videoInput?: boolean
+  /** Its family's reference video limits (referenceVideoLimits). */
+  videoLimits?: ReferenceVideoLimits
+  /** Reference videos already in place (the form's, when appending); counted against the limits. */
+  existingVideos?: readonly ReferenceVideo[]
   /**
    * false: keep every clip asked for even past the model's limits, so a check (validate_prompt) reports the
    * proposal as it is rather than a trimmed one. Default true.
@@ -405,6 +512,10 @@ export interface ResolvedReferences {
   audios: ReferenceAudio[]
   /** Clips that were asked for (or would have been added by default) but don't fit, and why. */
   skippedAudio: (AudioInfo & { reason: string })[]
+  /** Reference videos in @Video order (after any existing ones), without duplicates, within the limits. */
+  videos: ReferenceVideo[]
+  /** Videos that were asked for but don't fit the model family's limits, and why. */
+  skippedVideos: (VideoInfo & { reason: string })[]
   /** What was decided on the agent's behalf, e.g. a voice left out because the model takes none. */
   notes: string[]
 }
@@ -491,6 +602,8 @@ export function resolveReferences(
   const paths: string[] = []
   const audios: ReferenceAudio[] = []
   const skippedAudio: ResolvedReferences['skippedAudio'] = []
+  const videos: ReferenceVideo[] = []
+  const skippedVideos: ResolvedReferences['skippedVideos'] = []
   const notes: string[] = []
   const seenImages = new Set<string>()
   const limits = target && target.enforceLimits !== false ? target : undefined
@@ -498,8 +611,46 @@ export function resolveReferences(
   const seenAudio = new Set(existing.map((a) => pathKey(a.path)))
   let count = existing.length
   let total = audioSeconds(existing, index)
+  const existingVideos = target?.existingVideos ?? []
+  const videoKey = (v: ReferenceVideo): string => {
+    const w = videoWindow(v)
+    return `${pathKey(v.path)}\u0000${seconds(w.start)}\u0000${seconds(w.length)}`
+  }
+  const seenVideos = new Set(existingVideos.map(videoKey))
+  let videoCount = existingVideos.length
+  let videoTotal = videoSeconds(existingVideos)
+  const videoLimits = limits?.videoLimits
 
   for (const item of items) {
+    if ('video' in item) {
+      if (target && !target.videoInput) {
+        throw new Error(
+          `${target.modelLabel} doesn't take reference videos (@Video1 …). Choose a Seedance 2.x reference-to-video model (reference_videos: true in list_models), e.g. ${DEFAULT_MODEL['reference-to-video']}.`
+        )
+      }
+      const key = videoKey(item.video)
+      if (seenVideos.has(key)) continue
+      seenVideos.add(key)
+      const { length } = videoWindow(item.video)
+      if (videoLimits && videoCount + 1 > videoLimits.maxVideos) {
+        skippedVideos.push({
+          ...describeVideo(item.video),
+          reason: `${videoLimits.family} takes at most ${videoLimits.maxVideos} reference ${videoLimits.maxVideos === 1 ? 'video' : 'videos'}.`
+        })
+        continue
+      }
+      if (videoLimits && videoTotal + length > videoLimits.maxTotalSeconds + 1e-6) {
+        skippedVideos.push({
+          ...describeVideo(item.video),
+          reason: `${videoLimits.family} takes at most ${videoLimits.maxTotalSeconds} s of reference video in all (this window is ${seconds(length)} s, ${seconds(videoTotal)} s are already chosen). Choose shorter windows with start / length.`
+        })
+        continue
+      }
+      videoCount++
+      videoTotal += length
+      videos.push(item.video)
+      continue
+    }
     if ('picture' in item) {
       const key = pathKey(item.picture)
       if (!seenImages.has(key)) {
@@ -552,7 +703,7 @@ export function resolveReferences(
       audios.push(ref)
     }
   }
-  return { paths, audios, skippedAudio, notes }
+  return { paths, audios, skippedAudio, videos, skippedVideos, notes }
 }
 
 /** One photo of an asset (the chosen one, else its cover). */
@@ -628,17 +779,22 @@ export function takesAudio(modelId: string, models?: readonly VideoModel[]): boo
   return listed ? listed.audioInput === true : supportsAudioInput(modelId)
 }
 
-/** The audio target for references chosen for this model. */
+/** The audio (and video) target for references chosen for this model. */
 export function audioTarget(
   modelId: string,
   models: readonly VideoModel[] | undefined,
-  existing?: readonly ReferenceAudio[]
+  existing?: readonly ReferenceAudio[],
+  existingVideos?: readonly ReferenceVideo[]
 ): AudioTarget {
+  const videoLimits = referenceVideoLimits(modelId)
   return {
     modelLabel: models?.find((m) => m.id === modelId)?.name ?? modelId,
     audioInput: takesAudio(modelId, models),
     maxAudios: maxReferenceAudios(modelId),
-    existing
+    existing,
+    videoInput: supportsReferenceVideos(modelId),
+    ...(videoLimits ? { videoLimits } : {}),
+    ...(existingVideos ? { existingVideos } : {})
   }
 }
 
@@ -726,8 +882,23 @@ export function modelInfo(m: VideoModel): Record<string, unknown> {
     audio_input: audioInput,
     max_reference_audios: audioInput ? maxReferenceAudios(m.id) : 0,
     ...(audioInput ? { max_reference_audio_seconds: MAX_REFERENCE_AUDIO_SECONDS } : {}),
+    ...referenceVideoInfo(m.id),
     ...(mode === 'image-to-video' ? { supports_end_image: supportsEndImage(m.id) } : {}),
     ...(m.promptCharacterLimit ? { prompt_character_limit: m.promptCharacterLimit } : {})
+  }
+}
+
+/**
+ * What a model takes in reference videos (@VideoN), for list_models and the form's limits: reference_videos, and for
+ * Seedance 2.x its family's count and seconds (2.0: 3 videos of 2–15 s, 15 s together; 2.5: 10 of 2–30 s, 30 s).
+ */
+export function referenceVideoInfo(modelId: string): Record<string, unknown> {
+  const limits = referenceVideoLimits(modelId)
+  if (!limits) return kindOfModelId(modelId) === 'reference-to-video' ? { reference_videos: false } : {}
+  return {
+    reference_videos: true,
+    max_reference_videos: limits.maxVideos,
+    reference_video_seconds: { min: limits.minSeconds, max_each: limits.maxSeconds, max_total: limits.maxTotalSeconds }
   }
 }
 
@@ -748,7 +919,8 @@ export function asGenerated(params: GenerationParams, continuing: boolean, endFr
     startImage: continuing ? undefined : params.startImage,
     endImage: endFromNext ? undefined : params.endImage,
     referenceImages: undefined,
-    referenceAudios: undefined
+    referenceAudios: undefined,
+    referenceVideos: undefined
   }
 }
 
@@ -790,7 +962,10 @@ export function blockingProblem(params: GenerationParams, continuing = false, en
       ? "The clip ends on the next clip's first frame but has no start image. Choose a start image (start_image) or let it continue from the previous clip."
       : 'There is no start image.'
   }
-  if (kind === 'reference-to-video' && !params.referenceImages?.length) return 'There are no reference images.'
+  // A reference video the model takes is a reference too.
+  if (kind === 'reference-to-video' && !params.referenceImages?.length && !paramsForSubmit(params).referenceVideos?.length) {
+    return 'There are no reference images (or reference videos).'
+  }
   if (kind === 'image-to-video' && (endFromNext || params.endImage)) {
     // The automatic frames follow the same rule as a keyframe: references can't go along with pictures.
     const tokens = blockingContinuationError(params)
@@ -835,6 +1010,12 @@ export function paramsInfo(p: GenerationParams, index: AssetIndex): Record<strin
       ? {
           audio_references: audioTokenMap(p.referenceAudios, index),
           audio_reference_seconds: seconds(audioSeconds(p.referenceAudios, index))
+        }
+      : {}),
+    ...(reference && referenceVideosOf(p).length
+      ? {
+          video_references: videoTokenMap(referenceVideosOf(p)),
+          video_reference_seconds: seconds(videoSeconds(referenceVideosOf(p)))
         }
       : {}),
     ...(mode === 'image-to-video' && p.startImage ? { start_image: describePicture(p.startImage, index) } : {}),
@@ -976,5 +1157,8 @@ export function referenceSummary(p: GenerationParams, index: AssetIndex): string
   const audios = audioTokenMap(p.referenceAudios, index).map((t) =>
     t.asset_name ? `${t.token} ${t.asset_name} (${t.role})` : `${t.token} ${t.file}`
   )
-  return [...images, ...audios]
+  const videos = videoTokenMap(referenceVideosOf(p)).map(
+    (t) => `${t.token} ${t.title ?? t.file} (video, ${t.start}–${seconds(t.start + t.length)} s)`
+  )
+  return [...images, ...audios, ...videos]
 }

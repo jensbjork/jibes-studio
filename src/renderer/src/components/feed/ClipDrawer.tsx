@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-label'
-import { durationSeconds, kindOfModelId, type Kind } from '@shared/models'
+import { durationSeconds, kindOfModelId, referenceVideosOf, videosAreReferences, type Kind } from '@shared/models'
 import { workKey, type Edit, type Generation, type GenerationReview, type VideoModel } from '@shared/types'
 import { ASSET_VIEW } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
@@ -10,7 +10,10 @@ import type { Navigate } from '../../lib/navigation'
 import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { markSeen, useSeenWhenVisible } from '../../lib/work'
 import { findTakeOwner, openTakeOwner, takeOwnerLabel, type TakeOwner } from '../../lib/takes'
-import { KIND_TONE } from '../pickers/assetKinds'
+import { KIND_TONE, VIDEO_TONE } from '../pickers/assetKinds'
+import { useVideoFacts } from '../pickers/videoFacts'
+import { videoLabelParts } from '../pickers/videoRefs'
+import VideoWindowPreview from '../pickers/VideoWindowPreview'
 import Popover from '../pickers/Popover'
 import SequencePicker, { type AddedToSequence } from '../pickers/SequencePicker'
 import { titleFromPrompt } from '../pickers/text'
@@ -33,7 +36,8 @@ import {
   referencesOf,
   type AudioReference,
   type ImageReference,
-  type LibraryIndex
+  type LibraryIndex,
+  type VideoReference
 } from './references'
 import { AgentReviews, YourReview } from './ReviewSection'
 import SentPrompt from './SentPrompt'
@@ -123,7 +127,9 @@ export default function ClipDrawer({
 
   const userReview = reviews.find((r) => r.author === 'user')
   const otherReviews = reviews.filter((r) => r.author !== 'user')
-  const refs = referencesOf(g.params, index)
+  const mapped = referencesOf(g.params, index)
+  const videoFacts = useVideoFacts(mapped.videos.map((v) => v.path))
+  const refs = { ...mapped, videos: mapped.videos.map((v) => ({ ...v, facts: videoFacts.get(v.path) })) }
   const model = models.find((m) => m.id === g.model)
 
   // Opening a clip in the drawer is looking at it on purpose: a finished or failed one is seen from now on (also
@@ -257,6 +263,7 @@ export default function ClipDrawer({
                 text={g.prompt}
                 images={refs.images}
                 audios={refs.audios}
+                videos={refs.videos}
                 highlighted={highlighted}
                 onHover={setHighlighted}
                 className="text-[13px]"
@@ -270,6 +277,7 @@ export default function ClipDrawer({
                   sentPrompt={g.sentPrompt}
                   images={refs.images}
                   audios={refs.audios}
+                  videos={refs.videos}
                   highlighted={highlighted}
                   onHover={setHighlighted}
                 />
@@ -281,6 +289,7 @@ export default function ClipDrawer({
                     text={g.params.negativePrompt}
                     images={refs.images}
                     audios={refs.audios}
+                    videos={refs.videos}
                     className="text-[12px] text-muted"
                   />
                 </div>
@@ -288,10 +297,11 @@ export default function ClipDrawer({
             </section>
           )}
 
-          {(refs.images.length > 0 || refs.audios.length > 0) && (
+          {(refs.images.length > 0 || refs.audios.length > 0 || refs.videos.length > 0) && (
             <References
               images={refs.images}
               audios={refs.audios}
+              videos={refs.videos}
               highlighted={highlighted}
               onHover={setHighlighted}
               navigate={navigate}
@@ -476,12 +486,14 @@ function Actions({
 function References({
   images,
   audios,
+  videos,
   highlighted,
   onHover,
   navigate
 }: {
   images: ImageReference[]
   audios: AudioReference[]
+  videos: VideoReference[]
   highlighted?: string
   onHover: (token: string | undefined) => void
   navigate?: Navigate
@@ -564,7 +576,69 @@ function References({
           })}
         </ul>
       )}
+      {videos.length > 0 && (
+        <ul className={`grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2 ${images.length || audios.length ? 'mt-3' : ''}`}>
+          {videos.map((v) => (
+            <ReferenceVideoTile
+              key={`${v.token}:${v.path}`}
+              video={v}
+              lit={highlighted === v.token}
+              onHover={onHover}
+            />
+          ))}
+        </ul>
+      )}
     </section>
+  )
+}
+
+/**
+ * A reference video that was sent: its first frame, the part that was sent playing while hovered, its token, what it
+ * is and the window. A click shows the file in Finder (videos aren't library assets).
+ */
+function ReferenceVideoTile({
+  video: v,
+  lit,
+  onHover
+}: {
+  video: VideoReference
+  lit: boolean
+  onHover: (token: string | undefined) => void
+}) {
+  const [playing, setPlaying] = useState(false)
+  const { name, detail } = videoLabelParts(v)
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => void window.studio.revealFile(v.path)}
+        onMouseEnter={() => {
+          onHover(v.token)
+          setPlaying(true)
+        }}
+        onMouseLeave={() => {
+          onHover(undefined)
+          setPlaying(false)
+        }}
+        onFocus={() => setPlaying(true)}
+        onBlur={() => setPlaying(false)}
+        title={`${name} · ${detail} – the part that was sent plays while you point at it. Click to show the file in ${FILE_MANAGER}.`}
+        className={`group block w-full overflow-hidden rounded-md border text-left transition ${
+          lit ? 'border-white/60' : 'border-line hover:border-muted'
+        } ${v.unsent ? 'opacity-45' : ''}`}
+      >
+        <span className="relative block aspect-video bg-black">
+          <VideoWindowPreview path={v.path} start={v.start} length={v.length} playing={playing} className="h-full w-full object-contain" />
+          <span className={`absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px] font-medium ${VIDEO_TONE.text}`}>{v.token}</span>
+        </span>
+        <span className="flex items-center gap-1.5 px-1.5 py-1 text-[11px] text-muted">
+          <span className="min-w-0 flex-1 truncate">{v.unsent ? 'Not sent' : name}</span>
+          <span className="shrink-0 tabular-nums" title="The part of the video that was sent">
+            {audioWindowText(v.start, v.length)}
+          </span>
+        </span>
+      </button>
+    </li>
   )
 }
 
@@ -606,7 +680,7 @@ function Settings({ g, modelName, navigate }: { g: Generation; modelName?: strin
           // A take made from a video in the Editor (an edit or an upscale) isn't one of the Generate form's modes.
           p.upscaleFactor
             ? 'Upscale'
-            : p.sourceVideo || p.referenceVideos?.length
+            : p.sourceVideo || (referenceVideosOf(p).length > 0 && !videosAreReferences(p))
               ? 'Video to video'
               : MODE_LABEL[kindOfModelId(g.model)]
         ],

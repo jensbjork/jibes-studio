@@ -8,6 +8,7 @@
 import { pathKey } from './generation-filter'
 import { sanitizeReferenceAudios } from './models'
 import { resolveOutfitWearers, withOutfitWearer } from './outfits'
+import type { ReferenceKind } from './prompt-refs'
 import { renameReferenceNames } from './prompt-remap'
 import type { Asset, AssetAudio, GenerationParams, ReferenceAudio } from './types'
 
@@ -40,7 +41,9 @@ function renamed(
   audios: ReadonlySet<number>
 ): Pick<GenerationParams, 'prompt' | 'negativePrompt'> {
   if (!from || !to || from.id === to.id) return { prompt: params.prompt, negativePrompt: params.negativePrompt }
-  const owns = (ref: 'image' | 'audio', n: number): boolean => (ref === 'image' ? images : audios).has(n)
+  // Videos are no asset's: a group naming one keeps its name.
+  const owns = (ref: ReferenceKind, n: number): boolean =>
+    ref === 'image' ? images.has(n) : ref === 'audio' ? audios.has(n) : false
   return {
     prompt: renameReferenceNames(params.prompt ?? '', from.name, to.name, owns),
     ...(params.negativePrompt !== undefined

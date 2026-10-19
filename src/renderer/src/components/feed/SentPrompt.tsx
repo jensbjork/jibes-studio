@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { CopyButton } from '../prompts/controls'
 import { splitComposedPrompt } from '../prompt/descriptions'
 import HighlightedPrompt from './HighlightedPrompt'
-import type { AudioReference, ImageReference } from './references'
+import type { AudioReference, ImageReference, VideoReference } from './references'
 
 interface Props {
   /** The user's prompt, as the generation stores it. */
@@ -11,6 +11,7 @@ interface Props {
   sentPrompt: string
   images: readonly ImageReference[]
   audios: readonly AudioReference[]
+  videos?: readonly VideoReference[]
   highlighted?: string
   onHover?: (token: string | undefined) => void
 }
@@ -20,7 +21,7 @@ interface Props {
  * descriptions of the referenced assets, as they were then). The user's own part is shown above it already, so
  * here it is folded to two lines and the appended legend is set apart below it; both keep their tokens coloured.
  */
-export default function SentPrompt({ prompt, sentPrompt, images, audios, highlighted, onHover }: Props) {
+export default function SentPrompt({ prompt, sentPrompt, images, audios, videos, highlighted, onHover }: Props) {
   const [expanded, setExpanded] = useState(false)
   const { body, legend } = splitComposedPrompt(prompt, sentPrompt)
   // Only offer to unfold text that can be folded: more than a couple of lines' worth.
@@ -47,6 +48,7 @@ export default function SentPrompt({ prompt, sentPrompt, images, audios, highlig
             text={body}
             images={images}
             audios={audios}
+            videos={videos}
             highlighted={highlighted}
             onHover={onHover}
             className={`text-[12px] text-muted ${expanded || !foldable ? '' : 'line-clamp-2'}`}
@@ -66,6 +68,7 @@ export default function SentPrompt({ prompt, sentPrompt, images, audios, highlig
               text={legend}
               images={images}
               audios={audios}
+              videos={videos}
               highlighted={highlighted}
               onHover={onHover}
               className="text-[12px]"
@@ -77,6 +80,7 @@ export default function SentPrompt({ prompt, sentPrompt, images, audios, highlig
           text={sentPrompt}
           images={images}
           audios={audios}
+          videos={videos}
           highlighted={highlighted}
           onHover={onHover}
           className="text-[12px]"

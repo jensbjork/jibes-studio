@@ -6,7 +6,7 @@ import { readdir, rm, rmdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { castReferences, sameCastReferences, sanitizeCast } from '@shared/cast'
 import { continueModeOf, isContinueMode, type ChainClip } from '@shared/continuation'
-import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios } from '@shared/models'
+import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios, sanitizeReferenceVideos } from '@shared/models'
 import { sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import { generationSource, isVeniceGeneration } from '@shared/generation-label'
@@ -191,6 +191,7 @@ export function isUntouchedSegment(row: SegmentRow): boolean {
     !p.startImage &&
     !p.endImage &&
     (onlyCast || (!p.referenceImages?.length && !p.referenceAudios?.length)) &&
+    !p.referenceVideos?.length &&
     !row.continue_from_previous &&
     !row.end_from_next &&
     !(row.notes ?? '').trim()
@@ -249,7 +250,7 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v 
 
 /**
  * Normalises params coming from the renderer, an agent or JSON, dropping anything malformed. Reference audio
- * clips keep their windows; whether the model can use them is decided when a take is sent (paramsForSubmit).
+ * clips and reference videos keep their windows; whether the model can use them is decided when a take is sent (paramsForSubmit).
  * The description switches (includeDescriptions, excludedDescriptionAssetIds) and who wears each outfit
  * (outfitWearers) are kept: they decide what a take appends to its prompt, and "Use again" on a take brings them
  * back. So is a song clip's place in its song (song, shared/song.ts).
@@ -273,6 +274,8 @@ export function sanitizeParams(input: Partial<GenerationParams> | undefined): Ge
     endImage: str(p.endImage),
     referenceImages: refs?.length ? refs : undefined,
     referenceAudios: sanitizeReferenceAudios(p.referenceAudios),
+    // A clip's reference videos are references (never the Editor's task); plain paths become { path }.
+    referenceVideos: sanitizeReferenceVideos(p.referenceVideos),
     ...sanitizeDescriptionFlags(p),
     ...(wearers ? { outfitWearers: wearers } : {}),
     ...(song ? { song } : {})

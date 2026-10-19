@@ -2,9 +2,10 @@
 // chosen per clip (Segment.continueMode):
 //
 // - 'references' (the default, "With references"): reference-to-video with the references the clip carries – its
-//   own reference images and voices, or, when it has none, those of the clip it continues from (up the chain, so in
-//   effect the sequence's first clip with references) – and the previous clip's last frame as one more reference
-//   image after them, @Image{N+1}. The prompt as sent starts with an instruction to begin exactly on that frame
+//   own reference images, voices and reference videos, or, when it has none, those of the clip it continues from (up
+//   the chain, so in effect the sequence's first clip with references) – and the previous clip's last frame as one
+//   more reference image after them, @Image{N+1}. Reference videos are carried like the pictures (they are references
+//   too, @Video1 … keep their numbers), when the reference model takes them (Seedance 2.x) and within its count. The prompt as sent starts with an instruction to begin exactly on that frame
 //   (prompt-compose.ts continuationLeadIn). The first frame is then close to, not guaranteed identical with, the
 //   previous clip's last one; characters who leave the picture come back as themselves.
 // - 'exact' ("Exact start frame"): image-to-video from that frame (its exact first frame), without references.
@@ -20,13 +21,16 @@ import {
   maxReferenceAudios,
   maxReferenceImages,
   referenceToVideoVariant,
+  referenceVideoLimits,
+  referenceVideosOf,
   sanitizeReferenceAudios,
-  supportsAudioInput
+  supportsAudioInput,
+  videosAreReferences
 } from './models'
 import { blockingContinuationError, blockingPromptError, droppedForFrameMessage } from './prompt-refs'
 import { remapPromptReferences, sameList } from './prompt-remap'
 import { isExtractedFrame } from './seams'
-import type { ContinueMode, GenerationParams, ReferenceAudio } from './types'
+import type { ContinueMode, GenerationParams, ReferenceAudio, ReferenceVideo } from './types'
 
 /** What the decision reads of a clip: a Segment, or a segment row as main reads it. */
 export interface ChainClip {
@@ -61,18 +65,21 @@ export function endsOnNextAt(clips: readonly ChainClip[], index: number): boolea
 }
 
 /**
- * A clip's own references: the reference images and audio of a clip whose model is reference-to-video (in any other
- * mode they are left-over form state, never sent). A continuation frame a take was made from never counts.
+ * A clip's own references: the reference images, audio and reference videos of a clip whose model is
+ * reference-to-video (in any other mode they are left-over form state, never sent). A continuation frame a take was
+ * made from never counts, nor does the Editor's video to edit.
  */
 export function ownReferences(
-  params: Pick<GenerationParams, 'model' | 'referenceImages' | 'referenceAudios'>
-): { images: string[]; audios: ReferenceAudio[] } | undefined {
+  params: Pick<GenerationParams, 'model' | 'referenceImages' | 'referenceAudios'> &
+    Partial<Pick<GenerationParams, 'referenceVideos' | 'referenceTask'>>
+): { images: string[]; audios: ReferenceAudio[]; videos: ReferenceVideo[] } | undefined {
   if (kindOfModelId(params.model) !== 'reference-to-video') return undefined
   const images = (Array.isArray(params.referenceImages) ? params.referenceImages : []).filter(
     (p): p is string => typeof p === 'string' && !!p && !isExtractedFrame(p)
   )
   const audios = sanitizeReferenceAudios(params.referenceAudios) ?? []
-  return images.length || audios.length ? { images, audios } : undefined
+  const videos = videosAreReferences(params) ? referenceVideosOf(params) : []
+  return images.length || audios.length || videos.length ? { images, audios, videos } : undefined
 }
 
 /** The references a continuing clip carries, and where they come from. */
@@ -84,6 +91,8 @@ export interface CarriedReferences {
   /** Every reference image carried, in @Image order (also one that gives way for the frame). */
   images: string[]
   audios: ReferenceAudio[]
+  /** Every reference video carried, in @Video order (also ones past the reference model's count). */
+  videos: ReferenceVideo[]
 }
 
 /**
@@ -96,7 +105,9 @@ export function carriedReferences(clips: readonly ChainClip[], index: number): C
     const clip = clips[i]
     if (!clip) return undefined
     const own = ownReferences(clip.params)
-    if (own) return { fromClip: i + 1, inherited: i !== index, images: own.images, audios: own.audios }
+    if (own) {
+      return { fromClip: i + 1, inherited: i !== index, images: own.images, audios: own.audios, videos: own.videos }
+    }
     if (!continuesAt(clips, i)) return undefined
   }
   return undefined
@@ -140,6 +151,8 @@ export interface ContinuationPlan {
   images: string[]
   /** Reference mode: the carried audio clips that are sent. */
   audios: ReferenceAudio[]
+  /** Reference mode: the carried reference videos that are sent (the model takes them, within its count). */
+  videos: ReferenceVideo[]
   /** Reference mode: 1-based numbers of carried pictures left out to make room for the frame. */
   droppedImages: number[]
   /** Reference mode: N in @ImageN for the frame (the number after the pictures sent). */
@@ -164,6 +177,7 @@ export function continuationPlan(clips: readonly ChainClip[], index: number): Co
     model: imageToVideoVariant(params.model),
     images: [],
     audios: [],
+    videos: [],
     droppedImages: []
   })
   if (endsOnNextAt(clips, index)) return exact(ENDS_ON_NEXT_NOTE, false)
@@ -177,7 +191,11 @@ export function continuationPlan(clips: readonly ChainClip[], index: number): Co
   const room = Math.max(0, maxReferenceImages(model) - 1)
   const images = carried ? carried.images.slice(0, room) : []
   const audios = carried && supportsAudioInput(model) ? carried.audios.slice(0, maxReferenceAudios(model)) : []
-  if (!images.length && !audios.length) return { ...exact(NOTHING_CARRIED_NOTE), form: 'reference-to-video' }
+  const videoLimit = referenceVideoLimits(model)?.maxVideos ?? 0
+  const videos = carried ? carried.videos.slice(0, videoLimit) : []
+  if (!images.length && !audios.length && !videos.length) {
+    return { ...exact(NOTHING_CARRIED_NOTE), form: 'reference-to-video' }
+  }
   return {
     chosen,
     mode: 'references',
@@ -187,6 +205,7 @@ export function continuationPlan(clips: readonly ChainClip[], index: number): Co
     carried,
     images,
     audios,
+    videos,
     droppedImages: carried ? carried.images.slice(room).map((_, i) => room + i + 1) : [],
     frameToken: images.length + 1
   }
@@ -195,13 +214,15 @@ export function continuationPlan(clips: readonly ChainClip[], index: number): Co
 /** Stands for the previous clip's last frame in a list of what a continuing clip's tokens name (never a path). */
 const FRAME_SLOT = '\u0000previous-frame'
 
-/** What the @ImageN / @AudioN tokens of a clip that inherits its references name. */
+/** What the @ImageN / @AudioN / @VideoN tokens of a clip that inherits its references name. */
 export interface InheritedTokens {
   /** 0-based index of the clip the references are carried from. */
   fromIndex: number
   /** The carried pictures sent, in @Image order, then the previous clip's last frame. */
   images: string[]
   audios: ReferenceAudio[]
+  /** The carried reference videos sent, in @Video order. */
+  videos: ReferenceVideo[]
 }
 
 /**
@@ -212,19 +233,27 @@ export interface InheritedTokens {
 export function inheritedTokensAt(clips: readonly ChainClip[], index: number): InheritedTokens | undefined {
   const plan = continuationPlan(clips, index)
   if (plan?.mode !== 'references' || !plan.carried?.inherited) return undefined
-  return { fromIndex: plan.carried.fromClip - 1, images: [...plan.images, FRAME_SLOT], audios: plan.audios }
+  return {
+    fromIndex: plan.carried.fromClip - 1,
+    images: [...plan.images, FRAME_SLOT],
+    audios: plan.audios,
+    videos: plan.videos
+  }
 }
 
 /**
- * A prompt of a clip that inherits its references, with every @ImageN / @AudioN kept on the same picture, voice or
- * frame after the references it carries changed in the clip they come from – as that clip's own prompt follows them
- * (prompt-remap.ts): reordered, they get their new numbers; one no longer sent goes; the frame's token moves with it.
+ * A prompt of a clip that inherits its references, with every @ImageN / @AudioN / @VideoN kept on the same picture,
+ * voice, video or frame after the references it carries changed in the clip they come from – as that clip's own
+ * prompt follows them (prompt-remap.ts): reordered, they get their new numbers; one no longer sent goes; the frame's
+ * token moves with it.
  */
 export function remapInheritedTokens(prompt: string, before: InheritedTokens, after: InheritedTokens): string {
   return remapPromptReferences(
     prompt,
     { before: before.images, after: after.images },
-    { before: before.audios, after: after.audios }
+    { before: before.audios, after: after.audios },
+    undefined,
+    { before: before.videos ?? [], after: after.videos ?? [] }
   )
 }
 
@@ -235,6 +264,10 @@ export function inheritedTokensChanged(before: InheritedTokens, after: Inherited
     !sameList(
       before.audios.map((a) => a.path),
       after.audios.map((a) => a.path)
+    ) ||
+    !sameList(
+      (before.videos ?? []).map((v) => v.path),
+      (after.videos ?? []).map((v) => v.path)
     )
   )
 }
@@ -271,7 +304,10 @@ export function sendParams(clips: readonly ChainClip[], index: number): Generati
       startImage: undefined,
       endImage: undefined,
       referenceImages: plan.images.length ? [...plan.images] : undefined,
-      referenceAudios: plan.audios.length ? plan.audios.map((a) => ({ ...a })) : undefined
+      referenceAudios: plan.audios.length ? plan.audios.map((a) => ({ ...a })) : undefined,
+      referenceVideos: plan.videos.length ? plan.videos.map((v) => ({ ...v })) : undefined,
+      // Carried videos are references; the Editor's task never comes along.
+      referenceTask: undefined
     }
   }
   return {
@@ -279,6 +315,8 @@ export function sendParams(clips: readonly ChainClip[], index: number): Generati
     model: imageToVideoVariant(params.model),
     referenceImages: undefined,
     referenceAudios: undefined,
+    referenceVideos: undefined,
+    referenceTask: undefined,
     ...(continuing ? { startImage: undefined } : {}),
     ...(ending ? { endImage: undefined } : {})
   }
@@ -307,7 +345,12 @@ export function continuationProblem(sent: GenerationParams, plan: ContinuationPl
     })
   }
   return blockingPromptError(
-    { ...sent, referenceImages: plan.carried?.images ?? [], referenceAudios: plan.audios.length ? plan.audios : undefined },
+    {
+      ...sent,
+      referenceImages: plan.carried?.images ?? [],
+      referenceAudios: plan.audios.length ? plan.audios : undefined,
+      referenceVideos: plan.carried?.videos.length ? plan.carried.videos : undefined
+    },
     { continuationFrame: true }
   )
 }

@@ -6,15 +6,16 @@ import { mediaUrl } from '../../lib/media'
 import { PATH_SEPARATOR } from '../../lib/platform'
 import { placeBeside } from '../prompt/textareaDom'
 import AudioPlayButton, { toggleClip } from './AudioPlayButton'
-import { KIND_TONE } from './assetKinds'
+import { KIND_TONE, VIDEO_TONE } from './assetKinds'
 import { audioRole, windowLabel } from './audioRefs'
+import VideoWindowPreview from './VideoWindowPreview'
 
-// A card that shows what an @ImageN or @AudioN token in a read-only prompt points at – the picture large enough
-// to recognise, or the clip with a play button for the part that is sent – so a prompt can be checked against its
-// references without leaving it. The token spans stay plain text until a card opens: nothing is loaded before.
+// A card that shows what an @ImageN, @AudioN or @VideoN token in a read-only prompt points at – the picture large
+// enough to recognise, the clip with a play button for the part that is sent, or the video playing that part over and
+// over – so a prompt can be checked against its references without leaving it. The token spans stay plain text until a card opens: nothing is loaded before.
 // The same card shows a reference thumbnail (or an approval tile) larger while it is hovered: the picture variant.
 
-/** What @ImageN (or @AudioN; index N-1) points at, for colouring the token and for its card. */
+/** What @ImageN (or @AudioN, @VideoN; index N-1) points at, for colouring the token and for its card. */
 export interface TokenTarget {
   kind?: AssetKind
   /** "Anna (photo 2)", "Anna · voice": what it is, in one line. */
@@ -31,15 +32,17 @@ export interface TokenTarget {
    * nothing, and the card says so under the picture.
    */
   unsent?: string
-  /** The part of a clip that is sent, in seconds (no length: from `start`, length unknown). */
+  /** The part of a clip or video that is sent, in seconds (no length: from `start`, length unknown). */
   window?: { start: number; length?: number }
+  /** A video's kind in words ("take", "film", "own video"), for its card. */
+  detail?: string
 }
 
 /** What a token's card is about. */
 export interface TokenCardContent {
-  /** The token as it is meant: "@Image2", "@Audio1" (or as written, for a misspelled one). */
+  /** The token as it is meant: "@Image2", "@Audio1", "@Video1" (or as written, for a misspelled one). */
   token: string
-  ref: 'image' | 'audio'
+  ref: 'image' | 'audio' | 'video'
   target?: TokenTarget
   /** Why the token names nothing that is sent (misspelled, out of range); the card then says only that, in red. */
   problem?: string
@@ -212,7 +215,8 @@ function fileName(path: string): string {
 }
 
 /** "photo 2 of 3" (nothing for an asset's only photo); "voice", "voice 2" for its second voice clip. */
-function placeOf(target: TokenTarget, ref: 'image' | 'audio'): string | undefined {
+function placeOf(target: TokenTarget, ref: 'image' | 'audio' | 'video'): string | undefined {
+  if (ref === 'video') return target.detail
   const several = (target.count ?? 0) > 1 && target.number !== undefined
   if (ref === 'image') return several ? `photo ${target.number} of ${target.count}` : undefined
   if (!target.name) return undefined
@@ -243,15 +247,44 @@ function ReferenceCard({
 }) {
   const { token, target, problem } = content
   const picture = content.ref === 'image' && target?.path && !problem ? target.path : undefined
+  const film = content.ref === 'video' && target?.path && !problem ? target.path : undefined
   const room = TEXT_ROOM + (content.hint ? HINT_ROOM : 0)
-  const height = picture ? PICTURE + room : 96
+  const height = picture ? PICTURE + room : film ? 136 + room : 96
   const place = placeBeside(rect, WIDTH, height, height)
-  const tone = target?.kind ? KIND_TONE[target.kind].text : 'text-text'
+  const tone = content.ref === 'video' ? VIDEO_TONE.text : target?.kind ? KIND_TONE[target.kind].text : 'text-text'
   const where = target ? placeOf(target, content.ref) : undefined
 
   let body: ReactNode
   if (problem || !target) {
     body = <p className="leading-snug text-red-300">{problem ?? `${token} doesn’t point at anything that is sent.`}</p>
+  } else if (content.ref === 'video') {
+    const w = target.window
+    body = (
+      <>
+        {film && (
+          <span className="block aspect-video overflow-hidden rounded bg-black/40">
+            <VideoWindowPreview
+              path={film}
+              start={w?.start ?? 0}
+              length={w?.length ?? 5}
+              playing
+              className={`h-full w-full object-contain ${target.unsent ? 'opacity-50' : ''}`}
+            />
+          </span>
+        )}
+        <p className="mt-1.5 flex items-baseline gap-2">
+          <span className="min-w-0 flex-1 truncate">
+            <span className={`font-medium ${tone}`}>{token}</span>
+            <span className="text-muted"> · </span>
+            <span className="font-medium">{target.name ?? (target.path ? fileName(target.path) : target.label)}</span>
+          </span>
+        </p>
+        <p className="truncate text-[11px] text-muted">
+          {[where, w ? windowText(w) : undefined].filter(Boolean).join(' · ')}
+        </p>
+        {target.unsent && <p className="text-[11px] leading-snug text-accent">{target.unsent}</p>}
+      </>
+    )
   } else if (content.ref === 'audio') {
     const w = target.window
     body = (
@@ -314,8 +347,9 @@ function ReferenceCard({
     )
   }
 
-  // A picture's card has nothing to reach: the pointer goes through it, so it never covers a neighbour's ✕ or a drop.
-  const through = content.ref === 'image'
+  // A picture's (or a video's) card has nothing to reach: the pointer goes through it, so it never covers a
+  // neighbour's ✕ or a drop.
+  const through = content.ref !== 'audio'
   return createPortal(
     <div
       id={id}

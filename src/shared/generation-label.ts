@@ -4,6 +4,7 @@
 // "<edit> v3"), so they are never listed as an empty prompt. Pure (no Node or DOM), like everything in
 // src/shared.
 
+import { referenceVideosOf, videosAreReferences } from './models'
 import type { Generation, GenerationSource } from './types'
 
 /** What naming reads of a generation. A row without a source (from before own clips existed) is Venice's. */
@@ -88,14 +89,15 @@ export function sourceBadge(g: Partial<Pick<Generation, 'source' | 'editId'>>): 
 
 /**
  * Whether the row's settings can be put back in the Generate form ("Use again", "Use prompt"): only a Venice
- * generation made from a prompt, not an import, a version, or a take of a video-to-video model (its source video
- * is an edit's proxy the form can't hold).
+ * generation made from a prompt, not an import, a version, or an Editor take (a video-to-video model's source video,
+ * or Seedance's video to edit: an edit's proxy the form can't hold). Reference videos the form holds.
  */
 export function canUseAgain(g: Partial<Pick<Generation, 'source' | 'params'>>): boolean {
   if (!isVeniceGeneration(g)) return false
   const p = g.params
   if (!p || typeof p !== 'object') return true
-  return !p.sourceVideo && !(Array.isArray(p.referenceVideos) && p.referenceVideos.length > 0)
+  // The Editor's edit sends its proxy as the video to edit; reference videos (Generate, clips) the form holds.
+  return !p.sourceVideo && !(referenceVideosOf(p).length > 0 && !videosAreReferences(p))
 }
 
 /** The labels of the feed's "Source" filter, by source. */

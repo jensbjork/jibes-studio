@@ -1,9 +1,16 @@
+import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
 import { z } from 'zod'
-import type { AssetFileOrigin, Still } from '@shared/types'
+import { referenceVideoWindow } from '@shared/models'
+import type { AssetFileOrigin, ReferenceVideo, Still } from '@shared/types'
+import * as db from '../../db'
+import { exportRow } from '../../edit-store'
+import { fromStoredPath } from '../../paths'
+import { videoDuration } from '../../reference-videos'
+import { importReferenceFile } from '../../references'
 import { checkUrl, MAX_URL_LENGTH } from '../fetch-url'
 import { callService } from '../local-ipc'
-import { StillIndex, requireLibrary, type ReferenceItem } from '../studio'
+import { StillIndex, requireLibrary, seconds, type ReferenceItem } from '../studio'
 import type { UploadKind } from '../upload-check'
 import type { UploadEntry } from '../uploads'
 import { afterCall, type ToolContext } from './kit'
@@ -198,27 +205,92 @@ export async function importAsStill(ctx: ToolContext, source: FileSource, ownerI
   return callService<Still>('stills:import', file.path, ownerId)
 }
 
-/** A reference as an agent gives it: an asset's photos, a still, or an uploaded picture. */
+/** A reference video as an agent gives it (kit.ts videoReferenceItem). */
+export interface VideoReferenceInput {
+  video: { generation_id: string } | { export_id: string } | { upload_id: string }
+  start?: number
+  length?: number
+}
+
+/** A reference as an agent gives it: an asset's photos, a still, an uploaded picture, or a reference video. */
 export type ReferenceInput =
   | { asset_id: string; image_ids?: string[]; audio_ids?: string[]; include_voice?: boolean }
   | { still_id: string }
   | { upload_id: string }
+  | VideoReferenceInput
+
+/** The film a reference video names: a finished generation's, an export's, or an upload's (copied in, or as it is). */
+async function videoFile(ctx: ToolContext, video: VideoReferenceInput['video'], importUploads: boolean): Promise<string> {
+  if ('generation_id' in video) {
+    const g = db.getGeneration(video.generation_id)
+    if (!g) throw new Error(`There is no generation with id ${video.generation_id}. list_generations shows which there are.`)
+    if (g.status !== 'completed' || !g.filePath) {
+      throw new Error(`The generation ${video.generation_id} has no finished video yet – wait until it is done (get_generation).`)
+    }
+    if (!existsSync(g.filePath)) throw new Error(`The video of the generation ${video.generation_id} is missing on disk.`)
+    return g.filePath
+  }
+  if ('export_id' in video) {
+    const row = exportRow(video.export_id)
+    if (!row) throw new Error(`There is no exported film with id ${video.export_id}. list_exports shows which there are.`)
+    const path = fromStoredPath(row.file_path)
+    if (!existsSync(path)) throw new Error(`The exported film ${video.export_id} is missing on disk.`)
+    return path
+  }
+  const [file] = await stageFiles(ctx, 'video', [{ upload_id: video.upload_id }])
+  // Copied into Referensbilder/<today>/, so the form or clip never points into the scratch folder (cleared at open).
+  return importUploads ? importReferenceFile(file.path, 'video', file.fileName) : file.path
+}
 
 /**
- * The references with loose pictures resolved to files: a still's picture; an upload made a still in "Referensbilder"
- * first (`importUploads`), so the form or clip never points into the scratch folder – or, for a check that changes
- * nothing (validate_prompt), the upload's own file.
+ * A reference video resolved to its file and its window, measured: start (default 0) and length (default 5 s, or what
+ * is left of the film) filled in, so what the form or clip stores is what is sent. Refused when the window starts at or
+ * after the film's end. A window outside the model family's limits is left as asked: the prompt checks say why.
+ */
+async function resolveVideoReference(
+  ctx: ToolContext,
+  item: VideoReferenceInput,
+  importUploads: boolean
+): Promise<ReferenceVideo> {
+  const path = await videoFile(ctx, item.video, importUploads)
+  let duration: number
+  try {
+    duration = await videoDuration(path)
+  } catch (err) {
+    throw new Error(`${basename(path)} can't be used as a reference video: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  const asked: ReferenceVideo = {
+    path,
+    ...(item.start !== undefined ? { start: item.start } : {}),
+    ...(item.length !== undefined ? { length: item.length } : {})
+  }
+  const window = referenceVideoWindow(asked, duration)
+  if (window.length <= 0) {
+    throw new Error(
+      `start ${seconds(window.start)} s is at or after the end of ${basename(path)}, which is ${seconds(duration)} s long.`
+    )
+  }
+  const ms = (n: number): number => Math.round(n * 1000) / 1000
+  return { path, start: ms(window.start), length: ms(window.length) }
+}
+
+/**
+ * The references with loose pictures and videos resolved to files: a still's picture; an upload made a still in
+ * "Referensbilder" first (`importUploads`), so the form or clip never points into the scratch folder – or, for a check
+ * that changes nothing (validate_prompt), the upload's own file; a reference video's film with its window measured (a
+ * video upload copied into "Referensbilder" likewise).
  */
 export async function resolvePictureReferences(
   ctx: ToolContext,
   items: readonly ReferenceInput[],
   importUploads: boolean
 ): Promise<ReferenceItem[]> {
-  if (!items.some((i) => 'still_id' in i || 'upload_id' in i)) return items as ReferenceItem[]
+  if (!items.some((i) => 'still_id' in i || 'upload_id' in i || 'video' in i)) return items as ReferenceItem[]
   const stills = items.some((i) => 'still_id' in i) ? await StillIndex.load() : undefined
   const out: ReferenceItem[] = []
   for (const item of items) {
-    if ('still_id' in item) out.push({ picture: stills!.require(item.still_id).path })
+    if ('video' in item) out.push({ video: await resolveVideoReference(ctx, item, importUploads) })
+    else if ('still_id' in item) out.push({ picture: stills!.require(item.still_id).path })
     else if ('upload_id' in item) {
       out.push({
         picture: importUploads

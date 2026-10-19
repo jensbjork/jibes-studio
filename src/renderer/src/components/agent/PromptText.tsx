@@ -1,6 +1,12 @@
 import type { ReactNode } from 'react'
-import { findAudioTokens, findImageTokens, findMalformedTokens, type PromptToken } from '@shared/prompt-refs'
-import { KIND_TONE } from '../pickers/assetKinds'
+import {
+  findAudioTokens,
+  findImageTokens,
+  findMalformedTokens,
+  findVideoTokens,
+  type PromptToken
+} from '@shared/prompt-refs'
+import { KIND_TONE, VIDEO_TONE } from '../pickers/assetKinds'
 import { useTokenCard, type TokenTarget } from '../pickers/ReferenceCard'
 import { markKey } from '../prompt/promptText'
 
@@ -12,6 +18,8 @@ interface Props {
   targets: TokenTarget[]
   /** One entry per reference audio clip that is sent; empty when the model takes no audio. */
   audioTargets?: TokenTarget[]
+  /** One entry per reference video (an unsent one says why); empty when the model takes none. */
+  videoTargets?: TokenTarget[]
   /** The picture or clip ("image:2", "audio:1") whose tokens are lit: hovered here, in another text or among the tiles. */
   highlighted?: string
   onHighlight?: (key: string | undefined) => void
@@ -28,27 +36,28 @@ const tokenBase = 'rounded px-0.5 font-medium outline-none focus-visible:ring-1 
 const broken = `${tokenBase} text-accent underline decoration-accent decoration-wavy underline-offset-2`
 
 /**
- * A prompt, read-only, with its @ImageN and @AudioN tokens coloured like the reference chips: valid ones by the
- * kind of the asset they point at, tokens that point at nothing (or are misspelled) red and underlined. Hovering or
- * focusing a token shows its card – the picture, or the clip with a play button – and lights the tokens and tiles
- * that name the same picture or clip.
+ * A prompt, read-only, with its @ImageN, @AudioN and @VideoN tokens coloured like the reference chips: valid ones by
+ * the kind of the asset they point at (videos in their own colour), tokens that point at nothing (or are misspelled)
+ * red and underlined. Hovering or focusing a token shows its card – the picture, the clip with a play button, or the
+ * video playing the part that is sent – and lights the tokens and tiles that name the same picture, clip or video.
  */
 export default function PromptText({
   prompt,
   targets,
   audioTargets = [],
+  videoTargets = [],
   highlighted,
   onHighlight,
   className = ''
 }: Props) {
   const card = useTokenCard()
   const marks: Mark[] = []
-  const mark = (t: PromptToken, ref: 'image' | 'audio', list: TokenTarget[], nothing: string): void => {
+  const mark = (t: PromptToken, ref: 'image' | 'audio' | 'video', list: TokenTarget[], nothing: string): void => {
     const target = list[t.index - 1]
     const key = markKey(ref, t.index)
-    const tone = target?.kind ? KIND_TONE[target.kind].text : 'text-text'
+    const tone = ref === 'video' ? VIDEO_TONE.text : target?.kind ? KIND_TONE[target.kind].text : 'text-text'
     const lit = highlighted !== undefined && key === highlighted ? ' ring-1 ring-white/50' : ''
-    const token = `${ref === 'image' ? '@Image' : '@Audio'}${t.index}`
+    const token = `${ref === 'image' ? '@Image' : ref === 'audio' ? '@Audio' : '@Video'}${t.index}`
     marks.push({
       start: t.start,
       end: t.end,
@@ -69,6 +78,7 @@ export default function PromptText({
   }
   for (const t of findImageTokens(prompt)) mark(t, 'image', targets, 'doesn’t point at any of the images that are sent')
   for (const t of findAudioTokens(prompt)) mark(t, 'audio', audioTargets, 'doesn’t point at any of the sound clips that are sent')
+  for (const t of findVideoTokens(prompt)) mark(t, 'video', videoTargets, 'doesn’t point at any of the videos that are sent')
   for (const m of findMalformedTokens(prompt)) {
     if (marks.some((x) => m.start < x.end && x.start < m.end)) continue
     marks.push({

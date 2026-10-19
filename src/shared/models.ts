@@ -1,6 +1,6 @@
 // Model-related defaults and helpers shared by the main process and the renderer.
 
-import type { GenerationParams, ReferenceAudio, VideoModel } from './types'
+import type { GenerationParams, ReferenceAudio, ReferenceVideo, VideoModel } from './types'
 
 export type Kind = 'text-to-video' | 'image-to-video' | 'reference-to-video'
 
@@ -282,16 +282,146 @@ export function paramsForSubmit(params: GenerationParams): GenerationParams {
     referenceAudios: audios?.slice(0, maxReferenceAudios(params.model)),
     sourceVideo: videoInput && typeof params.sourceVideo === 'string' ? params.sourceVideo || undefined : undefined,
     upscaleFactor: upscale ? params.upscaleFactor : undefined,
-    referenceVideos:
-      referenceVideos && Array.isArray(params.referenceVideos)
-        ? params.referenceVideos.filter((v) => typeof v === 'string' && v !== '').slice(0, MAX_REFERENCE_VIDEOS)
-        : undefined,
+    referenceVideos: referenceVideos ? sentReferenceVideos(params) : undefined,
     referenceTask: referenceVideos ? params.referenceTask : undefined
   }
 }
 
-/** Venice takes at most this many reference videos per request. */
+/** The reference videos params send (paramsForSubmit), within the model family's count; undefined when none. */
+function sentReferenceVideos(params: GenerationParams): ReferenceVideo[] | undefined {
+  const videos = sanitizeReferenceVideos(params.referenceVideos)
+  if (!videos) return undefined
+  // The Editor's edit sends its one proxy as it always has; references keep to the family's count.
+  const max = videosAreReferences(params) ? (referenceVideoLimits(params.model)?.maxVideos ?? 0) : MAX_REFERENCE_VIDEOS
+  const sent = videos.slice(0, max)
+  return sent.length ? sent : undefined
+}
+
+// ── Reference videos ──────────────────────────────────────────────────────────
+// Seedance 2.x reference-to-video takes `reference_video_urls`: in Generate and sequence clips each one is a
+// reference only (its action, camera movement and style), named @Video1, @Video2 … in Studio's prompt and sent as
+// "<Video 1>" … (toVeniceVideoTokens in prompt-refs.ts), the window (start/length) of its file cut to a small proxy.
+// The Editor's prompt-edit sends its own proxy whole as the video to edit (referenceTask 'edit', "<Video 1>" written
+// into the prompt): none of the window rules below apply to it.
+
+/** Venice takes at most this many reference videos per request (Seedance 2.5; 2.0 takes 3). */
 export const MAX_REFERENCE_VIDEOS = 10
+/** The shortest reference video window Venice takes, in seconds (both families). */
+export const MIN_VIDEO_CLIP_SECONDS = 2
+/** How much of a video is sent when nothing else is chosen: three of them fit Seedance 2.0's 15 s. */
+export const DEFAULT_VIDEO_CLIP_SECONDS = 5
+/** The largest file Venice takes per reference video. Studio's proxies stay far below it. */
+export const MAX_REFERENCE_VIDEO_BYTES = 50_000_000
+
+/** What a model family takes in reference videos. */
+export interface ReferenceVideoLimits {
+  /** "Seedance 2.0" or "Seedance 2.5", for messages. */
+  family: string
+  maxVideos: number
+  /** Per video, in seconds. */
+  minSeconds: number
+  maxSeconds: number
+  /** All videos together, in seconds. */
+  maxTotalSeconds: number
+}
+
+const SEEDANCE_20_VIDEOS: ReferenceVideoLimits = {
+  family: 'Seedance 2.0',
+  maxVideos: 3,
+  minSeconds: MIN_VIDEO_CLIP_SECONDS,
+  maxSeconds: 15,
+  maxTotalSeconds: 15
+}
+const SEEDANCE_25_VIDEOS: ReferenceVideoLimits = {
+  family: 'Seedance 2.5',
+  maxVideos: 10,
+  minSeconds: MIN_VIDEO_CLIP_SECONDS,
+  maxSeconds: 30,
+  maxTotalSeconds: 30
+}
+
+/**
+ * The reference video limits of the model's family (Venice's Seedance 2.0 guide): 2.0 takes ≤ 3 videos of 2–15 s, 15 s
+ * together; 2.5 ≤ 10 of 2–30 s, 30 s together. Undefined for a model that takes no reference videos. Another 2.x
+ * family Studio doesn't know yet gets 2.0's, the stricter.
+ */
+export function referenceVideoLimits(modelId: string): ReferenceVideoLimits | undefined {
+  if (!supportsReferenceVideos(modelId)) return undefined
+  return modelId.startsWith('seedance-2-5-') ? SEEDANCE_25_VIDEOS : SEEDANCE_20_VIDEOS
+}
+
+/** Whether the model is Seedance 2.5, which takes `omni_reference_task_type` (2.0 doesn't). */
+export function takesReferenceTask(modelId: string): boolean {
+  return supportsReferenceVideos(modelId) && modelId.startsWith('seedance-2-5-')
+}
+
+/**
+ * Whether params' reference videos are references (Generate, a sequence clip: windows cut to proxies, @VideoN, the
+ * legend's reference line) rather than the Editor's video to edit or extend (referenceTask 'edit' / 'extend').
+ */
+export function videosAreReferences(params: Pick<GenerationParams, 'referenceTask'>): boolean {
+  return params.referenceTask !== 'edit' && params.referenceTask !== 'extend'
+}
+
+/**
+ * The reference videos of params, from the window, an agent or stored JSON, each as { path, start?, length? }: rows
+ * from before windows existed (the Editor's prompt-edit) hold plain paths, which become { path }. Malformed entries
+ * are left out; [] when there are none. Read params' videos only through here (or sanitizeReferenceVideos).
+ */
+export function referenceVideosOf(params: { referenceVideos?: unknown } | null | undefined): ReferenceVideo[] {
+  return sanitizeReferenceVideos(params?.referenceVideos) ?? []
+}
+
+/** Reference videos from any input (see referenceVideosOf), without malformed entries; undefined when none. */
+export function sanitizeReferenceVideos(input: unknown): ReferenceVideo[] | undefined {
+  if (!Array.isArray(input)) return undefined
+  const out: ReferenceVideo[] = []
+  for (const item of input) {
+    if (typeof item === 'string') {
+      if (item) out.push({ path: item })
+      continue
+    }
+    if (!item || typeof item !== 'object') continue
+    const { path, start, length } = item as Partial<Record<keyof ReferenceVideo, unknown>>
+    if (typeof path !== 'string' || !path) continue
+    const clip: ReferenceVideo = { path }
+    if (typeof start === 'number' && Number.isFinite(start) && start >= 0) clip.start = start
+    if (typeof length === 'number' && Number.isFinite(length) && length > 0) clip.length = length
+    out.push(clip)
+  }
+  return out.length ? out : undefined
+}
+
+/**
+ * The part of the file a reference video sends, in seconds: from `start` (default 0) for `length` (default
+ * DEFAULT_VIDEO_CLIP_SECONDS), cut short where the file ends when its duration is known. Not clamped to the family's
+ * limits: a window outside them is reported by the prompt checks rather than quietly changed.
+ */
+export function referenceVideoWindow(clip: ReferenceVideo, duration?: number): { start: number; length: number } {
+  const start = typeof clip.start === 'number' && Number.isFinite(clip.start) && clip.start > 0 ? clip.start : 0
+  const known = typeof duration === 'number' && Number.isFinite(duration) ? Math.max(0, duration - start) : undefined
+  const asked =
+    typeof clip.length === 'number' && Number.isFinite(clip.length) && clip.length > 0
+      ? clip.length
+      : Math.min(known ?? DEFAULT_VIDEO_CLIP_SECONDS, DEFAULT_VIDEO_CLIP_SECONDS)
+  return { start, length: known === undefined ? asked : Math.min(asked, known) }
+}
+
+/**
+ * The model to offer for reference videos when `modelId` takes none: its family's reference-to-video model when that
+ * takes videos (seedance-2-0-image-to-video → seedance-2-0-reference-to-video), else Seedance 2.5's reference model;
+ * `modelId` itself when it takes them. `available` (the model list's ids) rules out models Venice doesn't offer:
+ * undefined when none of them is.
+ */
+export function referenceVideoModelFor(modelId: string, available?: readonly string[]): string | undefined {
+  const offered = (id: string): boolean => !!id && supportsReferenceVideos(id) && (!available || available.includes(id))
+  if (typeof modelId !== 'string') return undefined
+  if (offered(modelId)) return modelId
+  const sibling = modelId.replace(/(image|text)-to-video/, 'reference-to-video')
+  if (offered(sibling)) return sibling
+  if (offered(DEFAULT_MODEL['reference-to-video'])) return DEFAULT_MODEL['reference-to-video']
+  return available?.find((id) => supportsReferenceVideos(id))
+}
 
 /**
  * The most raw media (videos, images and audio together, before base64) Studio puts into one Venice request body.

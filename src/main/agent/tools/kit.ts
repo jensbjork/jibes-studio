@@ -218,16 +218,42 @@ export const assetReferenceItem = z.object({
 })
 
 /**
- * A reference: an asset's photos (and audio), or one loose picture – a still, or an uploaded picture (made a still in
- * "Referensbilder" first, so the form or clip never points into the scratch folder). A loose picture has no
- * description, so nothing is appended to the prompt for it.
+ * A reference video (@VideoN, Seedance 2.x reference-to-video): a finished generation's film (a take, a clip from the
+ * feed, an own clip, a version), an exported film or a ready video upload (copied into "Referensbilder" first), and
+ * the window of it that is sent. A reference only: its action, camera movement and style – never footage to edit.
+ */
+export const videoReferenceItem = z
+  .object({
+    video: z
+      .union([
+        z.object({ generation_id: z.string().describe('A finished generation (list_generations, a take).') }).strict(),
+        z.object({ export_id: z.string().describe('An exported film (list_exports).') }).strict(),
+        z.object({ upload_id: z.string().describe('A ready video upload (begin_upload kind "video").') }).strict()
+      ])
+      .describe('The film: {generation_id}, {export_id} or {upload_id}.'),
+    start: z.number().min(0).optional().describe('Seconds into the film where the window starts. Default 0.'),
+    length: z
+      .number()
+      .positive()
+      .optional()
+      .describe(
+        "Seconds of the film that are sent (at least 2; at most 15 on Seedance 2.0, 30 on 2.5, and the videos together no more). Default: 5 s, or what is left of the film."
+      )
+  })
+  .strict()
+
+/**
+ * A reference: an asset's photos (and audio), one loose picture – a still, or an uploaded picture (made a still in
+ * "Referensbilder" first, so the form or clip never points into the scratch folder) – or a reference video. A loose
+ * picture has no description, so nothing is appended to the prompt for it.
  */
 export const referenceItem = z.union([
   assetReferenceItem,
   z.object({ still_id: z.string().describe('A still (list_stills): one picture, no description.') }).strict(),
   z
     .object({ upload_id: z.string().describe('A ready image upload (begin_upload): one picture, no description.') })
-    .strict()
+    .strict(),
+  videoReferenceItem
 ])
 
 /** The "Include descriptions" switch, as set_form, validate_prompt, add_segment and update_segment take it. */

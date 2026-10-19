@@ -5,7 +5,8 @@ import {
   endImageVariant,
   imageToVideoVariant,
   kindOfModelId,
-  referenceToVideoVariant
+  referenceToVideoVariant,
+  referenceVideosOf
 } from '@shared/models'
 import { remapPromptReferences } from '@shared/prompt-remap'
 import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
@@ -83,6 +84,7 @@ export function isUntouchedClip(segment: Segment, cast?: SequenceCast): boolean 
     !p.startImage &&
     !p.endImage &&
     (onlyCast || (!p.referenceImages?.length && !p.referenceAudios?.length)) &&
+    !referenceVideosOf(p).length &&
     !segment.continueFromPrevious &&
     !segment.endFromNext &&
     !segment.notes.trim()
@@ -372,25 +374,35 @@ function takeListAsClips(take: readonly string[], clip: readonly string[]): stri
 }
 
 /**
- * A take's prompts as they read with the clip's references now ("Use prompt"): every @ImageN / @AudioN token
- * renumbered from the take's reference lists to the clip's (remapPromptReferences), so after the references were
- * reordered or one removed the take's words come back naming the same pictures and clips, not whatever holds
- * their old numbers now. A token whose picture or clip has left the clip goes.
+ * A take's prompts as they read with the clip's references now ("Use prompt"): every @ImageN / @AudioN / @VideoN
+ * token renumbered from the take's reference lists to the clip's (remapPromptReferences), so after the references
+ * were reordered or one removed the take's words come back naming the same pictures, clips and videos, not whatever
+ * holds their old numbers now. A token whose picture, clip or video has left the clip goes.
  */
 export function takePromptsFor(
-  take: Pick<GenerationParams, 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios'>,
-  clip: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'>
+  take: Pick<GenerationParams, 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios'> &
+    Partial<Pick<GenerationParams, 'referenceVideos'>>,
+  clip: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'> & Partial<Pick<GenerationParams, 'referenceVideos'>>
 ): { prompt: string; negativePrompt?: string } {
   const clipImages = clip.referenceImages ?? []
   const clipAudios = clip.referenceAudios ?? []
+  const clipVideos = referenceVideosOf(clip)
   const takeAudioPaths = takeListAsClips(
     (take.referenceAudios ?? []).map((a) => a.path),
     clipAudios.map((a) => a.path)
   )
+  const takeVideoPaths = takeListAsClips(
+    referenceVideosOf(take).map((v) => v.path),
+    clipVideos.map((v) => v.path)
+  )
   const images = { before: takeListAsClips(take.referenceImages ?? [], clipImages), after: clipImages }
   const audios = { before: takeAudioPaths.map((path) => ({ path })), after: clipAudios }
-  const negative = take.negativePrompt && remapPromptReferences(take.negativePrompt, images, audios)
-  return { prompt: remapPromptReferences(take.prompt, images, audios), negativePrompt: negative || undefined }
+  const videos = { before: takeVideoPaths.map((path) => ({ path })), after: clipVideos }
+  const negative = take.negativePrompt && remapPromptReferences(take.negativePrompt, images, audios, undefined, videos)
+  return {
+    prompt: remapPromptReferences(take.prompt, images, audios, undefined, videos),
+    negativePrompt: negative || undefined
+  }
 }
 
 /** Finds a consent request in an error message, also when it is wrapped (e.g. "Clip 2: NEEDS_CONSENT:{…}"). */

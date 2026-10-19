@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { droppedImagesNote, type ContinuationPlan } from '@shared/continuation'
-import { endImageVariant, supportsEndImage } from '@shared/models'
+import { endImageVariant, referenceVideosOf, supportsEndImage } from '@shared/models'
 import type { Asset, ContinueMode, Segment, Sequence, VideoModel } from '@shared/types'
 import { useAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
@@ -76,6 +76,9 @@ function carriedText(plan: ContinuationPlan, assets: readonly Asset[]): string {
     const label = source ? soundOf(source.asset) : 'a sound clip'
     if (!parts.includes(label)) parts.push(label)
   }
+  // Reference videos are carried like the pictures.
+  const videos = plan.videos.length
+  if (videos) parts.push(videos === 1 ? '1 reference video' : `${videos} reference videos`)
   const from = plan.carried?.inherited ? ` from clip ${plan.carried.fromClip}` : ''
   return `Sends along${from}: ${parts.join(', ')} + the last frame (@Image${plan.frameToken ?? plan.images.length + 1})`
 }
@@ -115,7 +118,11 @@ export default function KeyframeBox({
   // Turning "End on the next clip's first frame" on makes main switch to a model that takes an end image; say which.
   const endModel = supportsEndImage(model) ? undefined : endImageVariant(model, models.map((m) => m.id))
   // …and drops the clip's references (image-to-video can't send them), their @ tokens with them.
-  const hasReferences = !!(segment.params.referenceImages?.length || segment.params.referenceAudios?.length)
+  const hasReferences = !!(
+    segment.params.referenceImages?.length ||
+    segment.params.referenceAudios?.length ||
+    referenceVideosOf(segment.params).length
+  )
   const dropsReferences = hasReferences ? " The references are removed, since image-to-video can't send them." : ''
 
   const references = startOn && plan?.mode === 'references'

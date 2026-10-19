@@ -1,6 +1,7 @@
-// Reference material: start/end/reference images and reference audio clips picked from outside the library are
-// copied into Referensbilder/<day>/ when a generation is submitted, so the generation (and its "use again")
-// keeps working after the originals are moved or deleted, and the user finds the material next to the output.
+// Reference material: start/end/reference images, reference audio clips and reference videos picked from outside the
+// library are copied into Referensbilder/<day>/ when a generation is submitted (a video cloned on the library's
+// volume), so the generation (and its "use again") keeps working after the originals are moved or deleted, and the
+// user finds the material next to the output.
 // Also the file-placement helpers the other media modules share: everything that lands in a visible folder
 // is written to the library's scratch folder first and then moved into place under a free name.
 
@@ -9,6 +10,7 @@ import { createReadStream, createWriteStream, existsSync, type Stats } from 'nod
 import { constants, copyFile, readdir, rm, stat } from 'node:fs/promises'
 import { pipeline } from 'node:stream/promises'
 import { basename, extname, isAbsolute, join } from 'node:path'
+import { referenceVideosOf } from '@shared/models'
 import type { GenerationParams } from '@shared/types'
 import { isInsideRoot, movePath, referencesDayDir, safeName, tmpDir, uniqueName } from './paths'
 
@@ -219,7 +221,7 @@ async function findIdentical(dir: string, size: number, hash: string): Promise<s
 type Material = 'image' | 'audio' | 'video'
 
 /** The library copy of one outside file: an identical file already in today's folder, or a new copy. */
-async function importFile(src: string, dir: string, material: Material): Promise<string> {
+async function importFile(src: string, dir: string, material: Material, keptAs?: string): Promise<string> {
   const name = basename(src)
   try {
     const info = await stat(src)
@@ -228,7 +230,12 @@ async function importFile(src: string, dir: string, material: Material): Promise
     if (existing) return existing
     const ext = extname(src)
     const fallback = material === 'audio' ? 'Referensljud' : material === 'video' ? 'Referensvideo' : 'Referensbild'
-    const copy = await copyInto(src, dir, safeName(basename(src, ext), { fallback }), ext.toLowerCase())
+    const base = safeName(keptAs ? basename(keptAs, extname(keptAs)) : basename(src, ext), { fallback })
+    // A video can be large: cloned on the library's volume (instant, no extra space), else copied as a stream.
+    const copy =
+      material === 'video'
+        ? await cloneInto(src, dir, base, ext.toLowerCase())
+        : await copyInto(src, dir, base, ext.toLowerCase())
     // The copy has the same content; remember that so the next lookup doesn't read it again.
     const cached = hashCache.get(src)
     const copied = await stat(copy).catch(() => undefined)
@@ -241,6 +248,18 @@ async function importFile(src: string, dir: string, material: Material): Promise
 }
 
 /**
+ * An outside file copied into Referensbilder/<today>/ (an identical one already there is reused): an agent's uploaded
+ * reference video, so the form or clip never points into the scratch folder, which is cleared at every library open.
+ * `name` is the name the file is kept under (its own when left out). Resolves with the library copy.
+ */
+export function importReferenceFile(src: string, material: Material, name?: string): Promise<string> {
+  return importing(async () => {
+    const dir = referencesDayDir(new Date())
+    return importFile(src, dir, material, name)
+  })
+}
+
+/**
  * Every file the params send, with what it is (for the wording when it can't be copied): images, reference audio,
  * and the source and reference videos of video-to-video models.
  */
@@ -250,9 +269,10 @@ export function referencedFiles(params: GenerationParams): { path: string; mater
     material: 'image' as const
   }))
   const audio = (params.referenceAudios ?? []).map((clip) => ({ path: clip?.path, material: 'audio' as const }))
-  const videos = [params.sourceVideo, ...(Array.isArray(params.referenceVideos) ? params.referenceVideos : [])].map(
-    (path) => ({ path, material: 'video' as const })
-  )
+  const videos = [params.sourceVideo, ...referenceVideosOf(params).map((v) => v.path)].map((path) => ({
+    path,
+    material: 'video' as const
+  }))
   return [...images, ...audio, ...videos].filter(
     (f): f is { path: string; material: Material } => typeof f.path === 'string' && f.path !== ''
   )
@@ -263,8 +283,9 @@ const importing = serialized()
 /**
  * Copies every start/end/reference image, reference audio clip and source/reference video that lies outside the
  * library into Referensbilder/<today>/ (keeping its original name, made unique) and returns params pointing at the
- * copies (each audio clip keeps its window). An edit's proxies are made in its Underlag/ folder, so in practice only
- * images and audio are ever copied. Files already in the library (photos and voice clips of assets, earlier
+ * copies (each audio clip and reference video keeps its window). An edit's proxies are made in its Underlag/ folder,
+ * so of videos in practice only reference videos (Generate, a sequence clip) are ever copied: the whole file, so the
+ * window can still be moved on "Use again". Files already in the library (photos and voice clips of assets, earlier
  * references, continuation frames) are left as they are, and a file whose exact content is already in today's
  * folder is reused instead of copied again.
  */
@@ -290,7 +311,9 @@ export function importExternalReferences(params: GenerationParams): Promise<Gene
       )
     }
     if (params.sourceVideo) result.sourceVideo = local(params.sourceVideo)
-    if (Array.isArray(params.referenceVideos)) result.referenceVideos = params.referenceVideos.map(local)
+    if (Array.isArray(params.referenceVideos)) {
+      result.referenceVideos = referenceVideosOf(params).map((v) => ({ ...v, path: local(v.path) }))
+    }
     return result
   })
 }

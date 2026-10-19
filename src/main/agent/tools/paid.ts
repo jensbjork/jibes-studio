@@ -3,7 +3,7 @@ import { basename } from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { withContinuationFrame, type ContinuationPlan } from '@shared/continuation'
-import { paramsForSubmit } from '@shared/models'
+import { paramsForSubmit, referenceVideosOf } from '@shared/models'
 import type { ComposedPrompt } from '@shared/prompt-compose'
 import { blockingPromptError, canonicalizeParams } from '@shared/prompt-refs'
 import type {
@@ -34,6 +34,7 @@ import {
 import * as store from '../../sequence-store'
 import { getImageSafeMode } from '../../settings'
 import { planStill } from '../../stills'
+import { resolveReferenceVideos } from '../../reference-videos'
 import { ensureImagesExist, resolveReferenceAudios } from '../../venice'
 import { type MissingTransition } from '../../storyboards'
 import type { SentListener } from '../../variants'
@@ -161,8 +162,9 @@ function paramsKey(p: GenerationParams, silent?: SilentModels, plan?: Continuati
     s.startImage ?? '',
     s.endImage ?? '',
     s.referenceImages ?? [],
-    // The windows count: moving a voice's window changes what Venice hears.
+    // The windows count: moving a voice's window changes what Venice hears, a video's what it is shown.
     (s.referenceAudios ?? []).map((a) => [a.path, a.start ?? 0, a.length ?? null]),
+    referenceVideosOf(s).map((v) => [v.path, v.start ?? 0, v.length ?? null]),
     // A continuation: sent with its references and the frame after them, or exactly.
     plan ? [plan.mode, plan.frameToken ?? null] : null
   ])
@@ -254,8 +256,9 @@ function storedSentPrompt(segmentId: string): string | undefined {
 }
 
 /**
- * Which files the request's pictures and audio clips are (device, inode, size, modification time). A path names a
- * place, not a photo: renaming two assets can put another person's photo (or voice) where the approved one was.
+ * Which files the request's pictures, audio clips and reference videos are (device, inode, size, modification time). A
+ * path names a place, not a photo: renaming two assets can put another person's photo (or voice) where the approved
+ * one was.
  */
 function imageIdentity(params: GenerationParams): string {
   const id = (path: string | undefined): string => {
@@ -271,7 +274,8 @@ function imageIdentity(params: GenerationParams): string {
     id(params.startImage),
     id(params.endImage),
     (params.referenceImages ?? []).map(id),
-    (params.referenceAudios ?? []).map((a) => id(a.path))
+    (params.referenceAudios ?? []).map((a) => id(a.path)),
+    referenceVideosOf(params).map((v) => id(v.path))
   ])
 }
 
@@ -632,11 +636,14 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       ensureImagesExist(paramsForSubmit(generated))
       // In reference mode the frame goes along as the last reference image: checked (and its audio measured) with it.
       const withFrame = references && startFrame ? withContinuationFrame(generated, startFrame) : undefined
+      // Its reference videos with their windows measured, as the take will send them (what the dialog shows).
+      let measuredVideos = paramsForSubmit(generated).referenceVideos
       if ((!continuing && !endFromNext) || withFrame) {
         // Its audio clips are measured like the take's submit will, so a bad window is refused before approval.
-        await prepareSubmission(withFrame ?? generated).catch((err: unknown) => {
+        const prepared = await prepareSubmission(withFrame ?? generated).catch((err: unknown) => {
           throw new Error(`Clip ${clip}: ${errorText(err)}`)
         })
+        if (prepared.referenceVideos?.length) measuredVideos = prepared.referenceVideos
       }
       const [price, silent] = await Promise.all([quote(generated), silentModels()])
       // Pinned to the neighbours' takes and trims too: the dialog shows the frames they give now.
@@ -666,10 +673,11 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       // What the dialog shows. In reference mode the frame is the last reference image and the prompt starts with the
       // instruction that names it, as Venice gets them.
       const leadIn = references ? continuationLeadInFor(plan.frameToken) : ''
-      const shown =
+      const shownBase =
         withFrame && leadIn
           ? { ...paramsForSubmit(withFrame), prompt: `${leadIn}\n\n${generated.prompt.trimEnd()}` }
           : paramsForSubmit(generated)
+      const shown = measuredVideos?.length ? { ...shownBase, referenceVideos: measuredVideos } : shownBase
       const total = variantsPrice(price, count)
       const { request, reused } = requestApproval(ctx, epoch, {
         kind: 'segment',
@@ -747,12 +755,12 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         if (c.plan?.mode === 'references') {
           // A continuation in reference mode carries voices too; its frame comes from a take this run may make first,
           // so the audio is measured and the prompt checked with the frame's place kept (as continuationProblem).
-          if (!c.generated.referenceAudios?.length) continue
-          const measured = await resolveReferenceAudios(paramsForSubmit(canonicalizeParams(c.generated))).catch(
-            (err: unknown) => {
+          if (!c.generated.referenceAudios?.length && !c.generated.referenceVideos?.length) continue
+          const measured = await resolveReferenceAudios(paramsForSubmit(canonicalizeParams(c.generated)))
+            .then(resolveReferenceVideos)
+            .catch((err: unknown) => {
               throw new Error(`Clip ${c.clip}: ${errorText(err)}`)
-            }
-          )
+            })
           const late = blockingPromptError(
             { ...measured, referenceImages: c.plan.carried?.images ?? [] },
             { continuationFrame: true }

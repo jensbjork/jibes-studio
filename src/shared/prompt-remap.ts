@@ -1,30 +1,37 @@
-// Keeping a prompt's @ImageN and @AudioN tokens on their pictures and clips when the reference lists change:
-// a picture removed with its chip ✕, an outfit swapped, a voice left out, or the references dragged into a new
-// order. Pure and shared, so the editor (renderer) and the agent tools that edit sequence clips (main) renumber
+// Keeping a prompt's @ImageN, @AudioN and @VideoN tokens on their pictures, clips and videos when the reference
+// lists change: a picture removed with its chip ✕, an outfit swapped, a voice left out, a video removed, or the
+// references dragged into a new order. Pure and shared, so the editor (renderer) and the agent tools that edit sequence clips (main) renumber
 // tokens by exactly the same rules – a token pointing at the wrong picture spoils a paid generation just as
 // quietly as a missing one.
 
+import { referenceVideosOf } from './models'
 import {
   findAudioTokens,
   findImageTokens,
   findMalformedTokens,
+  findVideoTokens,
   type PromptToken,
   type ReferenceKind
 } from './prompt-refs'
-import type { Asset, GenerationParams, ReferenceAudio } from './types'
+import type { Asset, GenerationParams, ReferenceAudio, ReferenceVideo } from './types'
 
-/** A near miss ("@Image 3", "@img3", "@Ljud1") whose suggested spelling names one picture or clip. */
-const SINGLE_SUGGESTION = /^@(Image|Audio)(\d+)$/
+/** A near miss ("@Image 3", "@img3", "@Ljud1", "@Vid1") whose suggested spelling names one picture, clip or video. */
+const SINGLE_SUGGESTION = /^@(Image|Audio|Video)(\d+)$/
 /** A range's suggested spelling ("@Image1-3" → "@Image1, @Image2, @Image3"): its first and last numbers. */
-const RANGE_SUGGESTION = /^@(Image|Audio)(\d+)(?:, @\1\d+)*, @\1(\d+)$/
+const RANGE_SUGGESTION = /^@(Image|Audio|Video)(\d+)(?:, @\1\d+)*, @\1(\d+)$/
 /** A range near miss's numbers at its end: "1-3" in "@Image1-3" (the first may be full-width, as prompt-refs reads it). */
 const RANGE_DIGITS = /([0-9\uFF10-\uFF19]+)([-\u2010-\u2015\u2212])([0-9]+)$/
 /** A glued near miss's suggested spelling ("@Image3rd" → "@Image3 rd"): the number and what was glued on. */
-const GLUED_SUGGESTION = /^@(Image|Audio)(\d+) (\S+)$/
+const GLUED_SUGGESTION = /^@(Image|Audio|Video)(\d+) (\S+)$/
 /** The number at the end of a near miss, in ASCII or full-width digits. */
 const TRAILING_DIGITS = /[0-9\uFF10-\uFF19]+$/
 /** The word in front of an @AudioN inside a reference's brackets ("voice @Audio1", "röst @Audio1"). */
 const AUDIO_WORD = /^(voice|sound|röst|ljud)[ \t]+/iu
+
+/** The word of each kind's tokens. */
+const WORD: Record<ReferenceKind, string> = { image: 'Image', audio: 'Audio', video: 'Video' }
+/** "@Image3", "@Audio2", "@Video1". */
+const tokenOf = (ref: ReferenceKind, n: number): string => `@${WORD[ref]}${n}`
 
 /**
  * `n` written the way `digits` was (leading zeros, full-width digits), so a renumbered near miss stays the
@@ -67,7 +74,8 @@ type Found = PromptToken & { ref: ReferenceKind }
 function referenceUnits(prompt: string): Unit[] {
   const tokens: Found[] = [
     ...findImageTokens(prompt).map((t) => ({ ...t, ref: 'image' as const })),
-    ...findAudioTokens(prompt).map((t) => ({ ...t, ref: 'audio' as const }))
+    ...findAudioTokens(prompt).map((t) => ({ ...t, ref: 'audio' as const })),
+    ...findVideoTokens(prompt).map((t) => ({ ...t, ref: 'video' as const }))
   ].sort((a, b) => a.start - b.start)
   const byStart = new Map(tokens.map((t) => [t.start, t]))
   /** The member starting at `pos`: a token, or "voice @AudioN". */
@@ -113,7 +121,7 @@ function referenceUnits(prompt: string): Unit[] {
   }
   for (const m of findMalformedTokens(prompt)) {
     const suggestion = m.suggestion ?? ''
-    const kindOf = (word: string): ReferenceKind => (word === 'Audio' ? 'audio' : 'image')
+    const kindOf = (word: string): ReferenceKind => (word === 'Audio' ? 'audio' : word === 'Video' ? 'video' : 'image')
     const { start, end, raw } = m
     const single = SINGLE_SUGGESTION.exec(suggestion)
     if (single && kindOf(single[1]) === m.ref && TRAILING_DIGITS.test(raw)) {
@@ -186,12 +194,13 @@ export interface ListChange<T> {
 }
 
 /**
- * The prompt with its @ImageN and @AudioN tokens kept on their pictures and clips after the reference lists
- * changed (an asset removed with its chip ✕, an outfit swapped, a voice left out, the references reordered):
- * every token gets its new number. A token whose picture or clip left the list goes, and so does a "(…)" left
- * empty; the words around it stay. With `swap`, a group naming only the old outfits' photos is given to the new
- * outfit instead, name included: "Red dress (@Image3)" → "Blue jeans (@Image3, @Image4)". Tokens beyond
- * `before` name nothing and are left as they are, as are @AudioN tokens when `audios` is left out. Tokens are
+ * The prompt with its @ImageN, @AudioN and @VideoN tokens kept on their pictures, clips and videos after the
+ * reference lists changed (an asset removed with its chip ✕, an outfit swapped, a voice left out, a video removed,
+ * the references reordered): every token gets its new number. A token whose picture, clip or video left the list
+ * goes, and so does a "(…)" left empty; the words around it stay. With `swap`, a group naming only the old outfits'
+ * photos is given to the new outfit instead, name included: "Red dress (@Image3)" → "Blue jeans (@Image3, @Image4)".
+ * Tokens beyond `before` name nothing and are left as they are, as are @AudioN tokens when `audios` is left out and
+ * @VideoN tokens when `videos` is (videos are followed by path, like the clips: a changed window keeps its token). Tokens are
  * found as the shared rules find them, so "@image3" (which the model reads as @Image3) follows its picture too,
  * and a near miss like "@Image 3", "@Image3rd" or "@Image1-2" keeps naming the pictures its suggested fix would
  * (a range whose pictures no longer follow each other is written out as that fix: "@Image3, @Image1").
@@ -200,11 +209,13 @@ export function remapPromptReferences(
   prompt: string,
   images: ListChange<string>,
   audios?: ListChange<ReferenceAudio>,
-  swap?: { from: readonly Asset[]; to: Asset | null }
+  swap?: { from: readonly Asset[]; to: Asset | null },
+  videos?: ListChange<ReferenceVideo>
 ): string {
   const imagesSame = sameList(images.before, images.after)
   const audiosSame = !audios || sameList(audios.before.map((a) => a.path), audios.after.map((a) => a.path))
-  if (!prompt || (imagesSame && audiosSame)) return prompt
+  const videosSame = !videos || sameList(videos.before.map((v) => v.path), videos.after.map((v) => v.path))
+  if (!prompt || (imagesSame && audiosSame && videosSame)) return prompt
   const units = referenceUnits(prompt)
   if (!units.length) return prompt
   const { before, after } = images
@@ -216,8 +227,9 @@ export function remapPromptReferences(
   // keeps each token on its own place rather than all of them going to the first.
   const imageKeys = placeKeys(before, after)
   const audioKeys = audios ? placeKeys(audios.before.map((a) => a.path), audios.after.map((a) => a.path)) : undefined
+  const videoKeys = videos ? placeKeys(videos.before.map((v) => v.path), videos.after.map((v) => v.path)) : undefined
   const renumber = (ref: ReferenceKind, n: number): number | null | undefined => {
-    const keys = ref === 'audio' ? audioKeys : imageKeys
+    const keys = ref === 'audio' ? audioKeys : ref === 'video' ? videoKeys : imageKeys
     if (!keys) return undefined
     const key = keys.before[n - 1]
     if (key === undefined) return undefined
@@ -227,14 +239,14 @@ export function remapPromptReferences(
   /** A lone token or near miss's new number, following an old outfit's photo to the new outfit's. */
   const follow = (ref: ReferenceKind, n: number): number | null | undefined => {
     const next = renumber(ref, n)
-    if (next !== null || ref === 'audio') return next
+    if (next !== null || ref !== 'image') return next
     if (!newIndices.length || !oldPhotos.has(before[n - 1])) return null
     // A picture of the old outfit, written by hand: point at the new outfit's photo in the same place.
     const k = [...oldPhotos].indexOf(before[n - 1])
     return newIndices[Math.min(k, newIndices.length - 1)]
   }
   const tokenText = (m: Member): string =>
-    m.ref === 'audio' ? `${m.word ? `${m.word} ` : ''}@Audio${m.n}` : `@Image${m.n}`
+    m.ref === 'audio' ? `${m.word ? `${m.word} ` : ''}@Audio${m.n}` : tokenOf(m.ref, m.n)
 
   let out = ''
   let last = 0
@@ -285,7 +297,7 @@ export function remapPromptReferences(
       } else {
         // No longer a run (the pictures were reordered apart, or one left): written out as its fix would have it,
         // each picture with its new number.
-        put(start, end, numbers.map((n) => (unit.ref === 'audio' ? `@Audio${n}` : `@Image${n}`)).join(', '))
+        put(start, end, numbers.map((n) => tokenOf(unit.ref, n)).join(', '))
       }
       continue
     }
@@ -294,7 +306,7 @@ export function remapPromptReferences(
       if (n === undefined || n === unit.n) continue
       // In running text ("speaks with the voice @Audio2") a word in front is part of the sentence, so it stays.
       if (n === null) drop(start, end)
-      else if (unit.type === 'token') put(start, end, unit.ref === 'audio' ? `@Audio${n}` : `@Image${n}`)
+      else if (unit.type === 'token') put(start, end, tokenOf(unit.ref, n))
       else put(start, end, unit.raw.replace(TRAILING_DIGITS, (digits) => digitsLike(digits, n)))
       continue
     }
@@ -373,21 +385,35 @@ export function sameList(a: readonly string[], b: readonly string[]): boolean {
 
 // ── Reordering ───────────────────────────────────────────────────────────────
 
-/** "@Image3", "@image3", "@Audio2" … as a whole entry of a new order: the kind's word and the number. */
-const ORDER_TOKEN = /^\s*[@\uFF20](image|audio)\s*0*([1-9][0-9]*)\s*$/i
+/** "@Image3", "@image3", "@Audio2", "@Video1" … as a whole entry of a new order: the kind's word and the number. */
+const ORDER_TOKEN = /^\s*[@\uFF20](image|audio|video)\s*0*([1-9][0-9]*)\s*$/i
 
-const WORD: Record<ReferenceKind, string> = { image: 'Image', audio: 'Audio' }
-
-/** "1 reference image", "3 reference images", "2 audio clips": how many there are, for the messages. */
+/** "1 reference image", "3 reference images", "2 audio clips", "1 reference video": how many, for the messages. */
 function countText(kind: ReferenceKind, n: number): string {
   if (kind === 'audio') return n === 1 ? '1 audio clip' : `${n} audio clips`
+  if (kind === 'video') return n === 1 ? '1 reference video' : `${n} reference videos`
   return n === 1 ? '1 reference image' : `${n} reference images`
+}
+
+/** "reference images (@ImageN)", "audio clips (@AudioN)", "reference videos (@VideoN)". */
+const KIND_LIST: Record<ReferenceKind, string> = {
+  image: 'reference images (@ImageN)',
+  audio: 'audio clips (@AudioN)',
+  video: 'reference videos (@VideoN)'
+}
+/** "an image", "an audio clip", "a video". */
+const KIND_ONE: Record<ReferenceKind, string> = { image: 'an image', audio: 'an audio clip', video: 'a video' }
+/** "the reference images", "the audio clips", "the reference videos". */
+const KIND_ALL: Record<ReferenceKind, string> = {
+  image: 'reference images',
+  audio: 'audio clips',
+  video: 'reference videos'
 }
 
 /**
  * The positions (0-based, into the current list) of the references in their new order. Each entry of
- * `newOrder` names one reference: by its token ("@Image3", any letter case; "@Audio2" for audio) or by its
- * path. The ones named come first, in that order; the rest keep their order after them, so a partial list
+ * `newOrder` names one reference: by its token ("@Image3", any letter case; "@Audio2" for audio, "@Video1" for
+ * videos) or by its path. The ones named come first, in that order; the rest keep their order after them, so a partial list
  * moves only what it names to the front. Throws for an entry that names no reference, one of the
  * other kind, or a reference named twice.
  */
@@ -398,28 +424,24 @@ export function referenceOrder(paths: readonly string[], kind: ReferenceKind, ne
     const token = ORDER_TOKEN.exec(entry)
     let index: number
     if (token) {
-      const tokenKind: ReferenceKind = token[1].toLowerCase() === 'audio' ? 'audio' : 'image'
+      const word = token[1].toLowerCase()
+      const tokenKind: ReferenceKind = word === 'audio' ? 'audio' : word === 'video' ? 'video' : 'image'
       const shown = `@${WORD[tokenKind]}${token[2]}`
       if (tokenKind !== kind) {
-        throw new Error(
-          kind === 'image'
-            ? `${shown} is an audio clip – only reference images (@ImageN) can be ordered here.`
-            : `${shown} is an image – only audio clips (@AudioN) can be ordered here.`
-        )
+        throw new Error(`${shown} is ${KIND_ONE[tokenKind]} – only ${KIND_LIST[kind]} can be ordered here.`)
       }
       index = Number(token[2]) - 1
       if (index >= paths.length) {
         throw new Error(
           paths.length
             ? `${shown} doesn't exist – there ${paths.length === 1 ? 'is' : 'are'} only ${countText(kind, paths.length)}.`
-            : `${shown} doesn't exist – there are no ${kind === 'audio' ? 'audio clips' : 'reference images'}.`
+            : `${shown} doesn't exist – there are no ${KIND_ALL[kind]}.`
         )
       }
     } else {
       index = paths.indexOf(entry)
       if (index === -1) {
-        const what = kind === 'audio' ? 'one of the audio clips' : 'one of the reference images'
-        throw new Error(`${entry} is not ${what} – give @${WORD[kind]}N or the path.`)
+        throw new Error(`${entry} is not one of the ${KIND_ALL[kind]} – give @${WORD[kind]}N or the path.`)
       }
     }
     if (leading.includes(index)) {
@@ -432,9 +454,9 @@ export function referenceOrder(paths: readonly string[], kind: ReferenceKind, ne
 }
 
 /**
- * The params with their reference images (`kind` 'image') or reference audio clips ('audio') in a new order,
- * and every @ImageN / @AudioN token in the prompt and the negative prompt renumbered so it keeps pointing at the
- * same picture or clip (remapPromptReferences: any letter case, near misses, "(…)" groups). For example refs
+ * The params with their reference images (`kind` 'image'), reference audio clips ('audio') or reference videos
+ * ('video') in a new order, and every @ImageN / @AudioN / @VideoN token in the prompt and the negative prompt
+ * renumbered so it keeps pointing at the same picture, clip or video (remapPromptReferences: any letter case, near misses, "(…)" groups). For example refs
  * [A, B, C] with "@Image1 hugs @Image3", C dragged first: [C, A, B] and "@Image2 hugs @Image1". `newOrder` names
  * the references by token or path (see referenceOrder); unnamed ones keep their order after the named ones.
  * Everything else – the clips' windows, the description flags – stays as it was. Returns the same object when
@@ -445,6 +467,18 @@ export function reorderReferences<T extends GenerationParams>(
   kind: ReferenceKind,
   newOrder: readonly string[]
 ): T {
+  if (kind === 'video') {
+    const current = referenceVideosOf(params)
+    const order = referenceOrder(current.map((v) => v.path), 'video', newOrder)
+    if (order.every((from, to) => from === to)) return params
+    const after = order.map((i) => current[i])
+    const images = params.referenceImages ?? []
+    const same: ListChange<string> = { before: images, after: images }
+    return withRemappedPrompts({ ...params, referenceVideos: after }, params, same, undefined, {
+      before: current,
+      after
+    })
+  }
   if (kind === 'audio') {
     const current = params.referenceAudios ?? []
     const order = referenceOrder(current.map((a) => a.path), 'audio', newOrder)
@@ -467,10 +501,13 @@ function withRemappedPrompts<T extends GenerationParams>(
   next: T,
   was: T,
   images: ListChange<string>,
-  audios?: ListChange<ReferenceAudio>
+  audios?: ListChange<ReferenceAudio>,
+  videos?: ListChange<ReferenceVideo>
 ): T {
-  const prompt = remapPromptReferences(was.prompt, images, audios)
-  const negative = was.negativePrompt ? remapPromptReferences(was.negativePrompt, images, audios) : was.negativePrompt
+  const prompt = remapPromptReferences(was.prompt, images, audios, undefined, videos)
+  const negative = was.negativePrompt
+    ? remapPromptReferences(was.negativePrompt, images, audios, undefined, videos)
+    : was.negativePrompt
   return { ...next, prompt, ...(was.negativePrompt !== undefined ? { negativePrompt: negative } : {}) }
 }
 
@@ -480,12 +517,18 @@ function withRemappedPrompts<T extends GenerationParams>(
  * a reorder renumbered the tokens. References that left or arrived are not included.
  */
 export function referenceMoves(
-  before: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'>,
-  after: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'>,
+  before: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'> & Partial<Pick<GenerationParams, 'referenceVideos'>>,
+  after: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'> & Partial<Pick<GenerationParams, 'referenceVideos'>>,
   kind: ReferenceKind
 ): { from: string; to: string; path: string }[] {
-  const paths = (p: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'>): string[] =>
-    kind === 'audio' ? (p.referenceAudios ?? []).map((a) => a.path) : (p.referenceImages ?? [])
+  const paths = (
+    p: Pick<GenerationParams, 'referenceImages' | 'referenceAudios'> & Partial<Pick<GenerationParams, 'referenceVideos'>>
+  ): string[] =>
+    kind === 'audio'
+      ? (p.referenceAudios ?? []).map((a) => a.path)
+      : kind === 'video'
+        ? referenceVideosOf(p).map((v) => v.path)
+        : (p.referenceImages ?? [])
   const old = paths(before)
   return paths(after).flatMap((path, i) => {
     const was = old.indexOf(path)

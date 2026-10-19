@@ -1,6 +1,9 @@
-import { maxReferenceImages } from '@shared/models'
-import { findAudioTokens, findImageTokens, findMalformedTokens } from '@shared/prompt-refs'
+import { maxReferenceImages, referenceVideosOf } from '@shared/models'
+import { findAudioTokens, findImageTokens, findMalformedTokens, findVideoTokens } from '@shared/prompt-refs'
 import type { GenerationParams } from '@shared/types'
+import * as db from '../db'
+import { exportRow } from '../edit-store'
+import { fromStoredPath } from '../paths'
 import {
   AssetIndex,
   audioTokenMap,
@@ -8,15 +11,17 @@ import {
   issueList,
   promptIssues,
   q,
-  tokenMap
+  tokenMap,
+  videoTokenMap
 } from './studio'
 
 // Reordering a reference list (the Generate form's or a sequence clip's) the way dragging a thumbnail does it in
-// Studio: every picture and audio clip stays the same, only their numbers change, and the prompt's tokens follow
+// Studio: every picture, audio clip and video stays the same, only their numbers change, and the prompt's tokens follow
 // them (the shared reorderReferences in prompt-remap.ts). Here: reading the order an agent asks for – by token, by
-// photo or clip id, or by asset – and saying what moved and what is past the model's limit.
+// photo or clip id, by asset, or (videos) by generation or export id – and saying what moved and what is past the
+// model's limit.
 
-export type ReferenceKind = 'image' | 'audio'
+export type ReferenceKind = 'image' | 'audio' | 'video'
 
 const pathKey = (path: string): string => path.normalize('NFC')
 
@@ -46,7 +51,21 @@ const WORDS: Record<ReferenceKind, Words> = {
     list: 'audios',
     other: 'an image – give it',
     otherList: 'images'
+  },
+  video: {
+    token: '@Video',
+    one: 'reference video',
+    plural: 'reference videos',
+    list: 'videos',
+    other: 'an image or audio clip – give it',
+    otherList: 'images or audios'
   }
+}
+
+const FIND: Record<ReferenceKind, typeof findImageTokens> = {
+  image: findImageTokens,
+  audio: findAudioTokens,
+  video: findVideoTokens
 }
 
 /** "the form" → "The form", for a message that starts with where. */
@@ -60,7 +79,7 @@ function tokenRange(kind: ReferenceKind, n: number): string {
 
 /** The token an entry is, when the whole entry is one ("@image3" and "@Image3" alike); 1-based. */
 function tokenNumber(entry: string, kind: ReferenceKind): number | undefined {
-  const found = (kind === 'image' ? findImageTokens : findAudioTokens)(entry)
+  const found = FIND[kind](entry)
   return found.length === 1 && found[0].start === 0 && found[0].end === entry.length ? found[0].index : undefined
 }
 
@@ -85,9 +104,11 @@ function positionsOf(
     }
     return [n - 1]
   }
-  const other: ReferenceKind = kind === 'image' ? 'audio' : 'image'
-  if (tokenNumber(entry, other) !== undefined) {
-    throw new Error(`${entry} is ${words.other} in ${words.otherList}, not in ${words.list}.`)
+  const others: ReferenceKind[] = (['image', 'audio', 'video'] as const).filter((k) => k !== kind)
+  const other = others.find((k) => tokenNumber(entry, k) !== undefined)
+  if (other) {
+    const what = other === 'image' ? 'an image' : other === 'audio' ? 'an audio clip' : 'a video'
+    throw new Error(`${entry} is ${what} – give it in ${WORDS[other].list}, not in ${words.list}.`)
   }
   const malformed = findMalformedTokens(entry)[0]
   if (malformed) {
@@ -97,6 +118,20 @@ function positionsOf(
   }
   const keys = paths.map(pathKey)
   const at = (path: string): number => keys.indexOf(pathKey(path))
+  if (kind === 'video') {
+    // A video by the generation or export whose film it is.
+    const generation = db.getGeneration(entry)
+    const exported = generation ? undefined : exportRow(entry)
+    const file = generation?.filePath ?? (exported ? fromStoredPath(exported.file_path) : undefined)
+    if (file) {
+      const found = keys.flatMap((key, i) => (key === pathKey(file) ? [i] : []))
+      if (!found.length) throw new Error(`The film ${entry} is not one of the ${words.plural} in ${where}.`)
+      return found
+    }
+    throw new Error(
+      `“${entry}” is neither a reference video (@Video1 …) nor the generation_id or export_id of one. Use the tokens from get_workspace or get_sequence (video_references).`
+    )
+  }
   if (kind === 'image') {
     const photo = index.image(entry)
     if (photo) {
@@ -213,6 +248,7 @@ export function movedTokens(
     if (j < 0 || j === i) return []
     const photo = kind === 'image' ? index.photo(path) : undefined
     const clip = kind === 'audio' ? index.audio(path) : undefined
+    // A video belongs to no asset: its token alone says it.
     const name = photo?.asset.name ?? clip?.asset.name
     const number = photo?.photoNumber ?? clip?.clipNumber
     const moved: MovedToken = { from: `${t}${i + 1}`, to: `${t}${j + 1}` }
@@ -236,8 +272,8 @@ export function notSentInfo(paths: readonly string[], modelId: string, index: As
 }
 
 /** "(@Image3 → @Image1, @Audio2 → @Audio1)" for the activity log; at most four moves are named. */
-export function movedSummary(moved: { images: MovedToken[]; audios: MovedToken[] }): string {
-  const all = [...moved.images, ...moved.audios].map((m) => `${m.from} → ${m.to}`)
+export function movedSummary(moved: { images: MovedToken[]; audios: MovedToken[]; videos?: MovedToken[] }): string {
+  const all = [...moved.images, ...moved.audios, ...(moved.videos ?? [])].map((m) => `${m.from} → ${m.to}`)
   if (!all.length) return ''
   return ` (${all.slice(0, 4).join(', ')}${all.length > 4 ? ' …' : ''})`
 }
@@ -254,10 +290,12 @@ export function referencesAnswer(
 ): Record<string, unknown> {
   const all = params.referenceImages ?? []
   const audios = params.referenceAudios ?? []
+  const videos = referenceVideosOf(params)
   return {
     references: tokenMap(all.slice(0, maxReferenceImages(params.model)), index),
     ...notSentInfo(all, params.model, index),
     ...(audios.length ? { audio_references: audioTokenMap(audios, index) } : {}),
+    ...(videos.length ? { video_references: videoTokenMap(videos) } : {}),
     ...change,
     prompt: params.prompt,
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
@@ -270,12 +308,13 @@ export function referencesAnswer(
 export function reorderAnswer(
   params: GenerationParams,
   index: AssetIndex,
-  moved: { images: MovedToken[]; audios: MovedToken[] }
+  moved: { images: MovedToken[]; audios: MovedToken[]; videos?: MovedToken[] }
 ): Record<string, unknown> {
   return referencesAnswer(params, index, {
     moved: {
       ...(moved.images.length ? { images: moved.images } : {}),
-      ...(moved.audios.length ? { audios: moved.audios } : {})
+      ...(moved.audios.length ? { audios: moved.audios } : {}),
+      ...(moved.videos?.length ? { videos: moved.videos } : {})
     }
   })
 }

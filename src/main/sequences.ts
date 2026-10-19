@@ -48,12 +48,20 @@ import {
   pickOption,
   PREFERRED,
   referenceToVideoVariant,
+  referenceVideosOf,
   supportsAudioInput,
-  supportsEndImage
+  supportsEndImage,
+  videosAreReferences
 } from '@shared/models'
 import { outfitWearersAmong } from '@shared/outfits'
 import { knowsPromptLimit, rememberPromptLimits } from '@shared/prompt-compose'
-import { blockingContinuationError, blockingPromptError, findAudioTokens, findImageTokens } from '@shared/prompt-refs'
+import {
+  blockingContinuationError,
+  blockingPromptError,
+  findAudioTokens,
+  findImageTokens,
+  findVideoTokens
+} from '@shared/prompt-refs'
 import { songClipProblem, withSong } from '@shared/song-send'
 import { songPlacesProblem } from '@shared/song-trims'
 import { checkSongBoundaries, defaultSongPart, formatPlace, placesOf, splitPoint } from '@shared/song'
@@ -287,11 +295,11 @@ async function clonePathVerified(from: string, to: string): Promise<void> {
 }
 
 /**
- * Params made for a video input (a video-to-video edit or an upscale in the Editor): the Generate form and a clip's
- * template can't use them.
+ * Params made for a video input (a video-to-video edit, an upscale or Seedance's video to edit in the Editor): the
+ * Generate form and a clip's template can't use them. Reference videos (Generate, a clip) they can.
  */
 function usesVideoInput(params: GenerationParams): boolean {
-  return !!params.sourceVideo || !!params.referenceVideos?.length
+  return !!params.sourceVideo || (referenceVideosOf(params).length > 0 && !videosAreReferences(params))
 }
 
 /** The "Write a prompt…" refusal of clipProblem, which a clip whose own film is gone replaces (see clipProblemAt). */
@@ -430,7 +438,9 @@ function clipProblem(params: GenerationParams, links: ClipLinks, plan?: Continua
   // The general message advises switching to reference mode, which an exact continuation can't do; in reference mode
   // the prompt is checked against what it carries, with the frame after it.
   if (links.continuing) return plan ? continuationProblem(params, plan) : blockingContinuationError(params)
-  if (kind === 'reference-to-video' && !params.referenceImages?.length) {
+  // A reference video the model takes is a reference as good as a picture (and lets audio go along).
+  const videos = paramsForSubmit(params).referenceVideos?.length ?? 0
+  if (kind === 'reference-to-video' && !params.referenceImages?.length && !videos) {
     // Venice refuses reference audio without a picture, so a clip with only a voice needs one too.
     return params.referenceAudios?.length && supportsAudioInput(params.model)
       ? 'Add at least one reference image for the clip – audio clips are only sent together with an image.'
@@ -469,14 +479,16 @@ const AUDIO_WORD_BEFORE = /(^|[(,][ \t]*)(?:voice|sound|röst|ljud)[ \t]+$/iu
  * "- @Image2, @Image3: the room".
  */
 const LEGEND_LINE =
-  /^\s*(?:[-*•]\s+)?@(?:image|audio)\d+(?:\s*(?:,|&|and|och)\s*@(?:image|audio)\d+)*\s*(?:[–—:=]|-(?!\w))/iu
+  /^\s*(?:[-*•]\s+)?@(?:image|audio|video)\d+(?:\s*(?:,|&|and|och)\s*@(?:image|audio|video)\d+)*\s*(?:[–—:=]|-(?!\w))/iu
 
 /** A heading of its own line, like "REFERENCES:" or "Referenser:". */
 const HEADING_LINE = /^\s*[^\s:][^:]{0,38}:\s*$/u
 
 /** One line without its tokens; labels and brackets left empty go with them. */
 function stripLineTokens(line: string): string {
-  const tokens = [...findImageTokens(line), ...findAudioTokens(line)].sort((a, b) => a.start - b.start)
+  const tokens = [...findImageTokens(line), ...findAudioTokens(line), ...findVideoTokens(line)].sort(
+    (a, b) => a.start - b.start
+  )
   if (!tokens.length) return line
   let out = ''
   let last = 0
@@ -506,13 +518,13 @@ function stripLineTokens(line: string): string {
 }
 
 /**
- * The text without its @ImageN / @AudioN tokens, for a clip that becomes image-to-video and so sends no
+ * The text without its @ImageN / @AudioN / @VideoN tokens, for a clip that becomes image-to-video and so sends no
  * references: "Anna (@Image1, röst @Audio1) wearing Red dress (@Image3) walks" → "Anna wearing Red dress walks".
  * Lines that only explain tokens ("@Image1 – Anna, the woman …") go, and so does a heading ("REFERENCES:") whose
  * lines all went. The names stay, so the prompt still says who is who; the look comes from the keyframes.
  */
 export function withoutReferenceTokens(text: string): string {
-  if (!findImageTokens(text).length && !findAudioTokens(text).length) return text
+  if (!findImageTokens(text).length && !findAudioTokens(text).length && !findVideoTokens(text).length) return text
   const lines = text.split('\n')
   const kept: (string | null)[] = lines.map((line) => (LEGEND_LINE.test(line) ? null : stripLineTokens(line)))
   for (let i = 0; i < lines.length; i++) {
@@ -554,7 +566,8 @@ function asKeyframed(
     prompt: withoutReferenceTokens(params.prompt),
     negativePrompt: negative || undefined,
     referenceImages: undefined,
-    referenceAudios: undefined
+    referenceAudios: undefined,
+    referenceVideos: undefined
   }
   return model !== params.model ? fitToModel(next, models) : next
 }
@@ -577,7 +590,8 @@ function asContinuing(params: GenerationParams, models: readonly VideoModel[] | 
     startImage: undefined,
     endImage: undefined,
     referenceImages: own?.images.length ? own.images : undefined,
-    referenceAudios: own?.audios.length ? own.audios : undefined
+    referenceAudios: own?.audios.length ? own.audios : undefined,
+    referenceVideos: own?.videos.length ? own.videos : undefined
   }
   return model !== params.model ? fitToModel(next, models) : next
 }
@@ -1292,7 +1306,8 @@ export class SequenceService {
         model: endImageVariant(params.model, models?.map((m) => m.id)),
         endImage: undefined,
         referenceImages: undefined,
-        referenceAudios: undefined
+        referenceAudios: undefined,
+        referenceVideos: undefined
       }
     }
 
@@ -1324,14 +1339,15 @@ export class SequenceService {
         ...params,
         startImage: undefined,
         endImage: undefined,
-        ...(copied ? { referenceImages: undefined, referenceAudios: undefined } : {})
+        ...(copied ? { referenceImages: undefined, referenceAudios: undefined, referenceVideos: undefined } : {})
       }
       const asReferences = !ending && mode === 'references' ? asContinuing(cleared, models) : undefined
       params = asReferences ?? {
         ...cleared,
         model: imageToVideoVariant(params.model),
         referenceImages: undefined,
-        referenceAudios: undefined
+        referenceAudios: undefined,
+        referenceVideos: undefined
       }
     }
     // A clip moved to another model gets the options that model offers.
@@ -2381,6 +2397,8 @@ export class SequenceService {
       pair(sent.endImage, stored.endImage)
       sent.referenceImages?.forEach((r, i) => pair(r, stored.referenceImages?.[i]))
       sent.referenceAudios?.forEach((a, i) => pair(a.path, stored.referenceAudios?.[i]?.path))
+      const storedVideos = referenceVideosOf(stored)
+      referenceVideosOf(sent).forEach((v, i) => pair(v.path, storedVideos[i]?.path))
       if (!copies.size) return
       const row = store.getSegmentRow(segmentId)
       if (!row) return
@@ -2392,7 +2410,8 @@ export class SequenceService {
         startImage: use(params.startImage),
         endImage: use(params.endImage),
         referenceImages: params.referenceImages?.map((r) => copies.get(r) ?? r),
-        referenceAudios: params.referenceAudios?.map((a) => ({ ...a, path: copies.get(a.path) ?? a.path }))
+        referenceAudios: params.referenceAudios?.map((a) => ({ ...a, path: copies.get(a.path) ?? a.path })),
+        referenceVideos: params.referenceVideos?.map((v) => ({ ...v, path: copies.get(v.path) ?? v.path }))
       }
       const json = store.serializeParams(next)
       if (json !== store.serializeParams(params)) {

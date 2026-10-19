@@ -1,11 +1,21 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { kindOfModelId } from '@shared/models'
+import { kindOfModelId, referenceVideosOf, supportsReferenceVideos } from '@shared/models'
 import { composePrompt, describedAssets, includesDescriptions } from '@shared/prompt-compose'
 import type { GenerationParams, Learning } from '@shared/types'
 import { isLibraryReady } from '../../paths'
 import { promptWritingGuide, studioGuide } from '../guide'
-import { AssetIndex, asGenerated, audioTokenMap, takesAudio, tokenMap, type AudioTokenEntry, type TokenEntry } from '../studio'
+import {
+  AssetIndex,
+  asGenerated,
+  audioTokenMap,
+  seconds,
+  takesAudio,
+  tokenMap,
+  videoTokenMap,
+  type AudioTokenEntry,
+  type TokenEntry
+} from '../studio'
 import { registerDeleteTools } from './delete'
 import { registerEditorTools } from './editor'
 import { registerEditorPaidTools } from './editor-paid'
@@ -75,7 +85,13 @@ function referenceContext(params: GenerationParams, assets: AssetIndex, empty: s
       ? ''
       : '\nThe model takes reference audio, but none is chosen (characters with a voice clip get it with set_references).'
     : '\nThe model takes no reference audio: write no @Audio tokens.'
-  const references = images.length || audios.length ? tokenLines(images, audios) : empty
+  const videos = supportsReferenceVideos(params.model) ? videoTokenMap(referenceVideosOf(params)) : []
+  const videoLines = videos.map(
+    (v) =>
+      `- ${v.token} = a reference video (${v.title ?? v.file}, ${v.start}–${seconds(v.start + v.length)} s): take its action, camera movement or style – say which, e.g. "the camera moves as in ${v.token}"`
+  )
+  const listed = images.length || audios.length ? tokenLines(images, audios) : videoLines.length ? '' : empty
+  const references = [listed, ...videoLines].filter(Boolean).join('\n')
   return `Its references:\n${references}${voices}${descriptionContext(params, assets)}`
 }
 

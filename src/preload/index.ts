@@ -41,6 +41,7 @@ const api: StudioApi = {
   // Generation
   listModels: (force) => ipcRenderer.invoke('models:list', force),
   quote: (params) => ipcRenderer.invoke('video:quote', params),
+  probeReferenceVideo: (path, at) => ipcRenderer.invoke('referenceVideos:probe', path, at),
   generate: (params, opts) => ipcRenderer.invoke('video:generate', params, opts),
   acceptConsent: (flow, version) => ipcRenderer.invoke('consent:accept', flow, version),
   listGenerations: () => ipcRenderer.invoke('generations:list'),

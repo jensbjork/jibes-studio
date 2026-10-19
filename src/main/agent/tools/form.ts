@@ -8,6 +8,7 @@ import {
   kindOfModelId,
   maxReferenceAudios,
   maxReferenceImages,
+  referenceVideosOf,
   supportsEndImage,
   type Kind
 } from '@shared/models'
@@ -18,8 +19,10 @@ import {
   canonicalizeTokens,
   findAudioTokens,
   findImageTokens,
+  findVideoTokens,
   hasBlockingIssues,
   imageToken,
+  videoToken,
   type ReferenceKind
 } from '@shared/prompt-refs'
 import type {
@@ -35,6 +38,7 @@ import type {
   ExportSummary,
   GenerationParams,
   ReferenceAudio,
+  ReferenceVideo,
   Sequence,
   Storyboard,
   VideoModel
@@ -92,12 +96,14 @@ import {
   paramsInfo,
   promptIssues,
   q,
+  referenceVideoInfo,
   requireLibrary,
   requireModel,
   resolveReferences,
   takesAudio,
   tokenMap,
   usableModels,
+  videoTokenMap,
   type ReferenceItem
 } from '../studio'
 import {
@@ -120,7 +126,7 @@ import { importAsStill, resolvePictureReferences, uploadSource } from './sources
 // The Generate form in Studio's window and what the user is looking at. These tools go through the window (the
 // form is its state), so the user sees every change as it happens.
 
-/** What the model takes in reference mode: images, and audio when it has audio input. */
+/** What the model takes in reference mode: images, audio when it has audio input, videos for Seedance 2.x. */
 export function referenceLimits(modelId: string, models?: readonly VideoModel[]): Record<string, unknown> {
   if (kindOfModelId(modelId) !== 'reference-to-video') return {}
   const audioInput = takesAudio(modelId, models)
@@ -129,7 +135,8 @@ export function referenceLimits(modelId: string, models?: readonly VideoModel[])
     audio_input: audioInput,
     ...(audioInput
       ? { max_reference_audios: maxReferenceAudios(modelId), max_reference_audio_seconds: MAX_REFERENCE_AUDIO_SECONDS }
-      : {})
+      : {}),
+    ...referenceVideoInfo(modelId)
   }
 }
 
@@ -191,6 +198,11 @@ function referenceModel(currentModel: string, models: readonly VideoModel[] | un
 
 const sameAudio = (a: ReferenceAudio, b: ReferenceAudio): boolean =>
   a.path.normalize('NFC') === b.path.normalize('NFC')
+
+const sameVideo = (a: ReferenceVideo, b: ReferenceVideo): boolean =>
+  a.path.normalize('NFC') === b.path.normalize('NFC') &&
+  Math.abs((a.start ?? 0) - (b.start ?? 0)) < 0.001 &&
+  Math.abs((a.length ?? 0) - (b.length ?? 0)) < 0.001
 
 const samePaths = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((p, i) => p.normalize('NFC') === b[i].normalize('NFC'))
@@ -328,12 +340,12 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Set references',
       description:
-        "Sets the Generate form's references (reference-to-video mode) from assets: each item adds all photos of an asset, or just the image_ids you list, in order – and for models that take reference audio (audio_input in list_models) its audio: by default a character's first voice clip, or the audio_ids you list (include_voice: false leaves the voice out; true also adds an environment's soundscape). Photos become @Image1, @Image2 … and audio clips @Audio1, @Audio2 … in the order given. mode \"replace\" (default) makes these the references; \"append\" adds them after the current ones (duplicates skipped). The model's limits apply (9 images for Seedance; at most 3 audio clips and 15 s of audio in total); what doesn't fit is reported in not_added / not_added_audio. A pose asset is a picture of how people stand – add it like any asset and refer to it in the prompt (see the guide). A character's default outfit is NOT added automatically – add it (or another outfit) yourself. An item can also be {still_id} (a still) or {upload_id} (a ready image upload, made a still in Referensbilder first): one loose picture with no description, so nothing about it is appended to the prompt – say in words what it shows. A product goes after the characters (see the guide). Returns the resulting token maps (references, audio_references) – write the prompt with exactly these tokens. Choose the references first and write the prompt afterwards: setting the references (mode \"replace\") does not renumber tokens already in the prompt (check the returned issues and notes) – to change only their order, use reorder_references, which does. If the form is not in reference-to-video mode, Studio switches it (see notes). An empty items list with mode \"replace\" removes all references.",
+        "Sets the Generate form's references (reference-to-video mode) from assets: each item adds all photos of an asset, or just the image_ids you list, in order – and for models that take reference audio (audio_input in list_models) its audio: by default a character's first voice clip, or the audio_ids you list (include_voice: false leaves the voice out; true also adds an environment's soundscape). Photos become @Image1, @Image2 … and audio clips @Audio1, @Audio2 … in the order given. mode \"replace\" (default) makes these the references; \"append\" adds them after the current ones (duplicates skipped). The model's limits apply (9 images for Seedance; at most 3 audio clips and 15 s of audio in total); what doesn't fit is reported in not_added / not_added_audio. A pose asset is a picture of how people stand – add it like any asset and refer to it in the prompt (see the guide). A character's default outfit is NOT added automatically – add it (or another outfit) yourself. An item can also be {still_id} (a still) or {upload_id} (a ready image upload, made a still in Referensbilder first): one loose picture with no description, so nothing about it is appended to the prompt – say in words what it shows. A product goes after the characters (see the guide). An item {video: {generation_id} | {export_id} | {upload_id}, start?, length?} adds a reference video (@Video1, @Video2 … in the order given; Seedance 2.x reference models only – reference_videos in list_models): a window of a film the model takes the action, camera movement and style from – a reference only, never footage to edit. Seedance 2.0 takes ≤ 3 videos of 2–15 s, 15 s together; 2.5 ≤ 10 of 2–30 s, 30 s together; the window defaults to 5 s from the start, and reference videos cost more (Venice's \"input with video\" price). What doesn't fit is reported in not_added_videos. Returns the resulting token maps (references, audio_references, video_references) – write the prompt with exactly these tokens. Choose the references first and write the prompt afterwards: setting the references (mode \"replace\") does not renumber tokens already in the prompt (check the returned issues and notes) – to change only their order, use reorder_references, which does. If the form is not in reference-to-video mode, Studio switches it (see notes). An empty items list with mode \"replace\" removes all references.",
       input: {
         items: z
           .array(referenceItem)
           .describe(
-            'Assets (or loose pictures) in the order their photos (and audio) should get @Image / @Audio numbers.'
+            'Assets, loose pictures and reference videos in the order their photos (audio, videos) should get @Image / @Audio / @Video numbers.'
           ),
         mode: z.enum(['replace', 'append']).default('replace')
       },
@@ -347,9 +359,16 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       const models = items.length ? await modelsIfAvailable() : undefined
       const model = referenceModel(current.params.model, models)
       const existing = mode === 'append' ? (current.params.referenceAudios ?? []) : []
+      const existingVideos = mode === 'append' ? referenceVideosOf(current.params) : []
       const refs = await resolvePictureReferences(ctx, items, true)
-      const resolved = resolveReferences(refs, index, audioTarget(model, models, existing))
-      const args: AgentSetReferencesArgs = { paths: resolved.paths, audios: resolved.audios, mode }
+      const resolved = resolveReferences(refs, index, audioTarget(model, models, existing, existingVideos))
+      const args: AgentSetReferencesArgs = {
+        paths: resolved.paths,
+        audios: resolved.audios,
+        // Left out, "replace" clears the window's videos and "append" keeps them, as for the audio.
+        ...(resolved.videos.length || mode === 'replace' ? { videos: resolved.videos } : {}),
+        mode
+      }
       const state = await ctx.bridge.send<AgentFormState>('set_references', args)
       const result = new Set(state.params.referenceImages ?? [])
       const notAdded = resolved.paths.filter((p) => !result.has(p))
@@ -363,18 +382,32 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           reason: 'The Studio window didn\'t add the audio clip (the model\'s limit or mode).'
         }))
       ]
+      const videosNow = referenceVideosOf(state.params)
+      const droppedVideos = resolved.videos.filter((v) => !videosNow.some((w) => sameVideo(v, w)))
+      const notAddedVideos = [
+        ...resolved.skippedVideos,
+        ...videoTokenMap(droppedVideos).map(({ token: _, ...rest }) => ({
+          ...rest,
+          reason: "The Studio window didn't add the video (the model's limit or mode)."
+        }))
+      ]
       const names = [
         ...new Set(items.map((i) => ('asset_id' in i ? index.get(i.asset_id)?.name : undefined)).filter(Boolean))
       ] as string[]
       const kind = kindOfModelId(state.params.model)
       const notes = [...resolved.notes, ...(state.notes ?? [])]
+      if (mode === 'replace' && findVideoTokens(state.params.prompt).length && resolved.videos.length) {
+        notes.push("The prompt wasn't changed – make sure every @VideoN in it points at the right video in the new list.")
+      }
       return {
         data: {
           references: tokenMap(state.params.referenceImages, index),
           ...(audioNow.length ? { audio_references: audioTokenMap(audioNow, index) } : {}),
+          ...(videosNow.length ? { video_references: videoTokenMap(videosNow) } : {}),
           ...referenceLimits(state.params.model, models),
           ...(notAdded.length ? { not_added: tokenMap(notAdded, index).map(({ token: _, ...rest }) => rest) } : {}),
           ...(notAddedAudio.length ? { not_added_audio: notAddedAudio } : {}),
+          ...(notAddedVideos.length ? { not_added_videos: notAddedVideos } : {}),
           mode: kind,
           ...(kind !== 'reference-to-video'
             ? { note: 'The form is not in reference-to-video mode, so these references are not sent. Call set_form({mode: "reference-to-video"}).' }
@@ -382,9 +415,14 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           issues: issueList(promptIssues(state.params)),
           ...(notes.length ? { notes } : {})
         },
-        summary: names.length
-          ? `${mode === 'append' ? 'added' : 'set'} the references (${names.join(', ')}${audioNow.length ? `, ${audioNow.length} ${audioNow.length === 1 ? 'sound' : 'sounds'}` : ''})`
-          : undefined
+        summary:
+          names.length || videosNow.length
+            ? `${mode === 'append' ? 'added' : 'set'} the references (${[
+                ...names,
+                ...(audioNow.length ? [`${audioNow.length} ${audioNow.length === 1 ? 'sound' : 'sounds'}`] : []),
+                ...(videosNow.length ? [`${videosNow.length} ${videosNow.length === 1 ? 'video' : 'videos'}`] : [])
+              ].join(', ')})`
+            : undefined
       }
     }
   )
@@ -527,7 +565,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Validate prompt',
       description:
-        "Checks a prompt's @ImageN and @AudioN tokens against a set of references without changing anything – the same check Studio applies before every paid generation (tokens that point at nothing or past the model's limits, malformed ones like \"@Image 3\" or \"@Voice1\", audio with a model that takes none, audio without any reference image, more than 15 s of audio in total, references neither mentioned nor explained by the References legend). By default (use_form: true) it uses the Generate form's references, model, description switches and who wears what; pass reference_asset_ids (all photos of each asset, in order, plus characters' voices) or references (items like set_references) to check against another set, e.g. a planned sequence clip, and model or mode to check for another mode. Returns ok (no errors), the issues (errors block generation, warnings are advice), the token maps with which references the prompt mentions, the prompt with tokens normalised, and composed_prompt: the prompt as it would be sent, with the descriptions of the referenced assets appended as a References legend (description_entries, with worn_by for an outfit somebody wears; include_descriptions / excluded_description_asset_ids change it like set_form's), measured against the model's prompt_character_limit.",
+        "Checks a prompt's @ImageN, @AudioN and @VideoN tokens against a set of references without changing anything – the same check Studio applies before every paid generation (tokens that point at nothing or past the model's limits, malformed ones like \"@Image 3\", \"@Voice1\" or \"@Vid1\", audio with a model that takes none, audio without any reference image or video, more than 15 s of audio in total, reference videos with a model that takes none or past its family's count and seconds, references neither mentioned nor explained by the References legend). By default (use_form: true) it uses the Generate form's references, model, description switches and who wears what; pass reference_asset_ids (all photos of each asset, in order, plus characters' voices) or references (items like set_references) to check against another set, e.g. a planned sequence clip, and model or mode to check for another mode. Returns ok (no errors), the issues (errors block generation, warnings are advice), the token maps with which references the prompt mentions, the prompt with tokens normalised, and composed_prompt: the prompt as it would be sent, with the descriptions of the referenced assets appended as a References legend (description_entries, with worn_by for an outfit somebody wears; include_descriptions / excluded_description_asset_ids change it like set_form's), measured against the model's prompt_character_limit.",
       input: {
         prompt: z.string(),
         negative_prompt: z.string().optional(),
@@ -562,18 +600,23 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         input.model ?? (input.mode ? DEFAULT_MODEL[input.mode] : (form?.params.model ?? DEFAULT_MODEL['reference-to-video']))
       let paths: string[]
       let audios: ReferenceAudio[]
+      let videos: ReferenceVideo[]
       const notes: string[] = []
       // Also what makes main remember the models' prompt limits, which the descriptions are fitted into.
       const models = await modelsIfAvailable()
       if (explicitRefs) {
         // The proposal as it is: limits are what the check is for, so nothing is trimmed here.
-        const resolved = resolveReferences(explicitRefs, index, { ...audioTarget(model, models), enforceLimits: false })
+        // Videos with a model that takes none are reported by the check, not refused here.
+        const target = { ...audioTarget(model, models), enforceLimits: false, videoInput: true }
+        const resolved = resolveReferences(explicitRefs, index, target)
         paths = resolved.paths
         audios = resolved.audios
+        videos = resolved.videos
         notes.push(...resolved.notes)
       } else {
         paths = form?.params.referenceImages ?? []
         audios = form?.params.referenceAudios ?? []
+        videos = form ? referenceVideosOf(form.params) : []
       }
       // The description switches follow the references: the form's go with the form's references.
       const switches = explicitRefs ? undefined : form?.params
@@ -588,6 +631,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         duration: form?.params.duration ?? '',
         referenceImages: paths,
         referenceAudios: audios.length ? audios : undefined,
+        ...(videos.length ? { referenceVideos: videos } : {}),
         includeDescriptions: input.include_descriptions ?? switches?.includeDescriptions,
         ...(excluded?.length ? { excludedDescriptionAssetIds: excluded } : {}),
         // Who wears what goes with the form's references too; other references get Studio's default.
@@ -596,6 +640,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       const issues = promptIssues(params)
       const mentioned = new Set(findImageTokens(input.prompt).map((t) => t.index))
       const mentionedAudio = new Set(findAudioTokens(input.prompt).map((t) => t.index))
+      const mentionedVideo = new Set(findVideoTokens(input.prompt).map((t) => t.index))
       const kind = kindOfModelId(model)
       const normalized = canonicalizeTokens(input.prompt)
       const errors = issues.filter((i) => i.severity === 'error').length
@@ -609,6 +654,9 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
           references: reference ? tokenMap(paths, index).map((t, i) => ({ ...t, mentioned: mentioned.has(i + 1) })) : [],
           ...(reference && audios.length
             ? { audio_references: audioTokenMap(audios, index).map((t, i) => ({ ...t, mentioned: mentionedAudio.has(i + 1) })) }
+            : {}),
+          ...(reference && videos.length
+            ? { video_references: videoTokenMap(videos).map((t, i) => ({ ...t, mentioned: mentionedVideo.has(i + 1) })) }
             : {}),
           ...(normalized !== input.prompt ? { normalized_prompt: normalized } : {}),
           ...descriptionInfo({ ...params, prompt: normalized }, index),
@@ -626,7 +674,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Reorder references',
       description:
-        "Changes the order of the reference images and/or reference audio of the Generate form (target \"form\", the default) or of a sequence clip (target {segment_id}) – like dragging a thumbnail in Studio – and renumbers every @ImageN / @AudioN token in the prompt and the negative prompt so each keeps pointing at the same picture or clip. Example: references [A, B, C] and the prompt \"@Image1 hugs @Image3\"; images [\"@Image3\"] gives [C, A, B] and \"@Image2 hugs @Image1\". Name references by their token in the current numbering (\"@Image3\", \"@Audio2\"), by image_id / audio_id, or by asset_id (all of that asset's photos or clips, in their current order). The ones you name come first, in the order you name them; the others follow in their current order – so naming one moves it to the front, and naming all of them gives the full order. Nothing is added or removed. With a model that takes fewer images than the list has, only the first max_reference_images are sent: moving a picture to the front makes it sent (not_sent lists the ones left over). The descriptions appended to the prompt (composed_prompt, description_entries) follow the new order. Use this instead of set_references when only the order should change: set_references with mode \"replace\" does not renumber tokens already in the prompt. Returns the new token maps, which tokens moved (moved), the new prompt and its issues. A clip that continues from the previous one with continue_mode \"references\" reorders its own references (the previous clip's last frame stays last, after them); not for a clip that has no references of its own, continues with continue_mode \"exact\", or has a start or end image (it sends no references).",
+        "Changes the order of the reference images, reference audio and/or reference videos of the Generate form (target \"form\", the default) or of a sequence clip (target {segment_id}) – like dragging a thumbnail in Studio – and renumbers every @ImageN / @AudioN / @VideoN token in the prompt and the negative prompt so each keeps pointing at the same picture, clip or video. Example: references [A, B, C] and the prompt \"@Image1 hugs @Image3\"; images [\"@Image3\"] gives [C, A, B] and \"@Image2 hugs @Image1\". Name references by their token in the current numbering (\"@Image3\", \"@Audio2\", \"@Video1\"), by image_id / audio_id, by asset_id (all of that asset's photos or clips, in their current order), or a video by its generation_id / export_id. The ones you name come first, in the order you name them; the others follow in their current order – so naming one moves it to the front, and naming all of them gives the full order. Nothing is added or removed. With a model that takes fewer images than the list has, only the first max_reference_images are sent: moving a picture to the front makes it sent (not_sent lists the ones left over). The descriptions appended to the prompt (composed_prompt, description_entries) follow the new order. Use this instead of set_references when only the order should change: set_references with mode \"replace\" does not renumber tokens already in the prompt. Returns the new token maps, which tokens moved (moved), the new prompt and its issues. A clip that continues from the previous one with continue_mode \"references\" reorders its own references (the previous clip's last frame stays last, after them); not for a clip that has no references of its own, continues with continue_mode \"exact\", or has a start or end image (it sends no references).",
       input: {
         target: z
           .union([z.literal('form'), z.object({ segment_id: z.string() }).strict()])
@@ -639,17 +687,21 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         audios: z
           .array(z.string())
           .optional()
-          .describe('Reference audio clips in their new order: tokens ("@Audio2"), audio_ids or asset_ids. The rest follow in their current order.')
+          .describe('Reference audio clips in their new order: tokens ("@Audio2"), audio_ids or asset_ids. The rest follow in their current order.'),
+        videos: z
+          .array(z.string())
+          .optional()
+          .describe('Reference videos in their new order: tokens ("@Video2"), generation_ids or export_ids. The rest follow in their current order.')
       },
       annotations: { ...WRITE, idempotentHint: false },
       summary: ({ target }) =>
         target === 'form' ? 'reordered the references' : 'reordered a clip\'s references'
     },
-    async ({ target, images, audios }) => {
-      if (!images?.length && !audios?.length) {
-        throw new Error('Give images and/or audios: the references in the order they should have.')
+    async ({ target, images, audios, videos }) => {
+      if (!images?.length && !audios?.length && !videos?.length) {
+        throw new Error('Give images, audios and/or videos: the references in the order they should have.')
       }
-      if (target !== 'form') return reorderClipReferences(target.segment_id, images, audios)
+      if (target !== 'form') return reorderClipReferences(target.segment_id, images, audios, videos)
       const index = await AssetIndex.load()
       const before = await readForm(ctx)
       const params = before.params
@@ -661,13 +713,18 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       }
       const paths = formImages(before)
       const clips = params.referenceAudios ?? []
+      const films = referenceVideosOf(params)
       const imageOrder = images?.length ? newOrder('image', images, paths, index, 'the form') : undefined
       const audioOrder = audios?.length
         ? newOrder('audio', audios, clips.map((a) => a.path), index, 'the form')
         : undefined
+      const videoOrder = videos?.length
+        ? newOrder('video', videos, films.map((v) => v.path), index, 'the form')
+        : undefined
       const imagesMove = !!imageOrder && !unchanged(imageOrder)
       const audiosMove = !!audioOrder && !unchanged(audioOrder)
-      if (!imagesMove && !audiosMove) {
+      const videosMove = !!videoOrder && !unchanged(videoOrder)
+      if (!imagesMove && !audiosMove && !videosMove) {
         return {
           data: {
             target: 'form',
@@ -684,13 +741,16 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       const leading = (kind: ReferenceKind, wanted: readonly string[], list: readonly string[]): string[] => {
         const first = namedPositions(kind, wanted, list, index, 'the form')
         if (new Set(list).size === list.length) return inOrder(list, first)
-        return first.map((i) => (kind === 'image' ? imageToken(i + 1) : audioToken(i + 1)))
+        return first.map((i) => (kind === 'image' ? imageToken(i + 1) : kind === 'audio' ? audioToken(i + 1) : videoToken(i + 1)))
       }
       const args: AgentReorderReferencesArgs = {
         ...(imagesMove ? { images: leading('image', images!, paths) } : {}),
-        ...(audiosMove ? { audios: leading('audio', audios!, clips.map((a) => a.path)) } : {})
+        ...(audiosMove ? { audios: leading('audio', audios!, clips.map((a) => a.path)) } : {}),
+        ...(videosMove ? { videos: leading('video', videos!, films.map((v) => v.path)) } : {})
       }
-      const byPath = [...(args.images ?? []), ...(args.audios ?? [])].filter((entry) => isAbsolute(entry))
+      const byPath = [...(args.images ?? []), ...(args.audios ?? []), ...(args.videos ?? [])].filter((entry) =>
+        isAbsolute(entry)
+      )
       const state = await ctx.bridge.send<AgentFormState>('reorder_references', args).catch((err: unknown) => {
         // A picture or clip named by path that the window no longer has: the user removed it meanwhile.
         if (byPath.some((path) => errorText(err).includes(path))) {
@@ -704,17 +764,20 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       const notes = [...(state.notes ?? [])]
       const wantedImages = imagesMove ? inOrder(paths, imageOrder) : paths
       const wantedAudios = audiosMove ? inOrder(clips, audioOrder).map((a) => a.path) : clips.map((a) => a.path)
+      const wantedVideos = videosMove ? inOrder(films, videoOrder).map((v) => v.path) : films.map((v) => v.path)
       const gotImages = formImages(state)
       const gotAudios = (after.referenceAudios ?? []).map((a) => a.path)
+      const gotVideos = referenceVideosOf(after).map((v) => v.path)
       // The user may have changed the form at the same moment; the agent hears what it is now, not what it asked.
-      if (!samePaths(gotImages, wantedImages) || !samePaths(gotAudios, wantedAudios)) {
+      if (!samePaths(gotImages, wantedImages) || !samePaths(gotAudios, wantedAudios) || !samePaths(gotVideos, wantedVideos)) {
         notes.push(
           'The references in the form didn\'t end up exactly in the order you asked for (the form may have changed at the same time) – see references in the answer.'
         )
       }
       const moved = {
         images: movedTokens('image', paths, gotImages, index),
-        audios: movedTokens('audio', clips.map((a) => a.path), gotAudios, index)
+        audios: movedTokens('audio', clips.map((a) => a.path), gotAudios, index),
+        videos: movedTokens('video', films.map((v) => v.path), gotVideos, index)
       }
       return {
         data: {

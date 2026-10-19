@@ -2,7 +2,7 @@
 // The renderer and the agents' list_generations tool both use these, so a filter means the same thing to the
 // user and to an agent. Pure (no Node or DOM), like everything in src/shared.
 
-import { durationSeconds } from './models'
+import { durationSeconds, referenceVideosOf } from './models'
 import { THUMBS_DOWN, type Generation, type GenerationFilter } from './types'
 
 export type GenerationSort = NonNullable<GenerationFilter['sort']>
@@ -76,7 +76,7 @@ export function generationFilePaths(g: Pick<Generation, 'params'>): string[] {
   if (!p || typeof p !== 'object') return []
   const images = Array.isArray(p.referenceImages) ? p.referenceImages : []
   const audio = Array.isArray(p.referenceAudios) ? p.referenceAudios.map((a) => a?.path) : []
-  const videos = Array.isArray(p.referenceVideos) ? p.referenceVideos : []
+  const videos = referenceVideosOf(p).map((v) => v.path)
   return [p.startImage, p.endImage, ...images, ...audio, p.sourceVideo, ...videos].filter(
     (v): v is string => typeof v === 'string' && v !== ''
   )

@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { agentDisplayName } from '@shared/agent-name'
 import { overBudgetFor, overBudgetText } from '@shared/budget'
-import { KINDS, kindOfModelId, maxReferenceImages, paramsForSubmit } from '@shared/models'
+import {
+  KINDS,
+  kindOfModelId,
+  maxReferenceImages,
+  paramsForSubmit,
+  referenceVideoLimits,
+  referenceVideosOf,
+  referenceVideoWindow,
+  videosAreReferences
+} from '@shared/models'
 import {
   composeOptionsFor,
   composePrompt,
@@ -50,6 +59,8 @@ import {
   type FormAudio
 } from '../pickers/audioRefs'
 import Modal from '../pickers/Modal'
+import { useVideoFacts } from '../pickers/videoFacts'
+import { videoCount, videoLabelParts } from '../pickers/videoRefs'
 import { markKey } from '../prompt/promptText'
 import { effectiveParams, needsTake, parseConsent, pendingTake } from '../sequences/sequenceUtils'
 import {
@@ -63,7 +74,7 @@ import {
   slotName,
   variantCount
 } from './agentText'
-import { ImageTile, type Photo } from './ApprovalPictures'
+import { ImageTile, VideoTile, type Photo } from './ApprovalPictures'
 import { DeleteSummary, useDeleteCheck } from './DeleteApproval'
 import { EditSummary, ResumeSummary, VoiceDesignSummary, useEditApproval } from './EditApproval'
 import PromptText, { type TokenTarget } from './PromptText'
@@ -967,6 +978,32 @@ function ClipSummary({
     count: a.source ? audioClipsOf(a.source.asset).length : undefined,
     window: { start: a.start, length: a.length }
   }))
+  // The reference videos as asked for (the Editor's video to edit is no reference): those past the family's count
+  // aren't sent (paramsForSubmit cut them off), but a token naming one still shows which video it is, and why.
+  const askedVideos =
+    kind === 'reference-to-video' && videosAreReferences(clip.checked) ? referenceVideosOf(clip.checked) : []
+  const sentVideos = referenceVideosOf(p).length
+  const videoLimits = referenceVideoLimits(p.model)
+  const videoFacts = useVideoFacts(askedVideos.map((v) => v.path))
+  const videos = askedVideos.map((v, i) => {
+    const w = referenceVideoWindow(v, videoFacts.get(v.path)?.duration)
+    const { name, detail } = videoLabelParts({ path: v.path, facts: videoFacts.get(v.path) })
+    const unsent =
+      i >= sentVideos
+        ? videoLimits
+          ? `Not sent – ${videoLimits.family} takes at most ${videoCount(videoLimits.maxVideos)}`
+          : 'Not sent – the model takes no reference videos'
+        : undefined
+    return { index: i + 1, path: v.path, ...w, name, detail, unsent }
+  })
+  const videoTargets: TokenTarget[] = videos.map((v) => ({
+    label: `${v.name} · ${v.detail}`,
+    path: v.path,
+    name: v.name,
+    detail: v.detail,
+    window: { start: v.start, length: v.length },
+    ...(v.unsent ? { unsent: v.unsent } : {})
+  }))
   // The neighbours' frames, when the start or end image is taken from them.
   const startFrame = frames?.start?.source === 'previous' ? frames.start.path : undefined
   const endFrame = frames?.end?.source === 'next' ? frames.end.path : undefined
@@ -990,6 +1027,7 @@ function ClipSummary({
           prompt={p.prompt}
           targets={targets}
           audioTargets={audioTargets}
+          videoTargets={videoTargets}
           highlighted={lit}
           onHighlight={setLit}
           className={`overflow-y-auto rounded-md border border-line bg-raised px-3 py-2 ${compact ? 'max-h-32' : 'max-h-60'}`}
@@ -1003,6 +1041,7 @@ function ClipSummary({
           legend={clip.legend}
           targets={targets}
           audioTargets={audioTargets}
+          videoTargets={videoTargets}
           highlighted={lit}
           onHighlight={setLit}
           sentLength={clip.sentLength}
@@ -1031,6 +1070,31 @@ function ClipSummary({
                   path={path}
                   badge={`@Image${i + 1}`}
                   photo={photos.get(path)}
+                  lit={lit === key}
+                  onLight={light(key)}
+                />
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {videos.length > 0 && (
+        <>
+          <Label className="mt-3">Reference videos</Label>
+          <div className="flex flex-wrap gap-2">
+            {videos.map((v) => {
+              const key = markKey('video', v.index)
+              return (
+                <VideoTile
+                  key={`${v.path}:${v.start}:${v.length}`}
+                  path={v.path}
+                  badge={`@Video${v.index}`}
+                  start={v.start}
+                  length={v.length}
+                  caption={v.name}
+                  windowText={windowLabel(v)}
+                  unsent={v.unsent}
                   lit={lit === key}
                   onLight={light(key)}
                 />
@@ -1119,6 +1183,7 @@ function DescriptionLegend({
   legend,
   targets,
   audioTargets,
+  videoTargets,
   highlighted,
   onHighlight,
   sentLength,
@@ -1129,6 +1194,7 @@ function DescriptionLegend({
   legend: string
   targets: TokenTarget[]
   audioTargets: TokenTarget[]
+  videoTargets: TokenTarget[]
   /** As for PromptText: the tokens lit with the prompt's and the tiles'. */
   highlighted?: string
   onHighlight: (key: string | undefined) => void
@@ -1142,7 +1208,7 @@ function DescriptionLegend({
   return (
     <div className={`mt-2 rounded-md border border-dashed px-3 py-2 ${changed ? 'border-accent/60' : 'border-line'}`}>
       <div className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-muted">
-        <span>Added to the prompt · the descriptions of the references</span>
+        <span>Added to the prompt · the References legend</span>
         {sentLength !== undefined && (
           <span
             className="ml-auto tabular-nums"
@@ -1156,6 +1222,7 @@ function DescriptionLegend({
         prompt={legend}
         targets={targets}
         audioTargets={audioTargets}
+        videoTargets={videoTargets}
         highlighted={highlighted}
         onHighlight={onHighlight}
         className={`overflow-y-auto text-[12px] text-muted ${compact ? 'max-h-24' : 'max-h-40'}`}

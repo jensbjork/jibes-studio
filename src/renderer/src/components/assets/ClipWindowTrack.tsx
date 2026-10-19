@@ -5,7 +5,8 @@ import {
   moveWindow,
   resizeEnd,
   resizeStart,
-  type ClipWindow
+  type ClipWindow,
+  type WindowLimits
 } from './audioUtils'
 
 interface Props {
@@ -23,6 +24,8 @@ interface Props {
   onEnd: () => void
   /** A finished change: saved at once after a drag, after a pause for key presses. */
   onChange: (w: ClipWindow, when: 'now' | 'soon') => void
+  /** How long the window may be; a sound clip's 2–15 s when left out (a reference video's depends on the model). */
+  limits?: WindowLimits
 }
 
 // Parts of the recording that are not sent, hatched like the trimmed-away parts of a take.
@@ -34,7 +37,7 @@ const snap = (t: number) => Math.round(t * 10) / 10
 
 /**
  * The whole recording as a bar with the reference window on it. Drag the window to move it, its edges to
- * change its length (2–15 s), click anywhere to move the playhead. The window and both edges are sliders
+ * change its length (2–15 s, or `limits`), click anywhere to move the playhead. The window and both edges are sliders
  * for the keyboard: ←/→ nudge (with ⇧ in bigger steps), Home/End go to the start or end of the recording.
  */
 export default function ClipWindowTrack({
@@ -45,16 +48,17 @@ export default function ClipWindowTrack({
   onBegin,
   onPreview,
   onEnd,
-  onChange
+  onChange,
+  limits
 }: Props) {
   const bar = useRef<HTMLDivElement>(null)
   const pct = (t: number) => `${(Math.min(duration, Math.max(0, t)) / duration) * 100}%`
   const end = w.start + w.length
 
   // Pointer listeners outlive the render that created them.
-  const latest = useRef({ w, duration })
+  const latest = useRef({ w, duration, limits })
   useEffect(() => {
-    latest.current = { w, duration }
+    latest.current = { w, duration, limits }
   })
 
   const timeAt = (clientX: number) => {
@@ -118,14 +122,14 @@ export default function ClipWindowTrack({
 
   const startDragWindow = (e: ReactPointerEvent<HTMLElement>) => {
     const from = latest.current.w
-    drag(e, (_time, dt) => moveWindow(from, snap(from.start + dt), latest.current.duration))
+    drag(e, (_time, dt) => moveWindow(from, snap(from.start + dt), latest.current.duration, latest.current.limits))
   }
   const startDragEdge = (e: ReactPointerEvent<HTMLElement>, edge: 'start' | 'end') => {
     const from = latest.current.w
     drag(e, (time) =>
       edge === 'start'
-        ? resizeStart(from, snap(time), latest.current.duration)
-        : resizeEnd(from, snap(time), latest.current.duration)
+        ? resizeStart(from, snap(time), latest.current.duration, latest.current.limits)
+        : resizeEnd(from, snap(time), latest.current.duration, latest.current.limits)
     )
   }
 
@@ -182,7 +186,7 @@ export default function ClipWindowTrack({
           onKeyDown={(e) =>
             keys(
               e,
-              (d) => moveWindow(w, d === 'home' ? 0 : d === 'end' ? duration : snap(w.start + d), duration),
+              (d) => moveWindow(w, d === 'home' ? 0 : d === 'end' ? duration : snap(w.start + d), duration, limits),
               0.5,
               5
             )
@@ -212,7 +216,9 @@ export default function ClipWindowTrack({
               keys(
                 e,
                 (d) =>
-                  edge === 'start' ? resizeStart(w, at(w.start, d), duration) : resizeEnd(w, at(end, d), duration),
+                  edge === 'start'
+                    ? resizeStart(w, at(w.start, d), duration, limits)
+                    : resizeEnd(w, at(end, d), duration, limits),
                 0.1,
                 1
               )

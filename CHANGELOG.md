@@ -10,6 +10,18 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Reference videos**: in Generate and a sequence clip, *Reference videos* (under Reference images, with Seedance 2.x
+  reference-to-video models) takes up to 3 videos on Seedance 2.0 (2–15 s each, 15 s in all) or 10 on Seedance 2.5
+  (2–30 s each, 30 s in all) – from Media, a take, an exported film or a file (pick or drop). Each tile shows its
+  `@Video1` token and the part that is sent; click it to choose the window (start and length), hover to play it, drag
+  or ⌥←/→ to reorder (the prompt's tokens follow). They are references only – for the action, camera movement and
+  style: the References legend says so in Venice's own wording, Seedance 2.5 also gets the task type *reference*, and
+  `@VideoN` is sent as Venice's `<Video N>`. Only the window goes, as a small H.264 copy (at most 720p), and the price
+  is quoted with the videos' seconds (Venice charges more with video). The checks, the `@` menu, hover cards, the clip
+  drawer and the approval dialog know them, and a continuing clip carries them like its pictures. Agents: references in
+  `set_references`, `add_segment`, `update_segment` and `validate_prompt` take `{video: {generation_id | export_id |
+  upload_id}, start, length}`, the answers have `video_references`, and `reorder_references` takes `videos`.
+
 - **Studio for Windows** (64-bit): an installer (`Studio-win-x64-setup.exe`, per user, no administrator needed) and a
   portable zip (`Studio-win-x64.zip`) on every release, next to the Mac app. ffmpeg comes with the Windows app (a
   pinned FFmpeg build, GPL; see `THIRD_PARTY_NOTICES.md`), so nothing else has to be installed. On Windows the window

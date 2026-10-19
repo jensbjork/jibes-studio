@@ -23,7 +23,9 @@ import {
   maxReferenceImages,
   pickOption,
   referenceToVideoVariant,
-  supportsEndImage
+  referenceVideosOf,
+  supportsEndImage,
+  supportsReferenceVideos
 } from '@shared/models'
 import { generationTitle } from '@shared/generation-label'
 import { resolveOutfitWearers } from '@shared/outfits'
@@ -32,8 +34,10 @@ import {
   audioToken,
   findAudioTokens,
   findImageTokens,
+  findVideoTokens,
   imageToken,
   validateGenerationParams,
+  videoToken,
   type PromptIssue
 } from '@shared/prompt-refs'
 import { reorderReferences } from '@shared/prompt-remap'
@@ -121,9 +125,11 @@ import {
   takesAudio,
   tokenMap,
   usableModels,
+  videoTokenMap,
   type AudioInfo,
   type OutfitWearerInput,
-  type ReferenceItem
+  type ReferenceItem,
+  type VideoInfo
 } from '../studio'
 import {
   READ_ONLY,
@@ -288,6 +294,7 @@ function continuationInfo(plan: ContinuationPlan, assets: AssetIndex): Record<st
             inherited: plan.carried.inherited,
             references: tokenMap(plan.images, assets),
             ...(plan.audios.length ? { audio_references: audioTokenMap(plan.audios, assets) } : {}),
+            ...(plan.videos.length ? { video_references: videoTokenMap(plan.videos) } : {}),
             start_frame_token: imageToken(plan.frameToken ?? plan.images.length + 1),
             ...(dropped ? { not_sent: dropped } : {})
           }
@@ -767,11 +774,16 @@ interface ClipParams {
   notes: string[]
   /** Audio asked for that didn't fit the model's limits. */
   skippedAudio: (AudioInfo & { reason: string })[]
+  /** Reference videos asked for that didn't fit the model family's limits. */
+  skippedVideos: (VideoInfo & { reason: string })[]
 }
 
-/** Has @ImageN or @AudioN tokens. */
+/** Has @ImageN, @AudioN or @VideoN tokens. */
 function hasTokens(text: string | undefined): boolean {
-  return !!text && (findImageTokens(text).length > 0 || findAudioTokens(text).length > 0)
+  return (
+    !!text &&
+    (findImageTokens(text).length > 0 || findAudioTokens(text).length > 0 || findVideoTokens(text).length > 0)
+  )
 }
 
 /** Where a clip sits among its sequence's clips, for the references a continuation carries from the clips before. */
@@ -916,6 +928,7 @@ async function clipParams(
   }
 
   let skippedAudio: ClipParams['skippedAudio'] = []
+  let skippedVideos: ClipParams['skippedVideos'] = []
   if (withReferences) {
     // Its own references (given here, or kept); without any it carries those of the clip it continues from as they
     // are when its take is made. A new clip doesn't take the previous clip's as its own: it carries them.
@@ -925,25 +938,29 @@ async function clipParams(
       const resolved = resolveReferences(input.references, assets, audioTarget(modelId, models))
       params.referenceImages = resolved.paths.length ? resolved.paths : undefined
       params.referenceAudios = resolved.audios.length ? resolved.audios : undefined
+      params.referenceVideos = resolved.videos.length ? resolved.videos : undefined
       notes.push(...resolved.notes)
       skippedAudio = resolved.skippedAudio
+      skippedVideos = resolved.skippedVideos
     } else {
       // References it already sent in reference mode stay; ones left over from another mode go (as Studio does it).
       const own = place.insert ? undefined : ownReferences(base)
       params.referenceImages = own?.images.length ? own.images : undefined
       params.referenceAudios = own?.audios.length && takesAudio(modelId, models) ? own.audios : undefined
+      params.referenceVideos = own?.videos.length && supportsReferenceVideos(modelId) ? own.videos : undefined
     }
     const max = maxReferenceImages(modelId)
     const count = params.referenceImages?.length ?? 0
     if (count > max) throw new Error(`Clip ${clipNumber} has ${count} reference images, but the model takes at most ${max}.`)
   } else if (keyframed) {
-    if (base.referenceImages?.length || base.referenceAudios?.length) {
+    if (base.referenceImages?.length || base.referenceAudios?.length || base.referenceVideos?.length) {
       notes.push(
-        'The clip\'s references (images and voices) were removed: with a start or end image it is generated image-to-video, and the look comes from the images.'
+        'The clip\'s references (images, voices and videos) were removed: with a start or end image it is generated image-to-video, and the look comes from the images.'
       )
     }
     params.referenceImages = undefined
     params.referenceAudios = undefined
+    params.referenceVideos = undefined
     // Neighbours' frames are taken when the take is generated; new pictures are put in once the clip is saved.
     params.startImage = continuing || slots.start.set ? undefined : slots.start.path
     params.endImage = ending || slots.end.set ? undefined : slots.end.path
@@ -954,12 +971,21 @@ async function clipParams(
       const resolved = resolveReferences(input.references, assets, audioTarget(modelId, models))
       params.referenceImages = resolved.paths.length ? resolved.paths : undefined
       params.referenceAudios = resolved.audios.length ? resolved.audios : undefined
+      params.referenceVideos = resolved.videos.length ? resolved.videos : undefined
       notes.push(...resolved.notes)
       skippedAudio = resolved.skippedAudio
-    } else if (params.referenceAudios?.length && !takesAudio(modelId, models)) {
-      // Kept references meet a model that takes no audio: the voices would only be refused at generation.
-      params.referenceAudios = undefined
-      notes.push('The audio references were removed: the model takes no reference audio.')
+      skippedVideos = resolved.skippedVideos
+    } else {
+      if (params.referenceAudios?.length && !takesAudio(modelId, models)) {
+        // Kept references meet a model that takes no audio: the voices would only be refused at generation.
+        params.referenceAudios = undefined
+        notes.push('The audio references were removed: the model takes no reference audio.')
+      }
+      if (params.referenceVideos?.length && !supportsReferenceVideos(modelId)) {
+        // Likewise for videos: only Seedance 2.x reference models take them.
+        params.referenceVideos = undefined
+        notes.push("The reference videos were removed: the model doesn't take reference videos.")
+      }
     }
     if (kindOfModelId(modelId) === 'reference-to-video') {
       const max = maxReferenceImages(modelId)
@@ -1007,7 +1033,7 @@ async function clipParams(
   } else if (plan?.note && plan.applies && plan.chosen === 'references') {
     notes.push(plan.note)
   }
-  return { params, notes, skippedAudio }
+  return { params, notes, skippedAudio, skippedVideos }
 }
 
 /**
@@ -1055,6 +1081,7 @@ async function resolvedClipInput<
 function clipNotes(result: ClipParams): Record<string, unknown> {
   return {
     ...(result.skippedAudio.length ? { not_added_audio: result.skippedAudio } : {}),
+    ...(result.skippedVideos.length ? { not_added_videos: result.skippedVideos } : {}),
     ...(result.notes.length ? { notes: result.notes } : {})
   }
 }
@@ -1112,15 +1139,17 @@ function assertClipUnchanged(segmentId: string, params: GenerationParams): void 
 }
 
 /**
- * reorder_references for a sequence clip: its reference images and/or audio in the new order (see newOrder), with
- * every @ImageN / @AudioN token in its prompt and negative prompt renumbered by the shared reorderReferences (what
- * Studio's own drag and drop applies), saved through the sequence service in one change. Refused while "Generate
- * missing" runs, for a clip that sends no references, and when the clip changed in Studio meanwhile.
+ * reorder_references for a sequence clip: its reference images, audio and/or videos in the new order (see newOrder),
+ * with every @ImageN / @AudioN / @VideoN token in its prompt and negative prompt renumbered by the shared
+ * reorderReferences (what Studio's own drag and drop applies), saved through the sequence service in one change.
+ * Refused while "Generate missing" runs, for a clip that sends no references, and when the clip changed in Studio
+ * meanwhile.
  */
 export async function reorderClipReferences(
   segmentId: string,
   images: readonly string[] | undefined,
-  audios: readonly string[] | undefined
+  audios: readonly string[] | undefined,
+  videos?: readonly string[]
 ): Promise<ToolOutput> {
   const { sequence, index, segment } = await loadClip(segmentId)
   assertNotRunning(sequence)
@@ -1132,16 +1161,22 @@ export async function reorderClipReferences(
   const params = segment.params
   const paths = params.referenceImages ?? []
   const clips = params.referenceAudios ?? []
+  const films = referenceVideosOf(params)
   const imageOrder = images?.length ? newOrder('image', images, paths, assets, where) : undefined
   const audioOrder = audios?.length ? newOrder('audio', audios, clips.map((a) => a.path), assets, where) : undefined
-  type Moved = { images: MovedToken[]; audios: MovedToken[] }
+  const videoOrder = videos?.length ? newOrder('video', videos, films.map((v) => v.path), assets, where) : undefined
+  type Moved = { images: MovedToken[]; audios: MovedToken[]; videos?: MovedToken[] }
   const answer = (p: GenerationParams, moved: Moved): Record<string, unknown> => ({
     target: { segment_id: segment.id },
     sequence_id: sequence.id,
     clip_number: clipNumber,
     ...reorderAnswer(p, assets, moved)
   })
-  if ((!imageOrder || unchanged(imageOrder)) && (!audioOrder || unchanged(audioOrder))) {
+  if (
+    (!imageOrder || unchanged(imageOrder)) &&
+    (!audioOrder || unchanged(audioOrder)) &&
+    (!videoOrder || unchanged(videoOrder))
+  ) {
     return {
       data: {
         ...answer(params, { images: [], audios: [] }),
@@ -1156,13 +1191,15 @@ export async function reorderClipReferences(
   let next = params
   if (imageOrder) next = reorderReferences(next, 'image', imageOrder.map((i) => imageToken(i + 1)))
   if (audioOrder) next = reorderReferences(next, 'audio', audioOrder.map((i) => audioToken(i + 1)))
+  if (videoOrder) next = reorderReferences(next, 'video', videoOrder.map((i) => videoToken(i + 1)))
   // Built on the clip as it was read: a change the user saved meanwhile must not be written over.
   assertClipUnchanged(segment.id, params)
   const updated = await callService<Sequence>('segments:update', segment.id, { params: next } satisfies SegmentPatch)
   const saved = updated.segments.find((s) => s.id === segment.id)?.params ?? next
   const moved = {
     images: movedTokens('image', paths, saved.referenceImages ?? [], assets),
-    audios: movedTokens('audio', clips.map((a) => a.path), (saved.referenceAudios ?? []).map((a) => a.path), assets)
+    audios: movedTokens('audio', clips.map((a) => a.path), (saved.referenceAudios ?? []).map((a) => a.path), assets),
+    videos: movedTokens('video', films.map((v) => v.path), referenceVideosOf(saved).map((v) => v.path), assets)
   }
   return {
     data: answer(saved, moved),
@@ -1251,7 +1288,7 @@ const clipFields = {
     .array(referenceItem)
     .optional()
     .describe(
-      "The clip's own references, like set_references items: photos in @Image order and audio (characters' voices by default, with a model that takes audio) in @Audio order. Replaces the clip's references (a clip whose references differ from the sequence's cast no longer follows it). Left out on a new shot, the clip starts with the cast. A clip that continues in reference mode may have them (they replace the ones it would carry from the clip before; [] goes back to carrying those); not allowed on a clip sent image-to-video (an exact continuation, an end frame, a start or end image)."
+      "The clip's own references, like set_references items: photos in @Image order, audio (characters' voices by default, with a model that takes audio) in @Audio order and reference videos ({video: {generation_id} | {export_id} | {upload_id}, start?, length?}, Seedance 2.x only) in @Video order. Videos are never the cast's: a clip keeps its own whatever the cast does. Replaces the clip's references (a clip whose references differ from the sequence's cast no longer follows it). Left out on a new shot, the clip starts with the cast. A clip that continues in reference mode may have them (they replace the ones it would carry from the clip before; [] goes back to carrying those); not allowed on a clip sent image-to-video (an exact continuation, an end frame, a start or end image)."
     ),
   model: z
     .string()

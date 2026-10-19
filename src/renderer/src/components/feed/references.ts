@@ -2,8 +2,9 @@
 // its pictures and sound clips is. Generations store plain file paths; the library index maps them back to assets.
 
 import { generationAssetIds, indexAssetPaths, pathKey, type AssetPathIndex } from '@shared/generation-filter'
-import { maxReferenceImages } from '@shared/models'
+import { maxReferenceImages, referenceVideoLimits, referenceVideosOf, referenceVideoWindow, videosAreReferences } from '@shared/models'
 import type { Asset, AssetAudio, Generation, GenerationParams } from '@shared/types'
+import type { VideoFacts } from '../pickers/videoRefs'
 
 export interface LibraryIndex {
   /** Keyed by pathKey(path), the way the shared filter compares paths. */
@@ -49,12 +50,27 @@ export interface AudioReference {
   number?: number
 }
 
+export interface VideoReference {
+  /** "@Video1". */
+  token: string
+  path: string
+  /** The window that was sent, in seconds. */
+  start: number
+  length: number
+  /** Past the model family's count: kept in the params but never sent. */
+  unsent?: boolean
+  /** What the file is (a take, a film, an own video), when the window knows (videoFacts.ts). */
+  facts?: VideoFacts
+}
+
 export interface GenerationReferences {
   images: ImageReference[]
   audios: AudioReference[]
+  /** Reference videos (motion, camera, style); not the Editor's video to edit. */
+  videos: VideoReference[]
 }
 
-/** Every picture and sound clip in the params, mapped onto the library. */
+/** Every picture, sound clip and reference video in the params, mapped onto the library. */
 export function referencesOf(params: GenerationParams, index: LibraryIndex): GenerationReferences {
   const images: ImageReference[] = []
   const describe = (path: string) => {
@@ -78,7 +94,17 @@ export function referencesOf(params: GenerationParams, index: LibraryIndex): Gen
       number: hit?.number
     }
   })
-  return { images, audios }
+  // The Editor's edit sends its video as the one to edit, not as a reference: the drawer shows that elsewhere.
+  const limit = referenceVideoLimits(params.model)?.maxVideos ?? 0
+  const videos: VideoReference[] = videosAreReferences(params)
+    ? referenceVideosOf(params).map((v, i) => ({
+        token: `@Video${i + 1}`,
+        path: v.path,
+        ...referenceVideoWindow(v),
+        ...(i >= limit ? { unsent: true } : {})
+      }))
+    : []
+  return { images, audios, videos }
 }
 
 /** The library assets a generation used (pictures and sound), each once, in the order they first appear. */

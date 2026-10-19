@@ -7,6 +7,7 @@ import {
   findAudioTokens,
   findImageTokens,
   findMalformedTokens,
+  findVideoTokens,
   type PromptIssue,
   type ReferenceKind,
   type ValidateOptions
@@ -14,6 +15,7 @@ import {
 import type { Asset, PromptLanguage } from '@shared/types'
 import { audioInsertText, possessive, type FormAudio } from '../pickers/audioRefs'
 import { audioWord, promptList } from '../pickers/text'
+import { videoLabel, type FormVideo } from '../pickers/videoRefs'
 import {
   allTokenRanges,
   audioIntoReference,
@@ -22,6 +24,8 @@ import {
   groupText,
   unusedAudios,
   unusedReferences,
+  unusedVideos,
+  videoTokenRanges,
   type AssetGroup,
   type PromptReference,
   type TextEdit,
@@ -45,6 +49,10 @@ export type FixAction =
   | { type: 'remove-audio'; indices: number[] }
   /** Switch to a reference model that takes audio. */
   | { type: 'use-audio-model' }
+  /** Take these videos (1-based @VideoN numbers) out of the form; their tokens follow. */
+  | { type: 'remove-video'; indices: number[] }
+  /** Switch to a model that takes reference videos (the family's Seedance 2.x reference model). */
+  | { type: 'use-video-model' }
   /** A song clip: set What the clip hears to No song (its place is too short to send any of the song). */
   | { type: 'song-no-song' }
   /** A song clip: go to Who sings (the singer chosen isn't among the clip's pictures). */
@@ -85,6 +93,12 @@ interface Options {
   canRemoveAudio?: boolean
   /** A reference model that takes audio, offered when the current one doesn't ("Switch to Seedance 2.5 …"). */
   audioModelName?: string
+  /** The form's reference videos as @VideoN references. */
+  videos?: readonly FormVideo[]
+  /** The form can take videos out (fixes for videos that are too long, or not sent). */
+  canRemoveVideo?: boolean
+  /** A model that takes reference videos, offered when the current one doesn't. */
+  videoModelName?: string
   /** A song clip whose What the clip hears and Who sings can be set from here. */
   songFixes?: boolean
   /** Library assets that "@Name" may have meant; omit when assets can't be added from here. */
@@ -117,12 +131,34 @@ function audioNumbersIn(message: string): number[] {
   return [...new Set([...message.matchAll(/@Audio(\d+)/g)].map((m) => Number(m[1])))]
 }
 
+/** The @VideoN numbers a message names ("@Video2 is 18 s – …"). */
+function videoNumbersIn(message: string): number[] {
+  return [...new Set([...message.matchAll(/@Video(\d+)/g)].map((m) => Number(m[1])))]
+}
+
+/** "Remove @Video2" (or several) for videos of the form, when the form can take them out. */
+function removeVideoFix(numbers: readonly number[], o: Options, title: string): QuickFix[] {
+  const there = numbers.filter((n) => (o.videos ?? []).some((v) => v.index === n))
+  if (!o.canRemoveVideo || !there.length) return []
+  return [
+    {
+      label: `Remove ${there.map((n) => `@Video${n}`).join(', ')}`,
+      title,
+      action: { type: 'remove-video', indices: there }
+    }
+  ]
+}
+
 export function issueViews(o: Options): IssueView[] {
   const { prompt, references } = o
   const audios = o.audios ?? []
   const views: IssueView[] = []
+  const videos = o.videos ?? []
   const hasReferenceAttempts =
-    findImageTokens(prompt).length > 0 || findAudioTokens(prompt).length > 0 || findMalformedTokens(prompt).length > 0
+    findImageTokens(prompt).length > 0 ||
+    findAudioTokens(prompt).length > 0 ||
+    findVideoTokens(prompt).length > 0 ||
+    findMalformedTokens(prompt).length > 0
 
   // Errors with the same wording (the same wrong token written twice) are listed once and fixed together.
   const grouped = new Map<string, { issue: PromptIssue; ranges: TextRange[] }>()
@@ -143,6 +179,8 @@ export function issueViews(o: Options): IssueView[] {
   const audioUnused = unusedAudios(prompt, audios)
   const canChoose = o.kind === 'reference-to-video' && references.some((r) => r.sent)
   const canChooseAudio = o.kind === 'reference-to-video' && audios.some((a) => a.sent)
+  const videoUnused = unusedVideos(prompt, videos)
+  const canChooseVideo = o.kind === 'reference-to-video' && videos.some((v) => v.sent)
   const malformed = new Map(findMalformedTokens(prompt).map((m) => [m.start, m]))
   const allAudio = audios.map((a) => a.index)
 
@@ -156,17 +194,17 @@ export function issueViews(o: Options): IssueView[] {
     switch (issue.code) {
       case 'malformed': {
         const suggestions = ranges.map((r) => malformed.get(r.start)?.suggestion)
-        const audio = issue.ref === 'audio'
+        const ref: ReferenceKind = issue.ref ?? 'image'
         if (ranges.length && suggestions.every((s): s is string => !!s)) {
           const same = suggestions.every((s) => s === suggestions[0])
           fixes.push({
             label: same ? `Change to ${suggestions[0]}` : 'Fix the spelling',
             action: { type: 'edit', edits: ranges.map((r, i) => ({ ...r, text: suggestions[i] })) }
           })
-        } else if (ranges.length === 1 && (audio ? canChooseAudio : canChoose)) {
+        } else if (ranges.length === 1 && (ref === 'audio' ? canChooseAudio : ref === 'video' ? canChooseVideo : canChoose)) {
           fixes.push({
-            label: audio ? 'Choose a sound…' : 'Choose an image…',
-            action: { type: 'choose', range: ranges[0], ref: audio ? 'audio' : 'image' }
+            label: ref === 'audio' ? 'Choose a sound…' : ref === 'video' ? 'Choose a video…' : 'Choose an image…',
+            action: { type: 'choose', range: ranges[0], ref }
           })
         }
         remove('Remove')
@@ -204,6 +242,44 @@ export function issueViews(o: Options): IssueView[] {
           fixes.push({ label: 'Choose a sound…', action: { type: 'choose', range: ranges[0], ref: 'audio' } })
         }
         remove(written ? `Remove ${written}` : 'Remove')
+        break
+      }
+      case 'video-out-of-range':
+      case 'video-over-limit': {
+        // The one video the prompt doesn't mention yet is the likely meaning of a wrong number.
+        if (issue.code === 'video-out-of-range' && videoUnused.length === 1 && ranges.length) {
+          const target = videoUnused[0]
+          fixes.push({
+            label: `Change to @Video${target.index}`,
+            title: videoLabel(target),
+            action: { type: 'edit', edits: ranges.map((r) => ({ ...r, text: `@Video${target.index}` })) }
+          })
+        }
+        if (ranges.length === 1 && canChooseVideo) {
+          fixes.push({ label: 'Choose a video…', action: { type: 'choose', range: ranges[0], ref: 'video' } })
+        }
+        remove(written ? `Remove ${written}` : 'Remove')
+        break
+      }
+      case 'video-not-supported': {
+        // The family's reference model takes them; else the tokens go.
+        if (o.videoModelName) {
+          fixes.push({ label: `Switch to ${o.videoModelName}`, action: { type: 'use-video-model' } })
+        }
+        const all = videoTokenRanges(prompt)
+        if (all.length) fixes.push({ label: 'Remove the video references', action: { type: 'remove', ranges: all } })
+        break
+      }
+      case 'video-length': {
+        // About a video's window, not the text: choose another part of it, or leave the video out.
+        detail = 'Click the video under Reference videos to choose the part that is sent.'
+        fixes.push(...removeVideoFix(videoNumbersIn(issue.message), o, 'Removes the video from the form'))
+        break
+      }
+      case 'video-too-long': {
+        detail = 'Choose shorter parts of the videos, or send fewer videos.'
+        const lastSent = [...videos].reverse().find((v) => v.sent)
+        if (lastSent) fixes.push(...removeVideoFix([lastSent.index], o, 'Removes the last video from the form'))
         break
       }
       case 'not-reference-mode': {
@@ -292,7 +368,8 @@ export function issueViews(o: Options): IssueView[] {
   }
 
   // Other advice from the shared rules: "@Anna" that is plain text rather than a reference, pictures or clips
-  // past the model's limit, clips this model doesn't take. (The "not mentioned" advice is replaced by the one above.)
+  // past the model's limit, clips this model doesn't take, videos not mentioned or not sent. (The "not mentioned"
+  // advice for pictures and clips is replaced by the one above.)
   for (const issue of o.issues) {
     if (issue.severity !== 'warning' || issue.code === 'unused-reference' || issue.code === 'unused-audio') continue
     const ranges =
@@ -301,8 +378,36 @@ export function issueViews(o: Options): IssueView[] {
         : []
     const fixes: QuickFix[] =
       ranges.length && issue.code === 'malformed'
-        ? mentionFixes(ranges[0], issue.ref === 'audio', o)
-        : issue.code === 'audio-not-supported'
+        ? mentionFixes(ranges[0], issue.ref ?? 'image', o)
+        : issue.code === 'unused-video'
+          ? videoUnused.slice(0, MAX_INSERT_FIXES).map((v) => ({
+              label: `Insert @Video${v.index}`,
+              title: `Insert @Video${v.index} (${videoLabel(v)}) at the cursor`,
+              action: { type: 'insert', text: `@Video${v.index}` } as FixAction
+            }))
+          : issue.code === 'video-not-supported'
+            ? [
+                ...(o.videoModelName
+                  ? [{ label: `Switch to ${o.videoModelName}`, action: { type: 'use-video-model' } } as QuickFix]
+                  : []),
+                ...(o.canRemoveVideo && videos.length
+                  ? [
+                      {
+                        label: 'Remove the videos',
+                        action: { type: 'remove-video', indices: videos.map((v) => v.index) }
+                      } as QuickFix
+                    ]
+                  : [])
+              ]
+            : issue.code === 'video-over-limit'
+              ? removeVideoFix(
+                  videoNumbersIn(issue.message).length
+                    ? videoNumbersIn(issue.message)
+                    : videos.filter((v) => !v.sent).map((v) => v.index),
+                  o,
+                  'Removes the videos that aren’t sent'
+                )
+              : issue.code === 'audio-not-supported'
           ? [
               ...(o.audioModelName && o.kind === 'reference-to-video'
                 ? [{ label: `Switch to ${o.audioModelName}`, action: { type: 'use-audio-model' } } as QuickFix]
@@ -328,12 +433,24 @@ export function issueViews(o: Options): IssueView[] {
 
 /**
  * "@Anna" → "Anna (@Image1, @Image2)" when Anna is among the references, or add Anna from the library; "@Voice"
- * → the clip it most likely meant. Only in reference mode: other modes send no references (they may still sit in
- * the form, unsent), so the fix would write tokens that block generating.
+ * → the clip it most likely meant, "@Film" the video. Only in reference mode: other modes send no references (they
+ * may still sit in the form, unsent), so the fix would write tokens that block generating.
  */
-function mentionFixes(range: TextRange, audio: boolean, o: Options): QuickFix[] {
+function mentionFixes(range: TextRange, ref: ReferenceKind, o: Options): QuickFix[] {
   if (o.kind !== 'reference-to-video') return []
-  if (audio) {
+  if (ref === 'video') {
+    const sent = (o.videos ?? []).filter((v) => v.sent)
+    if (sent.length === 1) {
+      return [
+        {
+          label: `Change to @Video${sent[0].index}`,
+          action: { type: 'edit', edits: [{ ...range, text: `@Video${sent[0].index}` }] }
+        }
+      ]
+    }
+    return sent.length ? [{ label: 'Choose a video…', action: { type: 'choose', range, ref: 'video' } }] : []
+  }
+  if (ref === 'audio') {
     const sent = (o.audios ?? []).filter((a) => a.sent)
     if (sent.length === 1) {
       return [

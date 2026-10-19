@@ -8,9 +8,10 @@
 //   - Red dress (@Image3), worn by Anna (@Image1, @Image2): a red silk dress with thin straps
 //   - The beach (@Image4): a windswept pebble beach at dawn
 //   - @Audio1 is the lead vocal of this moment of the song: Anna (@Image1, @Image2) sings exactly these words, …
+//   - Refer to the action, camera movement and style in @Video1 – a reference only: don't edit or extend it.
 //
-// (the last line for a clip of a sequence cut to a song, whose window of the song is its reference audio:
-// song-send.ts).
+// (the song's line for a clip of a sequence cut to a song, whose window of the song is its reference audio:
+// song-send.ts; a line per reference video last, Seedance 2.x, sent as "<Video 1>": prompt-refs toVeniceVideoTokens).
 //
 // Composed at send time, never written into the editor's text: a description edited in the library applies to the
 // next generation, the prompt stays readable, and "Use again" can't append it twice. Pure and shared, so the
@@ -18,7 +19,7 @@
 // same text.
 
 import { pathKey } from './generation-filter'
-import { paramsForSubmit } from './models'
+import { paramsForSubmit, videosAreReferences } from './models'
 import { resolveOutfitWearers } from './outfits'
 import { songAudioNumber } from './song-send'
 import type {
@@ -45,6 +46,16 @@ const AUDIO_WORD: Record<PromptLanguage, { voice: string; sound: string }> = {
 
 /** Between an outfit's name and the character wearing it ("Red dress (@Image3), worn by Anna (@Image1)"). */
 const WORN_BY: Record<PromptLanguage, string> = { en: 'worn by', sv: 'bärs av' }
+
+/**
+ * The legend's line for each reference video, per prompt language: Venice's reference wording ("Refer to the … in
+ * <Video N>"), so Seedance takes it as a reference for motion, camera and style – never as footage to edit or extend.
+ */
+const VIDEO_LINE: Record<PromptLanguage, (token: string) => string> = {
+  en: (token) => `Refer to the action, camera movement and style in ${token} – a reference only: don't edit or extend it.`,
+  sv: (token) =>
+    `Utgå från handlingen, kamerarörelsen och stilen i ${token} – bara som referens: redigera eller förläng den inte.`
+}
 
 /** What is put after a shortened description. */
 const ELLIPSIS = '…'
@@ -227,6 +238,10 @@ function shorten(text: string, max: number): string {
  *   lead vocal, sung by the clip's singer (the character `song.singer` names among the pictures sent, else the first
  *   character among them; nobody for null) with the words sung there (`song.lyrics`), or the music the shot moves with.
  *   It isn't a description: it is appended with "Include descriptions" off too, and never shortened (`song`).
+ * - Reference videos (Seedance 2.x; not the Editor's video to edit) get a line each, last, in @Video order: "Refer to
+ *   the action, camera movement and style in @Video1 – a reference only: …" (VIDEO_LINE; Swedish too), Venice's
+ *   reference wording, so the model never takes a video for footage to edit or extend (`videos`). Like the song's
+ *   line it is no description: appended with "Include descriptions" off too, and never shortened.
  * - With a character limit, descriptions that would take the prompt past it are shortened in proportion to their
  *   length, at word boundaries, ending in "…" (`truncated`); if not even the names and tokens fit, no legend is
  *   appended at all (`dropped`). Entries are listed either way.
@@ -247,8 +262,14 @@ export function composePrompt(
   const sent = paramsForSubmit(params)
   // A song clip's window of the song is explained whether descriptions are included or not: it isn't one.
   const songNumber = songAudioNumber(sent)
-  if (!opts.include && !songNumber) return none
   const language: PromptLanguage = opts.language === 'sv' ? 'sv' : 'en'
+  // Reference videos are said to be references whatever else is appended: it decides how Seedance takes them.
+  const videoLines =
+    sent.referenceVideos?.length && videosAreReferences(sent)
+      ? sent.referenceVideos.map((_, i) => ({ token: `@Video${i + 1}`, line: VIDEO_LINE[language](`@Video${i + 1}`) }))
+      : []
+  const withVideos = (c: ComposedPrompt): ComposedPrompt => (videoLines.length ? { ...c, videos: videoLines } : c)
+  if (!opts.include && !songNumber && !videoLines.length) return none
 
   const excluded = new Set(opts.excludedAssetIds ?? [])
   const byImage = new Map<string, DescribedAsset>()
@@ -272,7 +293,7 @@ export function composePrompt(
   // The song's clip is no asset's own: a voice that merely starts where the place does is that voice.
   const songClip = songNumber ? sent.referenceAudios?.[songNumber - 1] : undefined
   const songToken = songClip && !byAudio.has(pathKey(songClip.path)) ? songNumber : 0
-  if (!byImage.size && !byAudio.size && !songToken) return none
+  if (!byImage.size && !byAudio.size && !songToken && !videoLines.length) return none
 
   const drafts = new Map<string, Draft>()
   const draftOf = (asset: DescribedAsset): Draft => {
@@ -304,8 +325,8 @@ export function composePrompt(
   const list = opts.include
     ? [...drafts.values()].filter((d) => !excluded.has(d.asset.id) && (d.description || d.wornBy))
     : []
-  if (!list.length && !song) return none
-  const withSong = (c: ComposedPrompt): ComposedPrompt => (song ? { ...c, song } : c)
+  if (!list.length && !song && !videoLines.length) return none
+  const withSong = (c: ComposedPrompt): ComposedPrompt => withVideos(song ? { ...c, song } : c)
 
   const entry = (d: Draft, description: string): DescriptionEntry => ({
     assetId: d.asset.id,
@@ -323,8 +344,9 @@ export function composePrompt(
   const base = lead + own
 
   const heading = `\n\n${HEADING[language]}`
-  // The song's line comes last and is never shortened: it is what the take is sung to.
-  const songLine = song ? `\n- ${song.line}` : ''
+  // The song's line comes after the descriptions and is never shortened: it is what the take is sung to. The videos'
+  // lines come last, never shortened either.
+  const songLine = (song ? `\n- ${song.line}` : '') + videoLines.map((v) => `\n- ${v.line}`).join('')
   const full = heading + list.map((d) => line(d, d.description, language)).join('') + songLine
   const limit = isLimit(opts.characterLimit)
     ? opts.characterLimit

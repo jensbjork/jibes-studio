@@ -16,13 +16,16 @@
 // Stored without a schema change as the references of the sequence's defaults (sequences.defaults JSON:
 // referenceImages, referenceAudios, outfitWearers, paths relative like a clip's params, so moving or tidying the library
 // rewrites them too). Pure and shared: the sequence view, main and the agents' tools decide it the same way.
+//
+// Reference videos (@VideoN) are never the cast's: videos are no assets. A clip's own videos stay its own whatever
+// the cast does, and whether it follows the cast is decided by its pictures and audio alone.
 
 import { continuationPlan, continuesAt, endsOnNextAt, ownReferences, type ChainClip } from './continuation'
 import { kindOfModelId, sanitizeReferenceAudios } from './models'
 import { sanitizeOutfitWearers } from './outfits'
 import { remapPromptReferences } from './prompt-remap'
 import { swapReferenceAsset } from './reference-swap'
-import type { Asset, GenerationParams, ReferenceAudio, SequenceCast } from './types'
+import type { Asset, GenerationParams, ReferenceAudio, ReferenceVideo, SequenceCast } from './types'
 
 type CastFields = Pick<GenerationParams, 'referenceImages' | 'referenceAudios' | 'outfitWearers'>
 
@@ -143,23 +146,23 @@ export function followsCastAt(clips: readonly ChainClip[], index: number, cast: 
 const FRAME_SLOT = '\u0000frame-of-previous-clip'
 
 /**
- * What the @ImageN / @AudioN tokens of the clip at `index` name, in order: its own references; for a continuation in
- * reference mode the pictures it sends (its own or carried) and then the previous clip's last frame; nothing for a
- * clip that sends no references.
+ * What the @ImageN / @AudioN / @VideoN tokens of the clip at `index` name, in order: its own references; for a
+ * continuation in reference mode the pictures it sends (its own or carried) and then the previous clip's last frame,
+ * and the videos it sends; nothing for a clip that sends no references.
  */
 export function namedReferences(
   clips: readonly ChainClip[],
   index: number
-): { images: string[]; audios: ReferenceAudio[] } {
+): { images: string[]; audios: ReferenceAudio[]; videos: ReferenceVideo[] } {
   const plan = continuationPlan(clips, index)
   if (plan) {
     return plan.mode === 'references'
-      ? { images: [...plan.images, FRAME_SLOT], audios: plan.audios }
-      : { images: [], audios: [] }
+      ? { images: [...plan.images, FRAME_SLOT], audios: plan.audios, videos: plan.videos }
+      : { images: [], audios: [], videos: [] }
   }
-  if (endsOnNextAt(clips, index)) return { images: [], audios: [] }
+  if (endsOnNextAt(clips, index)) return { images: [], audios: [], videos: [] }
   const own = ownReferences(clips[index].params)
-  return { images: own?.images ?? [], audios: own?.audios ?? [] }
+  return { images: own?.images ?? [], audios: own?.audios ?? [], videos: own?.videos ?? [] }
 }
 
 /**
@@ -169,10 +172,13 @@ export function namedReferences(
  */
 export function followTokensToCast(clips: readonly ChainClip[], index: number, text: string, cast: SequenceCast): string {
   const was = namedReferences(clips, index)
+  // The cast has no videos: a token naming one of the clip's goes.
   return remapPromptReferences(
     text,
     { before: was.images, after: cast.referenceImages },
-    { before: was.audios, after: cast.referenceAudios }
+    { before: was.audios, after: cast.referenceAudios },
+    undefined,
+    { before: was.videos, after: [] }
   )
 }
 
@@ -202,7 +208,13 @@ function followTokens(
   const after = before.map((c, i) => (i === index ? { ...c, ...links, params: next } : c))
   const now = namedReferences(after, index)
   const remap = (text: string): string =>
-    remapPromptReferences(text, { before: was.images, after: now.images }, { before: was.audios, after: now.audios })
+    remapPromptReferences(
+      text,
+      { before: was.images, after: now.images },
+      { before: was.audios, after: now.audios },
+      undefined,
+      { before: was.videos, after: now.videos }
+    )
   const out: GenerationParams = { ...next, prompt: remap(written.prompt ?? '') }
   if (written.negativePrompt !== undefined) out.negativePrompt = remap(written.negativePrompt) || undefined
   return out

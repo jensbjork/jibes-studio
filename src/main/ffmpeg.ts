@@ -1614,6 +1614,126 @@ export async function makeProxy(
   throw tooBig()
 }
 
+// ── Reference videos (Seedance 2.x) ──────────────────────────────────────────
+
+/**
+ * How a reference video's window is sent (makeReferenceVideoProxy): at most 720 on the shorter side and 1280 on the
+ * longer, at most 30 fps, H.264 CRF 23 capped at 1.6 Mb/s, AAC 128k. 30 s – Seedance 2.5's most – then come to about
+ * 6.5 MB, so even ten videos together stay well inside the ~22 MB of media one request body takes (with the pictures)
+ * and far under Venice's 50 MB per video. `version` is part of the proxy cache's key: bump it when the settings change.
+ */
+export const REFERENCE_PROXY = {
+  maxShortSide: 720,
+  maxLongSide: 1280,
+  maxFps: 30,
+  crf: 23,
+  maxrate: 1_600_000,
+  audioBitrate: 128_000,
+  /** A proxy larger than this (a few hard seconds over the rate cap) is made again at a lower rate. */
+  maxBytes: 12_000_000,
+  version: 1
+} as const
+
+/**
+ * [start, start + length) of a video as the small MP4 a reference video is sent as (REFERENCE_PROXY): upright, square
+ * pixels, 8-bit BT.709 (HDR tone-mapped as working copies are, when this ffmpeg has zscale), constant frame rate, the
+ * first decodable audio stream as stereo AAC 48 kHz (none when the file has no sound), no metadata (a phone clip's GPS
+ * position never leaves the machine), +faststart. Never longer than the window: whole frames within it, the sound cut
+ * at its end. Refuses a window that starts after the end of the file. Resolves with the result's size and length.
+ */
+export async function makeReferenceVideoProxy(
+  input: string,
+  out: string,
+  o: { start: number; length: number; signal?: AbortSignal }
+): Promise<{ bytes: number; seconds: number; width: number; height: number }> {
+  const { info: raw } = await ffprobeJson(input, 'Could not read the video file')
+  const info = await mediaInfoOf(input, raw)
+  const start = clamp(Number.isFinite(o.start) ? o.start : 0, 0, info.duration)
+  const length = Math.min(Number.isFinite(o.length) ? o.length : 0, info.duration - start)
+  if (length < MIN_CLIP_SECONDS) throw new Error('The selection starts after the end of the video.')
+  const fps = workingFps(info, REFERENCE_PROXY.maxFps)
+  const frames = Math.max(1, Math.floor(length * rationalValue(fps) + 1e-6))
+
+  // Display size: rotation is applied by ffmpeg before the filters; a non-square pixel shape is squared here.
+  let w = info.width
+  let h = info.height
+  if (info.sar && Math.abs(info.sar - 1) > 0.001) {
+    if (info.rotation === 90 || info.rotation === 270) h = Math.round(h * info.sar)
+    else w = Math.round(w * info.sar)
+  }
+  const scale = Math.min(1, REFERENCE_PROXY.maxShortSide / Math.min(w, h), REFERENCE_PROXY.maxLongSide / Math.max(w, h))
+  const outW = even(Math.round(w * scale))
+  const outH = even(Math.round(h * scale))
+  const toneMap = !!info.hdr && (await hasFilter('zscale')) && (await hasFilter('tonemap'))
+  const filters = [`fps=${fps}`]
+  if (toneMap) {
+    const transfer = info.hdr === 'pq' ? 'smpte2084' : 'arib-std-b67'
+    filters.push(
+      `scale=${outW}:${outH}`,
+      `zscale=tin=${transfer}:min=bt2020nc:pin=bt2020:rin=tv:t=linear:npl=100`,
+      'format=gbrpf32le',
+      'zscale=p=bt709',
+      'tonemap=tonemap=mobius:desat=0',
+      'zscale=t=bt709:m=bt709:r=tv',
+      'format=yuv420p'
+    )
+  } else {
+    if (info.hdr) console.warn('This ffmpeg has no zscale: an HDR reference video is sent without tone mapping.')
+    filters.push(`scale=${outW}:${outH}:out_range=tv`, 'format=yuv420p')
+  }
+  filters.push('setsar=1', BT709_FRAMES)
+  const audio = info.audioStreams.find((s) => s.decodable)
+  const resampler = audio ? await resamplerOption() : ''
+
+  const encode = (tmp: string, rate: number, hwaccel: boolean): string[] => [
+    '-nostdin', '-hide_banner', '-v', 'error',
+    ...(hwaccel ? HWACCEL : []),
+    '-ss', secs(start), '-t', secs(length),
+    '-i', resolve(input),
+    '-map', '0:V:0',
+    ...(audio ? ['-map', `0:${audio.index}`] : []),
+    '-vf', filters.join(','),
+    '-frames:v', String(frames),
+    '-c:v', 'libx264', '-preset', 'medium', '-crf', String(REFERENCE_PROXY.crf),
+    '-maxrate', String(Math.floor(rate)), '-bufsize', String(Math.floor(rate * 2)),
+    '-pix_fmt', 'yuv420p',
+    '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv',
+    ...(audio
+      ? [
+          '-af',
+          [channelFilter(audio.channels, 2) ?? '', `aresample=48000${resampler}:first_pts=0`, `atrim=end=${secs(length)}`]
+            .filter(Boolean)
+            .join(','),
+          '-c:a', 'aac', '-b:a', String(REFERENCE_PROXY.audioBitrate), '-ar', '48000', '-ac', '2'
+        ]
+      : ['-an']),
+    '-t', secs(length),
+    '-sn', '-dn', '-map_metadata', '-1', '-map_chapters', '-1',
+    '-movflags', '+faststart',
+    '-f', 'mp4', '-y', tmp
+  ]
+  const failure = 'The reference video could not be prepared'
+  let rate: number = REFERENCE_PROXY.maxrate
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await ffmpegToFile(out, (tmp) => encode(tmp, rate, true), { failure, signal: o.signal })
+    } catch (err) {
+      if (isAbortError(err) || errorMessage(err) === NOT_FOUND || !HWACCEL.length) throw err
+      // VideoToolbox can refuse an unusual stream mid-way; software decoding is slower but takes anything.
+      await ffmpegToFile(out, (tmp) => encode(tmp, rate, false), { failure, signal: o.signal })
+    }
+    const bytes = (await stat(out)).size
+    if (bytes <= REFERENCE_PROXY.maxBytes) {
+      const result = await probe(out)
+      return { bytes, seconds: result.duration, width: result.width, height: result.height }
+    }
+    // The cap is an average; a few hard seconds can still push the file over. Ask for less and try again.
+    rate *= 0.6
+  }
+  await rm(out, { force: true })
+  throw new Error(`${failure}: it stays too large for Venice. Select a shorter part.`)
+}
+
 /**
  * A solid-grey H.264 clip of exactly round(seconds · fps) frames at width × height: a few KB, for free /video/quote
  * calls only. Venice prices an edit by the source's length and the requested resolution, not its content (Topaz

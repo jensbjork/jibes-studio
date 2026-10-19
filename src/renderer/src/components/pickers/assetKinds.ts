@@ -131,3 +131,9 @@ export const KIND_TONE: Record<AssetKind, KindTone> = {
 
 /** A valid @ImageN token whose picture isn't a library photo (added from disk). */
 export const OWN_IMAGE_TOKEN = 'bg-white/10 text-text'
+
+/**
+ * An @VideoN token, badge and tile: reference videos aren't library assets, so they have a colour of their own
+ * (full class strings, so Tailwind sees them).
+ */
+export const VIDEO_TONE = { text: 'text-lime-300', token: 'bg-lime-400/15 text-lime-200' }

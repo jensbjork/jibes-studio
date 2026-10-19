@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { ownReferences, type CarriedReferences } from '@shared/continuation'
+import { carriedReferences, ownReferences, type CarriedReferences } from '@shared/continuation'
 import { generationTitle } from '@shared/generation-label'
+import { referenceVideosOf } from '@shared/models'
 import type {
   ConsentRequest,
   ContinueMode,
@@ -118,6 +119,12 @@ export default function SegmentEditor({
   // they can be used in the prompt, and changing them (adding, removing, reordering) makes them the clip's own, which
   // then override the inherited ones. Left as they are, nothing is saved and the clip keeps carrying them.
   const inherited = plan?.mode === 'references' && plan.carried?.inherited ? plan.carried : undefined
+  // The clip has references of its own: they replace everything the clips before would carry (also when they are only
+  // a video), which is worth saying when there was something to carry.
+  const replaced =
+    plan?.mode === 'references' && !inherited && index > 0 && plan.carried
+      ? carriedReferences(sequence.segments, index - 1)
+      : undefined
   const inheritedRef = useRef<CarriedReferences | undefined>(inherited)
   inheritedRef.current = inherited
   const shown = inherited ? withReferences(params, inherited) : params
@@ -129,7 +136,9 @@ export default function SegmentEditor({
         const next = typeof update === 'function' ? update(view) : update
         // The inherited references untouched: they stay the clip before's, not copied into this clip (whatever the
         // draft held instead was no reference it sends: left over from another mode, which main drops too).
-        if (carried && sameReferences(next, view)) return { ...next, referenceImages: undefined, referenceAudios: undefined }
+        if (carried && sameReferences(next, view)) {
+          return { ...next, referenceImages: undefined, referenceAudios: undefined, referenceVideos: undefined }
+        }
         return next
       }),
     [setParams]
@@ -457,8 +466,10 @@ export default function SegmentEditor({
                   : plan?.mode === 'references'
                     ? `+ the last frame of clip ${index} is sent after these (as @Image${plan.frameToken ?? 1}), and the prompt begins by saying the clip should start on it.${
                         inherited
-                          ? ` The images and voices come from clip ${inherited.fromClip} – if you change them, they become this clip's own.`
-                          : ''
+                          ? ` The ${inherited.videos.length ? 'images, videos' : 'images'} and voices come from clip ${inherited.fromClip} – if you change them (adding a video too), they become this clip's own and replace all of clip ${inherited.fromClip}'s.`
+                          : replaced
+                            ? ` This clip's own references replace clip ${replaced.fromClip}'s – its images, videos and voices aren't carried.`
+                            : ''
                       }`
                     : `Without references the clip starts exactly on the last frame of clip ${index}. Add references here (or in the clip before) and they're sent along with the frame.`
               }
@@ -513,15 +524,17 @@ function withReferences(params: GenerationParams, carried: CarriedReferences): G
   return {
     ...params,
     referenceImages: carried.images.length ? [...carried.images] : undefined,
-    referenceAudios: carried.audios.length ? carried.audios.map((a) => ({ ...a })) : undefined
+    referenceAudios: carried.audios.length ? carried.audios.map((a) => ({ ...a })) : undefined,
+    referenceVideos: carried.videos.length ? carried.videos.map((v) => ({ ...v })) : undefined
   }
 }
 
-/** The same reference images and audio clips (windows included), in the same order. */
+/** The same reference images, audio clips and videos (windows included), in the same order. */
 function sameReferences(a: GenerationParams, b: GenerationParams): boolean {
   return (
     stableJson(a.referenceImages ?? []) === stableJson(b.referenceImages ?? []) &&
-    stableJson(a.referenceAudios ?? []) === stableJson(b.referenceAudios ?? [])
+    stableJson(a.referenceAudios ?? []) === stableJson(b.referenceAudios ?? []) &&
+    stableJson(referenceVideosOf(a)) === stableJson(referenceVideosOf(b))
   )
 }
 

@@ -1,9 +1,11 @@
-// Reference tokens in prompts: @ImageN for the reference images and @AudioN for the reference audio clips
-// (voices, sounds). Finding them, spotting near misses ("@Image 3", "@img3", "@Bild3", "@Ljud1", "@Voice1"…)
-// and checking them against what a generation sends. In reference mode the model is given the pictures and
-// the audio clips in order and the prompt points at them as @Image1, @Image2 … and @Audio1, @Audio2 …; a token
-// that names the wrong one, or none, quietly spoils a paid generation. Pure, so the prompt editor (renderer),
-// the guard in front of every submission (main) and the agent tools all apply exactly the same rules.
+// Reference tokens in prompts: @ImageN for the reference images, @AudioN for the reference audio clips (voices,
+// sounds) and @VideoN for the reference videos (Seedance 2.x: motion, camera, style). Finding them, spotting near
+// misses ("@Image 3", "@img3", "@Bild3", "@Ljud1", "@Voice1", "@Vid1", "@Film2"…) and checking them against what a
+// generation sends. In reference mode the model is given the pictures, the audio clips and the videos in order and
+// the prompt points at them as @Image1, @Image2 …, @Audio1 … and @Video1 …; a token that names the wrong one, or
+// none, quietly spoils a paid generation. Pure, so the prompt editor (renderer), the guard in front of every
+// submission (main) and the agent tools all apply exactly the same rules. Venice writes videos "<Video 1>": Studio's
+// @Video1 becomes that only in the body it sends (toVeniceVideoTokens); images and audio go as written.
 
 import {
   KINDS,
@@ -16,25 +18,31 @@ import {
   maxReferenceAudios,
   maxReferenceImages,
   referenceAudioWindow,
+  referenceVideoLimits,
+  referenceVideosOf,
+  referenceVideoWindow,
   sanitizeReferenceAudios,
   supportsAudioInput,
-  type Kind
+  supportsReferenceVideos,
+  videosAreReferences,
+  type Kind,
+  type ReferenceVideoLimits
 } from './models'
 import { longPlaceNote } from './song'
 import { shortPlaceMessage, songAudioNumber } from './song-send'
 import type { GenerationParams } from './types'
 
-/** A canonical reference token: "@Image3" or "@Audio2", in any letter case ("@image3" counts too). */
+/** A canonical reference token: "@Image3", "@Audio2" or "@Video1", in any letter case ("@image3" counts too). */
 export interface PromptToken {
-  /** N in @ImageN (or @AudioN), 1-based. */
+  /** N in @ImageN (or @AudioN, @VideoN), 1-based. */
   index: number
   start: number
   end: number
   raw: string
 }
 
-/** What a token refers to: a reference image (@ImageN) or a reference audio clip (@AudioN). */
-export type ReferenceKind = 'image' | 'audio'
+/** What a token refers to: a reference image (@ImageN), audio clip (@AudioN) or video (@VideoN). */
+export type ReferenceKind = 'image' | 'audio' | 'video'
 
 export type PromptIssueCode =
   | 'no-references'
@@ -59,6 +67,21 @@ export type PromptIssueCode =
   | 'song-place'
   /** A song clip's chosen singer isn't among its reference images, so the legend names another (warning). */
   | 'song-singer'
+  /** @VideoN past the reference videos there are (or none are chosen). */
+  | 'video-out-of-range'
+  /** @VideoN past what the model family takes (error), or videos its limit drops (warning). */
+  | 'video-over-limit'
+  /**
+   * Videos named in a mode or with a model that sends none (error), or videos that won't be sent (warning): the fix is
+   * the family's reference-to-video model that takes them (referenceVideoModelFor in models.ts).
+   */
+  | 'video-not-supported'
+  /** A video's window is shorter than 2 s or longer than the family's 15 s (2.0) or 30 s (2.5). */
+  | 'video-length'
+  /** The videos together are longer than the family's 15 s (2.0) or 30 s (2.5). */
+  | 'video-too-long'
+  /** A reference video the prompt never mentions. */
+  | 'unused-video'
 
 export interface PromptIssue {
   /** Errors block a submission; warnings are advice. */
@@ -69,8 +92,11 @@ export interface PromptIssue {
   /** The offending text in the prompt the issue was found in, when it is about one place. */
   start?: number
   end?: number
-  /** Set to 'audio' when the issue is about reference audio (an @AudioN token, a clip, a near miss of one). */
-  ref?: 'audio'
+  /**
+   * 'audio' when the issue is about reference audio (an @AudioN token, a clip, a near miss of one); 'video' when it is
+   * about reference videos (an @VideoN token, a video's window, a near miss of one).
+   */
+  ref?: 'audio' | 'video'
 }
 
 /** Something that looks like an attempt at a reference but isn't one the model understands. */
@@ -80,7 +106,7 @@ export interface MalformedToken {
   raw: string
   /** The canonical text to put in its place, when it is clear what was meant ("@Image 3" → "@Image3"). */
   suggestion?: string
-  /** Whether it was meant as a picture (@ImageN) or an audio clip (@AudioN). */
+  /** Whether it was meant as a picture (@ImageN), an audio clip (@AudioN) or a video (@VideoN). */
   ref: ReferenceKind
 }
 
@@ -117,10 +143,23 @@ export interface ValidateOptions {
   /** How many audio clips the model takes (maxReferenceAudios); later ones are not sent. Default 3. */
   maxAudios?: number
   /**
-   * Reference videos sent with the prompt (Seedance reference-to-video edits from the Editor, named <Video 1>…).
-   * They are references too, so a prompt with videos but no images is not missing its references. Default 0.
+   * Videos sent with the prompt that are no reference videos of Studio's (the Editor's Seedance edit, its video to edit
+   * written "<Video 1>" in the prompt): they count as references, so a prompt with them but no images is not missing
+   * its references, and nothing else is checked about them. Default 0.
    */
   referenceVideos?: number
+  /**
+   * The reference videos in the params, in order (@Video1 is the first): each one's window length in seconds, or
+   * undefined where it isn't known yet (main measures the files before anything is sent). Omitted: none.
+   */
+  videoLengths?: readonly (number | undefined)[]
+  /**
+   * Whether the model takes reference videos (supportsReferenceVideos). false: @VideoN tokens are errors and the
+   * videos are not sent. Omitted: not known, so tokens are only checked against the videos there are.
+   */
+  videoInput?: boolean
+  /** The model family's limits (referenceVideoLimits); omitted: Seedance 2.0's, the stricter. */
+  videoLimits?: ReferenceVideoLimits
   /**
    * The @ImageN / @AudioN numbers the References legend explains (prompt-compose.ts explainedReferences: an asset whose
    * description – or, for an outfit, who wears it – Studio appends when "Include descriptions" is on for it). Those are
@@ -170,6 +209,8 @@ type Scanned =
       name: string
       /** A word for sound ("@Röst", "@voice"), so the advice is about audio references. */
       audioWord: boolean
+      /** A word for a video ("@Film", "@Videon"), so the advice is about reference videos. */
+      videoWord: boolean
     }
 
 type ScannedToken = Extract<Scanned, { type: 'token' }>
@@ -194,9 +235,9 @@ const RANGE = /^[-\u2010-\u2015\u2212]([0-9]+)/
 /** How long a range is spelled out in a suggestion. */
 const MAX_RANGE = 20
 
-/** The word the model knows for each kind of reference. Both have five letters, which canonicalText relies on. */
-const REF_WORD: Record<ReferenceKind, string> = { image: 'Image', audio: 'Audio' }
-const CANONICAL_WORD: Record<ReferenceKind, RegExp> = { image: /^image$/i, audio: /^audio$/i }
+/** The word the model knows for each kind of reference. All have five letters, which canonicalText relies on. */
+const REF_WORD: Record<ReferenceKind, string> = { image: 'Image', audio: 'Audio', video: 'Video' }
+const CANONICAL_WORD: Record<ReferenceKind, RegExp> = { image: /^image$/i, audio: /^audio$/i, video: /^video$/i }
 
 /** Words that mean "picture" or "reference", which people write instead of "Image". */
 const IMAGE_WORDS = new Set([
@@ -259,6 +300,29 @@ const AUDIO_WORDS = new Set([
   'musik'
 ])
 
+/**
+ * Words for a video or a film, which people write instead of "Video": with a number after them ("@Vid1", "@Film2",
+ * "@Videoklipp1") they are near misses of @VideoN; without one only "@Video" itself is an attempt. Looser words
+ * ("@Clip1", "@Movie2") stay text, as they were before videos were references.
+ */
+const VIDEO_WORDS = new Set([
+  'video',
+  'videos',
+  'vid',
+  'vids',
+  'videon',
+  'videor',
+  'videorna',
+  'videoklipp',
+  'videoklippet',
+  'videoclip',
+  'film',
+  'filmen',
+  'filmer',
+  'filmklipp',
+  'filmklippet'
+])
+
 /** Optimal-string-alignment distance (edits incl. swapped neighbours); stops early when clearly far apart. */
 function editDistance(a: string, b: string): number {
   if (Math.abs(a.length - b.length) > 2) return 3
@@ -305,16 +369,36 @@ function isAudioWord(word: string, numbered: boolean): boolean {
   return distance === 2 && word[0] === 'a' && Math.abs(word.length - 5) <= 1
 }
 
-/** What a word after an @ was meant to refer to; images first, so their rules are exactly what they were. */
+/**
+ * Whether the word after an @ was meant as "Video" (lower-cased, NFKC). Only with a number after it does a word for
+ * a film count ("@Vid1", "@Film2", "@Klipp1", "@Vidoe1"); without one only "@Video" itself is an attempt at a
+ * reference. Looser spellings must start with a "v", so other words stay text.
+ */
+function isVideoWord(word: string, numbered: boolean): boolean {
+  if (!word) return false
+  if (!numbered) return word === 'video' || word === 'videos'
+  if (VIDEO_WORDS.has(word)) return true
+  if (word.length >= 3 && 'video'.startsWith(word)) return true
+  return word.length >= 4 && word[0] === 'v' && editDistance(word, 'video') <= 1
+}
+
+/** What a word after an @ was meant to refer to; images first, then audio, so their rules are exactly what they were. */
 function refOf(word: string, numbered: boolean): ReferenceKind | undefined {
   if (isImageWord(word, numbered)) return 'image'
   if (isAudioWord(word, numbered)) return 'audio'
+  if (isVideoWord(word, numbered)) return 'video'
   return undefined
 }
 
-/** Worth looking past a space or dash for a number: "@Image 3", "@audio 1", "@Ljud 2". */
+/** Worth looking past a space or dash for a number: "@Image 3", "@audio 1", "@Ljud 2", "@Video 1". */
 function mayHaveSeparatedNumber(word: string): boolean {
-  return isImageWord(word, false) || AUDIO_WORDS.has(word) || (word.length >= 4 && editDistance(word, 'audio') <= 1)
+  return (
+    isImageWord(word, false) ||
+    AUDIO_WORDS.has(word) ||
+    (word.length >= 4 && editDistance(word, 'audio') <= 1) ||
+    VIDEO_WORDS.has(word) ||
+    (word.length >= 4 && word[0] === 'v' && editDistance(word, 'video') <= 1)
+  )
 }
 
 /** The code point that ends at `index` ('' at the start). */
@@ -346,12 +430,12 @@ function canonicalNumber(digits: string): string {
   return ascii.replace(/^0+(?=[0-9])/, '')
 }
 
-/** "@Image3" or "@Audio3". Numbers may come as text, so even an absurdly long one is shown as written. */
+/** "@Image3", "@Audio3" or "@Video3". Numbers may come as text, so even an absurdly long one is shown as written. */
 const token = (ref: ReferenceKind, n: number | string): string => `@${REF_WORD[ref]}${n}`
 
 /**
- * A canonical token spelled as the model expects: "@image3" → "@Image3", "@AUDIO2" → "@Audio2". Its raw text is
- * "@", the five letters of the word, then the digits.
+ * A canonical token spelled as the model expects: "@image3" → "@Image3", "@AUDIO2" → "@Audio2", "@video1" →
+ * "@Video1". Its raw text is "@", the five letters of the word, then the digits.
  */
 const canonicalText = (t: { raw: string; ref: ReferenceKind }): string => token(t.ref, t.raw.slice(6))
 
@@ -428,7 +512,15 @@ function readAt(text: string, start: number): Scanned | undefined {
       if (!WORD_CHAR.test(ch) && !INVISIBLE.test(ch)) break
       end += ch.length
     }
-    return { type: 'mention', start, end, raw: text.slice(start, end), name: word, audioWord: AUDIO_WORDS.has(lower) }
+    return {
+      type: 'mention',
+      start,
+      end,
+      raw: text.slice(start, end),
+      name: word,
+      audioWord: AUDIO_WORDS.has(lower),
+      videoWord: VIDEO_WORDS.has(lower)
+    }
   }
 
   if (attached && lower !== REF_WORD[ref].toLowerCase()) return undefined
@@ -553,10 +645,35 @@ export function findAudioTokens(prompt: string): PromptToken[] {
   )
 }
 
+/** The canonical @VideoN tokens, case-insensitive ("@video2" counts), in order. "@Video10" is video 10. */
+export function findVideoTokens(prompt: string): PromptToken[] {
+  return scan(prompt).flatMap((s) =>
+    isToken('video')(s) ? [{ index: s.index, start: s.start, end: s.end, raw: s.raw }] : []
+  )
+}
+
+/**
+ * The prompt as Venice gets it: every @VideoN token (any letter case) written "<Video N>", Venice's own syntax for a
+ * reference video; everything else – @ImageN, @AudioN, near misses, "<Video 1>" already written so – as it is. Only
+ * the body a submission sends is converted (venice.ts buildRequestBody): what Studio shows and stores keeps @VideoN.
+ */
+export function toVeniceVideoTokens(prompt: string): string {
+  if (typeof prompt !== 'string') return prompt
+  let out = ''
+  let last = 0
+  for (const t of scan(prompt)) {
+    if (t.type !== 'token' || t.ref !== 'video') continue
+    out += `${prompt.slice(last, t.start)}<Video ${t.index}>`
+    last = t.end
+  }
+  return last ? out + prompt.slice(last) : prompt
+}
+
 /**
  * Near misses the model won't read as references: "@Image 3", "@img3", "@Bild3", "@image03", "@Image" without
  * a number, "@Image0", "@Image1-3", "@Image3rd", "@@Image3", or a token broken by an invisible character; and
- * the same for audio clips: "@audio 1", "@Ljud1", "@Voice1", "@Röst1", "@sound1", "@Audio" … (`ref` says which).
+ * the same for audio clips: "@audio 1", "@Ljud1", "@Voice1", "@Röst1", "@sound1", "@Audio" …, and videos: "@Video 1",
+ * "@Vid1", "@Film2", "@Videoklipp1", "@Video" … (`ref` says which).
  */
 export function findMalformedTokens(prompt: string): MalformedToken[] {
   return scan(prompt).flatMap((s) =>
@@ -566,7 +683,10 @@ export function findMalformedTokens(prompt: string): MalformedToken[] {
   )
 }
 
-/** "@image3" → "@Image3", "@audio1" → "@Audio1". Near misses are left as they are: what they meant is a guess. */
+/**
+ * "@image3" → "@Image3", "@audio1" → "@Audio1", "@video1" → "@Video1". Near misses are left as they are: what they
+ * meant is a guess.
+ */
 export function canonicalizeTokens(prompt: string): string {
   if (typeof prompt !== 'string') return prompt
   let out = ''
@@ -591,6 +711,11 @@ export function imageToken(index: number): string {
 /** "@Audio2". */
 export function audioToken(index: number): string {
   return token('audio', index)
+}
+
+/** "@Video1". */
+export function videoToken(index: number): string {
+  return token('video', index)
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -639,6 +764,10 @@ function clips(n: number): string {
   return n === 1 ? '1 audio clip' : `${n} audio clips`
 }
 
+function videos(n: number): string {
+  return n === 1 ? '1 video' : `${n} videos`
+}
+
 /** Margin for window lengths that are sums or slider values (10 + 5 must not count as more than 15). */
 const SECONDS_EPSILON = 0.005
 
@@ -656,6 +785,25 @@ function seconds(value: number, limit?: number): string {
 
 function malformedMessage(s: ScannedMalformed): string {
   const raw = quoted(s.raw)
+  if (s.ref === 'video') {
+    switch (s.reason) {
+      case 'no-number':
+        return /^@video$/i.test(s.raw)
+          ? `${raw} has no number – write e.g. @Video1.`
+          : `${raw} is not a valid video reference – write @Video followed by the video's number, e.g. @Video1.`
+      case 'zero':
+        return `${raw} doesn't exist – videos are numbered from @Video1.`
+      case 'range':
+        return s.suggestion
+          ? `${raw} isn't read as several videos – write out each one: ${s.suggestion}.`
+          : `${raw} isn't read as several videos – write out each one, e.g. @Video1, @Video2.`
+      case 'hidden':
+        return `${raw} contains an invisible character (e.g. from pasted text) and isn't recognised – write it again as ${s.suggestion}.`
+      case 'glued':
+      case 'typo':
+        return `${raw} is not a valid video reference – did you mean ${s.suggestion}?`
+    }
+  }
   if (s.ref === 'audio') {
     switch (s.reason) {
       case 'no-number':
@@ -731,6 +879,28 @@ function audioModeMessage(kind: Kind, named: readonly ScannedReference[], field:
   )
 }
 
+/** Videos named in text-to-video or image-to-video, which send no reference videos. */
+function videoModeMessage(kind: Kind, named: readonly ScannedReference[], field: Field): string {
+  const { shown, count } = namedList(named)
+  const subject = field === 'prompt' ? 'The prompt' : 'The negative prompt'
+  const them = count === 1 ? 'the reference' : 'the references'
+  return (
+    `${subject} refers to ${shown}, but the ${modeLabel(kind)} mode sends no reference videos. Remove ${them} ` +
+    `or switch to the ${modeLabel('reference-to-video')} mode with Seedance.`
+  )
+}
+
+/** Videos named with a reference model that takes no reference videos. */
+function videoModelMessage(named: readonly ScannedReference[], field: Field): string {
+  const { shown, count } = namedList(named)
+  const subject = field === 'prompt' ? 'The prompt' : 'The negative prompt'
+  const them = count === 1 ? 'the reference' : 'the references'
+  return (
+    `${subject} refers to ${shown}, but the model doesn't take reference videos. Remove ${them} or switch to a ` +
+    `model that takes them (Seedance 2.0 or 2.5 with references).`
+  )
+}
+
 /** Audio named with a reference model that takes no reference audio. */
 function audioModelMessage(named: readonly ScannedReference[], field: Field): string {
   const { shown, count } = namedList(named)
@@ -769,6 +939,7 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
     const named = scanned.filter(isReference)
     const imagesNamed = named.filter((s) => s.ref === 'image')
     const audioNamed = named.filter((s) => s.ref === 'audio')
+    const videoNamed = named.filter((s) => s.ref === 'video')
     if (opts.continuing) {
       if (named.length) {
         general.push({
@@ -776,7 +947,7 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
           code: 'not-reference-mode',
           message: continuationReferencesMessage(text, field === 'prompt' ? 'the prompt' : 'the negative prompt'),
           ...at(named[0]),
-          ...(imagesNamed.length ? {} : { ref: 'audio' as const })
+          ...(imagesNamed.length ? {} : audioNamed.length ? { ref: 'audio' as const } : { ref: 'video' as const })
         })
       }
     } else {
@@ -797,9 +968,22 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
           ref: 'audio'
         })
       }
+      if (videoNamed.length) {
+        general.push({
+          severity: 'error',
+          code: 'video-not-supported',
+          message: videoModeMessage(opts.kind, videoNamed, field),
+          ...at(videoNamed[0]),
+          ref: 'video'
+        })
+      }
     }
   } else {
-    const videosSent = Math.max(0, Math.floor(Number(opts.referenceVideos)) || 0)
+    // Videos count as references: the Editor's video to edit, and reference videos the model takes.
+    const videoCount = Array.isArray(opts.videoLengths) ? opts.videoLengths.length : 0
+    const videoLimits = opts.videoLimits ?? DEFAULT_VIDEO_LIMITS
+    const referenceVideosSent = opts.videoInput !== false ? Math.min(videoCount, videoLimits.maxVideos) : 0
+    const videosSent = (Math.max(0, Math.floor(Number(opts.referenceVideos)) || 0)) + referenceVideosSent
     // A continuation in reference mode sends the previous clip's last frame after the pictures: they get every place
     // but the model's last, which is the frame's, and its token (frameIndex) names it. With more pictures than that
     // room, the frame takes the place of the last one that fits no more, and that number names no picture at all.
@@ -809,14 +993,20 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
     if (count === 0 && field === 'prompt' && !frame && (videosSent === 0 || tokens.length > 0)) {
       // Venice refuses reference audio on its own, so that is worth saying when audio is all there is.
       const audioOnly = !tokens.length && audioSent > 0
+      // With a model that takes reference videos, a video is as good a reference as a picture.
+      const orVideo = opts.videoInput === true
       general.push({
         severity: 'error',
         code: 'no-references',
         message: tokens.length
           ? `No reference images are chosen – add the images the prompt refers to (${andList([...new Set(tokens.map(canonicalText))])}).`
           : audioOnly
-            ? 'Audio references are only sent together with at least one reference image – add an image, e.g. of the person whose voice it is.'
-            : 'Add at least one reference image.',
+            ? orVideo
+              ? 'Audio references are only sent together with at least one reference image or video – add an image, e.g. of the person whose voice it is.'
+              : 'Audio references are only sent together with at least one reference image – add an image, e.g. of the person whose voice it is.'
+            : orVideo
+              ? 'Add at least one reference image or video.'
+              : 'Add at least one reference image.',
         ...(audioOnly ? { ref: 'audio' as const } : {})
       })
     }
@@ -902,21 +1092,25 @@ function validate(prompt: string, referenceCount: number, opts: ValidateOptions,
     }
 
     validateAudio(scanned, text, opts, field, audioCount, maxAudios, { general, placed, advice })
+    validateVideo(scanned, text, opts, field, videoCount, videoLimits, { general, placed, advice })
   }
 
   for (const s of scanned) {
     if (s.type !== 'mention') continue
     const aboutAudio = s.audioWord && opts.kind === 'reference-to-video' && opts.audioInput !== false
+    const aboutVideo = !aboutAudio && s.videoWord && opts.kind === 'reference-to-video' && opts.videoInput === true
     advice.push({
       severity: 'warning',
       code: 'malformed',
       message: aboutAudio
         ? `${prefix}${quoted(s.raw)} is not an audio reference and is sent as plain text – refer to audio clips with @Audio and the number, e.g. @Audio1.`
-        : opts.kind === 'reference-to-video'
-          ? `${prefix}${quoted(s.raw)} is not an image reference and is sent as plain text – refer to images with @Image and the number, e.g. “${s.name} (@Image1)”.`
-          : `${prefix}${quoted(s.raw)} is not an image reference and is sent as plain text.`,
+        : aboutVideo
+          ? `${prefix}${quoted(s.raw)} is not a video reference and is sent as plain text – refer to reference videos with @Video and the number, e.g. @Video1.`
+          : opts.kind === 'reference-to-video'
+            ? `${prefix}${quoted(s.raw)} is not an image reference and is sent as plain text – refer to images with @Image and the number, e.g. “${s.name} (@Image1)”.`
+            : `${prefix}${quoted(s.raw)} is not an image reference and is sent as plain text.`,
       ...at(s),
-      ...(aboutAudio ? { ref: 'audio' as const } : {})
+      ...(aboutAudio ? { ref: 'audio' as const } : aboutVideo ? { ref: 'video' as const } : {})
     })
   }
 
@@ -1080,6 +1274,143 @@ function validateAudio(
   }
 }
 
+/** Seedance 2.0's limits, the stricter: what the checks assume when the options don't say. */
+const DEFAULT_VIDEO_LIMITS: ReferenceVideoLimits = referenceVideoLimits('seedance-2-0-reference-to-video')!
+
+/**
+ * The @VideoN checks in reference mode: tokens against the videos there are and the family's count, near misses,
+ * and (main prompt only) each video's window, the windows' total and videos the prompt never mentions. The model
+ * family decides the limits (referenceVideoLimits: 2.0 ≤ 3 videos of 2–15 s, 15 s together; 2.5 ≤ 10 of 2–30 s, 30 s).
+ */
+function validateVideo(
+  scanned: readonly Scanned[],
+  text: string,
+  opts: ValidateOptions,
+  field: Field,
+  count: number,
+  limits: ReferenceVideoLimits,
+  out: { general: PromptIssue[]; placed: PromptIssue[]; advice: PromptIssue[] }
+): void {
+  const tokens = scanned.filter(isToken('video'))
+  const malformed = scanned.filter(isMalformed('video'))
+  const prefix = field === 'negative' ? 'Negative prompt: ' : ''
+  const at = (s: { start: number; end: number }): { start: number; end: number } => ({ start: s.start, end: s.end })
+  const max = limits.maxVideos
+
+  if (opts.videoInput === false) {
+    // Nothing goes out, so everything that names a video names nothing; videos that are there are left behind.
+    const named = scanned.filter((s): s is ScannedReference => isReference(s) && s.ref === 'video')
+    if (named.length) {
+      out.general.push({
+        severity: 'error',
+        code: 'video-not-supported',
+        message: videoModelMessage(named, field),
+        ...at(named[0]),
+        ref: 'video'
+      })
+    } else if (field === 'prompt' && count > 0) {
+      out.advice.push({
+        severity: 'warning',
+        code: 'video-not-supported',
+        message: "The model doesn't take reference videos – the videos are not sent.",
+        ref: 'video'
+      })
+    }
+    return
+  }
+
+  for (const t of tokens) {
+    if (t.index > count) {
+      out.placed.push({
+        severity: 'error',
+        code: 'video-out-of-range',
+        message: count
+          ? `${prefix}${canonicalText(t)} doesn't exist – only ${videos(count)} ${count === 1 ? 'is' : 'are'} chosen.`
+          : `${prefix}${canonicalText(t)} doesn't exist – no reference videos are chosen.`,
+        ...at(t),
+        ref: 'video'
+      })
+    } else if (t.index > max) {
+      out.placed.push({
+        severity: 'error',
+        code: 'video-over-limit',
+        message: `${prefix}${canonicalText(t)} is not sent – ${limits.family} takes at most ${videos(max)}.`,
+        ...at(t),
+        ref: 'video'
+      })
+    }
+  }
+  for (const m of malformed) {
+    out.placed.push({ severity: 'error', code: 'malformed', message: prefix + malformedMessage(m), ...at(m), ref: 'video' })
+  }
+
+  // The videos themselves are checked once, with the main prompt.
+  if (field !== 'prompt' || count === 0) return
+  const sent = Math.min(count, max)
+
+  // Venice takes 2–15 s (2.0) or 2–30 s (2.5) per video and 15 or 30 s in all; outside that it refuses the request.
+  const lengths = (opts.videoLengths ?? []).slice(0, sent)
+  let clipTooLong = false
+  let total = 0
+  lengths.forEach((length, i) => {
+    if (typeof length !== 'number' || !Number.isFinite(length)) return
+    total += Math.max(0, length)
+    if (length < limits.minSeconds - SECONDS_EPSILON) {
+      out.general.push({
+        severity: 'error',
+        code: 'video-length',
+        message: `${videoToken(i + 1)} is only ${seconds(Math.max(0, length), limits.minSeconds)} – a reference video must be at least ${limits.minSeconds} s.`,
+        ref: 'video'
+      })
+    } else if (length > limits.maxSeconds + SECONDS_EPSILON) {
+      clipTooLong = true
+      out.general.push({
+        severity: 'error',
+        code: 'video-length',
+        message: `${videoToken(i + 1)} is ${seconds(length, limits.maxSeconds)} – ${limits.family} takes reference videos of at most ${limits.maxSeconds} s.`,
+        ref: 'video'
+      })
+    }
+  })
+  // A video that is too long on its own already says what to shorten; the total follows from it.
+  if (!clipTooLong && total > limits.maxTotalSeconds + SECONDS_EPSILON) {
+    out.general.push({
+      severity: 'error',
+      code: 'video-too-long',
+      message: `The reference videos are ${seconds(total, limits.maxTotalSeconds)} together – ${limits.family} takes at most ${limits.maxTotalSeconds} s in total.`,
+      ref: 'video'
+    })
+  }
+
+  const mentioned = new Set([...tokens.map((t) => t.index), ...malformed.flatMap((m) => m.meant)])
+  const unused: number[] = []
+  for (let n = 1; n <= sent; n++) if (!mentioned.has(n)) unused.push(n)
+  if (unused.length && text.trim()) {
+    out.advice.push({
+      severity: 'warning',
+      code: 'unused-video',
+      message:
+        unused.length === sent && sent > 1 && !tokens.length
+          ? 'None of the videos is mentioned in the prompt – write @Video1, @Video2 … where they are to be used (e.g. “the camera moves as in @Video1”), so the model knows what to take from each.'
+          : unused.length === 1
+            ? `${videoToken(unused[0])} isn't mentioned in the prompt, so the model doesn't know what to take from the video.`
+            : `${describeNumbers(unused, 'video')} aren't mentioned in the prompt, so the model doesn't know what to take from the videos.`,
+      ref: 'video'
+    })
+  }
+  // Videos past the family's count are dropped when sending; tokens pointing at them are errors above.
+  const dropped: number[] = []
+  for (let n = max + 1; n <= count; n++) if (!mentioned.has(n)) dropped.push(n)
+  if (dropped.length && max > 0) {
+    out.advice.push({
+      severity: 'warning',
+      code: 'video-over-limit',
+      message: `${limits.family} takes at most ${videos(max)} – ${describeNumbers(dropped, 'video')} ${dropped.length === 1 ? 'is' : 'are'} not sent.`,
+      ref: 'video'
+    })
+  }
+}
+
 /**
  * Checks a prompt's references against what the generation has. `referenceCount` is how many reference
  * images are in the form (in order: @Image1 is the first); only the first `opts.maxImages` of them are sent.
@@ -1110,7 +1441,8 @@ export function validateNegativePrompt(
 type PromptParams = Pick<
   GenerationParams,
   'model' | 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios' | 'referenceVideos' | 'song'
->
+> &
+  Partial<Pick<GenerationParams, 'referenceTask'>>
 
 /**
  * What the checks need to know about a generation's params: the mode and the limits come from the model, only
@@ -1124,7 +1456,11 @@ export function validationContext(
   const kind = kindOfModelId(params.model)
   const referenceCount = kind === 'reference-to-video' ? (params.referenceImages?.length ?? 0) : 0
   const audios = kind === 'reference-to-video' ? (sanitizeReferenceAudios(params.referenceAudios) ?? []) : []
-  const videos = kind === 'reference-to-video' && Array.isArray(params.referenceVideos) ? params.referenceVideos.length : 0
+  const allVideos = kind === 'reference-to-video' ? referenceVideosOf(params) : []
+  // The Editor's video to edit is only counted; reference videos are checked with their windows.
+  const references = videosAreReferences(params)
+  const videos = references ? 0 : allVideos.length
+  const videoLimits = referenceVideoLimits(params.model)
   // A song clip's window of the song among them (song-send.ts withSong makes it the only one).
   const songAudio = kind === 'reference-to-video' && params.song ? songAudioNumber({ ...params, referenceAudios: audios }) : 0
   return {
@@ -1132,6 +1468,13 @@ export function validationContext(
     options: {
       kind,
       ...(videos ? { referenceVideos: videos } : {}),
+      ...(references
+        ? {
+            videoLengths: allVideos.map((v) => (v.length === undefined ? undefined : referenceVideoWindow(v).length)),
+            videoInput: supportsReferenceVideos(params.model),
+            ...(videoLimits ? { videoLimits } : {})
+          }
+        : {}),
       maxImages: maxReferenceImages(params.model),
       ...(extra.continuing ? { continuing: true } : {}),
       ...(extra.continuationFrame && kind === 'reference-to-video' ? { continuationFrame: true } : {}),
@@ -1189,7 +1532,16 @@ export function blockingPromptError(
 function continuationReferencesMessage(text: string, where: string, referencesPossible = false): string {
   const named = scan(text).filter(isReference)
   const { shown } = namedList(named)
-  const sends = named.some((s) => s.ref === 'audio') ? 'no reference images or audio clips' : 'no reference images'
+  const audio = named.some((s) => s.ref === 'audio')
+  const video = named.some((s) => s.ref === 'video')
+  const sends =
+    audio && video
+      ? 'no reference images, videos or audio clips'
+      : audio
+        ? 'no reference images or audio clips'
+        : video
+          ? 'no reference images or videos'
+          : 'no reference images'
   const instead = referencesPossible
     ? 'or choose “With references” for the clip'
     : "or turn off “Start on the previous clip's last frame”"
@@ -1209,9 +1561,10 @@ export function blockingContinuationError(
   params: PromptParams,
   opts: { referencesPossible?: boolean } = {}
 ): string | undefined {
-  const sent = { ...params, model: imageToVideoVariant(params.model), referenceAudios: undefined }
+  const sent = { ...params, model: imageToVideoVariant(params.model), referenceAudios: undefined, referenceVideos: undefined }
   const { prompt, negativePrompt } = validateGenerationParams(sent)
-  const isModeIssue = (i: PromptIssue): boolean => i.code === 'not-reference-mode' || i.code === 'audio-not-supported'
+  const isModeIssue = (i: PromptIssue): boolean =>
+    i.code === 'not-reference-mode' || i.code === 'audio-not-supported' || i.code === 'video-not-supported'
   const possible = !!opts.referencesPossible
   if (prompt.some(isModeIssue)) return continuationReferencesMessage(sent.prompt, 'the prompt', possible)
   if (negativePrompt.some(isModeIssue)) {
@@ -1220,7 +1573,10 @@ export function blockingContinuationError(
   return blockingPromptError(sent)
 }
 
-/** The params with the tokens of both prompts in canonical form ("@image3" → "@Image3", "@audio1" → "@Audio1"). */
+/**
+ * The params with the tokens of both prompts in canonical form ("@image3" → "@Image3", "@audio1" → "@Audio1",
+ * "@video1" → "@Video1").
+ */
 export function canonicalizeParams<T extends Pick<GenerationParams, 'prompt' | 'negativePrompt'>>(params: T): T {
   const prompt = canonicalizeTokens(params.prompt)
   const negativePrompt = params.negativePrompt === undefined ? undefined : canonicalizeTokens(params.negativePrompt)

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-label'
+import { referenceVideosOf, videosAreReferences } from '@shared/models'
 import { workKey, type Generation, type VideoModel } from '@shared/types'
 import { formatSeconds, formatUsd, mediaUrl } from '../lib/media'
 import type { Navigate } from '../lib/navigation'
@@ -340,6 +341,11 @@ function GenerationCard({
           {(g.params.referenceAudios?.length ?? 0) > 0 && (
             <span className="shrink-0" title="With a sound reference">
               · ♪
+            </span>
+          )}
+          {referenceVideosOf(g.params).length > 0 && videosAreReferences(g.params) && (
+            <span className="shrink-0" title="With a reference video (motion, camera, style)">
+              · video ref
             </span>
           )}
           {/* Overlays the metadata on hover so the model name isn't squeezed by invisible buttons. */}

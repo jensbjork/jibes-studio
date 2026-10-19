@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { referenceVideosOf } from '@shared/models'
 import { remapPromptReferences } from '@shared/prompt-remap'
-import type { GenerationParams, ReferenceAudio } from '@shared/types'
+import type { GenerationParams, ReferenceAudio, ReferenceVideo } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { stableJson } from './sequenceUtils'
 
@@ -40,11 +41,12 @@ function mergeFields<T extends object>(local: T, base: T, server: T): T {
 }
 
 /** A params-like value's reference lists (empty when it has none). */
-function referenceLists(p: object): { images: string[]; audios: ReferenceAudio[] } {
+function referenceLists(p: object): { images: string[]; audios: ReferenceAudio[]; videos: ReferenceVideo[] } {
   const { referenceImages, referenceAudios } = p as Partial<GenerationParams>
   return {
     images: Array.isArray(referenceImages) ? referenceImages : [],
-    audios: Array.isArray(referenceAudios) ? referenceAudios : []
+    audios: Array.isArray(referenceAudios) ? referenceAudios : [],
+    videos: referenceVideosOf(p as Partial<GenerationParams>)
   }
 }
 
@@ -70,7 +72,9 @@ function followReferences(out: Record<string, unknown>, promptFrom: object, nega
     out[key] = remapPromptReferences(
       text,
       { before: before.images, after: after.images },
-      { before: before.audios, after: after.audios }
+      { before: before.audios, after: after.audios },
+      undefined,
+      { before: before.videos, after: after.videos }
     )
   }
 }

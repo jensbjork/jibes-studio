@@ -4,19 +4,26 @@ import { basename, extname } from 'node:path'
 import {
   isUpscaleModel,
   isVideoInputModel,
+  paramsForSubmit,
   MAX_AUDIO_CLIP_SECONDS,
   MAX_REFERENCE_AUDIO_SECONDS,
+  MAX_REFERENCE_VIDEO_BYTES,
   MAX_REQUEST_MEDIA_BYTES,
   MIN_AUDIO_CLIP_SECONDS,
   referenceAudioWindow,
-  rememberModelKinds
+  referenceVideosOf,
+  rememberModelKinds,
+  supportsReferenceVideos,
+  takesReferenceTask,
+  videosAreReferences
 } from '@shared/models'
 import { rememberPromptLimits } from '@shared/prompt-compose'
-import { audioToken } from '@shared/prompt-refs'
+import { audioToken, toVeniceVideoTokens, videoToken } from '@shared/prompt-refs'
 import type { GenerationParams, ReferenceAudio, VideoModel, VideoModelType } from '@shared/types'
-import { encodeAudioClip, probe, probeAudio } from './ffmpeg'
+import { encodeAudioClip, probeAudio } from './ffmpeg'
 import { decodeImageFile } from './input-image'
 import { isInsideRoot } from './paths'
+import { referenceVideoProxy, referenceVideoSeconds, resolveReferenceVideos } from './reference-videos'
 
 const BASE_URL = 'https://api.venice.ai/api/v1'
 
@@ -128,7 +135,18 @@ export function ensureImagesExist(params: GenerationParams): void {
     }
   }
   video(params.sourceVideo, 'The source video')
-  for (const path of params.referenceVideos ?? []) video(path, 'A reference video')
+  const videos = referenceVideosOf(params)
+  if (!videosAreReferences(params)) {
+    for (const clip of videos) video(clip.path, 'A reference video')
+    return
+  }
+  videos.forEach((clip, i) => {
+    if (!existsSync(clip.path)) {
+      throw new Error(
+        `The reference video ${videoToken(i + 1)} no longer exists: ${basename(clip.path)}. Remove it and choose a new one.`
+      )
+    }
+  })
 }
 
 /** The MIME type a video file is sent as in a data URL (the proxies Studio makes are MP4). */
@@ -178,13 +196,13 @@ export function requestMediaBytes(body: Record<string, unknown>): number {
 }
 
 /**
- * Refuses before anything is read when the source and reference videos alone are already too large for one
- * request: a multi-GB file must never be loaded into memory to find that out.
+ * Refuses before anything is read when the videos sent as they are (a source video, the Editor's video to edit) are
+ * already too large for one request: a multi-GB file must never be loaded into memory to find that out. Reference
+ * videos are not counted here: only their windows' small proxies are sent (buildRequestBody checks those).
  */
 function checkVideoSizes(params: GenerationParams): void {
-  const paths = [params.sourceVideo, ...(params.referenceVideos ?? [])].filter(
-    (p): p is string => typeof p === 'string' && p !== ''
-  )
+  const whole = videosAreReferences(params) ? [] : referenceVideosOf(params).map((v) => v.path)
+  const paths = [params.sourceVideo, ...whole].filter((p): p is string => typeof p === 'string' && p !== '')
   let total = 0
   for (const path of paths) {
     try {
@@ -354,8 +372,10 @@ export async function imageRequestBytes(path: string): Promise<number> {
  * window they have; those without one are measured first (resolveReferenceAudios), which a submit has normally
  * done already. Video-input models get their source video as `video_url` (the file as is: the caller made the
  * proxy) and duration "Auto" (the result follows the source); an upscaler gets only that, its factor and the model.
- * Seedance reference-to-video gets its reference videos and task. Refused when the raw media would pass
- * MAX_REQUEST_MEDIA_BYTES.
+ * Seedance reference-to-video gets its reference videos: references as the proxies of their windows
+ * (reference-videos.ts; measured first when a window isn't filled in), with `omni_reference_task_type: "reference"` on
+ * Seedance 2.5 (2.0 doesn't take the field) and the prompts' @VideoN written "<Video N>" (toVeniceVideoTokens); the
+ * Editor's video to edit as it is, with its task. Refused when the raw media would pass MAX_REQUEST_MEDIA_BYTES.
  */
 export async function buildRequestBody(params: GenerationParams): Promise<Record<string, unknown>> {
   ensureImagesExist(params)
@@ -375,14 +395,18 @@ export async function buildRequestBody(params: GenerationParams): Promise<Record
   if (params.referenceAudios?.some((a) => a.start === undefined || a.length === undefined)) {
     params = await resolveReferenceAudios(params)
   }
+  const references = videosAreReferences(params)
+  if (references && referenceVideosOf(params).some((v) => v.start === undefined || v.length === undefined)) {
+    params = await resolveReferenceVideos(params)
+  }
   const videoInput = isVideoInputModel(params.model)
   if (videoInput && !params.sourceVideo) throw new Error('The source video is missing.')
   const body: Record<string, unknown> = {
     model: params.model,
-    prompt: params.prompt,
+    prompt: toVeniceVideoTokens(params.prompt),
     duration: videoInput ? 'Auto' : params.duration
   }
-  if (params.negativePrompt) body.negative_prompt = params.negativePrompt
+  if (params.negativePrompt) body.negative_prompt = toVeniceVideoTokens(params.negativePrompt)
   if (params.resolution) body.resolution = params.resolution
   if (params.aspectRatio) body.aspect_ratio = params.aspectRatio
   if (params.audio !== undefined) body.audio = params.audio
@@ -396,26 +420,31 @@ export async function buildRequestBody(params: GenerationParams): Promise<Record
     body.reference_audio_urls = mp3s.map((mp3) => `data:audio/mpeg;base64,${mp3.toString('base64')}`)
   }
   if (videoInput && params.sourceVideo) body.video_url = await videoToDataUrl(params.sourceVideo)
-  if (params.referenceVideos?.length) {
-    body.reference_video_urls = await Promise.all(params.referenceVideos.map(videoToDataUrl))
+  const videos = referenceVideosOf(params)
+  if (videos.length && references) {
+    // One at a time: each may have to be cut first, and ffmpeg is busy enough with one.
+    const urls: string[] = []
+    for (const [i, clip] of videos.entries()) {
+      const proxy = await referenceVideoProxy(clip, i)
+      const url = await videoToDataUrl(proxy)
+      if (dataUrlBytes(url) > MAX_REFERENCE_VIDEO_BYTES) {
+        throw new Error(`${videoToken(i + 1)} is too large for Venice (at most 50 MB). Select a shorter part.`)
+      }
+      urls.push(url)
+    }
+    body.reference_video_urls = urls
+    if (takesReferenceTask(params.model)) body.omni_reference_task_type = 'reference'
+  } else if (!references) {
+    // The Editor's video to edit, as it always went: the file as is, with its task.
+    if (videos.length) body.reference_video_urls = await Promise.all(videos.map((v) => videoToDataUrl(v.path)))
+    if (params.referenceTask) body.omni_reference_task_type = params.referenceTask
   }
-  if (params.referenceTask) body.omni_reference_task_type = params.referenceTask
   if (requestMediaBytes(body) > MAX_REQUEST_MEDIA_BYTES) throw new Error(REQUEST_TOO_LARGE)
   return body
 }
 
 /** How long a video-input quote (made on a stand-in) is reused. */
 const VIDEO_QUOTE_TTL_MS = 10 * 60_000
-
-/** The reference videos' total length in seconds (ffprobe), rounded to milliseconds, for a Seedance quote. */
-async function referenceVideoSeconds(paths: readonly string[]): Promise<number> {
-  let total = 0
-  for (const path of paths) {
-    if (!existsSync(path)) throw new Error(`A reference video no longer exists: ${basename(path)}.`)
-    total += (await probe(path)).duration
-  }
-  return Math.round(total * 1000) / 1000
-}
 
 export type RetrieveResult =
   | { state: 'processing'; averageExecutionTime?: number; executionDuration?: number }
@@ -489,8 +518,10 @@ export class VeniceClient {
    * their source as `video_url`: the caller passes a few-KB stand-in of the same length (and, for an upscaler, the
    * same size and frame rate), never the real proxy, since Venice prices them by length, resolution and factor only.
    * An upscaler's quote carries the factor both as `resolution: "<n>x"` and `upscale_factor`, and needs the API key.
-   * Seedance reference-to-video with reference videos sends their total length, measured here. Video-input quotes
-   * are cached for 10 minutes per model, resolution, factor and stand-in file.
+   * Seedance reference-to-video with reference videos sends their total length (`reference_video_total_duration`,
+   * the "input with video" price), measured here: the windows that are sent (within the family's count), or the
+   * Editor's whole video to edit. Video-input quotes are cached for 10 minutes per model, resolution, factor and
+   * stand-in file.
    */
   async quote(params: GenerationParams): Promise<number> {
     if (isVideoInputModel(params.model)) return this.quoteVideoInput(params)
@@ -498,8 +529,9 @@ export class VeniceClient {
     if (params.resolution) body.resolution = params.resolution
     if (params.aspectRatio) body.aspect_ratio = params.aspectRatio
     if (params.audio !== undefined) body.audio = params.audio
-    if (params.referenceVideos?.length) {
-      body.reference_video_total_duration = await referenceVideoSeconds(params.referenceVideos)
+    const videos = supportsReferenceVideos(params.model) ? paramsForSubmit(params).referenceVideos : undefined
+    if (videos?.length) {
+      body.reference_video_total_duration = await referenceVideoSeconds({ ...params, referenceVideos: videos })
     }
     const res = await this.post<{ quote: number }>('/video/quote', body, false)
     return res.quote

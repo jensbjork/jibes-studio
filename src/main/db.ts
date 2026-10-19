@@ -20,6 +20,7 @@ import {
   toStoredPath,
   withoutLocalPaths
 } from './paths'
+import { referenceVideosOf } from '@shared/models'
 import { noteRequestedBy } from './requested-by'
 
 let db: Database.Database | undefined
@@ -803,6 +804,16 @@ function audioPaths(p: Partial<GenerationParams>): unknown[] {
 }
 
 /**
+ * The reference video paths of params: plain path strings (rows from before windows existed) and { path } windows
+ * alike (anything else gives undefined).
+ */
+function videoPaths(p: Partial<GenerationParams>): unknown[] {
+  const videos = (p as { referenceVideos?: unknown }).referenceVideos
+  if (!Array.isArray(videos)) return []
+  return videos.map((v: unknown) => (v && typeof v === 'object' ? (v as { path?: unknown }).path : v))
+}
+
+/**
  * The song file and its vocals in a sequence's defaults (`song`, sequence-store.parseSong); a clip's own `song` (its
  * place in the song) holds no paths, so nothing is found there.
  */
@@ -823,8 +834,7 @@ function paramFilePaths(json: string): string[] {
     const p = JSON.parse(json) as Partial<GenerationParams> | null
     if (!p || typeof p !== 'object') return []
     const refs = Array.isArray(p.referenceImages) ? p.referenceImages : []
-    const videos = Array.isArray(p.referenceVideos) ? p.referenceVideos : []
-    return [p.startImage, p.endImage, ...refs, ...audioPaths(p), p.sourceVideo, ...videos, ...songPaths(p)].filter(
+    return [p.startImage, p.endImage, ...refs, ...audioPaths(p), p.sourceVideo, ...videoPaths(p), ...songPaths(p)].filter(
       (v): v is string => typeof v === 'string' && v !== ''
     )
   } catch {
@@ -957,7 +967,16 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
     }) as GenerationParams['referenceAudios']
   }
   if ('sourceVideo' in out) out.sourceVideo = one(out.sourceVideo) as string | undefined
-  if (Array.isArray(out.referenceVideos)) out.referenceVideos = out.referenceVideos.map(one) as string[]
+  // Reference videos: a plain path (a row from before windows existed) stays a string, a window keeps its fields.
+  if (Array.isArray(out.referenceVideos)) {
+    out.referenceVideos = (out.referenceVideos as unknown[]).map((v: unknown) => {
+      if (typeof v === 'string') return one(v)
+      if (!v || typeof v !== 'object') return v
+      const path = (v as { path?: unknown }).path
+      const next = one(path)
+      return next === path ? v : { ...v, path: next }
+    }) as GenerationParams['referenceVideos']
+  }
   // A sequence's song (its defaults): the file and its vocals. A clip's place in the song has no paths.
   const song = (out as { song?: unknown }).song
   if (song && typeof song === 'object' && !Array.isArray(song)) {
@@ -1182,7 +1201,7 @@ export function followRewrites(params: GenerationParams, mark: number): Generati
   // An edit's proxy in Underlag/ follows its folder when the edit is renamed while the take is being sent.
   if (typeof params.sourceVideo === 'string') result.sourceVideo = follow(params.sourceVideo)
   if (Array.isArray(params.referenceVideos)) {
-    result.referenceVideos = params.referenceVideos.map((v) => (typeof v === 'string' ? (follow(v) ?? v) : v))
+    result.referenceVideos = referenceVideosOf(params).map((v) => ({ ...v, path: follow(v.path) ?? v.path }))
   }
   return result
 }

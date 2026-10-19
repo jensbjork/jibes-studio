@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import AudioPlayButton from '../pickers/AudioPlayButton'
-import { KIND_TONE } from '../pickers/assetKinds'
+import { videoLabelParts, type FormVideo } from '../pickers/videoRefs'
+import VideoWindowPreview from '../pickers/VideoWindowPreview'
+import { KIND_TONE, VIDEO_TONE } from '../pickers/assetKinds'
 import { audioLabel, audioLabelParts, windowLabel, type FormAudio } from '../pickers/audioRefs'
 import { Thumb } from './TokenMenu'
 import { fileName, markKey, type PromptReference } from './promptText'
@@ -8,10 +11,14 @@ interface Props {
   references: PromptReference[]
   /** The reference audio clips, listed after the pictures. */
   audios: FormAudio[]
+  /** The reference videos, listed last. */
+  videos?: FormVideo[]
   /** @ImageN numbers the prompt mentions. */
   mentioned: ReadonlySet<number>
   /** @AudioN numbers the prompt mentions. */
   mentionedAudio: ReadonlySet<number>
+  /** @VideoN numbers the prompt mentions. */
+  mentionedVideo?: ReadonlySet<number>
   /**
    * @ImageN / @AudioN numbers the References legend explains (its description, or who wears an outfit): not marked
    * as unmentioned, since the model is told what they are.
@@ -31,16 +38,18 @@ interface Props {
 const row = 'flex w-full items-center gap-2 px-2 py-1 text-left text-[11px] transition hover:bg-raised'
 
 /**
- * The key to the prompt's @ImageN and @AudioN tokens: one row per reference image and per audio clip (with a
- * play button for the part that is sent), with a warning dot on the ones the prompt never mentions and the
- * References legend doesn't explain either ("described" on those it does). Clicking a row inserts its token at the
- * caret.
+ * The key to the prompt's @ImageN, @AudioN and @VideoN tokens: one row per reference image, per audio clip (with a
+ * play button for the part that is sent) and per video (its part plays while the row is hovered), with a warning dot
+ * on the ones the prompt never mentions and the References legend doesn't explain either ("described" on those it
+ * does). Clicking a row inserts its token at the caret.
  */
 export default function ReferenceStrip({
   references,
   audios,
+  videos = [],
   mentioned,
   mentionedAudio,
+  mentionedVideo,
   explained,
   explainedAudio,
   showUnused,
@@ -49,7 +58,8 @@ export default function ReferenceStrip({
   onHighlight,
   onInsert
 }: Props) {
-  if (!references.length && !audios.length) return null
+  const [playing, setPlaying] = useState<string>()
+  if (!references.length && !audios.length && !videos.length) return null
   return (
     <ul
       aria-label="The references in the prompt"
@@ -141,6 +151,49 @@ export default function ReferenceStrip({
             <span className="shrink-0 pr-2">
               <AudioPlayButton path={a.path} start={a.start} length={a.length} label={label} className="h-5 w-5" />
             </span>
+          </li>
+        )
+      })}
+      {videos.map((v) => {
+        // Videos aren't described by the legend: unmentioned is unmentioned.
+        const unused = showUnused && v.sent && !mentionedVideo?.has(v.index)
+        const token = `@Video${v.index}`
+        const key = markKey('video', v.index)
+        const { name, detail } = videoLabelParts(v)
+        return (
+          <li key={`video:${v.index}:${v.path}`}>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onInsert(token)}
+              onMouseEnter={() => {
+                onHighlight(key)
+                setPlaying(key)
+              }}
+              onMouseLeave={() => setPlaying((p) => (p === key ? undefined : p))}
+              onFocus={() => onHighlight(key)}
+              onBlur={() => onHighlight(undefined)}
+              title={
+                !v.sent
+                  ? 'Not sent with this model'
+                  : unused
+                    ? `Not mentioned in the prompt – click to insert ${token} at the cursor`
+                    : `Insert ${token} at the cursor`
+              }
+              className={`${row} ${highlighted === key ? 'bg-raised' : ''} ${v.sent ? '' : 'opacity-45'}`}
+            >
+              <span className={`w-[52px] shrink-0 font-medium ${VIDEO_TONE.text}`}>{token}</span>
+              <span className="relative h-5 w-9 shrink-0 overflow-hidden rounded bg-raised">
+                <VideoWindowPreview path={v.path} start={v.start} length={v.length} playing={playing === key} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">
+                {name}
+                <span className="text-muted">
+                  {' '}
+                  · {detail} · {windowLabel(v)}
+                </span>
+              </span>
+              <Status sent={v.sent} unused={unused} described={false} />
+            </button>
           </li>
         )
       })}

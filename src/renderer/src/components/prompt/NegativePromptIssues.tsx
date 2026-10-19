@@ -24,14 +24,17 @@ interface Props {
   /** Switches to a reference model that takes audio (named `audioModelName`). */
   onUseAudioModel?: () => void
   audioModelName?: string
+  /** Switches to a model that takes reference videos (named `videoModelName`). */
+  onUseVideoModel?: () => void
+  videoModelName?: string
 }
 
-/** The errors in the negative prompt's @ImageN and @AudioN references (they block generating too). */
+/** The errors in the negative prompt's @ImageN, @AudioN and @VideoN references (they block generating too). */
 export function negativePromptIssues(value: string, checks: PromptChecks): PromptIssue[] {
   return value ? validateNegativePrompt(value, checks.referenceCount, checks.options) : []
 }
 
-/** Problems with @ImageN and @AudioN in the negative prompt, under its field. Same rules and fixes as the prompt. */
+/** Problems with @ImageN, @AudioN and @VideoN in the negative prompt, under its field. Same rules and fixes as the prompt. */
 export default function NegativePromptIssues({
   id,
   value,
@@ -41,7 +44,9 @@ export default function NegativePromptIssues({
   checks,
   onSwitchToReference,
   onUseAudioModel,
-  audioModelName
+  audioModelName,
+  onUseVideoModel,
+  videoModelName
 }: Props) {
   const checksKey = JSON.stringify(checks)
   const views = useMemo(
@@ -56,9 +61,17 @@ export default function NegativePromptIssues({
         canSwitchToReference: !!onSwitchToReference,
         canAddReferences: false,
         audioModelName: onUseAudioModel ? audioModelName : undefined,
+        videoModelName: onUseVideoModel ? videoModelName : undefined,
         adviseUnused: false
       }),
-    [value, checksKey, kind, !!onSwitchToReference, onUseAudioModel ? audioModelName : undefined]
+    [
+      value,
+      checksKey,
+      kind,
+      !!onSwitchToReference,
+      onUseAudioModel ? audioModelName : undefined,
+      onUseVideoModel ? videoModelName : undefined
+    ]
   )
 
   const setValue = (next: string): void => {
@@ -82,6 +95,7 @@ export default function NegativePromptIssues({
     else if (action.type === 'choose') reveal(action.range)
     else if (action.type === 'switch-to-reference') onSwitchToReference?.()
     else if (action.type === 'use-audio-model') onUseAudioModel?.()
+    else if (action.type === 'use-video-model') onUseVideoModel?.()
   }
 
   return <PromptIssueList id={id} issues={views} onFix={fix} onReveal={reveal} />

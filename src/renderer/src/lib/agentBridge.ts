@@ -9,6 +9,8 @@ import {
   maxReferenceImages,
   paramsForSubmit,
   pickOption,
+  referenceVideoLimits,
+  referenceVideosOf,
   supportsAudioInput,
   supportsEndImage,
   type Kind
@@ -30,11 +32,13 @@ import type {
   AssetKind,
   GenerationParams,
   ReferenceAudio,
+  ReferenceVideo,
   VideoModel
 } from '@shared/types'
 import { modelForKind } from '../components/ParamsForm'
 import { addPaths, sameList } from '../components/pickers/assetRefs'
 import { addAudios, audioSourcesByPath, sameAudios, windowOf } from '../components/pickers/audioRefs'
+import { appendVideoWindows } from '../components/pickers/videoRefs'
 import { ASSET_VIEW } from './assets'
 import { followGenerateAudio, generateParamsFrozen, getGenerateParams, setGenerateParams } from './generateStore'
 import { ipcErrorMessage, loadModels } from './hooks'
@@ -271,6 +275,19 @@ export function applySetForm(
         `${modelLabel} doesn't take sound references – the sound (${audios} ${audios === 1 ? 'clip' : 'clips'}) stays in the form but isn't sent.`
       )
     }
+    // Reference videos: kept in the form, but only a Seedance 2.x reference model sends them, within its family's limits.
+    const videos = referenceVideosOf(current).length
+    const was = referenceVideoLimits(current.model)
+    const now = referenceVideoLimits(modelId)
+    if (videos && was && !now) {
+      notes.push(
+        `${modelLabel} doesn't take reference videos – the ${videos === 1 ? 'video stays' : `${videos} videos stay`} in the form but ${videos === 1 ? "isn't" : "aren't"} sent.`
+      )
+    } else if (videos && now && was && now.family !== was.family && videos > now.maxVideos) {
+      notes.push(
+        `${now.family} takes at most ${now.maxVideos} reference videos – the last ${videos - now.maxVideos} of ${videos} ${videos - now.maxVideos === 1 ? "isn't" : "aren't"} sent.`
+      )
+    }
   }
 
   const unknownModel = () =>
@@ -420,13 +437,34 @@ function parseAudios(value: unknown): ReferenceAudio[] | undefined {
   })
 }
 
+/** set_references' `videos`: reference videos with their windows (main resolved the agent's ids and measured them). */
+function parseVideos(value: unknown): ReferenceVideo[] | undefined {
+  if (value === undefined || value === null) return undefined
+  const unreadable = "The reference videos couldn't be read (videos must be a list of video files and their windows)."
+  if (!Array.isArray(value)) throw new BridgeError(unreadable)
+  return value.map((item): ReferenceVideo => {
+    const v = typeof item === 'string' ? { path: item } : asArgs(item)
+    const start = seconds(v.start)
+    const length = seconds(v.length)
+    if (typeof v.path !== 'string' || !isAbsolutePath(v.path) || Number.isNaN(start) || Number.isNaN(length)) {
+      throw new BridgeError(unreadable)
+    }
+    return {
+      path: v.path,
+      ...(start !== undefined ? { start } : {}),
+      ...(length !== undefined ? { length } : {})
+    }
+  })
+}
+
 /**
  * Applies set_references: the given photos (main has resolved asset ids to paths) replace the reference
  * images or are added after them, as many as the model takes, and the same for the reference audio (`audios`;
- * left out, replace clears the audio and append keeps it). Audio is only added for a model that takes it, as
- * many clips as fit (count and total length). Switches to reference mode if needed. The prompt is left alone:
- * an agent typically writes it for the new lists right after. `assets` tells the audio clips' windows when main
- * left them out.
+ * left out, replace clears the audio and append keeps it) and the reference videos (`videos`, with their windows;
+ * the same rule). Audio is only added for a model that takes it, as many clips as fit (count and total length);
+ * videos only for a Seedance 2.x reference model, within its family's count and total. Switches to reference mode if
+ * needed. The prompt is left alone: an agent typically writes it for the new lists right after. `assets` tells the
+ * audio clips' windows when main left them out.
  */
 export function applySetReferences(
   current: GenerationParams,
@@ -442,6 +480,7 @@ export function applySetReferences(
   const mode = args.mode ?? 'replace'
   if (mode !== 'replace' && mode !== 'append') throw new BridgeError('mode must be “replace” or “append”.')
   const wantedAudios = parseAudios(field(args, 'audios'))
+  const wantedVideos = parseVideos(field(args, 'videos'))
 
   const notes: string[] = []
   let next: GenerationParams = { ...current }
@@ -475,6 +514,24 @@ export function applySetReferences(
     }
   }
   next.referenceAudios = audios.length ? audios : undefined
+
+  const videosBefore = referenceVideosOf(current)
+  let videos = mode === 'append' ? videosBefore : []
+  if (wantedVideos?.length) {
+    const limits = referenceVideoLimits(next.model)
+    const name = models.find((m) => m.id === next.model)?.name ?? next.model
+    if (!limits) {
+      notes.push(
+        `${name} doesn't take reference videos, so the videos weren't added. Pick a Seedance 2.x reference model ` +
+          'to send them.'
+      )
+    } else {
+      const change = appendVideoWindows(videos, wantedVideos, limits)
+      videos = change.videos
+      if (change.note) notes.push(change.note)
+    }
+  }
+  next.referenceVideos = videos.length ? videos : undefined
   // "worn by" choices for outfits (or characters) no longer among the pictures are forgotten, as the form does it.
   const owners = new Map(assets.flatMap((a) => a.images.map((img) => [pathKey(img.path), a.id] as const)))
   const present = new Set(refs.flatMap((path) => owners.get(pathKey(path)) ?? []))
@@ -500,7 +557,32 @@ export interface MovedReference {
 
 /** What reorder_references did: the form, notes, and every token that got a new number. */
 export interface ReorderChange extends FormChange {
-  moved: { images: MovedReference[]; audios: MovedReference[] }
+  moved: { images: MovedReference[]; audios: MovedReference[]; videos: MovedReference[] }
+}
+
+/**
+ * reorder_references' `videos`: tokens ("@Video2", or its number) or the form's own paths – main resolved the
+ * agent's generation and export ids to paths. Undefined when the list was left out.
+ */
+function videoOrderEntries(value: unknown, paths: readonly string[]): string[] | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value)) throw new BridgeError('videos must be a list of references (@Video1 …) in the new order.')
+  const keys = paths.map(pathKey)
+  return value.map((item): string => {
+    if (typeof item === 'number') {
+      if (!Number.isInteger(item) || item < 1) throw new BridgeError(`${item} isn't a valid @Video number.`)
+      return `@Video${item}`
+    }
+    const raw = typeof item === 'string' ? item : asArgs(item).path
+    if (typeof raw !== 'string' || !raw.trim()) throw new BridgeError('videos contains an empty or unreadable entry.')
+    const entry = raw.trim()
+    if (isAbsolutePath(entry)) {
+      const i = keys.indexOf(pathKey(entry))
+      return i === -1 ? entry : paths[i]
+    }
+    const bare = /^[@＠]?\s*video\s*0*([1-9][0-9]*)$/i.exec(entry)
+    return bare ? `@Video${bare[1]}` : entry
+  })
 }
 
 const pathKey = (path: string): string => path.normalize('NFC')
@@ -584,11 +666,12 @@ function orderEntries(
 }
 
 /**
- * Applies reorder_references to the form: the reference images (`images`) and/or audio clips (`audios`) in a new
- * order – the ones named first, the rest after them in their current order – with every @ImageN and @AudioN token
- * of the prompt and the negative prompt renumbered so it still names the same picture or clip, all in one change
- * (the shared reorderReferences, which sequence clips use too). Nothing is added or removed, so unlike
- * set_references the prompt stays right. All or nothing: an entry that names no reference refuses the command.
+ * Applies reorder_references to the form: the reference images (`images`), audio clips (`audios`) and/or reference
+ * videos (`videos`) in a new order – the ones named first, the rest after them in their current order – with every
+ * @ImageN, @AudioN and @VideoN token of the prompt and the negative prompt renumbered so it still names the same
+ * picture, clip or video, all in one change (the shared reorderReferences, which sequence clips use too). Nothing is
+ * added or removed, so unlike set_references the prompt stays right. All or nothing: an entry that names no
+ * reference refuses the command.
  */
 export function applyReorderReferences(
   current: GenerationParams,
@@ -600,8 +683,9 @@ export function applyReorderReferences(
   const audios = current.referenceAudios ?? []
   const imageEntries = orderEntries(field(args, 'images') ?? field(args, 'paths'), 'image', images, assets)
   const audioEntries = orderEntries(field(args, 'audios'), 'audio', audios.map((a) => a.path), assets)
-  if (!imageEntries && !audioEntries) {
-    throw new BridgeError('Give images and/or audios: the references in the order they should have.')
+  const videoEntries = videoOrderEntries(field(args, 'videos'), referenceVideosOf(current).map((v) => v.path))
+  if (!imageEntries && !audioEntries && !videoEntries) {
+    throw new BridgeError('Give images, audios and/or videos: the references in the order they should have.')
   }
   if (kindOfModelId(current.model) !== 'reference-to-video') {
     throw new BridgeError(
@@ -614,22 +698,25 @@ export function applyReorderReferences(
   try {
     if (imageEntries?.length) next = reorderReferences(next, 'image', imageEntries)
     if (audioEntries?.length) next = reorderReferences(next, 'audio', audioEntries)
+    if (videoEntries?.length) next = reorderReferences(next, 'video', videoEntries)
   } catch (e) {
     throw new BridgeError(`Nothing was changed. ${e instanceof Error ? e.message : String(e)}`)
   }
 
   const moved = {
     images: referenceMoves(current, next, 'image'),
-    audios: referenceMoves(current, next, 'audio')
+    audios: referenceMoves(current, next, 'audio'),
+    videos: referenceMoves(current, next, 'video')
   }
   const notes: string[] = []
-  if (!moved.images.length && !moved.audios.length) {
+  if (!moved.images.length && !moved.audios.length && !moved.videos.length) {
     notes.push('The references were already in that order – nothing was changed.')
     return { params: current, notes, moved }
   }
   const renumbered = (list: readonly MovedReference[]) => list.map((m) => `${m.from} → ${m.to}`).join(', ')
   if (moved.images.length) notes.push(`The images have new numbers: ${renumbered(moved.images)}.`)
   if (moved.audios.length) notes.push(`The sounds have new numbers: ${renumbered(moved.audios)}.`)
+  if (moved.videos.length) notes.push(`The videos have new numbers: ${renumbered(moved.videos)}.`)
   const promptFollowed = next.prompt !== current.prompt
   const negativeFollowed = (next.negativePrompt ?? '') !== (current.negativePrompt ?? '')
   if (promptFollowed || negativeFollowed) {
@@ -639,7 +726,7 @@ export function applyReorderReferences(
         : promptFollowed
           ? 'The prompt'
           : 'The negative prompt'
-    notes.push(`${which} followed along: every @ reference points at the same image or sound as before.`)
+    notes.push(`${which} followed along: every @ reference points at the same image, sound or video as before.`)
   }
   notes.push(...capNotes(images, next.referenceImages ?? [], maxReferenceImages(current.model), assets))
   return { params: next, notes, moved }

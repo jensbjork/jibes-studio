@@ -15,8 +15,9 @@ import { maxReferenceAudios, type Kind } from '@shared/models'
 import { validatePromptReferences, type ReferenceKind, type ValidateOptions } from '@shared/prompt-refs'
 import { remapPromptReferences } from '@shared/prompt-remap'
 import type { Asset, PromptLanguage } from '@shared/types'
-import { KIND_TONE, OWN_IMAGE_TOKEN } from '../pickers/assetKinds'
+import { KIND_TONE, OWN_IMAGE_TOKEN, VIDEO_TONE } from '../pickers/assetKinds'
 import type { FormAudio } from '../pickers/audioRefs'
+import type { FormVideo } from '../pickers/videoRefs'
 import PromptIssueList from './PromptIssueList'
 import {
   applyEdits,
@@ -27,6 +28,7 @@ import {
   markKey,
   mentionedAudioIndices,
   mentionedIndices,
+  mentionedVideoIndices,
   promptMarks,
   removeRanges,
   segmentsOf,
@@ -76,6 +78,8 @@ interface Props {
   references: PromptReference[]
   /** Every reference audio clip in the form, in order (also the ones that aren't sent). */
   audios: FormAudio[]
+  /** Every reference video in the form, in order (also the ones that aren't sent); omitted: none. */
+  videos?: FormVideo[]
   /** The model's limit on reference images. */
   maxImages: number
   /** The library assets among the references, and what naming them inserts. */
@@ -96,6 +100,11 @@ interface Props {
   /** Switches to a reference model that takes audio (named `audioModelName`); offered when this one doesn't. */
   onUseAudioModel?: () => void
   audioModelName?: string
+  /** Takes videos (1-based @VideoN numbers) out of the form; offered when they are too long or not sent. */
+  onRemoveVideo?: (indices: number[]) => void
+  /** Switches to a model that takes reference videos (named `videoModelName`); offered when this one doesn't. */
+  onUseVideoModel?: () => void
+  videoModelName?: string
   /**
    * A clip of a sequence cut to a song: set What the clip hears to No song (offered when its place is too short), and
    * go to Who sings (offered when the singer isn't among its pictures).
@@ -125,13 +134,17 @@ interface MenuState {
   tail: boolean
 }
 
+/** No reference videos (a stable empty list, so memos don't run again). */
+const NO_VIDEOS: FormVideo[] = []
+
 /** How long "Undo" is offered after the prompt was replaced from outside while the user was typing. */
 const REPLACED_UNDO_MS = 30_000
 
-/** The reference pictures and clips (paths, in @ImageN / @AudioN order) a text was written against. */
+/** The reference pictures, clips and videos (paths, in @ImageN / @AudioN / @VideoN order) a text was written against. */
 interface ShownLists {
   images: string[]
   audios: string[]
+  videos: string[]
 }
 
 /** Text replaced from outside, with the lists it was written against (undefined outside reference mode). */
@@ -157,6 +170,8 @@ function markClass(mark: PromptMark, lit: string | undefined): string {
   if (mark.tone === 'warning') {
     return 'text-amber-200 underline decoration-amber-400/80 decoration-dotted underline-offset-[3px]'
   }
+  // Videos are no asset's: they have a colour of their own.
+  if (mark.ref === 'video') return `rounded-[3px] ${VIDEO_TONE.token}${glow}`
   // Clips are coloured by their asset like pictures, and underlined so a voice reads apart from a photo.
   const audio = mark.ref === 'audio' ? ' underline decoration-current/60 decoration-dotted underline-offset-[3px]' : ''
   return `rounded-[3px] ${mark.kind ? KIND_TONE[mark.kind].token : OWN_IMAGE_TOKEN}${audio}${glow}`
@@ -186,6 +201,7 @@ export default function PromptEditor(props: Props) {
     checks,
     references,
     audios,
+    videos = NO_VIDEOS,
     maxImages,
     groups,
     library,
@@ -195,6 +211,9 @@ export default function PromptEditor(props: Props) {
     onRemoveAudio,
     onUseAudioModel,
     audioModelName,
+    onRemoveVideo,
+    onUseVideoModel,
+    videoModelName,
     songFixes,
     language,
     belowInput,
@@ -229,8 +248,11 @@ export default function PromptEditor(props: Props) {
   // back must be renumbered to the lists as they are then, or its tokens would name other pictures.
   const reference = kind === 'reference-to-video'
   const lists = useMemo<ShownLists | undefined>(
-    () => (reference ? { images: references.map((r) => r.path), audios: audios.map((a) => a.path) } : undefined),
-    [reference, references, audios]
+    () =>
+      reference
+        ? { images: references.map((r) => r.path), audios: audios.map((a) => a.path), videos: videos.map((v) => v.path) }
+        : undefined,
+    [reference, references, audios, videos]
   )
   const shownLists = useRef(lists)
   useLayoutEffect(() => {
@@ -245,7 +267,9 @@ export default function PromptEditor(props: Props) {
     return remapPromptReferences(
       replaced.text,
       { before: was.images, after: lists.images },
-      { before: clips(was.audios), after: clips(lists.audios) }
+      { before: clips(was.audios), after: clips(lists.audios) },
+      undefined,
+      { before: clips(was.videos), after: clips(lists.videos) }
     )
   }, [replaced, lists])
 
@@ -272,13 +296,21 @@ export default function PromptEditor(props: Props) {
   )
   const audioInput = reference && checks.options.audioInput !== false
   const maxAudios = checks.options.maxAudios ?? maxReferenceAudios('')
+  const videoInput = reference && checks.options.videoInput === true
+  const maxVideos = checks.options.videoLimits?.maxVideos ?? 0
   const marks = useMemo(
-    () => promptMarks(text, { references, audios, kind, maxImages, maxAudios, audioInput }, issues),
-    [text, references, audios, kind, maxImages, maxAudios, audioInput, issues]
+    () =>
+      promptMarks(
+        text,
+        { references, audios, kind, maxImages, maxAudios, audioInput, videos, videoInput, maxVideos },
+        issues
+      ),
+    [text, references, audios, videos, kind, maxImages, maxAudios, audioInput, videoInput, maxVideos, issues]
   )
   const segments = useMemo(() => segmentsOf(text.length, marks), [text, marks])
   const mentioned = useMemo(() => mentionedIndices(text), [text])
   const mentionedAudio = useMemo(() => mentionedAudioIndices(text), [text])
+  const mentionedVideo = useMemo(() => mentionedVideoIndices(text), [text])
   // What the References legend explains, which the strip doesn't mark as unmentioned.
   const explainedKey = JSON.stringify(checks.options.explained ?? null)
   const explained = useMemo(() => new Set(checks.options.explained?.images ?? []), [explainedKey])
@@ -290,6 +322,7 @@ export default function PromptEditor(props: Props) {
         issues,
         references,
         audios,
+        videos,
         groups,
         kind,
         language,
@@ -297,6 +330,8 @@ export default function PromptEditor(props: Props) {
         canAddReferences: !!onAddReferences,
         canRemoveAudio: !!onRemoveAudio,
         audioModelName: onUseAudioModel ? audioModelName : undefined,
+        canRemoveVideo: !!onRemoveVideo,
+        videoModelName: onUseVideoModel ? videoModelName : undefined,
         songFixes: !!songFixes,
         library: onAddFromLibrary ? library : undefined,
         adviseUnused: true,
@@ -307,6 +342,7 @@ export default function PromptEditor(props: Props) {
       issues,
       references,
       audios,
+      videos,
       groups,
       kind,
       language,
@@ -314,6 +350,8 @@ export default function PromptEditor(props: Props) {
       !!onAddReferences,
       !!onRemoveAudio,
       onUseAudioModel ? audioModelName : undefined,
+      !!onRemoveVideo,
+      onUseVideoModel ? videoModelName : undefined,
       !!songFixes,
       library,
       !!onAddFromLibrary,
@@ -352,7 +390,7 @@ export default function PromptEditor(props: Props) {
 
   // ── Hover card and linked highlighting ────────────────────────────────────────
   const [hover, setHover] = useState<{ mark: number; rect: DOMRect }>()
-  /** The picture or clip ("image:3", "audio:1") hovered in the key below, whose tokens light up. */
+  /** The picture, clip or video ("image:3", "audio:1", "video:2") hovered in the key below, whose tokens light up. */
   const [highlighted, setHighlighted] = useState<string>()
   // A hover is tied to the highlighting it was measured on.
   useEffect(() => setHover(undefined), [marks])
@@ -398,6 +436,7 @@ export default function PromptEditor(props: Props) {
             query: menu.query,
             references,
             audios,
+            videos,
             groups,
             library: onAddFromLibrary ? library : undefined,
             maxImages,
@@ -405,7 +444,19 @@ export default function PromptEditor(props: Props) {
             only: menu.only
           })
         : [],
-    [menu?.query, menu?.only, menu !== undefined, references, audios, groups, library, !!onAddFromLibrary, maxImages, audioInput]
+    [
+      menu?.query,
+      menu?.only,
+      menu !== undefined,
+      references,
+      audios,
+      videos,
+      groups,
+      library,
+      !!onAddFromLibrary,
+      maxImages,
+      audioInput
+    ]
   )
   const items = useMemo(() => sections.flatMap((s) => s.items), [sections])
   const activeIndex =
@@ -577,6 +628,7 @@ export default function PromptEditor(props: Props) {
     let insert: string
     if (item.type === 'image') insert = `@Image${item.reference.index}`
     else if (item.type === 'audio') insert = `@Audio${item.audio.index}`
+    else if (item.type === 'video') insert = `@Video${item.video.index}`
     else if (item.type === 'group') insert = groupInsertText(item.group, language, before)
     else {
       const added = onAddFromLibrary?.(item.asset)
@@ -660,6 +712,12 @@ export default function PromptEditor(props: Props) {
       case 'use-audio-model':
         onUseAudioModel?.()
         break
+      case 'remove-video':
+        onRemoveVideo?.(action.indices)
+        break
+      case 'use-video-model':
+        onUseVideoModel?.()
+        break
       case 'song-no-song':
         songFixes?.onNoSong()
         break
@@ -712,11 +770,13 @@ export default function PromptEditor(props: Props) {
   }
 
   const hoverReference =
-    hoveredMark?.index !== undefined && reference && hoveredMark.ref !== 'audio'
+    hoveredMark?.index !== undefined && reference && hoveredMark.ref !== 'audio' && hoveredMark.ref !== 'video'
       ? references[hoveredMark.index - 1]
       : undefined
   const hoverAudio =
     hoveredMark?.index !== undefined && reference && hoveredMark.ref === 'audio' ? audios[hoveredMark.index - 1] : undefined
+  const hoverVideo =
+    hoveredMark?.index !== undefined && reference && hoveredMark.ref === 'video' ? videos[hoveredMark.index - 1] : undefined
 
   return (
     <div className={inFocus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
@@ -816,8 +876,10 @@ export default function PromptEditor(props: Props) {
         <ReferenceStrip
           references={references}
           audios={audios}
+          videos={videos}
           mentioned={mentioned}
           mentionedAudio={mentionedAudio}
+          mentionedVideo={mentionedVideo}
           explained={explained}
           explainedAudio={explainedAudio}
           showUnused={!!text.trim()}
@@ -839,12 +901,19 @@ export default function PromptEditor(props: Props) {
           query={menu.query}
           replacing={menu.replace}
           only={menu.only}
-          noReferences={!references.length}
+          noReferences={!references.length && !videos.length}
+          videosPossible={videoInput}
         />
       )}
 
       {hover && hoveredMark && !menu && (
-        <TokenHoverCard mark={hoveredMark} reference={hoverReference} audio={hoverAudio} rect={hover.rect} />
+        <TokenHoverCard
+          mark={hoveredMark}
+          reference={hoverReference}
+          audio={hoverAudio}
+          video={hoverVideo}
+          rect={hover.rect}
+        />
       )}
 
       {expanded && !inFocus && (

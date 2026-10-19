@@ -1,12 +1,13 @@
-// Pure helpers behind the prompt editor: which picture each @ImageN token names and which clip each @AudioN
-// token names, what to highlight, what the "@" menu offers, and the text edits its choices and the quick fixes
-// make. No DOM and no React here.
+// Pure helpers behind the prompt editor: which picture each @ImageN token names, which clip each @AudioN token
+// names and which video each @VideoN token names, what to highlight, what the "@" menu offers, and the text edits its
+// choices and the quick fixes make. No DOM and no React here.
 
 import type { Kind } from '@shared/models'
 import {
   findAudioTokens,
   findImageTokens,
   findMalformedTokens,
+  findVideoTokens,
   type PromptIssue,
   type ReferenceKind
 } from '@shared/prompt-refs'
@@ -14,6 +15,7 @@ import { ASSET_KINDS, type Asset, type AssetKind, type PromptLanguage } from '@s
 import { ASSET_COPY } from '../../lib/assets'
 import { PATH_SEPARATOR } from '../../lib/platform'
 import { audioRole, bringsVoice, type FormAudio } from '../pickers/audioRefs'
+import { videoCount, type FormVideo } from '../pickers/videoRefs'
 import {
   audioWord,
   clipCount,
@@ -78,7 +80,7 @@ export function fileName(path: string): string {
 /** The numbers in a near miss's suggested spelling ("@Image1, @Image2" for "@Image1-2"; "@Audio1" for "@Ljud1"). */
 function suggestedNumbers(suggestion: string | undefined, ref: ReferenceKind): number[] {
   if (!suggestion) return []
-  const pattern = ref === 'audio' ? /@Audio(\d+)/g : /@Image(\d+)/g
+  const pattern = ref === 'audio' ? /@Audio(\d+)/g : ref === 'video' ? /@Video(\d+)/g : /@Image(\d+)/g
   return [...suggestion.matchAll(pattern)].map((m) => Number(m[1]))
 }
 
@@ -99,6 +101,20 @@ export function mentionedAudioIndices(prompt: string): Set<number> {
     ...findAudioTokens(prompt).map((t) => t.index),
     ...findMalformedTokens(prompt).flatMap((m) => (m.ref === 'audio' ? suggestedNumbers(m.suggestion, 'audio') : []))
   ])
+}
+
+/** The @VideoN numbers the prompt mentions, the same way. */
+export function mentionedVideoIndices(prompt: string): Set<number> {
+  return new Set([
+    ...findVideoTokens(prompt).map((t) => t.index),
+    ...findMalformedTokens(prompt).flatMap((m) => (m.ref === 'video' ? suggestedNumbers(m.suggestion, 'video') : []))
+  ])
+}
+
+/** The videos that are sent but never mentioned in the prompt. */
+export function unusedVideos(prompt: string, videos: readonly FormVideo[]): FormVideo[] {
+  const used = mentionedVideoIndices(prompt)
+  return videos.filter((v) => v.sent && !used.has(v.index))
 }
 
 /** The pictures that are sent but never mentioned in the prompt. */
@@ -248,9 +264,9 @@ export interface PromptMark {
   end: number
   /** valid: names something that is sent. error: blocks generating. warning: advice ("@Anna" is plain text). */
   tone: 'valid' | 'error' | 'warning'
-  /** What it refers to (or was meant to): a picture or an audio clip. */
+  /** What it refers to (or was meant to): a picture, an audio clip or a video. */
   ref?: ReferenceKind
-  /** N of the @ImageN / @AudioN token (for a near miss: of its suggested spelling). */
+  /** N of the @ImageN / @AudioN / @VideoN token (for a near miss: of its suggested spelling). */
   index?: number
   /** Kind of the asset a valid token's picture or clip belongs to; undefined for a file from disk. */
   kind?: AssetKind
@@ -260,7 +276,7 @@ export interface PromptMark {
   suggestion?: string
 }
 
-/** "image:3" / "audio:1": which picture or clip a mark (or a row of the key) is about, for linked highlighting. */
+/** "image:3" / "audio:1" / "video:2": which picture, clip or video a mark (or a row of the key) is about. */
 export function markKey(ref: ReferenceKind | undefined, index: number | undefined): string | undefined {
   return index === undefined ? undefined : `${ref ?? 'image'}:${index}`
 }
@@ -269,6 +285,9 @@ export const NOT_REFERENCE_MODE =
   'Reference images are only used in the References mode – this mode sends no reference images.'
 
 export const AUDIO_NOT_SENT = 'Audio clips are only sent in the References mode, with a model that takes audio.'
+
+export const VIDEO_NOT_SENT =
+  'Reference videos are only sent in the References mode, with a Seedance 2.x reference model.'
 
 function missingImageText(n: number, count: number): string {
   if (!count) return `@Image${n} doesn’t exist – no reference images are chosen yet.`
@@ -280,6 +299,11 @@ function missingAudioText(n: number, count: number): string {
   return `@Audio${n} doesn’t exist – only ${clipCount(count)} ${count === 1 ? 'is' : 'are'} chosen.`
 }
 
+function missingVideoText(n: number, count: number): string {
+  if (!count) return `@Video${n} doesn’t exist – no reference videos are chosen yet.`
+  return `@Video${n} doesn’t exist – only ${videoCount(count)} ${count === 1 ? 'is' : 'are'} chosen.`
+}
+
 /** What the prompt's references are checked against, for highlighting. */
 export interface MarkContext {
   references: readonly PromptReference[]
@@ -289,6 +313,12 @@ export interface MarkContext {
   maxAudios: number
   /** The model takes reference audio (reference-to-video with audio input). */
   audioInput: boolean
+  /** The form's reference videos (also the ones that aren't sent); omitted: none. */
+  videos?: readonly FormVideo[]
+  /** The model takes reference videos (a Seedance 2.x reference model). */
+  videoInput?: boolean
+  /** How many videos the model family takes. */
+  maxVideos?: number
 }
 
 /**
@@ -310,6 +340,13 @@ export function promptMarks(prompt: string, ctx: MarkContext, issues: readonly P
       : (issues.find((i) => i.severity === 'error' && i.code === 'audio-not-supported')?.message ??
         issues.find((i) => i.code === 'not-reference-mode')?.message ??
         AUDIO_NOT_SENT)
+  const videos = ctx.videos ?? []
+  const videoRefused =
+    reference && ctx.videoInput
+      ? undefined
+      : (issues.find((i) => i.severity === 'error' && i.code === 'video-not-supported')?.message ??
+        issues.find((i) => i.code === 'not-reference-mode')?.message ??
+        VIDEO_NOT_SENT)
   const marks: PromptMark[] = []
   for (const t of findImageTokens(prompt)) {
     const ref = references[t.index - 1]
@@ -349,9 +386,21 @@ export function promptMarks(prompt: string, ctx: MarkContext, issues: readonly P
       problem
     })
   }
+  for (const t of findVideoTokens(prompt)) {
+    const video = videos[t.index - 1]
+    const problem =
+      videoRefused ??
+      (!video
+        ? missingVideoText(t.index, videos.length)
+        : !video.sent
+          ? `@Video${t.index} is not sent – the model takes at most ${videoCount(ctx.maxVideos ?? 0)}.`
+          : undefined)
+    marks.push({ start: t.start, end: t.end, tone: problem ? 'error' : 'valid', ref: 'video', index: t.index, problem })
+  }
   for (const m of findMalformedTokens(prompt)) {
     const numbers = suggestedNumbers(m.suggestion, m.ref)
     const audio = m.ref === 'audio'
+    const video = m.ref === 'video'
     marks.push({
       start: m.start,
       end: m.end,
@@ -360,18 +409,23 @@ export function promptMarks(prompt: string, ctx: MarkContext, issues: readonly P
       index: numbers.length === 1 ? numbers[0] : undefined,
       suggestion: m.suggestion,
       problem:
-        (audio ? audioRefused : notReference) ??
+        (audio ? audioRefused : video ? videoRefused : notReference) ??
         (m.suggestion
           ? `Misspelled reference – it is written ${m.suggestion}.`
           : audio
             ? 'Incomplete reference – write @Audio and the sound clip’s number, e.g. @Audio1.'
-            : 'Incomplete reference – write @Image and the image’s number, e.g. @Image1.')
+            : video
+              ? 'Incomplete reference – write @Video and the video’s number, e.g. @Video1.'
+              : 'Incomplete reference – write @Image and the image’s number, e.g. @Image1.')
     })
   }
   for (const issue of issues) {
     if (issue.start === undefined || issue.end === undefined || issue.end <= issue.start) continue
     // These name the first token only; the message is already on every token above.
-    if (issue.code === 'not-reference-mode' || (issue.code === 'audio-not-supported' && issue.severity === 'error')) {
+    if (
+      issue.code === 'not-reference-mode' ||
+      ((issue.code === 'audio-not-supported' || issue.code === 'video-not-supported') && issue.severity === 'error')
+    ) {
       continue
     }
     const { start, end } = issue
@@ -494,9 +548,9 @@ function removeOne(text: string, start: number, end: number): string {
   return left + right
 }
 
-/** Every token and near miss in the prompt (pictures and audio), for "remove all references". */
+/** Every token and near miss in the prompt (pictures, audio and videos), for "remove all references". */
 export function allTokenRanges(prompt: string): TextRange[] {
-  return [...findImageTokens(prompt), ...findAudioTokens(prompt), ...findMalformedTokens(prompt)]
+  return [...findImageTokens(prompt), ...findAudioTokens(prompt), ...findVideoTokens(prompt), ...findMalformedTokens(prompt)]
     .map(({ start, end }) => ({ start, end }))
     .sort((a, b) => a.start - b.start)
 }
@@ -504,6 +558,13 @@ export function allTokenRanges(prompt: string): TextRange[] {
 /** Every @AudioN token and near miss of one, for "remove the audio references". */
 export function audioTokenRanges(prompt: string): TextRange[] {
   return [...findAudioTokens(prompt), ...findMalformedTokens(prompt).filter((m) => m.ref === 'audio')]
+    .map(({ start, end }) => ({ start, end }))
+    .sort((a, b) => a.start - b.start)
+}
+
+/** Every @VideoN token and near miss of one, for "remove the video references". */
+export function videoTokenRanges(prompt: string): TextRange[] {
+  return [...findVideoTokens(prompt), ...findMalformedTokens(prompt).filter((m) => m.ref === 'video')]
     .map(({ start, end }) => ({ start, end }))
     .sort((a, b) => a.start - b.start)
 }
@@ -517,6 +578,8 @@ export type MenuItem =
   | { type: 'image'; key: string; reference: PromptReference }
   /** One reference audio clip: inserts "@Audio1". */
   | { type: 'audio'; key: string; audio: FormAudio }
+  /** One reference video: inserts "@Video1". */
+  | { type: 'video'; key: string; video: FormVideo }
   /** A library asset not (fully) among the references: adds its photos and inserts its reference. */
   | { type: 'library'; key: string; asset: Asset; status: string; warning?: string; disabled: boolean }
 
@@ -542,6 +605,8 @@ function kindWords(kind: AssetKind): string {
 
 /** Words an audio clip is found by in the "@" menu, besides its asset's name. */
 const AUDIO_SEARCH_WORDS = 'audio sound voice soundscape'
+/** Words a reference video is found by in the "@" menu, besides its name. */
+const VIDEO_SEARCH_WORDS = 'video film clip take motion camera'
 
 /** How a library asset fits among the references, as AssetPicker reports it. */
 function libraryStatus(
@@ -572,14 +637,16 @@ function libraryStatus(
 const LIBRARY_ROWS = { browsing: 6, searching: 12 }
 
 /**
- * The "@" menu: the references first (each asset, then its pictures and clips), then library assets that can be
- * added. `query` is what follows the "@"; it matches @ImageN / @AudioN numbers, names and kinds by word start.
- * `only` limits it to pictures or clips (choosing what a wrong token should name).
+ * The "@" menu: the references first (each asset, then its pictures and clips; then the videos), then library assets
+ * that can be added. `query` is what follows the "@"; it matches @ImageN / @AudioN / @VideoN numbers, names and kinds
+ * by word start. `only` limits it to pictures, clips or videos (choosing what a wrong token should name).
  */
 export function tokenMenuSections(options: {
   query: string
   references: readonly PromptReference[]
   audios?: readonly FormAudio[]
+  /** The form's reference videos. */
+  videos?: readonly FormVideo[]
   groups: readonly AssetGroup[]
   /** The whole library; omit to leave out "Add from the library". */
   library?: readonly Asset[]
@@ -590,6 +657,10 @@ export function tokenMenuSections(options: {
 }): MenuSection[] {
   const { references, groups, library, maxImages, only } = options
   const audios = options.audios ?? []
+  const videos = options.videos ?? []
+  const withImages = !only || only === 'image'
+  const withAudio = !only || only === 'audio'
+  const withVideos = !only || only === 'video'
   const q = options.query.toLocaleLowerCase('en').replace(/^@/, '')
   const sections: MenuSection[] = []
 
@@ -602,10 +673,12 @@ export function tokenMenuSections(options: {
     `audio${a.index}`.startsWith(q) ||
     startsWord(AUDIO_SEARCH_WORDS, q) ||
     (!!a.source && (startsWord(a.source.asset.name, q) || startsWord(kindWords(a.source.asset.kind), q)))
+  const videoMatches = (v: FormVideo): boolean =>
+    `video${v.index}`.startsWith(q) || startsWord(VIDEO_SEARCH_WORDS, q) || (!!v.facts?.name && startsWord(v.facts.name, q))
   const listed = new Set<string>()
   const audioListed = new Set<number>()
   const pushAudiosOf = (assetId: string | undefined): void => {
-    if (only === 'image') return
+    if (!withAudio) return
     for (const a of audios) {
       if (a.source?.asset.id !== assetId || audioListed.has(a.index) || !audioMatches(a)) continue
       audioListed.add(a.index)
@@ -617,10 +690,10 @@ export function tokenMenuSections(options: {
       if (listed.has(r.asset.id)) continue
       listed.add(r.asset.id)
       const group = groups.find((g) => g.asset.id === r.asset!.id)
-      if (only !== 'audio' && group && (startsWord(group.name, q) || startsWord(kindWords(group.asset.kind), q))) {
+      if (withImages && group && (startsWord(group.name, q) || startsWord(kindWords(group.asset.kind), q))) {
         referenceItems.push({ type: 'group', key: `group:${group.asset.id}`, group })
       }
-      if (only !== 'audio') {
+      if (withImages) {
         for (const own of references) {
           if (own.asset?.id === r.asset.id && imageMatches(own)) {
             referenceItems.push({ type: 'image', key: `image:${own.index}`, reference: own })
@@ -628,12 +701,12 @@ export function tokenMenuSections(options: {
         }
       }
       pushAudiosOf(r.asset.id)
-    } else if (only !== 'audio' && (imageMatches(r) || (!!q && startsWord('own image', q)))) {
+    } else if (withImages && (imageMatches(r) || (!!q && startsWord('own image', q)))) {
       referenceItems.push({ type: 'image', key: `image:${r.index}`, reference: r })
     }
   }
   // Clips whose asset has no pictures among the references, and clips that aren't library clips.
-  if (only !== 'image') {
+  if (withAudio) {
     for (const a of audios) {
       if (audioListed.has(a.index)) continue
       if (!audioMatches(a) && !(!!q && !a.source && startsWord('own sound', q))) continue
@@ -641,8 +714,21 @@ export function tokenMenuSections(options: {
       referenceItems.push({ type: 'audio', key: `audio:${a.index}`, audio: a })
     }
   }
+  // The videos: no asset's, so after everything else.
+  if (withVideos) {
+    for (const v of videos) {
+      if (videoMatches(v) || (!!q && startsWord('own video', q))) referenceItems.push({ type: 'video', key: `video:${v.index}`, video: v })
+    }
+  }
   if (referenceItems.length) {
-    const title = only === 'audio' ? 'Sound clips' : audios.length && only !== 'image' ? 'References' : 'Reference images'
+    const title =
+      only === 'audio'
+        ? 'Sound clips'
+        : only === 'video'
+          ? 'Reference videos'
+          : !only && (audios.length || videos.length)
+            ? 'References'
+            : 'Reference images'
     sections.push({ key: 'references', title, items: referenceItems, more: 0 })
   }
 

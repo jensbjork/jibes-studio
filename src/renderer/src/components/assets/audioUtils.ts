@@ -32,40 +32,64 @@ const round2 = (v: number) => Math.round(v * 100) / 100
 const floor2 = (v: number) => Math.floor(v * 100 + 1e-6) / 100
 
 /**
- * The window as main stores it: 2–15 s long (the whole file when it is shorter than 2 s) and inside the
- * file, in hundredths of a second.
+ * How long a window may be, in seconds. A sound clip's is Venice's 2–15 s (the default everywhere here); a reference
+ * video's depends on the model family (2–15 s on Seedance 2.0, 2–30 s on 2.5).
  */
-export function clampWindow(w: ClipWindow, duration: number): ClipWindow {
+export interface WindowLimits {
+  min: number
+  max: number
+}
+
+/** A reference audio clip's: 2–15 s. */
+export const AUDIO_WINDOW_LIMITS: WindowLimits = { min: MIN_AUDIO_CLIP_SECONDS, max: MAX_AUDIO_CLIP_SECONDS }
+
+/**
+ * The window as main stores it: 2–15 s long (`limits`; the whole file when it is shorter than the minimum) and inside
+ * the file, in hundredths of a second.
+ */
+export function clampWindow(w: ClipWindow, duration: number, limits: WindowLimits = AUDIO_WINDOW_LIMITS): ClipWindow {
   const d = Number.isFinite(duration) ? Math.max(0, duration) : 0
-  const wanted = Number.isFinite(w.length) ? w.length : MIN_AUDIO_CLIP_SECONDS
-  const length = Math.min(
-    round2(clamp(wanted, Math.min(MIN_AUDIO_CLIP_SECONDS, d), Math.min(MAX_AUDIO_CLIP_SECONDS, d))),
-    floor2(d)
-  )
+  const wanted = Number.isFinite(w.length) ? w.length : limits.min
+  const length = Math.min(round2(clamp(wanted, Math.min(limits.min, d), Math.min(limits.max, d))), floor2(d))
   const start = clamp(floor2(Number.isFinite(w.start) ? w.start : 0), 0, floor2(Math.max(0, d - length)))
   return { start, length }
 }
 
 /** The same length starting at `start` (moving the whole window). */
-export function moveWindow(w: ClipWindow, start: number, duration: number): ClipWindow {
-  return clampWindow({ start, length: w.length }, duration)
+export function moveWindow(
+  w: ClipWindow,
+  start: number,
+  duration: number,
+  limits: WindowLimits = AUDIO_WINDOW_LIMITS
+): ClipWindow {
+  return clampWindow({ start, length: w.length }, duration, limits)
 }
 
 /** A new start with the end kept where it is (dragging the left handle). */
-export function resizeStart(w: ClipWindow, start: number, duration: number): ClipWindow {
+export function resizeStart(
+  w: ClipWindow,
+  start: number,
+  duration: number,
+  limits: WindowLimits = AUDIO_WINDOW_LIMITS
+): ClipWindow {
   const end = Math.min(duration, w.start + w.length)
-  const lo = Math.max(0, end - MAX_AUDIO_CLIP_SECONDS)
-  const hi = Math.max(lo, end - Math.min(MIN_AUDIO_CLIP_SECONDS, duration))
+  const lo = Math.max(0, end - limits.max)
+  const hi = Math.max(lo, end - Math.min(limits.min, duration))
   const s = clamp(start, lo, hi)
-  return clampWindow({ start: s, length: end - s }, duration)
+  return clampWindow({ start: s, length: end - s }, duration, limits)
 }
 
 /** A new end with the start kept where it is (dragging the right handle). */
-export function resizeEnd(w: ClipWindow, end: number, duration: number): ClipWindow {
-  const min = Math.min(MIN_AUDIO_CLIP_SECONDS, duration)
+export function resizeEnd(
+  w: ClipWindow,
+  end: number,
+  duration: number,
+  limits: WindowLimits = AUDIO_WINDOW_LIMITS
+): ClipWindow {
+  const min = Math.min(limits.min, duration)
   // Near the end of the file the minimum length can only be had by moving the start back; clampWindow does.
-  const max = Math.max(min, Math.min(MAX_AUDIO_CLIP_SECONDS, duration - w.start))
-  return clampWindow({ start: w.start, length: clamp(end - w.start, min, max) }, duration)
+  const max = Math.max(min, Math.min(limits.max, duration - w.start))
+  return clampWindow({ start: w.start, length: clamp(end - w.start, min, max) }, duration, limits)
 }
 
 const tenths = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 })

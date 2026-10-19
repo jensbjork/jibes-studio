@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { access, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { paramsForSubmit } from '@shared/models'
+import { paramsForSubmit, referenceVideosOf, videosAreReferences } from '@shared/models'
 import {
   composeOptionsFor,
   composePrompt,
@@ -40,6 +40,7 @@ import {
   timeStamp,
   tmpDir
 } from './paths'
+import { resolveReferenceVideos } from './reference-videos'
 import { importExternalReferences, placeFile } from './references'
 import { noteCarriedOver } from './session'
 import { getAcceptedConsents, getPromptLanguage } from './settings'
@@ -152,24 +153,26 @@ function withCleanWearers(params: GenerationParams): GenerationParams {
 }
 
 /**
- * The params exactly as a paid submission sends them, or a refusal: the prompt's @ImageN and @AudioN
+ * The params exactly as a paid submission sends them, or a refusal: the prompt's @ImageN, @AudioN and @VideoN
  * references are checked against what the caller has (so a token past the model's limit is reported as such),
  * tokens are canonicalised, inputs the model doesn't use are dropped (paramsForSubmit), the prompt as composed with
- * the descriptions legend (composeSubmission) is checked too, and every reference audio clip is measured and its
- * window filled in, so that a clip shorter than 2 s or clips longer than 15 s together — which Venice would refuse
- * after the upload — are refused here. The returned params keep the user's prompt: the legend is composed again,
- * from the descriptions as they are then, when the job is sent. Nothing is copied or sent. JobManager.submit runs
- * it on every submission; callers that quote first (a sequence take) run it before the quote too.
+ * the descriptions legend (composeSubmission) is checked too, and every reference audio clip and reference video is
+ * measured and its window filled in, so that a clip shorter than 2 s, clips longer than 15 s together, a file that is
+ * no video, or videos past their family's 15 s (Seedance 2.0) or 30 s (2.5) — which Venice would refuse after the
+ * upload — are refused here. The returned params keep the user's prompt: the legend is composed again, from the
+ * descriptions as they are then, when the job is sent. Nothing is copied or sent. JobManager.submit runs it on every
+ * submission; callers that quote first (a sequence take) run it before the quote too.
  */
 export async function prepareSubmission(params: GenerationParams): Promise<GenerationParams> {
   const problem = blockingPromptError(params)
   if (problem) throw new Error(problem)
   const checked = withCleanWearers(paramsForSubmit(canonicalizeParams(params)))
   checkComposed(checked, composeSubmission(checked))
-  if (!checked.referenceAudios?.length) return checked
+  const videos = videosAreReferences(checked) ? referenceVideosOf(checked).length : 0
+  if (!checked.referenceAudios?.length && !videos) return checked
   // "The clip no longer exists" says more than ffprobe failing to open it.
   ensureImagesExist(checked)
-  const measured = await resolveReferenceAudios(checked)
+  const measured = await resolveReferenceVideos(await resolveReferenceAudios(checked))
   const late = blockingPromptError(measured)
   if (late) throw new Error(late)
   return measured
@@ -542,7 +545,8 @@ export class JobManager extends EventEmitter<JobEvents> {
         ? { prompt: given }
         : composeSubmission(params, { characterLimit: limit, ...(frame ? { continuationFrame: frame } : {}) })
     checkComposed(params, composed)
-    // Outside images and audio are copied into Referensbilder first, so the stored params point at the copies.
+    // Outside images, audio and reference videos are copied into Referensbilder first, so the stored params point at
+    // the copies.
     params = await importExternalReferences(params)
     const body = await buildRequestBody({ ...params, prompt: composed.prompt })
     if (params.model.includes('seedance') && getAcceptedConsents().seedance) {

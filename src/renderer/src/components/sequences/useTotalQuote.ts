@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { paramsForSubmit } from '@shared/models'
 import type { GenerationParams } from '@shared/types'
 
 const CACHE_MS = 10 * 60_000
@@ -7,7 +8,9 @@ const CACHE_MS = 10 * 60_000
 const cache = new Map<string, { at: number; quote: Promise<number> }>()
 
 function quoteKey(p: GenerationParams): string {
-  return [p.model, p.duration, p.resolution ?? '', p.aspectRatio ?? '', String(p.audio ?? '')].join('|')
+  // Reference videos are priced by the seconds that are sent (Seedance 2.x): each window counts.
+  const videos = (paramsForSubmit(p).referenceVideos ?? []).map((v) => `${v.path}\u0000${v.start ?? ''}\u0000${v.length ?? ''}`)
+  return [p.model, p.duration, p.resolution ?? '', p.aspectRatio ?? '', String(p.audio ?? ''), ...videos].join('|')
 }
 
 function cachedQuote(p: GenerationParams): Promise<number> {

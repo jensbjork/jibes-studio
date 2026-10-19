@@ -1822,7 +1822,7 @@ export class EditOps {
       // The checks every submission runs (JobManager.submit), on what will be sent: refused here rather than after
       // the proxy is made.
       const sent: GenerationParams = seedance
-        ? { ...params, referenceVideos: [standIn] }
+        ? { ...params, referenceVideos: [{ path: standIn }] }
         : { ...params, sourceVideo: standIn }
       d.problem(blockingPromptError(sent as Parameters<typeof blockingPromptError>[0]))
       if (!d.problems.length) await this.quote(d, sent, `Edit ${fmtSeconds(length)}`, length)
@@ -3443,7 +3443,7 @@ export class EditOps {
           })
           const path = await placeFile(tmp, dir, `${stamp} underlag`, '.mp4')
           placed.push(path)
-          if (op.op === 'prompt-edit' && supportsReferenceVideos(params.model)) params.referenceVideos = [path]
+          if (op.op === 'prompt-edit' && supportsReferenceVideos(params.model)) params.referenceVideos = [{ path }]
           else params.sourceVideo = path
         } finally {
           await rm(tmp, { force: true }).catch(() => {})

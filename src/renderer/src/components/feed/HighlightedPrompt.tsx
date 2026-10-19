@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react'
-import { findAudioTokens, findImageTokens, findMalformedTokens } from '@shared/prompt-refs'
-import { KIND_TONE, OWN_IMAGE_TOKEN as OWN_TOKEN } from '../pickers/assetKinds'
+import { findAudioTokens, findImageTokens, findMalformedTokens, findVideoTokens } from '@shared/prompt-refs'
+import { KIND_TONE, OWN_IMAGE_TOKEN as OWN_TOKEN, VIDEO_TONE } from '../pickers/assetKinds'
 import { audioRole } from '../pickers/audioRefs'
 import { useTokenCard, type TokenCardContent, type TokenTarget } from '../pickers/ReferenceCard'
-import type { AudioReference, ImageReference } from './references'
+import { videoLabelParts } from '../pickers/videoRefs'
+import type { AudioReference, ImageReference, VideoReference } from './references'
 
 interface Props {
   text: string
@@ -11,6 +12,8 @@ interface Props {
   images: readonly ImageReference[]
   /** The reference audio clips that were sent, in @AudioN order. */
   audios: readonly AudioReference[]
+  /** The reference videos that were sent, in @VideoN order. */
+  videos?: readonly VideoReference[]
   /** The token whose picture or clip is hovered elsewhere, e.g. "@Image2". */
   highlighted?: string
   onHover?: (token: string | undefined) => void
@@ -52,28 +55,46 @@ function audioTarget(ref: AudioReference): TokenTarget {
   }
 }
 
+/** A reference video that was sent, for the token's hover card. */
+export function videoTarget(ref: VideoReference): TokenTarget {
+  const { name, detail } = videoLabelParts(ref)
+  return {
+    label: `${name} · ${detail}`,
+    path: ref.path,
+    name,
+    detail,
+    window: { start: ref.start, length: ref.length },
+    ...(ref.unsent ? { unsent: 'Not sent – the model took no more videos' } : {})
+  }
+}
+
 /**
- * A finished generation's prompt, read-only, with its @ImageN and @AudioN tokens coloured like the asset they
- * point at, so it is easy to see which picture or voice each part of the text was about. Tokens that pointed at
- * nothing, and misspelled ones, are red. Hovering or focusing a token shows its card: the picture, or the clip
- * with a play button for the part that was sent.
+ * A finished generation's prompt, read-only, with its @ImageN, @AudioN and @VideoN tokens coloured like what they
+ * point at, so it is easy to see which picture, voice or video each part of the text was about. Tokens that pointed
+ * at nothing, and misspelled ones, are red. Hovering or focusing a token shows its card: the picture, the clip with
+ * a play button for the part that was sent, or the video playing that part.
  */
-export default function HighlightedPrompt({ text, images, audios, highlighted, onHover, className = '' }: Props) {
+export default function HighlightedPrompt({
+  text,
+  images,
+  audios,
+  videos = [],
+  highlighted,
+  onHover,
+  className = ''
+}: Props) {
   const references = images.filter((r) => r.role === 'reference')
   const card = useTokenCard()
   const marks: Mark[] = []
 
   const tokenNode = (key: number, raw: string, canonical: string, content: TokenCardContent, valid: boolean) => {
     const kind = content.target?.kind
+    const tone = content.ref === 'video' ? VIDEO_TONE.token : kind ? KIND_TONE[kind].token : OWN_TOKEN
     return (
       <span
         key={key}
         {...card.bind(key, content, { highlight: canonical, onHighlight: onHover })}
-        className={
-          valid
-            ? `${base} ${kind ? KIND_TONE[kind].token : OWN_TOKEN} ${highlighted === canonical ? 'ring-1 ring-white/50' : ''}`
-            : broken
-        }
+        className={valid ? `${base} ${tone} ${highlighted === canonical ? 'ring-1 ring-white/50' : ''}` : broken}
       >
         {raw}
       </span>
@@ -112,6 +133,24 @@ export default function HighlightedPrompt({ text, images, audios, highlighted, o
           ? { token: canonical, ref: 'audio', target: audioTarget(ref) }
           : { token: canonical, ref: 'audio', problem: `${t.raw} didn’t point at any sound that was sent` },
         !!ref
+      )
+    })
+  }
+  for (const t of findVideoTokens(text)) {
+    if (marks.some((m) => t.start < m.end && m.start < t.end)) continue
+    const ref = videos[t.index - 1]
+    const canonical = `@Video${t.index}`
+    marks.push({
+      start: t.start,
+      end: t.end,
+      node: tokenNode(
+        t.start,
+        t.raw,
+        canonical,
+        ref
+          ? { token: canonical, ref: 'video', target: videoTarget(ref) }
+          : { token: canonical, ref: 'video', problem: `${t.raw} didn’t point at any video that was sent` },
+        !!ref && !ref.unsent
       )
     })
   }

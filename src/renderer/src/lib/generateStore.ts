@@ -1,5 +1,5 @@
 import { useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
-import { DEFAULT_PARAMS, sanitizeReferenceAudios } from '@shared/models'
+import { DEFAULT_PARAMS, sanitizeReferenceAudios, sanitizeReferenceVideos } from '@shared/models'
 import { sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import type { Asset, AssetAudio, GenerationParams } from '@shared/types'
@@ -23,6 +23,9 @@ function loadRemembered(): GenerationParams {
     const audios = sanitizeReferenceAudios(params.referenceAudios)
     if (audios) params.referenceAudios = audios
     else delete params.referenceAudios
+    const videos = sanitizeReferenceVideos(params.referenceVideos)
+    if (videos) params.referenceVideos = videos
+    else delete params.referenceVideos
     // The description switches and "worn by" choices as the form writes them (defaults left out), never malformed
     // ones from storage.
     const { includeDescriptions: _include, excludedDescriptionAssetIds: _excluded, outfitWearers, ...rest } = params

@@ -20,8 +20,13 @@ import {
   maxReferenceImages,
   paramsForSubmit,
   pickOption,
+  referenceVideoLimits,
+  referenceVideoModelFor,
+  referenceVideosOf,
   supportsAudioInput,
   supportsEndImage,
+  supportsReferenceVideos,
+  videosAreReferences,
   type Kind
 } from '@shared/models'
 import { outfitWearersAmong, withOutfitWearer } from '@shared/outfits'
@@ -33,6 +38,7 @@ import {
   type AssetKind,
   type GenerationParams,
   type ReferenceAudio,
+  type ReferenceVideo,
   type SavedPrompt,
   type VideoModel
 } from '@shared/types'
@@ -75,9 +81,21 @@ import {
 } from './pickers/audioRefs'
 import Popover from './pickers/Popover'
 import PromptLibraryPicker from './pickers/PromptLibraryPicker'
+import ReferenceVideos from './pickers/ReferenceVideos'
 import { moveItem } from './pickers/reorder'
 import SavePromptDialog from './pickers/SavePromptDialog'
 import { formatClipSeconds } from './pickers/text'
+import { useVideoFacts, videoFactsNow } from './pickers/videoFacts'
+import {
+  addVideos,
+  formVideos,
+  sameVideos,
+  videoFits,
+  videosKey,
+  withVideoWindow,
+  type VideoCandidate
+} from './pickers/videoRefs'
+import type { ClipWindow } from './assets/audioUtils'
 import DescriptionsBox from './prompt/DescriptionsBox'
 import { assetIdsInForm, descriptionsView, withAssetDescription, withDescriptionsIncluded } from './prompt/descriptions'
 import NegativePromptIssues, { negativePromptIssues } from './prompt/NegativePromptIssues'
@@ -166,9 +184,9 @@ export function unavailableModel(model: VideoModel | undefined): string | undefi
 }
 
 /**
- * Why the params can't be submitted yet, or undefined if they can. Includes what is wrong with the @ImageN and
- * @AudioN references of the prompt and the negative prompt, and with the audio clips themselves (2–15 s each,
- * 15 s together): the main process refuses such params with the same words. `continuing`: a sequence clip that
+ * Why the params can't be submitted yet, or undefined if they can. Includes what is wrong with the @ImageN, @AudioN
+ * and @VideoN references of the prompt and the negative prompt, and with the audio clips and videos themselves (their
+ * lengths, alone and together): the main process refuses such params with the same words. `continuing`: a sequence clip that
  * continues from the previous clip, generated image-to-video from that clip's last frame (so it needs no start
  * image of its own) and without reference images or audio.
  */
@@ -177,11 +195,18 @@ export function missingInput(params: GenerationParams, continuing = false): stri
   if (!params.prompt.trim()) return 'Write a prompt'
   if (continuing) return blockingContinuationError(params)?.replace(/\.\s*$/, '')
   if (kind === 'image-to-video' && !params.startImage) return 'Add a start image'
-  if (kind === 'reference-to-video' && !params.referenceImages?.length) {
+  // With a model that takes reference videos, a video is as good a reference as a picture (the checks say so too).
+  const videos = supportsReferenceVideos(params.model) && videosAreReferences(params) ? referenceVideosOf(params).length : 0
+  if (kind === 'reference-to-video' && !params.referenceImages?.length && !videos) {
+    const withVideos = supportsReferenceVideos(params.model)
     // Venice refuses reference audio on its own, which is worth saying when a voice is all there is.
     return paramsForSubmit(params).referenceAudios?.length
-      ? 'Add at least one reference image – sound is only sent together with an image'
-      : 'Add at least one reference image'
+      ? withVideos
+        ? 'Add at least one reference image or video – sound is only sent together with one'
+        : 'Add at least one reference image – sound is only sent together with an image'
+      : withVideos
+        ? 'Add at least one reference image or video'
+        : 'Add at least one reference image'
   }
   return blockingPromptError(params)?.replace(/\.\s*$/, '')
 }
@@ -392,18 +417,44 @@ export default function ParamsForm({
   const audioSeconds = totalSeconds(audioRefs, audioSources)
   const audioModel = useMemo(() => audioModelOf(models), [models])
 
+  // ── Reference videos (motion, camera, style; @VideoN) ────────────────────────
+  // Seedance 2.x reference models only, within the family's limits (count, per video, in all). The Editor's video to
+  // edit is no reference video: a form never holds one (canUseAgain), and if it did it wouldn't be shown here.
+
+  const videoRefs = useMemo(
+    () => (videosAreReferences(params) ? referenceVideosOf(params) : []),
+    [params.referenceVideos, params.referenceTask]
+  )
+  const videoLimits = kind === 'reference-to-video' ? referenceVideoLimits(params.model) : undefined
+  const videoFacts = useVideoFacts(videoRefs.map((v) => v.path))
+  const videoKey = videosKey(videoRefs)
+  const videos = useMemo(
+    () => formVideos(videoRefs, videoFacts, videoLimits),
+    [videoKey, videoFacts, videoLimits?.family]
+  )
+  // The model to offer when this one takes no reference videos: its family's reference model, else Seedance 2.5's.
+  const videoModel = useMemo(() => {
+    const id = referenceVideoModelFor(
+      params.model,
+      models.filter((m) => !m.offline).map((m) => m.id)
+    )
+    return id && id !== params.model ? models.find((m) => m.id === id) : undefined
+  }, [models, params.model])
+  const [videoNote, setVideoNote] = useState<string>()
+
   /**
-   * Sets the reference images and audio. A removed or swapped picture (or clip) shifts the ones after it, so the
-   * prompt's @ImageN and @AudioN tokens follow them in the same update (see remapPromptReferences); `swap` names
-   * the outfits taken off and the one put on.
+   * Sets the reference images, audio and videos. A removed or swapped picture (or clip, or video) shifts the ones
+   * after it, so the prompt's @ImageN, @AudioN and @VideoN tokens follow them in the same update (see
+   * remapPromptReferences); `swap` names the outfits taken off and the one put on.
    */
   const setReferences = (
-    next: { refs?: string[]; audios?: ReferenceAudio[] },
+    next: { refs?: string[]; audios?: ReferenceAudio[]; videos?: ReferenceVideo[] },
     swap?: { from: Asset[]; to: Asset | null }
   ) => {
     const nextRefs = next.refs ?? refs
     const nextAudios = next.audios ?? audioRefs
-    if (sameList(nextRefs, refs) && sameAudios(nextAudios, audioRefs)) return
+    const nextVideos = next.videos ?? videoRefs
+    if (sameList(nextRefs, refs) && sameAudios(nextAudios, audioRefs) && sameVideos(nextVideos, videoRefs)) return
     // "worn by" choices for outfits (or characters) no longer among the pictures are forgotten, so an outfit added
     // again starts from its default wearer.
     const present = new Set(nextRefs.flatMap((path) => byPath.get(path)?.id ?? []))
@@ -411,21 +462,56 @@ export default function ParamsForm({
     // the remap itself (placeKeys).
     const images = { before: refs, after: nextRefs }
     const sounds = { before: audioRefs, after: nextAudios }
+    const films = { before: videoRefs, after: nextVideos }
     const before = params.prompt
-    const prompt = remapPromptReferences(before, images, sounds, swap)
+    const prompt = remapPromptReferences(before, images, sounds, swap, films)
     if (prompt !== before) ownPrompt.current = prompt
-    // The negative prompt may name pictures and clips too; its tokens follow them the same way (no outfit swap
-    // there: that renames the outfit in the description, which belongs to the prompt).
+    // The negative prompt may name pictures, clips and videos too; its tokens follow them the same way (no outfit
+    // swap there: that renames the outfit in the description, which belongs to the prompt).
     const negativeBefore = params.negativePrompt
-    const negative = negativeBefore && remapPromptReferences(negativeBefore, images, sounds)
+    const negative = negativeBefore && remapPromptReferences(negativeBefore, images, sounds, undefined, films)
     setParams((p) => ({
       ...withOutfitWearers(p, outfitWearersAmong(p.outfitWearers, present)),
       referenceImages: nextRefs,
       referenceAudios: nextAudios.length ? nextAudios : undefined,
+      ...(next.videos ? { referenceVideos: nextVideos.length ? nextVideos : undefined } : {}),
       ...(p.prompt === before ? { prompt } : {}),
       ...(negativeBefore && p.negativePrompt === negativeBefore ? { negativePrompt: negative || undefined } : {})
     }))
   }
+
+  /** Adds videos at the end, each with its window, as many as the family takes; a note says what didn't fit. */
+  const addVideoRefs = (candidates: VideoCandidate[]) => {
+    const change = addVideos(videoRefs, candidates, videoFactsNow(), videoLimits)
+    setReferences({ videos: change.videos })
+    setVideoNote(change.note)
+  }
+
+  /** Takes videos (1-based @VideoN numbers) out of the form; their tokens go, the later ones' follow. */
+  const removeVideos = (indices: readonly number[]) => {
+    setReferences({ videos: videoRefs.filter((_, i) => !indices.includes(i + 1)) })
+    setVideoNote(undefined)
+  }
+
+  /** A video dragged to another place (or moved with ⌥← / ⌥→; 0-based): the @VideoN tokens follow. */
+  const moveVideo = (from: number, to: number) => {
+    setReferences({ videos: moveItem(videoRefs, from, to) })
+    setVideoNote(undefined)
+  }
+
+  /** Another part of the video is sent: the same file in the same place, so no token changes. */
+  const setVideoWindow = (index: number, w: ClipWindow) => {
+    setReferences({ videos: withVideoWindow(videoRefs, index, w) })
+  }
+
+  const videoFitsNow = (path: string, duration: number | undefined) =>
+    videoFits(videoRefs, { path, duration }, videoFactsNow(), videoLimits)
+
+  // Offered when the model takes no reference videos but the form has (or names) some, or to start using them.
+  const switchToVideoModel =
+    !supportsReferenceVideos(params.model) && videoModel && kinds.includes('reference-to-video')
+      ? () => set('model', videoModel.id)
+      : undefined
 
   const setRefs = (next: string[], swap?: { from: Asset[]; to: Asset | null }) => setReferences({ refs: next }, swap)
 
@@ -983,6 +1069,47 @@ export default function ParamsForm({
         </div>
       )}
 
+      {kind === 'reference-to-video' &&
+        (videoLimits || videos.length > 0 ? (
+          <div>
+            <ReferenceVideos
+              videos={videos}
+              limits={videoLimits}
+              onAdd={addVideoRefs}
+              onRemove={(index) => removeVideos([index])}
+              onMove={moveVideo}
+              onWindow={setVideoWindow}
+              sequenceId={sequenceId}
+              fits={videoFitsNow}
+              note={videoNote}
+              onNote={setVideoNote}
+            />
+            {!videoLimits && videos.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-accent">
+                <span>{model?.name ?? 'The model'} doesn’t take reference videos – the videos aren’t sent.</span>
+                {switchToVideoModel && videoModel && (
+                  <button onClick={switchToVideoModel} className="text-text hover:underline">
+                    Switch to {videoModel.name}
+                  </button>
+                )}
+                <button onClick={() => removeVideos(videos.map((v) => v.index))} className="text-text hover:underline">
+                  Remove the videos
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          switchToVideoModel &&
+          videoModel && (
+            <p className="-mt-2 text-[11px] leading-snug text-muted">
+              Reference videos (motion, camera, style) need a Seedance 2.x reference model.{' '}
+              <button onClick={switchToVideoModel} className="text-text hover:underline">
+                Switch to {videoModel.name}
+              </button>
+            </p>
+          )
+        ))}
+
       {kind === 'reference-to-video' && (audioSupported || audios.length > 0) && (
         <div>
           <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -1128,15 +1255,18 @@ export default function ParamsForm({
           rows={7}
           placeholder={
             kind === 'reference-to-video'
-              ? audioSupported
-                ? 'Describe the scene, the motion and the camera… Type @ to refer to a reference image or a sound.'
-                : 'Describe the scene, the motion and the camera… Type @ to refer to a reference image.'
+              ? videoLimits && videos.length
+                ? 'Describe the scene, the motion and the camera… Type @ to refer to a reference image, a video or a sound.'
+                : audioSupported
+                  ? 'Describe the scene, the motion and the camera… Type @ to refer to a reference image or a sound.'
+                  : 'Describe the scene, the motion and the camera… Type @ to refer to a reference image.'
               : 'Describe the scene, the motion and the camera…'
           }
           kind={kind}
           checks={checks}
           references={references}
           audios={kind === 'reference-to-video' ? audios : []}
+          videos={kind === 'reference-to-video' ? videos : []}
           maxImages={maxRefs}
           groups={groups}
           library={assets}
@@ -1146,6 +1276,9 @@ export default function ParamsForm({
           onRemoveAudio={audioRefs.length ? removeAudios : undefined}
           onUseAudioModel={switchToAudioModel}
           audioModelName={audioModel?.name}
+          onRemoveVideo={videoRefs.length ? removeVideos : undefined}
+          onUseVideoModel={switchToVideoModel}
+          videoModelName={videoModel?.name}
           songFixes={song && { onNoSong: song.onNoSong, onChooseSinger: song.onChooseSinger }}
           language={language}
           belowInput={
@@ -1208,6 +1341,8 @@ export default function ParamsForm({
           onSwitchToReference={switchToReference}
           onUseAudioModel={switchToAudioModel}
           audioModelName={audioModel?.name}
+          onUseVideoModel={switchToVideoModel}
+          videoModelName={videoModel?.name}
         />
       </details>
 

@@ -1,3 +1,4 @@
+import { referenceVideosOf } from '@shared/models'
 import type { Asset, AssetKind, GenerationParams, LibraryMode } from '@shared/types'
 import { PATH_SEPARATOR, isWindows } from './platform'
 
@@ -154,10 +155,10 @@ export function followAssetImages<T extends Partial<GenerationParams>>(
 }
 
 /**
- * Pictures and audio clips from outside the library are copied into Referensbilder when a generation is
- * submitted (`sent` is what was submitted, `stored` what the generation recorded). Returns `current` using those
- * copies instead of the originals, so the form keeps working when the originals are moved or deleted; undefined
- * when nothing was copied. Audio clips keep their windows.
+ * Pictures, audio clips and reference videos from outside the library are copied into Referensbilder when a
+ * generation is submitted (`sent` is what was submitted, `stored` what the generation recorded). Returns `current`
+ * using those copies instead of the originals, so the form keeps working when the originals are moved or deleted;
+ * undefined when nothing was copied. Audio clips and videos keep their windows.
  */
 export function withImportedCopies<T extends Partial<GenerationParams>>(
   current: T,
@@ -172,6 +173,8 @@ export function withImportedCopies<T extends Partial<GenerationParams>>(
   pair(sent.endImage, stored.endImage)
   sent.referenceImages?.forEach((r, i) => pair(r, stored.referenceImages?.[i]))
   sent.referenceAudios?.forEach((a, i) => pair(a?.path, stored.referenceAudios?.[i]?.path))
+  const storedVideos = referenceVideosOf(stored)
+  referenceVideosOf(sent).forEach((v, i) => pair(v.path, storedVideos[i]?.path))
   if (!copies.size) return undefined
   let changed = false
   const next = mapParamImages(current, (path) => {
@@ -185,6 +188,12 @@ export function withImportedCopies<T extends Partial<GenerationParams>>(
     next.referenceAudios = current.referenceAudios.map((a) =>
       a?.path && copies.has(a.path) ? { ...a, path: copies.get(a.path)! } : a
     )
+  }
+  // Reference videos from outside the library are copied into "Referensbilder" too; each keeps its window.
+  const videos = referenceVideosOf(current)
+  if (videos.some((v) => copies.has(v.path))) {
+    changed = true
+    next.referenceVideos = videos.map((v) => (copies.has(v.path) ? { ...v, path: copies.get(v.path)! } : v))
   }
   return changed ? ({ ...current, ...next } as T) : undefined
 }
@@ -295,6 +304,13 @@ export function rememberAfterSwitch(
         next.referenceAudios = snapshot.referenceAudios.flatMap((a) => {
           const path = a?.path ? remapPath(a.path, m) : undefined
           return path ? [{ ...a, path }] : []
+        })
+      }
+      // Reference videos (takes, own clips, films, copies in "Referensbilder") likewise, each with its window.
+      if (snapshot.referenceVideos) {
+        next.referenceVideos = referenceVideosOf(snapshot).flatMap((v) => {
+          const path = remapPath(v.path, m)
+          return path ? [{ ...v, path }] : []
         })
       }
       localStorage.setItem(LAST_PARAMS_KEY, JSON.stringify(next))

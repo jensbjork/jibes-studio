@@ -11,6 +11,7 @@ import { basename, dirname, extname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
 import { formatPrice, roundUsd, toSrt } from '@shared/edit-plan'
 import { generationTitle } from '@shared/generation-label'
+import { referenceVideosOf } from '@shared/models'
 import type {
   AudioCatalog,
   Edit,
@@ -524,7 +525,7 @@ class EditService {
   /** An AI take's inputs in the edit's Underlag/ move to Referensbilder/<day>/, its params following. */
   private async releaseInputs(take: db.StoredGeneration, inputsDir: string): Promise<void> {
     const p = take.params
-    const paths = [p.startImage, p.endImage, p.sourceVideo, ...(p.referenceVideos ?? [])].filter(
+    const paths = [p.startImage, p.endImage, p.sourceVideo, ...referenceVideosOf(p).map((v) => v.path)].filter(
       (x): x is string => typeof x === 'string' && !!x && x.startsWith(`${inputsDir}/`) && existsSync(x)
     )
     for (const path of paths) {

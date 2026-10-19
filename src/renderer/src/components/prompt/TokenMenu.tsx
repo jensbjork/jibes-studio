@@ -6,8 +6,10 @@ import { mediaUrl } from '../../lib/media'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
 import AudioPlayButton from '../pickers/AudioPlayButton'
-import { KIND_TONE } from '../pickers/assetKinds'
+import { KIND_TONE, VIDEO_TONE } from '../pickers/assetKinds'
 import { audioLabel, audioLabelParts, windowLabel } from '../pickers/audioRefs'
+import { videoLabelParts } from '../pickers/videoRefs'
+import VideoWindowPreview from '../pickers/VideoWindowPreview'
 import { formatAudioRefs, formatImageRefs, promptList } from '../pickers/text'
 import { placeBeside } from './textareaDom'
 import { fileName, isDisabled, type MenuItem, type MenuSection } from './promptText'
@@ -28,8 +30,10 @@ interface Props {
   replacing: boolean
   /** Only pictures or only clips are offered. */
   only?: ReferenceKind
-  /** No reference images yet: the empty state explains where they come from. */
+  /** No reference images (or videos) yet: the empty state explains where they come from. */
   noReferences: boolean
+  /** The model takes reference videos: the empty state mentions them. */
+  videosPossible?: boolean
 }
 
 const WIDTH = 320
@@ -53,7 +57,8 @@ export default function TokenMenu({
   query,
   replacing,
   only,
-  noReferences
+  noReferences,
+  videosPossible = false
 }: Props) {
   const optionRefs = useRef<(HTMLElement | null)[]>([])
   const place = placeBeside(anchor, WIDTH, MAX_HEIGHT)
@@ -74,13 +79,25 @@ export default function TokenMenu({
     >
       {replacing && (
         <p className="border-b border-line px-3 py-2 text-[11px] text-muted">
-          {only === 'audio' ? 'Choose the sound clip the reference should point at' : 'Choose the image the reference should point at'}
+          {only === 'audio'
+            ? 'Choose the sound clip the reference should point at'
+            : only === 'video'
+              ? 'Choose the video the reference should point at'
+              : 'Choose the image the reference should point at'}
         </p>
       )}
       <div
         id={id}
         role="listbox"
-        aria-label={only === 'audio' ? 'Refer to a sound clip' : 'Refer to an image or a sound clip'}
+        aria-label={
+          only === 'audio'
+            ? 'Refer to a sound clip'
+            : only === 'video'
+              ? 'Refer to a video'
+              : videosPossible
+                ? 'Refer to an image, a video or a sound clip'
+                : 'Refer to an image or a sound clip'
+        }
         className="min-h-0 flex-1 overflow-y-auto p-1"
       >
         {empty ? (
@@ -90,6 +107,7 @@ export default function TokenMenu({
               <p className="mt-1 text-[11px]">
                 Add images with ＋ Character, ＋ Environment, ＋ Product, ＋ Outfit or ＋ Pose above – they get the
                 numbers @Image1, @Image2 … and voices @Audio1 …
+                {videosPossible && ' Videos added with ＋ Video are @Video1 …'}
               </p>
             )}
           </div>
@@ -197,6 +215,22 @@ function OptionContent({ item }: { item: MenuItem }) {
           {name} · {detail} · {windowLabel(a)}
         </span>
         {!a.sent && <span className="shrink-0 text-[11px] text-accent">not sent</span>}
+      </>
+    )
+  }
+  if (item.type === 'video') {
+    const v = item.video
+    const { name, detail } = videoLabelParts(v)
+    return (
+      <>
+        <span className="relative h-6 w-10 shrink-0 overflow-hidden rounded bg-raised">
+          <VideoWindowPreview path={v.path} start={v.start} length={v.length} playing={false} />
+        </span>
+        <span className={`shrink-0 font-medium ${VIDEO_TONE.text}`}>@Video{v.index}</span>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
+          {name} · {detail} · {windowLabel(v)}
+        </span>
+        {!v.sent && <span className="shrink-0 text-[11px] text-accent">not sent</span>}
       </>
     )
   }

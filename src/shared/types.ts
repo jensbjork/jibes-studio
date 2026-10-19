@@ -71,11 +71,17 @@ export interface GenerationParams {
    */
   sourceVideo?: string
   /**
-   * Seedance 2.x reference-to-video: reference videos, "<Video 1>"… in the prompt; sent as
-   * `reference_video_urls`. Absolute over IPC, stored relative like the images.
+   * Seedance 2.x reference-to-video: reference videos, sent as `reference_video_urls`. In Generate and sequence clips
+   * they are references only (motion, camera, style): @Video1… in Studio's prompt, "<Video 1>"… as sent, each the
+   * window (start/length) of its file cut to a small proxy when sent. The Editor's prompt-edit sends its proxy whole
+   * with `referenceTask` 'edit' and "<Video 1>" written into the prompt. Absolute over IPC, stored relative like the
+   * images. Rows from before windows existed hold plain path strings: read them with referenceVideosOf (models.ts).
    */
-  referenceVideos?: string[]
-  /** Seedance 2.5 R2V `omni_reference_task_type`. */
+  referenceVideos?: ReferenceVideo[]
+  /**
+   * Seedance 2.x R2V `omni_reference_task_type`: the Editor's 'edit'. Undefined for references (Generate, clips):
+   * Seedance 2.5 is then sent 'reference', 2.0 nothing (it doesn't take the field).
+   */
   referenceTask?: 'edit' | 'extend' | 'reference' | 'auto'
   /** Upscale models: `upscale_factor` on the queue, `resolution: "<n>x"` (and upscale_factor) on the quote. */
   upscaleFactor?: 1 | 2 | 4
@@ -122,6 +128,36 @@ export interface ReferenceAudio {
    * outside Venice's 2–15 s is reported by the prompt checks instead of being changed quietly.
    */
   length?: number
+}
+
+/**
+ * One reference video of a generation (Seedance 2.x reference-to-video): the part of the file from `start` that lasts
+ * `length` seconds, sent as a reference only (@Video1… in the prompt).
+ */
+export interface ReferenceVideo {
+  /** Absolute path to a local video file (a take, an own clip, an exported film or a copy in Referensvideor). */
+  path: string
+  /** Seconds into the file; default 0. */
+  start?: number
+  /**
+   * Seconds; default min(rest of the file, 5 s) (referenceVideoWindow in models.ts). Not clamped: a window outside
+   * the model family's limits (2–15 s on Seedance 2.0, 2–30 s on 2.5) is reported by the prompt checks instead.
+   */
+  length?: number
+}
+
+/** A video file as the window shows it as a reference (StudioApi.probeReferenceVideo). */
+export interface ReferenceVideoInfo {
+  /** The file, as asked. */
+  path: string
+  /** Seconds. */
+  duration: number
+  /** Display size (rotation applied). */
+  width: number
+  height: number
+  hasAudio: boolean
+  /** Absolute path of a JPEG of the frame asked for (at most 512 px wide); absent when none could be taken. */
+  poster?: string
 }
 
 export type GenerationStatus = 'queued' | 'processing' | 'completed' | 'failed'
@@ -633,6 +669,12 @@ export interface ComposedPrompt {
     singer?: { assetId: string; name: string; tokens: string[] }
     singerMissing?: boolean
   }
+  /**
+   * The reference videos sent as references (Seedance 2.x, GenerationParams.referenceVideos): the legend's line for each
+   * ("Refer to the action, camera movement and style in @Video1 …"), in @Video order, also when nothing is appended,
+   * like `entries`. Not descriptions: appended with "Include descriptions" off too, and never shortened.
+   */
+  videos?: { token: string; line: string }[]
 }
 
 // ── Prompt library ───────────────────────────────────────────────────────────
@@ -2216,13 +2258,20 @@ export interface AgentSetReferencesArgs {
    * photos. Omitted: replace clears the audio, append keeps it.
    */
   audios?: ReferenceAudio[]
+  /**
+   * Reference videos (@VideoN; main resolved the agent's generation, export or upload to a file in the library and
+   * measured each window: start and length always set), in order; follows `mode` like the photos, within the model
+   * family's limits (referenceVideoLimits; main left out what doesn't fit). Only for a model that takes them
+   * (supportsReferenceVideos). Omitted: replace clears the videos, append keeps them.
+   */
+  videos?: ReferenceVideo[]
   /** replace: these become the reference images. append: added after the ones there (duplicates skipped). */
   mode: 'replace' | 'append'
 }
 
 /**
- * reorder_references: the form's reference images and/or audio clips in a new order, each named by its token in
- * the current numbering ("@Image3", "@Audio2") or by its absolute path (main resolved the agent's ids and sends
+ * reorder_references: the form's reference images, audio clips and/or reference videos in a new order, each named by
+ * its token in the current numbering ("@Image3", "@Audio2", "@Video1") or by its absolute path (main resolved the agent's ids and sends
  * paths, so a form the user changed meanwhile still gets the pictures named, or refuses if one is gone). Named ones
  * come first, the rest keep their order after them; the window applies it with reorderReferences
  * (src/shared/prompt-remap.ts), so the prompt's and the negative prompt's tokens follow, in one change of the form.
@@ -2230,6 +2279,8 @@ export interface AgentSetReferencesArgs {
 export interface AgentReorderReferencesArgs {
   images?: string[]
   audios?: string[]
+  /** Reference videos ("@Video2" or their absolute paths), applied with reorderReferences(params, 'video', …). */
+  videos?: string[]
 }
 
 /** The library views of the five asset kinds (the renderer's View ids). */
@@ -2321,7 +2372,19 @@ export interface StudioApi {
 
   // Generation
   listModels(force?: boolean): Promise<VideoModel[]>
+  /**
+   * Venice's price for the params. With reference videos (Seedance 2.x) the windows that are sent count
+   * (`reference_video_total_duration`): main measures the files, so a window past a file's end counts only up to it.
+   */
   quote(params: GenerationParams): Promise<number>
+  /**
+   * A video file as a reference video (Generate, a sequence clip): its length, display size, whether it has sound, and
+   * a poster – a JPEG of the frame at `at` seconds (default 0; at most 512 px wide, cached in .studio/tmp) – for a tile,
+   * a window editor or the approval dialog. Free, nothing is copied: a file from outside the library is copied into
+   * Referensbilder/<day>/ only when a generation is sent. Rejects with a plain reason when the file is no video Studio
+   * can read ("clip.txt: The file is not a video Studio can read …").
+   */
+  probeReferenceVideo(path: string, at?: number): Promise<ReferenceVideoInfo>
   /** The first take; with `count` > 1 the other variants arrive through onGenerationUpdate. */
   generate(params: GenerationParams, opts?: GenerateOptions): Promise<Generation>
   acceptConsent(flow: string, version: string): Promise<void>

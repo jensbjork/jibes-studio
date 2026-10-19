@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { rememberModelKinds } from '@shared/models'
+import { paramsForSubmit, rememberModelKinds } from '@shared/models'
 import type {
   Asset,
   AssetKind,
@@ -141,6 +141,10 @@ export function ipcErrorMessage(e: unknown): string {
 /** Live USD price for the params; debounced so flipping through options doesn't spam the API. */
 export function useQuote(params: GenerationParams, model: VideoModel | undefined): number | undefined {
   const [quote, setQuote] = useState<number>()
+  // Reference videos are priced by their seconds ("input with video"): the windows that are sent count.
+  const videoWindows = (paramsForSubmit(params).referenceVideos ?? [])
+    .map((v) => `${v.path}\u0000${v.start ?? ''}\u0000${v.length ?? ''}`)
+    .join('\n')
   useEffect(() => {
     setQuote(undefined)
     if (!model) return
@@ -155,7 +159,7 @@ export function useQuote(params: GenerationParams, model: VideoModel | undefined
       cancelled = true
       clearTimeout(t)
     }
-  }, [model?.id, params.duration, params.resolution, params.aspectRatio, params.audio])
+  }, [model?.id, params.duration, params.resolution, params.aspectRatio, params.audio, videoWindows])
   return quote
 }
 
