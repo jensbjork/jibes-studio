@@ -45,6 +45,10 @@ export type FixAction =
   | { type: 'remove-audio'; indices: number[] }
   /** Switch to a reference model that takes audio. */
   | { type: 'use-audio-model' }
+  /** A song clip: set What the clip hears to No song (its place is too short to send any of the song). */
+  | { type: 'song-no-song' }
+  /** A song clip: go to Who sings (the singer chosen isn't among the clip's pictures). */
+  | { type: 'song-singer' }
 
 export interface QuickFix {
   label: string
@@ -81,6 +85,8 @@ interface Options {
   canRemoveAudio?: boolean
   /** A reference model that takes audio, offered when the current one doesn't ("Switch to Seedance 2.5 …"). */
   audioModelName?: string
+  /** A song clip whose What the clip hears and Who sings can be set from here. */
+  songFixes?: boolean
   /** Library assets that "@Name" may have meant; omit when assets can't be added from here. */
   library?: readonly Asset[]
   /** List the pictures and clips the text never mentions (the main prompt; not the negative one). */
@@ -239,6 +245,17 @@ export function issueViews(o: Options): IssueView[] {
         }
         break
       }
+      case 'song-place': {
+        // About the clip's place in the song, not the text: the message says to move a boundary; or hear nothing.
+        if (o.songFixes) {
+          fixes.push({
+            label: 'Set No song',
+            title: 'What the clip hears: nothing of the song (it still plays over the clip in the film)',
+            action: { type: 'song-no-song' }
+          })
+        }
+        break
+      }
       case 'audio-too-long': {
         detail = 'Shorten the excerpts in the library, or send fewer sound clips.'
         const lastSent = [...audios].reverse().find((a) => a.sent)
@@ -294,7 +311,10 @@ export function issueViews(o: Options): IssueView[] {
                 ? [{ label: 'Remove the sound', action: { type: 'remove-audio', indices: allAudio } } as QuickFix]
                 : [])
             ]
-          : []
+          : // A song clip's singer who isn't among its pictures: choose another (or nobody) in Who sings.
+            issue.code === 'song-singer' && o.songFixes
+            ? [{ label: 'Choose who sings', action: { type: 'song-singer' } } as QuickFix]
+            : []
     views.push({
       key: `${issue.code}:${issue.message}:${ranges[0]?.start ?? ''}`,
       severity: 'warning',

@@ -130,8 +130,8 @@ let stopFeed: (() => void) | undefined
 function notifyNewApproval(a: ApprovalRequest): void {
   if (document.hasFocus() || typeof Notification === 'undefined') return
   try {
-    // An image request makes a still, an edit changes a film in the Editor, a voice design makes a voice, a removal
-    // removes things; the rest generates video.
+    // An image request makes a still, an edit changes a film in the Editor, a voice design makes a voice, a song's
+    // lyrics are transcribed, a removal removes things; the rest generates video.
     const what =
       a.kind === 'image'
         ? 'wants to create an image'
@@ -139,9 +139,11 @@ function notifyNewApproval(a: ApprovalRequest): void {
           ? 'wants to edit a film'
           : a.kind === 'voice-design'
             ? 'wants to create a voice'
-            : a.kind === 'delete'
-              ? 'wants to delete something'
-              : 'wants to generate'
+            : a.kind === 'song-lyrics'
+              ? 'wants to transcribe a song'
+              : a.kind === 'delete'
+                ? 'wants to delete something'
+                : 'wants to generate'
     // "The agent wants to generate" for a generic MCP client name, "OpenClaw wants to generate" for a real one.
     const note = new Notification(`${agentDisplayName(a.client)} ${what}`, {
       body: 'Open Studio to approve or decline.',

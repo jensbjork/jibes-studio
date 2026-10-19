@@ -16,6 +16,7 @@ import { learningsForGuide, registerLibraryTools } from './library'
 import { registerPaidTools } from './paid'
 import { registerReviewTools } from './review'
 import { asSent, continuationOf, continues, endsOnNext, loadClip, registerSequenceTools } from './sequences'
+import { registerSongTools } from './song'
 import { registerStillTools } from './stills'
 import { registerSpendingTools } from './spending'
 import { boardNumbers, loadTransition, registerStoryboardTools } from './storyboards'
@@ -166,8 +167,8 @@ async function promptContext(ctx: ToolContext, segmentId: string | undefined, tr
 }
 
 /**
- * Everything a session offers: the tools, the write_video_prompt prompt and the studio://guide resource. 91 tools:
- * 36 that only read, 46 that change the library or the form (free), and 9 that only ask the user – the 8 paid
+ * Everything a session offers: the tools, the write_video_prompt prompt and the studio://guide resource. 96 tools:
+ * 37 that only read, 49 that change the library or the form (free), and 10 that only ask the user – the 9 paid
  * requests and request_delete. No tool removes anything or spends money on its own.
  */
 export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
@@ -175,6 +176,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
   registerUploadTools(server, ctx)
   registerFormTools(server, ctx)
   registerSequenceTools(server, ctx)
+  registerSongTools(server, ctx)
   registerImportTools(server, ctx)
   registerStillTools(server, ctx)
   registerStoryboardTools(server, ctx)

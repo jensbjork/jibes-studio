@@ -9,7 +9,9 @@ import Popover from '../pickers/Popover'
 import { menuRow, onMenuKeyDown } from '../storyboards/ui'
 import { Spinner } from '../work/StatusMark'
 import CastButton, { type CastPatch } from './CastPanel'
-import { CheckAllIcon, MoreIcon, PlayIcon } from './icons'
+import { CheckAllIcon, MoreIcon, NoteIcon, PlayIcon } from './icons'
+import SongChip from './song/SongChip'
+import type { TranscribeOptions } from './song/TranscribeLyrics'
 
 interface Props {
   sequence: Sequence
@@ -46,6 +48,13 @@ interface Props {
   onCastChange: (patch: CastPatch) => Promise<void>
   /** Opens the library view of a kind (from the Cast panel's picker). */
   onManageAssets?: (kind: AssetKind) => void
+  /** "Add a song…" (a sequence without one) and "Replace the song…": pick a file, then the import dialog. */
+  onPickSong: () => void
+  /** "Remove the song", after its question; rejects with main's refusal. */
+  onRemoveSong: () => Promise<void>
+  /** The song's steps from the Song panel (separating is free, transcribing paid); reject with main's refusal. */
+  onSeparateSong: () => Promise<unknown>
+  onTranscribeSong: (opts: TranscribeOptions) => Promise<unknown>
 }
 
 /** The heights "Export format" offers; Automatic (null) keeps the first clip's own size. */
@@ -91,7 +100,11 @@ export default function SequenceHeader({
   onError,
   onDelete,
   onCastChange,
-  onManageAssets
+  onManageAssets,
+  onPickSong,
+  onRemoveSong,
+  onSeparateSong,
+  onTranscribeSong
 }: Props) {
   const count = sequence.segments.length
   const exporting = exportProgress !== undefined
@@ -111,6 +124,16 @@ export default function SequenceHeader({
       </span>
 
       <div className="no-drag ml-auto flex shrink-0 items-center gap-2">
+        {sequence.song && (
+          <SongChip
+            sequence={sequence}
+            onReplace={onPickSong}
+            onRemove={onRemoveSong}
+            onSeparate={onSeparateSong}
+            onTranscribe={onTranscribeSong}
+            onError={onError}
+          />
+        )}
         <CastButton sequence={sequence} onChange={onCastChange} onManage={onManageAssets} />
         <OpenFolderButton
           target="sequences"
@@ -187,6 +210,7 @@ export default function SequenceHeader({
           onEditExport={onEditExport}
           onError={onError}
           onDelete={onDelete}
+          onAddSong={onPickSong}
         />
       </div>
     </div>
@@ -205,14 +229,18 @@ async function latestExport(sequenceId: string): Promise<ExportSummary | undefin
 export const DELETE_SEQUENCE_TEXT =
   "The clips leave the sequence. The takes stay in Media, and exported films stay in the folder. The sequence's images that nothing else uses are moved to the Trash."
 
-/** ⋯: the Export format, the latest export into the Editor, marking what is new here as seen, and deleting it. */
+/**
+ * ⋯: the Export format, the latest export into the Editor, a song for a sequence without one, marking what is new
+ * here as seen, and deleting it.
+ */
 function MoreMenu({
   sequence,
   exporting,
   onExportHeight,
   onEditExport,
   onError,
-  onDelete
+  onDelete,
+  onAddSong
 }: {
   sequence: Sequence
   exporting: boolean
@@ -220,6 +248,7 @@ function MoreMenu({
   onEditExport: (exportId: string) => void
   onError: (message: string) => void
   onDelete: () => void
+  onAddSong: () => void
 }) {
   const anchor = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
@@ -347,6 +376,29 @@ function MoreMenu({
                   : "Change the finished film with AI in the Editor. The sequence isn't touched."}
             </span>
           </button>
+          {!sequence.song && (
+            <>
+              <div className="mx-2 my-1 border-t border-line" />
+              <button
+                type="button"
+                role="menuitem"
+                data-menu-item
+                onClick={() => {
+                  setOpen(false)
+                  onAddSong()
+                }}
+                className={`${menuRow} flex-col items-start gap-0.5`}
+              >
+                <span className="flex items-center gap-2">
+                  <NoteIcon size={13} className="shrink-0 text-muted" />
+                  Add a song…
+                </span>
+                <span className="pl-[21px] text-[11px] leading-snug text-muted">
+                  Cut the sequence to a song: every clip gets a place in it, and the film plays the song.
+                </span>
+              </button>
+            </>
+          )}
           <div className="mx-2 my-1 border-t border-line" />
           <button
             type="button"

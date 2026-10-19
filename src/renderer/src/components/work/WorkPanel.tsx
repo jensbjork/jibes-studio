@@ -343,6 +343,7 @@ function runningIcon(w: RunningWork): ReactNode {
     case 'render':
       return <ScissorsIcon size={14} />
     case 'voice-design':
+    case 'song':
       return <WaveIcon size={14} />
     case 'import':
     case 'upload':

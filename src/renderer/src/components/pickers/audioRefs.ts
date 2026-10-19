@@ -131,10 +131,18 @@ export function audioRole(kind: AssetKind | undefined): string {
   return kind === 'character' ? 'voice' : kind === 'environment' ? 'soundscape' : 'sound'
 }
 
-/** What a clip is, in two parts: "Anna" and "voice" ("voice 2" when it has several), or "Own sound" and its file. */
+/** A sequence's song or its vocals (kept in the sequence's Ljud/ folder; the library's folder names are Swedish). */
+const SONG_FILE = /\/Sekvenser\/[^/]+\/Ljud\/[^/]+$/
+
+/**
+ * What a clip is, in two parts: "Anna" and "voice" ("voice 2" when it has several), "Song" and its file (a sequence's
+ * song or vocals, a song clip's window of it), or "Own sound" and its file.
+ */
 export function audioLabelParts(audio: Pick<FormAudio, 'path' | 'source'>): { name: string; detail: string } {
   const s = audio.source
-  if (!s) return { name: 'Own sound', detail: audio.path.split('/').pop() ?? audio.path }
+  if (!s) {
+    return { name: SONG_FILE.test(audio.path) ? 'Song' : 'Own sound', detail: audio.path.split('/').pop() ?? audio.path }
+  }
   const several = clipsOf(s.asset).length > 1
   return { name: s.asset.name, detail: `${audioRole(s.asset.kind)}${several ? ` ${s.clip}` : ''}` }
 }

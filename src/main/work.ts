@@ -47,6 +47,7 @@ import type { ImportService } from './imports'
 import type { JobManager, SendingSubmit } from './jobs'
 import { fromStoredPath } from './paths'
 import type { SequenceActiveWork, SequenceService } from './sequences'
+import type { SongActiveWork } from './song'
 import { currentSession } from './session'
 import { typicalStillMs, type StillWork } from './stills'
 import type { StoryboardService } from './storyboards'
@@ -132,6 +133,8 @@ export interface Registries {
   sequenceRuns: SequenceActiveWork['runs']
   storyboardRuns: { storyboardId: string; startedAt: number; total: number; sent: number; approved?: boolean }[]
   exports: SequenceActiveWork['exports']
+  /** Songs being prepared (main/song.ts). */
+  songs?: SongActiveWork[]
   stills: StillWork[]
   editJobs: EditActiveWork['jobs']
   renders: EditActiveWork['renders']
@@ -215,6 +218,23 @@ function segmentPlace(
     segmentId,
     label: `Clip ${number} in “${sequence.name}”`,
     target: { view: 'sequences', sequenceId: segment.sequenceId, segmentId, ...extra }
+  }
+}
+
+/** What a song's step says it is doing: "Separating the vocals 40%", "Transcribing the lyrics…". */
+function songDetail(w: SongActiveWork): string {
+  const pct = w.fraction !== undefined && w.fraction > 0 ? ` ${percent(w.fraction)}%` : '…'
+  switch (w.stage) {
+    case 'copying':
+      return 'Copying the song…'
+    case 'separating':
+      return `Separating the vocals${pct}`
+    case 'transcribing':
+      return 'Transcribing the lyrics…'
+    case 'analysing':
+      return 'Finding the beat…'
+    case 'splitting':
+      return 'Splitting into clips…'
   }
 }
 
@@ -331,6 +351,7 @@ function approvalView(a: ExecutingApproval, request: ApprovalRequest | undefined
       return 'generate'
     case 'segment':
     case 'generate-all':
+    case 'song-lyrics':
       return sequencePlace(names, a.sequenceId).view
     case 'image':
       return a.sequenceId ? sequencePlace(names, a.sequenceId).view : 'media'
@@ -362,6 +383,8 @@ function covers(a: ExecutingApproval, request: ApprovalRequest | undefined, item
       return item.kind === 'edit-job' && !!request?.edit?.editId && item.ownerId === request.edit.editId
     case 'voice-design':
       return item.kind === 'voice-design' && !!request?.edit?.assetId && item.ownerId === request.edit.assetId
+    case 'song-lyrics':
+      return item.kind === 'song' && item.ownerId === a.sequenceId
     default:
       return false
   }
@@ -581,6 +604,22 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       startedAt: e.startedAt,
       progress: e.progress,
       ...(remainingMs !== undefined ? { remainingMs } : {}),
+      measuredAt: now
+    })
+  }
+
+  // Songs being prepared: copied in, separated, transcribed, analysed or split into clips.
+  for (const w of reg.songs ?? []) {
+    const sequence = names.sequences[w.sequenceId]
+    if (!sequence) continue
+    items.push({
+      key: `song:${w.sequenceId}`,
+      kind: 'song',
+      ...sequencePlace(names, w.sequenceId),
+      label: `Song of “${sequence.name}”`,
+      detail: songDetail(w),
+      startedAt: w.startedAt,
+      ...(w.fraction !== undefined && w.fraction > 0 ? { progress: w.fraction } : {}),
       measuredAt: now
     })
   }
@@ -1184,6 +1223,8 @@ export interface WorkSources {
   storyboards: () => StoryboardService | undefined
   edits: () => EditServiceHandle | undefined
   imports: () => ImportService | undefined
+  /** The song service's activeWork() (main/song.ts). */
+  songs?: () => SongActiveWork[]
   /** stills.activeStills(). */
   stills: () => StillWork[]
   /** agent.approvals.executing() and the requests the store remembers (agent.approvals.list()). */
@@ -1271,6 +1312,7 @@ export class WorkStatus {
       sequenceRuns: sequences?.runs ?? [],
       storyboardRuns,
       exports: sequences?.exports ?? [],
+      songs: safely('the songs', () => this.src.songs?.() ?? [], []),
       stills,
       editJobs: edits?.jobs ?? [],
       renders: edits?.renders ?? [],

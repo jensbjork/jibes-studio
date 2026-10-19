@@ -56,6 +56,8 @@ interface Props {
   madeFromEarlierPictures?: (take: Generation) => boolean
   /** The take's prompt differs from the one in the editor now. */
   promptDiffers?: (take: Generation) => boolean
+  /** A word in the tile's lower left corner about a finished take (a song clip's: whether it sings in sync). */
+  badge?: (take: Generation) => TakeBadge | undefined
   /** A finished take was clicked or arrowed to: make it the chosen one (a click on the chosen one restarts it). */
   onChoose: (take: Generation, by: PickedBy) => void
   /** ⌥-click, ⌥← / ⌥→ or the menu: show it in the player without choosing it. */
@@ -73,6 +75,12 @@ interface Props {
   onImport?: (paths: string[]) => void
   /** "Add take from file…". */
   onPickFile?: () => void
+}
+
+export interface TakeBadge {
+  text: string
+  title: string
+  tone: 'good' | 'warning'
 }
 
 /** Tile heights: Sequences has the room, the transition editor beside the boards is 400 px wide. */
@@ -105,6 +113,7 @@ export default function TakeStrip({
   importing = [],
   madeFromEarlierPictures,
   promptDiffers,
+  badge,
   onChoose,
   onPreview,
   onLeavePreview,
@@ -371,6 +380,7 @@ export default function TakeStrip({
                     tabbable={take.id === tabbableId}
                     autoSelects={autoSelects}
                     stale={!!madeFromEarlierPictures && take.status === 'completed' && madeFromEarlierPictures(take)}
+                    corner={take.status === 'completed' && !take.fileMissing ? badge?.(take) : undefined}
                     refCallback={(el) => {
                       if (el) tiles.current.set(take.id, el)
                       else tiles.current.delete(take.id)
@@ -467,6 +477,7 @@ function TakeTile({
   tabbable,
   autoSelects,
   stale,
+  corner,
   refCallback,
   onClick,
   onKeyDown,
@@ -484,6 +495,8 @@ function TakeTile({
   tabbable: boolean
   autoSelects: boolean
   stale: boolean
+  /** The strip's badge for it (see Props.badge). */
+  corner?: TakeBadge
   refCallback: (el: HTMLDivElement | null) => void
   onClick: (e: MouseEvent, fresh: boolean) => void
   onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => void
@@ -662,6 +675,16 @@ function TakeTile({
           className="pointer-events-none absolute bottom-1 left-1 rounded bg-amber-500/90 px-1 py-px text-[9px] font-medium leading-none text-black"
         >
           Earlier image
+        </span>
+      )}
+      {corner && !stale && (
+        <span
+          title={corner.title}
+          className={`pointer-events-none absolute bottom-1 left-1 max-w-[60%] truncate rounded px-1 py-px text-[9px] font-medium leading-none text-black ${
+            corner.tone === 'good' ? 'bg-emerald-400/90' : 'bg-amber-500/90'
+          }`}
+        >
+          {corner.text}
         </span>
       )}
       {take.status === 'completed' && !take.fileMissing && !stale && (

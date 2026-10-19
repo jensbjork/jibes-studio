@@ -6,6 +6,7 @@ import {
   type ApprovalEditRequest,
   type ApprovalImageRequest,
   type ApprovalRequest,
+  type ApprovalSongRequest,
   type GenerationParams,
   type SequenceKind
 } from '@shared/types'
@@ -13,9 +14,9 @@ import { runConfirmed } from '../requested-by'
 import { errorText } from './studio'
 
 // What an agent asked for that needs the user's OK: paid generations (videos, pictures, the Editor's paid operations,
-// designed voices) and removals ('delete'). Nothing reaches Venice, and nothing is removed, until the user approves
-// the request in Studio; main then carries out exactly what the request describes, through the same code paths as
-// the window.
+// designed voices, a song's lyrics) and removals ('delete'). Nothing reaches Venice, and nothing is removed, until the
+// user approves the request in Studio; main then carries out exactly what the request describes, through the same
+// code paths as the window.
 
 /**
  * What carrying out an approved request led to: the generations it started, or the still it made – or, for a
@@ -90,6 +91,8 @@ export interface ApprovalPlan {
   edit?: ApprovalEditRequest
   /** 'delete': what will be removed, as the dialog shows it. */
   delete?: ApprovalDeleteRequest
+  /** 'song-lyrics': the song whose lyrics will be transcribed, as the dialog shows it. */
+  song?: ApprovalSongRequest
   sequenceId?: string
   /** 'storyboard' when sequenceId is a storyboard (a 'segment' request is then one of its transitions). */
   sequenceKind?: SequenceKind
@@ -165,6 +168,8 @@ function executingSummary(r: ApprovalRequest): string {
       return r.edit?.summary ?? 'A new voice'
     case 'delete':
       return r.delete?.summary ?? 'Deleting what the agent asked for'
+    case 'song-lyrics':
+      return `The lyrics of “${r.song?.songName ?? 'the song'}”${named}`
   }
 }
 
@@ -225,6 +230,7 @@ export class ApprovalStore {
       image: plan.image,
       ...(plan.edit ? { edit: plan.edit } : {}),
       ...(plan.delete ? { delete: plan.delete } : {}),
+      ...(plan.song ? { song: plan.song } : {}),
       sequenceId: plan.sequenceId,
       ...(plan.sequenceKind ? { sequenceKind: plan.sequenceKind } : {}),
       sequenceName: plan.sequenceName,

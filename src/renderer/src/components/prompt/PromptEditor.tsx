@@ -96,6 +96,11 @@ interface Props {
   /** Switches to a reference model that takes audio (named `audioModelName`); offered when this one doesn't. */
   onUseAudioModel?: () => void
   audioModelName?: string
+  /**
+   * A clip of a sequence cut to a song: set What the clip hears to No song (offered when its place is too short), and
+   * go to Who sings (offered when the singer isn't among its pictures).
+   */
+  songFixes?: { onNoSong: () => void; onChooseSinger: () => void }
   /** Prompt language: the words between a character and its voice and clothes ("voice", "wearing", or the Swedish words). */
   language: PromptLanguage
   /** Shown right under the text field. */
@@ -190,6 +195,7 @@ export default function PromptEditor(props: Props) {
     onRemoveAudio,
     onUseAudioModel,
     audioModelName,
+    songFixes,
     language,
     belowInput,
     inFocus
@@ -291,6 +297,7 @@ export default function PromptEditor(props: Props) {
         canAddReferences: !!onAddReferences,
         canRemoveAudio: !!onRemoveAudio,
         audioModelName: onUseAudioModel ? audioModelName : undefined,
+        songFixes: !!songFixes,
         library: onAddFromLibrary ? library : undefined,
         adviseUnused: true,
         explained: checks.options.explained
@@ -307,6 +314,7 @@ export default function PromptEditor(props: Props) {
       !!onAddReferences,
       !!onRemoveAudio,
       onUseAudioModel ? audioModelName : undefined,
+      !!songFixes,
       library,
       !!onAddFromLibrary,
       checksKey
@@ -651,6 +659,12 @@ export default function PromptEditor(props: Props) {
         break
       case 'use-audio-model':
         onUseAudioModel?.()
+        break
+      case 'song-no-song':
+        songFixes?.onNoSong()
+        break
+      case 'song-singer':
+        songFixes?.onChooseSinger()
         break
     }
   }

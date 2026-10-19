@@ -35,6 +35,11 @@ interface Props<T extends SideListItem> {
   onCreate?: () => void
   /** … or opens this under the button (a form, or a menu of ways to start); close() closes it. */
   createPanel?: { width?: number; label?: string; popup?: 'dialog' | 'menu'; render: (close: () => void) => ReactNode }
+  /**
+   * What "New …" chosen in ⌘K does instead of pressing the button (Sequences: an empty sequence at once, though the
+   * button offers a menu).
+   */
+  onCreateRequest?: () => void
   /** Under the heading, above the search (Mark all as seen). */
   headerExtra?: ReactNode
   /** In the view's order; undefined until the first load has arrived. */
@@ -72,6 +77,7 @@ export default function SideList<T extends SideListItem>({
   creating = false,
   onCreate,
   createPanel,
+  onCreateRequest,
   headerExtra,
   items,
   selectedId,
@@ -244,7 +250,9 @@ export default function SideList<T extends SideListItem>({
 
   const createAction = createPanel ? () => setCreateOpen((open) => !open) : onCreate
   // "New sequence", "New character" … chosen in ⌘K: the same as a press on the button, once the list has loaded.
-  useCreateRequest(!!items && !creating, () => (createPanel ? setCreateOpen(true) : onCreate?.()))
+  useCreateRequest(!!items && !creating, () =>
+    onCreateRequest ? onCreateRequest() : createPanel ? setCreateOpen(true) : onCreate?.()
+  )
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-line">

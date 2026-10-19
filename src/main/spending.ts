@@ -12,9 +12,10 @@ import { getBudget, setBudget } from './settings'
 //    operations) that completed, at its quote, on the day it completed. A failed one counts nothing: Venice doesn't
 //    charge for a generation that fails. One still rendering is on its way (pendingUsd), not spent;
 //  - a generated still at its cost, on the day it was made (a failed picture leaves no row);
-//  - an Editor sound job, a transcription or a voice design at the cost its sent parts added up to (media_jobs.cost,
-//    which grows as each part is sent, failed or stopped jobs included), on the day the job was started; the rest of a
-//    running job's quote is on its way. A picture operation's cost is its take's (a video above), never its job's.
+//  - an Editor sound job, a transcription (an edit's, or a song's: placed on its sequence) or a voice design at the
+//    cost its sent parts added up to (media_jobs.cost, which grows as each part is sent, failed or stopped jobs
+//    included), on the day the job was started; the rest of a running job's quote is on its way. A picture
+//    operation's cost is its take's (a video above), never its job's.
 // Edit media and transcripts repeat their job's cost and are left out. Whatever is deleted (a take, an edit with its
 // jobs) drops out of the history; Venice's own account is the record of what was billed.
 
@@ -115,17 +116,35 @@ function spendsSince(since: number): Spend[] {
     out.push({ id: r.id, at: r.at, usd: r.usd, kind: 'image', place: sequencePlace(r.seq_id, r.seq_name, r.seq_kind) })
   }
 
+  // A song's lyrics (main/song.ts) are a transcription without an edit: the sequence is in its request.
   const jobs = conn
     .prepare(
-      `SELECT j.id, j.created_at AS at, j.cost AS usd, j.op, j.edit_id, e.name AS edit_name
+      `SELECT j.id, j.created_at AS at, j.cost AS usd, j.op, j.edit_id, e.name AS edit_name,
+         s.id AS seq_id, s.name AS seq_name, s.kind AS seq_kind
        FROM media_jobs j LEFT JOIN edits e ON e.id = j.edit_id
+       LEFT JOIN sequences s ON j.edit_id IS NULL AND j.op = 'transcribe'
+         AND s.id = json_extract(CASE WHEN json_valid(j.request) THEN j.request END, '$.sequenceId')
        WHERE j.cost > 0 AND j.op NOT IN ${PICTURE_OPS} AND j.created_at >= ?`
     )
-    .all(since) as { id: string; at: number; usd: number; op: string; edit_id: string | null; edit_name: string | null }[]
+    .all(since) as {
+    id: string
+    at: number
+    usd: number
+    op: string
+    edit_id: string | null
+    edit_name: string | null
+    seq_id: string | null
+    seq_name: string | null
+    seq_kind: string | null
+  }[]
   for (const r of jobs) {
     const kind: SpendKind = r.op === 'design-voice' ? 'voice' : r.op === 'transcribe' ? 'transcript' : 'editor'
     const place: Place =
-      r.edit_id && r.edit_name !== null ? { kind: 'edit', id: r.edit_id, name: r.edit_name } : { kind: 'voices' }
+      r.edit_id && r.edit_name !== null
+        ? { kind: 'edit', id: r.edit_id, name: r.edit_name }
+        : r.seq_id
+          ? sequencePlace(r.seq_id, r.seq_name, r.seq_kind)
+          : { kind: 'voices' }
     out.push({ id: r.id, at: r.at, usd: r.usd, kind, place })
   }
   return out

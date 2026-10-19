@@ -30,6 +30,8 @@ import { registerSessionIpc } from './session'
 import { registerSpendingIpc } from './spending'
 import { reselectTransitionTake } from './sequence-store'
 import { registerSequenceIpc, type SequenceService } from './sequences'
+import { registerSongIpc, type SongService } from './song'
+import { registerSongSyncIpc } from './song-sync'
 import { registerStoryboardIpc, type StoryboardService } from './storyboards'
 import { acceptConsent, getApiKey, getSettings, setApiKey, setImageSafeMode, setPromptLanguage } from './settings'
 import {
@@ -92,6 +94,8 @@ let editsService: EditServiceHandle | undefined
 let sequenceService: SequenceService | undefined
 /** Storyboards (their boards, transitions and runs); set once their handlers are registered. */
 let storyboardService: StoryboardService | undefined
+/** Songs of sequences (their files, vocals, lyrics and analysis); set once their handlers are registered. */
+let songService: SongService | undefined
 /**
  * Activity: what runs and what finished unseen, pushed to the windows. Created once every service it reads
  * is registered; until then (and the agent connection, made before it, reads it lazily) nothing is observed.
@@ -196,6 +200,7 @@ function libraryBusyReason(): string | undefined {
   // every file: it is last, so the export itself can still ask whether anything else runs.
   return (
     sequencesBusy() ??
+    songService?.isBusy() ??
     importsService?.isBusy() ??
     editsService?.isBusy() ??
     assetWorkBusy() ??
@@ -451,6 +456,8 @@ function registerIpc(): void {
     // A take on its way to Venice, a run or an export started or stopped (nothing else announces a take's upload).
     workChanged: () => work?.touch('structure')
   })
+  // Song clips: where a finished take sings against the song, and the cut that follows (songs:syncTake).
+  registerSongSyncIpc({ jobs, sequences, notify: (sequenceId: string) => broadcastSequenceChange(sequenceId) })
   // Storyboards: boards and their transitions, which are segments the sequence service generates, keeps and exports.
   const storyboards = registerStoryboardIpc({
     sequences,
@@ -466,6 +473,14 @@ function registerIpc(): void {
   sequencesBusy = () => sequences.isBusy() ?? storyboards.isBusy()
   sequenceService = sequences
   storyboardService = storyboards
+  // A sequence's song: copied in, its vocals separated, its lyrics transcribed and its beat found, in the background
+  // (the rules of its clips are the sequence service's). Its changes reach the sequence's view like any other.
+  songService = registerSongIpc({
+    sequences,
+    audio,
+    notify: (sequenceId: string) => broadcastSequenceChange(sequenceId),
+    workChanged: () => work?.touch('structure')
+  })
   // Own clips: films copied into Egna klipp and added to the feed, a sequence or a clip.
   importsService = registerImportIpc({
     sequences,
@@ -513,6 +528,7 @@ function registerIpc(): void {
     edits: () => editsService,
     imports: () => importsService?.service,
     stills: activeStills,
+    songs: () => songService?.activeWork() ?? [],
     approvals: () => ({ executing: agent.approvals.executing(), decided: agent.approvals.list() }),
     uploads: () => agent.uploads.active(),
     send: sendWork

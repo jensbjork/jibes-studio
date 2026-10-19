@@ -7,6 +7,10 @@
 //   - Anna (@Image1, @Image2; voice @Audio1): tall woman in her thirties, short red hair
 //   - Red dress (@Image3), worn by Anna (@Image1, @Image2): a red silk dress with thin straps
 //   - The beach (@Image4): a windswept pebble beach at dawn
+//   - @Audio1 is the lead vocal of this moment of the song: Anna (@Image1, @Image2) sings exactly these words, …
+//
+// (the last line for a clip of a sequence cut to a song, whose window of the song is its reference audio:
+// song-send.ts).
 //
 // Composed at send time, never written into the editor's text: a description edited in the library applies to the
 // next generation, the prompt stays readable, and "Use again" can't append it twice. Pure and shared, so the
@@ -16,6 +20,7 @@
 import { pathKey } from './generation-filter'
 import { paramsForSubmit } from './models'
 import { resolveOutfitWearers } from './outfits'
+import { songAudioNumber } from './song-send'
 import type {
   Asset,
   ComposedPrompt,
@@ -217,11 +222,16 @@ function shorten(text: string, max: number): string {
  *   prompt made of descriptions alone must not be sent), though its entries are still listed.
  * - `opts.leadIn` (a continuation's instruction, continuationLeadIn) goes in front of a non-blank prompt with a blank
  *   line after it, counted against the limit like the prompt.
+ * - A song clip (params.song, part 'vocals' or 'mix') whose window of the song is sent (song-send.ts songAudioNumber:
+ *   the reference audio clip that is no asset's and sends the place) gets a last line saying what that @AudioN is: the
+ *   lead vocal, sung by the clip's singer (the character `song.singer` names among the pictures sent, else the first
+ *   character among them; nobody for null) with the words sung there (`song.lyrics`), or the music the shot moves with.
+ *   It isn't a description: it is appended with "Include descriptions" off too, and never shortened (`song`).
  * - With a character limit, descriptions that would take the prompt past it are shortened in proportion to their
  *   length, at word boundaries, ending in "…" (`truncated`); if not even the names and tokens fit, no legend is
  *   appended at all (`dropped`). Entries are listed either way.
  *
- * `opts` decide (`include` false: nothing); the params' own switches are not read here, so the editor can ask
+ * `opts` decide (`include` false: no descriptions); the params' own switches are not read here, so the editor can ask
  * for every candidate with `include: true`. composeOptionsFor gives the options a submission uses.
  */
 export function composePrompt(
@@ -234,7 +244,10 @@ export function composePrompt(
   const leadIn = typeof opts.leadIn === 'string' && userPrompt.trim() ? opts.leadIn.trim() : ''
   const lead = leadIn ? `${leadIn}\n\n` : ''
   const none: ComposedPrompt = { prompt: lead + userPrompt, legend: '', entries: [], truncated: false, dropped: false }
-  if (!opts.include) return none
+  const sent = paramsForSubmit(params)
+  // A song clip's window of the song is explained whether descriptions are included or not: it isn't one.
+  const songNumber = songAudioNumber(sent)
+  if (!opts.include && !songNumber) return none
   const language: PromptLanguage = opts.language === 'sv' ? 'sv' : 'en'
 
   const excluded = new Set(opts.excludedAssetIds ?? [])
@@ -256,9 +269,11 @@ export function composePrompt(
       }
     }
   }
-  if (!byImage.size && !byAudio.size) return none
+  // The song's clip is no asset's own: a voice that merely starts where the place does is that voice.
+  const songClip = songNumber ? sent.referenceAudios?.[songNumber - 1] : undefined
+  const songToken = songClip && !byAudio.has(pathKey(songClip.path)) ? songNumber : 0
+  if (!byImage.size && !byAudio.size && !songToken) return none
 
-  const sent = paramsForSubmit(params)
   const drafts = new Map<string, Draft>()
   const draftOf = (asset: DescribedAsset): Draft => {
     let d = drafts.get(asset.id)
@@ -283,10 +298,14 @@ export function composePrompt(
     const outfit = drafts.get(outfitId)
     if (outfit) outfit.wornBy = drafts.get(characterId)
   }
+  const song = songToken ? songLegend(sent, songToken, [...drafts.values()], language) : undefined
   // An entry per asset switched on that has a description, or is an outfit somebody wears (that alone is worth
   // saying, so the model can't take the clothes for anyone else's).
-  const list = [...drafts.values()].filter((d) => !excluded.has(d.asset.id) && (d.description || d.wornBy))
-  if (!list.length) return none
+  const list = opts.include
+    ? [...drafts.values()].filter((d) => !excluded.has(d.asset.id) && (d.description || d.wornBy))
+    : []
+  if (!list.length && !song) return none
+  const withSong = (c: ComposedPrompt): ComposedPrompt => (song ? { ...c, song } : c)
 
   const entry = (d: Draft, description: string): DescriptionEntry => ({
     assetId: d.asset.id,
@@ -300,40 +319,101 @@ export function composePrompt(
       : {})
   })
   const own = userPrompt.trimEnd()
-  if (!own) return { ...none, entries: list.map((d) => entry(d, d.description)) }
+  if (!own) return withSong({ ...none, entries: list.map((d) => entry(d, d.description)) })
   const base = lead + own
 
   const heading = `\n\n${HEADING[language]}`
-  const full = heading + list.map((d) => line(d, d.description, language)).join('')
+  // The song's line comes last and is never shortened: it is what the take is sung to.
+  const songLine = song ? `\n- ${song.line}` : ''
+  const full = heading + list.map((d) => line(d, d.description, language)).join('') + songLine
   const limit = isLimit(opts.characterLimit)
     ? opts.characterLimit
     : isLimit(opts.promptCharacterLimit)
       ? opts.promptCharacterLimit
       : undefined
   if (limit === undefined || base.length + full.length <= limit) {
-    return {
+    return withSong({
       prompt: base + full,
       legend: full,
       entries: list.map((d) => entry(d, d.description)),
       truncated: false,
       dropped: false
-    }
+    })
   }
 
-  // Too long: first what can't be shortened – the prompt, the heading, every entry's name and tokens.
-  const fixed = base.length + heading.length + list.reduce((sum, d) => sum + line(d, '', language).length, 0)
+  // Too long: first what can't be shortened – the prompt, the heading, every entry's name and tokens, the song's line.
+  const fixed =
+    base.length + heading.length + list.reduce((sum, d) => sum + line(d, '', language).length, 0) + songLine.length
   if (fixed > limit) {
     const entries = list.map((d) => entry(d, d.description))
-    return { prompt: lead + userPrompt, legend: '', entries, truncated: false, dropped: true }
+    return withSong({ prompt: lead + userPrompt, legend: '', entries, truncated: false, dropped: true })
   }
   const shortened = fitDescriptions(list.map((d) => d.description), limit - fixed)
-  const legend = heading + list.map((d, i) => line(d, shortened[i], language)).join('')
-  return {
+  const legend = heading + list.map((d, i) => line(d, shortened[i], language)).join('') + songLine
+  return withSong({
     prompt: base + legend,
     legend,
     entries: list.map((d, i) => entry(d, shortened[i])),
     truncated: true,
     dropped: false
+  })
+}
+
+// ── A song clip's line ───────────────────────────────────────────────────────
+
+/** The song's line in the legend, per prompt language: who sings (with their tokens) and the words, or the music. */
+const SONG_LINE: Record<
+  PromptLanguage,
+  {
+    vocals: (token: string, singer: string, words: string) => string
+    unsung: (token: string) => string
+    mix: (token: string) => string
+  }
+> = {
+  en: {
+    vocals: (token, singer, words) =>
+      `${token} is the lead vocal of this moment of the song: ${singer} sings ${
+        words ? 'exactly these words' : 'it'
+      }, on the beat, lips in sync with every syllable${words ? `: “${words}”` : ''}.`,
+    unsung: (token) => `${token} is the lead vocal of this moment of the song: nobody on screen sings; the shot moves with it.`,
+    mix: (token) => `${token} is the music at this moment of the song: the shot moves with its rhythm and mood.`
+  },
+  sv: {
+    vocals: (token, singer, words) =>
+      `${token} är huvudsången i det här ögonblicket av låten: ${singer} sjunger ${
+        words ? 'exakt de här orden' : 'den'
+      }, i takt, med läpparna i synk med varje stavelse${words ? `: ”${words}”` : ''}.`,
+    unsung: (token) => `${token} är huvudsången i det här ögonblicket av låten: ingen i bild sjunger; bilden rör sig med den.`,
+    mix: (token) => `${token} är musiken i det här ögonblicket av låten: bilden rör sig med dess rytm och stämning.`
+  }
+}
+
+/**
+ * The legend's line for a song clip's window of the song (@Audio{token}): for 'vocals', who sings it – the character
+ * `song.singer` names when they are among the pictures sent, else the first character among them; nobody for null or
+ * when no character is pictured – with the words sung there (song.lyrics); for 'mix', the music the shot moves with.
+ */
+function songLegend(
+  sent: GenerationParams,
+  token: number,
+  drafts: readonly Draft[],
+  language: PromptLanguage
+): NonNullable<ComposedPrompt['song']> {
+  const place = sent.song!
+  const audio = `@Audio${token}`
+  const words = SONG_LINE[language]
+  if (place.part !== 'vocals') return { token: audio, line: words.mix(audio) }
+  const characters = drafts.filter((d) => d.images.length && d.asset.kind === 'character')
+  const chosen = typeof place.singer === 'string' ? characters.find((d) => d.asset.id === place.singer) : undefined
+  const singerMissing = typeof place.singer === 'string' && !chosen
+  const singer = place.singer === null ? undefined : (chosen ?? characters[0])
+  const missing = singerMissing ? { singerMissing: true } : {}
+  if (!singer) return { token: audio, line: words.unsung(audio), ...missing }
+  return {
+    token: audio,
+    line: words.vocals(audio, withImages(singer), legendText(place.lyrics ?? '')),
+    singer: { assetId: singer.asset.id, name: singer.name, tokens: singer.images.map((n) => `@Image${n}`) },
+    ...missing
   }
 }
 
@@ -405,20 +485,23 @@ export function knowsPromptLimit(modelId: string): boolean {
 
 /**
  * The @ImageN / @AudioN numbers the legend explains when it is sent (not when it was left out: a blank prompt, or not
- * even the names fitted): the prompt checks don't report those as unmentioned (ValidateOptions.explained).
+ * even the names fitted): the prompt checks don't report those as unmentioned (ValidateOptions.explained). A song
+ * clip's window of the song counts too, and a chosen singer who isn't among its pictures is noted (`singerFallback`:
+ * the name its line gives instead, '' for nobody).
  */
-export function explainedReferences(composed: Pick<ComposedPrompt, 'legend' | 'entries'>): {
+export function explainedReferences(composed: Pick<ComposedPrompt, 'legend' | 'entries' | 'song'>): {
   images: number[]
   audios: number[]
+  singerFallback?: string
 } {
   const images: number[] = []
   const audios: number[] = []
-  if (!composed.legend) return { images, audios }
-  for (const e of composed.entries) {
-    for (const token of e.tokens) {
-      const m = /^@(Image|Audio)(\d+)$/.exec(token)
-      if (m) (m[1] === 'Image' ? images : audios).push(Number(m[2]))
-    }
+  const song = composed.song
+  const fallback = song?.singerMissing ? { singerFallback: song.singer?.name ?? '' } : {}
+  if (!composed.legend) return { images, audios, ...fallback }
+  for (const token of [...composed.entries.flatMap((e) => e.tokens), ...(song ? [song.token] : [])]) {
+    const m = /^@(Image|Audio)(\d+)$/.exec(token)
+    if (m) (m[1] === 'Image' ? images : audios).push(Number(m[2]))
   }
-  return { images, audios }
+  return { images, audios, ...fallback }
 }

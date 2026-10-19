@@ -192,3 +192,14 @@ export function CheckAllIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** A song: a sequence cut to one ("New sequence from a song…", the header's Song). */
+export function NoteIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6.5 11.5V3.5l7-1.5v8" />
+      <circle cx="4.75" cy="11.75" r="1.75" />
+      <circle cx="11.75" cy="10.25" r="1.75" />
+    </Icon>
+  )
+}

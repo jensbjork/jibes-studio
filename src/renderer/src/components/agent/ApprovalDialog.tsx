@@ -66,6 +66,7 @@ import { ImageTile, type Photo } from './ApprovalPictures'
 import { DeleteSummary, useDeleteCheck } from './DeleteApproval'
 import { EditSummary, ResumeSummary, VoiceDesignSummary, useEditApproval } from './EditApproval'
 import PromptText, { type TokenTarget } from './PromptText'
+import { SongLyricsSummary } from './SongLyricsApproval'
 import {
   BoardTargetSummary,
   TransitionSummary,
@@ -77,7 +78,7 @@ import {
 
 /**
  * What an agent asks for that needs the user's OK waits here: paid generations (videos, pictures, the Editor's paid
- * operations, voices) and removals. Shown above every view; several requests queue up and are shown one at a time.
+ * operations, voices, a song's lyrics) and removals. Shown above every view; several requests queue up and are shown one at a time.
  * Nothing is sent to Venice until "Approve and generate" ("Approve and create" for a picture), and nothing is removed
  * until "Approve and delete".
  */
@@ -192,6 +193,8 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const editState = useEditApproval(a)
   // A removal: what goes, checked again while it is on screen for review.
   const removal = a.kind === 'delete' ? (a.delete ?? null) : undefined
+  // A song's lyrics to transcribe.
+  const songRequest = a.kind === 'song-lyrics' ? (a.song ?? null) : undefined
   const deleteCheck = useDeleteCheck(a, removal !== undefined && (phase === 'review' || phase === 'confirming'))
   /** "I have the right to use this voice", ticked in this dialog (a cloned voice needs it). */
   const [cloneConsent, setCloneConsent] = useState(false)
@@ -254,6 +257,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
       // A removal: the items, and the live check's answer (a problem that clears arms the button again, after a while).
       removal?.items.map((i) => [i.kind, i.id, i.segmentId, i.toIndex, i.label, i.effects]),
       removal?.confirm,
+      songRequest,
       deleteCheck.checked,
       deleteCheck.problem,
       // A neighbour's other take (or trim) is another frame: the user must see it before it is paid for. While a
@@ -284,7 +288,8 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     (editRequest === null ? 'The request doesn’t say anything about the change' : undefined) ??
     editState.blocking ??
     (removal === null ? 'The request doesn’t say what should be deleted' : undefined) ??
-    (removal ? deleteCheck.problem : undefined)
+    (removal ? deleteCheck.problem : undefined) ??
+    (songRequest === null ? 'The request doesn’t say which song' : undefined)
   // Changed since the agent asked (rather than something the agent can fix): the agent has to ask again.
   const askAgain =
     !!blocking &&
@@ -535,7 +540,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
                 ? 'Creating the image…'
                 : removal !== undefined
                   ? 'Deleting…'
-                  : a.kind === 'edit'
+                  : a.kind === 'edit' || a.kind === 'song-lyrics'
                     ? 'Starting…'
                     : 'Sending…'
               : approveLabel(a)}
@@ -617,6 +622,9 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         {removal && <DeleteSummary approval={a} request={removal} check={deleteCheck} />}
         {removal === null && <p className="text-accent">The request doesn’t say what should be deleted.</p>}
 
+        {songRequest && <SongLyricsSummary request={songRequest} />}
+        {songRequest === null && <p className="text-accent">The request doesn’t say which song.</p>}
+
         {clips.map((clip) => (
           <ClipSummary
             key={clip.key}
@@ -647,6 +655,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           image === undefined &&
           editRequest === undefined &&
           removal === undefined &&
+          songRequest === undefined &&
           !storyboardId &&
           !sequence &&
           !sequenceError &&
@@ -884,6 +893,7 @@ function segmentClip(segment: Segment, index: number, sequence: Sequence): Clip 
 /** The clips a request would generate, in order (none for an image request, an edit, a voice or a removal). */
 function clipsOf(a: ApprovalRequest, sequence: Sequence | undefined): Clip[] {
   if (a.kind === 'image' || a.kind === 'edit' || a.kind === 'voice-design' || a.kind === 'delete') return []
+  if (a.kind === 'song-lyrics') return []
   if (a.kind === 'generation') return a.params ? [clipOf(a.id, a.params)] : []
   const count = sequence?.segments.length ?? 0
   const indexed = sequence?.segments.map((segment, index) => ({ segment, index })) ?? []

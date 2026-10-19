@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supportsEndImage } from '@shared/models'
+import { songClipProblem } from '@shared/song-send'
 import {
   workKey,
   type ConsentRequest,
@@ -9,7 +10,8 @@ import {
   type GenerationParams,
   type RunningWork,
   type Segment,
-  type Sequence
+  type Sequence,
+  type SongImportOptions
 } from '@shared/types'
 import { withBudgetConfirm } from '../../lib/budget'
 import { ASSET_VIEW } from '../../lib/assets'
@@ -23,7 +25,7 @@ import GenerationPickerDialog from '../feed/GenerationPickerDialog'
 import { useImportCards, useImportFlow, type ImportOutcome } from '../feed/ownClips'
 import { aspectValue } from '../storyboards/storyboardUtils'
 import { isPlayable } from '../takes/takeText'
-import TakeStrip, { type PickedBy } from '../takes/TakeStrip'
+import TakeStrip, { type PickedBy, type TakeBadge } from '../takes/TakeStrip'
 import { KEY_SELECT_DELAY, useTakeSelection } from '../takes/useTakeSelection'
 import { ownEndImageRefused, sendInputProblem } from './clipChecks'
 import { CloseIcon, FilmIcon } from './icons'
@@ -32,6 +34,9 @@ import SegmentEditor, { type EditorHandle } from './SegmentEditor'
 import type { CastPatch } from './CastPanel'
 import SequenceHeader from './SequenceHeader'
 import SequenceList from './SequenceList'
+import SongImportDialog, { type SongImportMode } from './song/SongImportDialog'
+import SongStrip from './song/SongStrip'
+import { offsetText, placeOf } from './song/songText'
 import Timeline, { type ClipSource } from './Timeline'
 import TrimControls, { type PlayRequest, type TakePlayerHandle } from './TrimControls'
 import {
@@ -110,7 +115,10 @@ function findRunProblem(sequence: Sequence, ffmpegOk: boolean): { segmentId: str
         message: `Clip ${i + 1}'s own video is missing (moved or deleted in Finder). Add the file again or generate an AI take.`
       }
     }
+    // A song clip that can't hear its window of the song says so before its references do (after a missing prompt).
+    const song = s.params.prompt.trim() ? songClipProblem(params, sequence.song)?.replace(/\.\s*$/, '') : undefined
     const reason =
+      song ??
       input ??
       (continuing && !ffmpegOk ? 'ffmpeg is needed to continue from the previous clip' : undefined) ??
       (endFromNext && !ffmpegOk ? 'ffmpeg is needed to take the end image from the next clip' : undefined) ??
@@ -129,6 +137,14 @@ interface Notice {
   sequenceId?: string
   /** Something worth knowing rather than a failure (e.g. a file imported before, used again). */
   info?: boolean
+}
+
+/** The song's dialog: for a new sequence, or another (or a first) song for the open one. */
+interface SongImport {
+  path: string
+  mode: SongImportMode
+  /** The sequence it goes on ('replace' / 'add'). */
+  sequenceId?: string
 }
 
 /** "From Media…" / "From the Editor…": a clip picked from the library, to add after a clip (or at the end). */
@@ -206,6 +222,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   // The clip "Redo between neighbours" was just used on, so its editor says what to do next.
   const [bridgedId, setBridgedId] = useState<string>()
   const [picking, setPicking] = useState<PickRequest>()
+  const [songImport, setSongImport] = useState<SongImport>()
   // Own films: inspected, asked about when there is something to decide, imported (cards show the progress).
   const importFlow = useImportFlow()
   const importCards = useImportCards()
@@ -241,6 +258,12 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       // Remembering the open sequence is only a convenience.
     }
   }, [sequenceId])
+
+  useEffect(() => {
+    if (intent?.type !== 'new-sequence-from-song') return
+    onIntentHandled()
+    void startFromSong()
+  }, [intent])
 
   useEffect(() => {
     if (intent?.type !== 'open-sequence') return
@@ -348,6 +371,73 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     } finally {
       setCreating(false)
     }
+  }
+
+  // ── Songs ──────────────────────────────────────────────────────────────────
+
+  /** An audio file from the file dialog; undefined when it was cancelled (or failed, which is said). */
+  const pickSongFile = async (): Promise<string | undefined> => {
+    try {
+      return (await window.studio.pickAudio(false))[0]
+    } catch (e) {
+      setNotice({ text: ipcErrorMessage(e) })
+      return undefined
+    }
+  }
+
+  /** "New sequence from a song…" (the list's menu, ⌘K, a song dropped on the list). */
+  const startFromSong = async (path?: string) => {
+    const file = path ?? (await pickSongFile())
+    if (file) setSongImport({ path: file, mode: { kind: 'create' } })
+  }
+
+  /** "Replace the song…" (the header's Song) and "Add a song…" (⋯) on the open sequence. */
+  const pickSong = async () => {
+    if (!sequence) return
+    const file = await pickSongFile()
+    if (!file) return
+    // Clips nobody has done anything with yet (a new sequence's empty Clip 1, a song's places still empty) don't
+    // count: while there are only such clips, main splits the song afresh (at the length chosen in the dialog).
+    const kept = sequence.segments.filter((s) => !isUntouchedClip(s, sequence.cast)).length
+    setSongImport({
+      path: file,
+      sequenceId: sequence.id,
+      mode: { kind: sequence.song ? 'replace' : 'add', sequenceName: sequence.name, clipCount: kept }
+    })
+  }
+
+  /**
+   * The dialog's choices: a new sequence opens at once (the vocals, lyrics and clips follow in its song strip), or the
+   * song goes on the open one. Transcribing is paid, so past the budget the user is asked first; false when they said
+   * no (the dialog stays).
+   */
+  const importSong = async (request: SongImport, opts: SongImportOptions): Promise<boolean> => {
+    const confirmed = (yes: boolean): SongImportOptions => (yes ? { ...opts, confirmOverBudget: true } : opts)
+    if (request.mode.kind === 'create') {
+      const created = await withBudgetConfirm((yes) => window.studio.createSequenceFromSong(request.path, confirmed(yes)))
+      if (!created) return false
+      gone.current.delete(created.id)
+      setSelectedId(created.id)
+      setSongImport(undefined)
+      void reload()
+      return true
+    }
+    const id = request.sequenceId
+    if (!id) return false
+    if (!(await flushAll())) throw new Error("The clip's changes couldn't be saved. Try again.")
+    const updated = await withBudgetConfirm((yes) =>
+      store.mutate(() => window.studio.setSequenceSong(id, request.path, confirmed(yes)))
+    )
+    if (!updated) return false
+    setSongImport(undefined)
+    return true
+  }
+
+  /** "Remove the song": the clips stay, as ordinary clips; rejects with main's refusal (shown in the Song panel). */
+  const removeSong = async () => {
+    if (!sequenceId) return
+    if (!(await flushAll())) throw new Error("The clip's changes couldn't be saved. Try again.")
+    await store.mutate(() => window.studio.setSequenceSong(sequenceId, null))
   }
 
   /** The list's ✕ (after its question in the row) and ⋯ → Delete sequence…; throws, so the row can show the error. */
@@ -520,9 +610,11 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     await flushAll()
     // A sequence with nothing in it yet (the empty Clip 1 of a new sequence): the films take the empty clip's place,
     // and there is no shape to ask about – the first film gives the sequence its shape.
-    const placeholders = sequence.segments.every((s) => isUntouchedClip(s, sequence.cast))
-      ? sequence.segments.map((s) => s.id)
-      : []
+    // Not in a sequence cut to a song: its empty clips are the song's places, waiting for their prompts.
+    const placeholders =
+      !sequence.song && sequence.segments.every((s) => isUntouchedClip(s, sequence.cast))
+        ? sequence.segments.map((s) => s.id)
+        : []
     const outcome = await importFlow.begin(
       paths,
       { kind: 'sequence', sequenceId: id, afterSegmentId },
@@ -555,7 +647,10 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     if (!sequence) return
     const segments = sequence.segments
     const after = gap > 0 ? segments[Math.min(gap, segments.length) - 1]?.id : undefined
-    void importClips(paths, after, gap === 0 && segments.length > 0)
+    // A song's clips keep the song's order (main refuses moves): there the films go after the clip they were dropped
+    // behind, or after the first.
+    if (sequence.song) void importClips(paths, after ?? segments[0]?.id)
+    else void importClips(paths, after, gap === 0 && segments.length > 0)
   }
 
   const addFrom = async (source: ClipSource, afterSegmentId?: string) => {
@@ -766,6 +861,23 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     segment && takePreview?.segmentId === segment.id
       ? segment.takes.find((t) => t.id === takePreview.takeId && isPlayable(t))
       : undefined
+  // A clip of a sequence cut to a song: the cut keeps its place's length of the take, from where its singing starts.
+  const songPlace = sequence?.song && segment ? placeOf(segment) : undefined
+  const readySync = songPlace && ready ? segment?.songSyncs?.[ready.id] : undefined
+  const trimSong = songPlace
+    ? {
+        length: songPlace.end - songPlace.start,
+        syncOffset: readySync?.measured === 'vocals' && readySync.matched ? readySync.offset : undefined
+      }
+    : undefined
+  /** In the take strip: whether each take of a singing clip sings in step with the song. */
+  const syncBadge = (take: Generation): TakeBadge | undefined => {
+    const sync = songPlace && segment?.songSyncs?.[take.id]
+    if (!sync || sync.measured !== 'vocals') return undefined
+    return sync.matched
+      ? { text: offsetText(sync.offset), tone: 'good', title: `In sync with the song (${offsetText(sync.offset)})` }
+      : { text: 'No singing', tone: 'warning', title: 'No singing found – check the lips' }
+  }
   const nextSegment = sequence && segmentIndex !== -1 ? sequence.segments[segmentIndex + 1] : undefined
   const previousSegment = sequence && segmentIndex > 0 ? sequence.segments[segmentIndex - 1] : undefined
 
@@ -817,6 +929,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
       promptDiffers={(take) =>
         takePromptsFor(take.params, segment.params).prompt.trim() !== segment.params.prompt.trim()
       }
+      badge={songPlace ? syncBadge : undefined}
       onChoose={chooseTake}
       onPreview={previewTake}
       onLeavePreview={() => setTakePreview(undefined)}
@@ -928,6 +1041,9 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
           setSelectedId(id)
         }}
         onCreate={() => void createSequence()}
+        onCreateFromSong={() => void startFromSong()}
+        onDropSong={(path) => void startFromSong(path)}
+        onDropProblem={(text) => setNotice({ text, info: true })}
         onDelete={removeSequence}
       />
 
@@ -937,7 +1053,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
             <SequenceHeader
               key={sequence.id}
               sequence={sequence}
-              totalSeconds={totalLength(sequence)}
+              totalSeconds={sequence.song?.duration ?? totalLength(sequence)}
               readyCount={readyCount}
               toGenerate={runPlan.toGenerate.length}
               generating={runPlan.generating}
@@ -952,7 +1068,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               onRename={rename}
               onGenerateAll={() => void generateAll()}
               onStop={() => void stopAll()}
-              onPreview={() => void openPreview(sequence.segments.find((s) => readyTake(s))?.id)}
+              // A song plays from its start, whatever clips have takes yet; otherwise from the first clip with one.
+              onPreview={() => void openPreview(sequence.song ? undefined : sequence.segments.find((s) => readyTake(s))?.id)}
               onExport={() => void exportSequence()}
               onExportHeight={setExportHeight}
               onEditExport={(exportId) => navigate('editor', { type: 'open-editor', exportId })}
@@ -960,8 +1077,22 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               onDelete={() => void deleteSequence(sequence.id)}
               onCastChange={changeCast}
               onManageAssets={(kind) => navigate(ASSET_VIEW[kind])}
+              onPickSong={() => void pickSong()}
+              onRemoveSong={removeSong}
+              onSeparateSong={() => store.mutate(() => window.studio.separateSongVocals(sequence.id))}
+              onTranscribeSong={(opts) => store.mutate(() => window.studio.transcribeSong(sequence.id, opts))}
             />
             {banners}
+            {sequence.song && (
+              <SongStrip
+                key={`song:${sequence.id}`}
+                sequence={sequence}
+                selectedId={segment?.id}
+                onSelect={selectSegment}
+                store={store}
+                flushAll={flushAll}
+              />
+            )}
             <Timeline
               sequence={sequence}
               selectedId={segment?.id}
@@ -1002,6 +1133,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
                       patchSegment={store.patchSegment}
                       flushers={flushers}
                       selecting={selection.pending}
+                      song={trimSong}
                       playRequest={playRequest}
                       playerRef={player}
                       onChoosePreview={() => previewed && choosePreviewed(previewed)}
@@ -1015,10 +1147,17 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
             ) : (
               sequence.segments.length === 0 && (
                 <div className="flex flex-1 items-center justify-center p-8">
-                  <p className="max-w-sm text-center leading-relaxed text-muted">
-                    Add a first clip above. Each clip is a generation of its own – or a film of your own – and the next
-                    clip can continue from the last frame of the one before, so the transition is seamless.
-                  </p>
+                  {sequence.song ? (
+                    <p className="max-w-sm text-center leading-relaxed text-muted">
+                      While the song is being prepared, set the <span className="text-text">Cast</span> – the singer,
+                      the outfit, the stage: every clip of the song starts with it.
+                    </p>
+                  ) : (
+                    <p className="max-w-sm text-center leading-relaxed text-muted">
+                      Add a first clip above. Each clip is a generation of its own – or a film of your own – and the
+                      next clip can continue from the last frame of the one before, so the transition is seamless.
+                    </p>
+                  )}
                 </div>
               )
             )}
@@ -1046,6 +1185,15 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
         <PreviewPlayer sequence={sequence} startSegmentId={preview.startSegmentId} onClose={() => setPreview(undefined)} />
       )}
       {importFlow.dialog}
+      {songImport && (
+        <SongImportDialog
+          key={songImport.path}
+          path={songImport.path}
+          mode={songImport.mode}
+          onCancel={() => setSongImport(undefined)}
+          onSubmit={(opts) => importSong(songImport, opts)}
+        />
+      )}
       <GenerationPickerDialog
         open={!!picking}
         title={picking?.source === 'edit' ? 'Add a version from the Editor' : 'Add a clip from Media'}

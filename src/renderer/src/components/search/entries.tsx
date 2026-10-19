@@ -20,7 +20,7 @@ import AssetIcon from '../assets/AssetIcon'
 import { fileName, formatLength, originLabel, summaryLine } from '../editor/editorUtils'
 import { ScissorsIcon } from '../editor/icons'
 import { FilmIcon, GearIcon, MediaIcon, PictureIcon, QuoteIcon, SidebarIcon, TrayIcon } from '../icons'
-import { PlusIcon, SparkleIcon } from '../sequences/icons'
+import { NoteIcon, PlusIcon, SparkleIcon } from '../sequences/icons'
 import { SETTINGS_SECTION, showSettingsSection } from '../settings/SettingsLayout'
 import { StoryboardIcon } from '../storyboards/icons'
 import { flatten } from './match'
@@ -237,6 +237,14 @@ export function commandEntries(sidebarCollapsed: boolean): Entry[] {
   })
   const actions: Entry[] = [
     create('sequence', 'New sequence', 'sequences', true),
+    {
+      key: 'new:sequence-from-song',
+      group: 'actions',
+      title: 'New sequence from a song…',
+      keywords: 'create add music video audio song lyrics singing',
+      icon: <NoteIcon size={13} />,
+      run: ({ navigate }) => navigate('sequences', { type: 'new-sequence-from-song' })
+    },
     create('storyboard', 'New storyboard', 'storyboards', true),
     create('edit', 'New edit', 'editor', true),
     ...ASSET_KINDS.map((kind) => create(kind, ASSET_COPY[kind].newName, ASSET_VIEW[kind], kind === 'character')),

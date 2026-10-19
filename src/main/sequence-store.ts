@@ -11,6 +11,7 @@ import { sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import { generationSource, isVeniceGeneration } from '@shared/generation-label'
 import { continuationFrameOf, isExtractedFirstFrame } from '@shared/seams'
+import { sanitizeSequenceSong, sanitizeSongWindow } from '@shared/song'
 import type {
   ContinueMode,
   Generation,
@@ -19,12 +20,15 @@ import type {
   Sequence,
   SequenceCast,
   SequenceKind,
-  SequenceSummary
+  SequenceSong,
+  SequenceSummary,
+  SongWork
 } from '@shared/types'
 import * as db from './db'
 import { toPublic } from './jobs'
 import { attachKeptByEdit } from './edit-store'
 import { attachReviewSummary } from './reviews'
+import { attachSongSyncs } from './song-sync-store'
 import {
   dayStamp,
   fromStoredParams,
@@ -247,7 +251,7 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v 
  * clips keep their windows; whether the model can use them is decided when a take is sent (paramsForSubmit).
  * The description switches (includeDescriptions, excludedDescriptionAssetIds) and who wears each outfit
  * (outfitWearers) are kept: they decide what a take appends to its prompt, and "Use again" on a take brings them
- * back.
+ * back. So is a song clip's place in its song (song, shared/song.ts).
  */
 export function sanitizeParams(input: Partial<GenerationParams> | undefined): GenerationParams {
   const p = input ?? {}
@@ -255,6 +259,7 @@ export function sanitizeParams(input: Partial<GenerationParams> | undefined): Ge
     ? p.referenceImages.filter((r): r is string => typeof r === 'string' && !!r)
     : undefined
   const wearers = sanitizeOutfitWearers(p.outfitWearers)
+  const song = sanitizeSongWindow(p.song)
   return {
     model: str(p.model) ?? DEFAULT_PARAMS.model,
     prompt: typeof p.prompt === 'string' ? p.prompt : '',
@@ -268,7 +273,8 @@ export function sanitizeParams(input: Partial<GenerationParams> | undefined): Ge
     referenceImages: refs?.length ? refs : undefined,
     referenceAudios: sanitizeReferenceAudios(p.referenceAudios),
     ...sanitizeDescriptionFlags(p),
-    ...(wearers ? { outfitWearers: wearers } : {})
+    ...(wearers ? { outfitWearers: wearers } : {}),
+    ...(song ? { song } : {})
   }
 }
 
@@ -332,16 +338,122 @@ export function parseCast(json: string): SequenceCast {
   }
 }
 
-/** The defaults JSON as stored: the output settings (pickDefaults) and the cast's references (see parseCast). */
-export function serializeDefaults(defaults: Partial<GenerationParams>, cast: SequenceCast): string {
+/**
+ * The defaults JSON as stored: the output settings (pickDefaults) and the cast's references (see parseCast). `stored`:
+ * the row's defaults as they are, whose song (see parseSong) is kept exactly as it was stored.
+ */
+export function serializeDefaults(defaults: Partial<GenerationParams>, cast: SequenceCast, stored?: string): string {
   const clean = sanitizeCast(cast)
   const refs = toStoredParams({ model: '', prompt: '', duration: '', ...castReferences(clean) })
+  const song = stored === undefined ? undefined : storedSong(stored)
   return JSON.stringify({
     ...pickDefaults(defaults),
     ...(refs.referenceImages?.length ? { referenceImages: refs.referenceImages } : {}),
     ...(refs.referenceAudios?.length ? { referenceAudios: refs.referenceAudios } : {}),
-    ...(refs.outfitWearers ? { outfitWearers: refs.outfitWearers } : {})
+    ...(refs.outfitWearers ? { outfitWearers: refs.outfitWearers } : {}),
+    ...(song ? { song } : {})
   })
+}
+
+// ── The song (a sequence cut to a song) ──────────────────────────────────────
+
+/** The defaults JSON as an object; undefined when it isn't one. */
+function defaultsObject(json: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(json) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The `song` object of a defaults JSON exactly as stored (paths relative), keys Studio doesn't read here included
+ * (song-sync.ts keeps its measurements in it); undefined for a sequence without a song.
+ */
+export function storedSong(defaultsJson: string): Record<string, unknown> | undefined {
+  const song = defaultsObject(defaultsJson)?.song
+  return song && typeof song === 'object' && !Array.isArray(song) ? (song as Record<string, unknown>) : undefined
+}
+
+/**
+ * The sequence's song (Sequence.song): stored under `song` in its defaults JSON, paths in stored form (relative inside
+ * the library, so moves and "Tidy up" rewrite them: db.mapStoredPaths), turned back into absolute paths here.
+ * undefined for an ordinary sequence (or a song that can't be read).
+ */
+export function parseSong(defaultsJson: string): SequenceSong | undefined {
+  const song = sanitizeSequenceSong(storedSong(defaultsJson))
+  if (!song) return undefined
+  return {
+    ...song,
+    path: fromStoredPath(song.path),
+    ...(song.vocalsPath ? { vocalsPath: fromStoredPath(song.vocalsPath) } : {})
+  }
+}
+
+/** The song of the sequence with this id; undefined when it has none (or the sequence is gone). */
+export function sequenceSong(sequenceId: string): SequenceSong | undefined {
+  const row = typeof sequenceId === 'string' ? getSequenceRow(sequenceId) : undefined
+  return row ? parseSong(row.defaults) : undefined
+}
+
+/**
+ * Rewrites the `song` of a sequence's defaults JSON with what `update` makes of it (as stored, or undefined for none;
+ * returning undefined removes it), keeping every other key of the defaults (the output settings, the cast) as stored.
+ * Synchronous, so nothing else writes the row in between. Returns whether the sequence was there.
+ */
+export function updateStoredSong(
+  sequenceId: string,
+  update: (song: Record<string, unknown> | undefined) => Record<string, unknown> | undefined
+): boolean {
+  const row = getSequenceRow(sequenceId)
+  if (!row) return false
+  const defaults = defaultsObject(row.defaults) ?? {}
+  const before = storedSong(row.defaults)
+  const after = update(before ? { ...before } : undefined)
+  const { song: _, ...rest } = defaults
+  const json = JSON.stringify(after ? { ...rest, song: after } : rest)
+  if (json !== row.defaults) conn().prepare('UPDATE sequences SET defaults = ? WHERE id = ?').run(json, sequenceId)
+  return true
+}
+
+/**
+ * Sets the sequence's song (absolute paths in, stored relative) or removes it (null). Keys of the stored song that
+ * SequenceSong doesn't have are kept while the song's file stays the same and dropped with a new one; fields the new
+ * song leaves out (vocals, lyrics) are removed. (The takes' sync measurements aren't here: song-sync-store.ts.)
+ */
+export function writeSequenceSong(sequenceId: string, song: SequenceSong | null): boolean {
+  const clean = song ? sanitizeSequenceSong(song) : undefined
+  if (song && !clean) throw new Error('The song could not be saved.')
+  return updateStoredSong(sequenceId, (before) => {
+    if (!clean) return undefined
+    const path = toStoredPath(clean.path)
+    const sameFile = typeof before?.path === 'string' && before.path === path
+    const kept: Record<string, unknown> = sameFile && before ? before : {}
+    const { path: _p, name: _n, duration: _d, vocalsPath: _v, lyrics: _l, ...extra } = kept
+    return {
+      ...extra,
+      path,
+      name: clean.name,
+      duration: clean.duration,
+      ...(clean.vocalsPath ? { vocalsPath: toStoredPath(clean.vocalsPath) } : {}),
+      ...(clean.lyrics ? { lyrics: clean.lyrics } : {})
+    }
+  })
+}
+
+/** What the song service (main/song.ts) is doing to a sequence's song right now, merged into the sequence on read. */
+const songRuntime = new Map<string, { work?: SongWork; error?: string }>()
+
+/** Sets (or clears, undefined) what is being done to the sequence's song and why its last step failed. */
+export function setSongRuntime(sequenceId: string, state: { work?: SongWork; error?: string } | undefined): void {
+  if (state && (state.work || state.error)) songRuntime.set(sequenceId, { ...state })
+  else songRuntime.delete(sequenceId)
+}
+
+/** What is being done to the sequence's song right now (Sequence.songWork, songError). */
+export function songRuntimeOf(sequenceId: string): { work?: SongWork; error?: string } {
+  return songRuntime.get(sequenceId) ?? {}
 }
 
 export function cleanSequenceName(name: unknown, kind: SequenceKind = 'sequence'): string {
@@ -578,12 +690,20 @@ export function loadSequence(id: string, run: RunInfo): Sequence {
   attachReviewSummary(segments.flatMap((s) => s.takes))
   // Which takes the Editor keeps, so the take list offers "Remove" (off the clip) rather than "Delete" for them.
   attachKeptByEdit(segments.flatMap((s) => s.takes))
+  // Where each measured take of a song clip sings (song-sync.ts), from the library's song-sync.json.
+  attachSongSyncs(segments)
 
+  // A sequence cut to a song: the song, and what is being done to it right now (main/song.ts).
+  const song = parseSong(row.defaults)
+  const songNow = songRuntimeOf(row.id)
   return {
     id: row.id,
     name: row.name,
     defaults: parseDefaults(row.defaults),
     cast: parseCast(row.defaults),
+    ...(song ? { song } : {}),
+    ...(songNow.work ? { songWork: songNow.work } : {}),
+    ...(songNow.error ? { songError: songNow.error } : {}),
     segments,
     exportHeight: exportHeightOf(row),
     running: run.running,
@@ -718,6 +838,14 @@ export function folderPath(folder: string, kind: SequenceKind = 'sequence'): str
 /** Sekvenser/<folder>/Tagningar (Storyboards/<folder>/Övergångar) without creating it (see paths.sequenceTakesDir). */
 export function takesPath(folder: string, kind: SequenceKind = 'sequence'): string {
   return join(folderPath(folder, kind), KIND_FOLDERS[kind].takes)
+}
+
+/** Inside a sequence folder: a song sequence's song and its separated vocals (main/song.ts). */
+export const SONG_FOLDER = 'Ljud'
+
+/** Sekvenser/<folder>/Ljud without creating it: where a song sequence keeps its song. */
+export function songFolderPath(folder: string): string {
+  return join(folderPath(folder, 'sequence'), SONG_FOLDER)
 }
 
 /** Sekvenser/<folder>/Storyboard (Storyboards/<folder>/Bilder) without creating it: where stills.ts puts stills. */

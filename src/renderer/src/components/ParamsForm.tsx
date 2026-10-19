@@ -120,6 +120,23 @@ interface Props {
   navigate?: Navigate
   /** A sequence clip's sequence: the swap picker offers its saved pictures (else every saved picture). */
   sequenceId?: string
+  /**
+   * The duration is set for the clip (a song clip's follows its place in the song): shown, not chosen, with this as
+   * its explanation.
+   */
+  durationFixed?: string
+  /**
+   * A clip of a sequence cut to a song. `sendAs`: what it sends instead of what the form holds (song-send.ts withSong –
+   * its window of the song as @Audio1, the words sung there), which the References legend and the prompt checks are
+   * worked out from, as main does; `audioNote`: said under Voices & sound while the song takes their place; the quick
+   * fixes for its place (No song) and its singer (Who sings).
+   */
+  song?: {
+    sendAs: (params: GenerationParams) => GenerationParams
+    audioNote?: string
+    onNoSong: () => void
+    onChooseSinger: () => void
+  }
 }
 
 /**
@@ -252,7 +269,9 @@ export default function ParamsForm({
   endImageRequired = false,
   onSubmit,
   navigate,
-  sequenceId
+  sequenceId,
+  durationFixed,
+  song
 }: Props) {
   const model = models.find((m) => m.id === params.model)
   const kind = kindOfModelId(params.model)
@@ -634,9 +653,12 @@ export default function ParamsForm({
 
   // What the box shows, and which references the legend that is sent explains (for the prompt checks below).
   const promptLimit = model?.promptCharacterLimit
+  // A song clip's legend and checks are those of what it sends (its window of the song as @Audio1).
+  const sendAs = song?.sendAs
+  const sent = useMemo(() => (sendAs ? sendAs(params) : params), [params, sendAs])
   const descriptions = useMemo(
-    () => descriptionsView(params, assets, language, promptLimit),
-    [params, assets, language, promptLimit]
+    () => descriptionsView(sent, assets, language, promptLimit),
+    [sent, assets, language, promptLimit]
   )
   const includeDescriptions = (on: boolean) => setParams((p) => withDescriptionsIncluded(p, on))
   const toggleDescription = (assetId: string, on: boolean) =>
@@ -763,7 +785,7 @@ export default function ParamsForm({
   const negativeIssuesId = useId()
   // What both prompts are checked against: exactly what the main process checks before sending – a reference the
   // References legend explains (its description, or who wears an outfit) isn't reported as unmentioned.
-  const checks = validationContext(params, { continuing, continuationFrame: framed, explained: descriptions.explained })
+  const checks = validationContext(sent, { continuing, continuationFrame: framed, explained: descriptions.explained })
   // @ImageN and @AudioN mistakes in the negative prompt block generating as well.
   const negativeHasError = negativePromptIssues(params.negativePrompt ?? '', checks).some((i) => i.severity === 'error')
   const switchToReference = kinds.includes('reference-to-video') ? () => switchKind('reference-to-video') : undefined
@@ -997,6 +1019,11 @@ export default function ParamsForm({
               onManage={manageKind}
             />
           </Popover>
+          {song?.audioNote && (
+            <p className="mb-1.5 rounded-md border border-violet-300/25 bg-violet-300/10 px-2.5 py-1.5 text-[11px] leading-snug text-violet-100">
+              {song.audioNote}
+            </p>
+          )}
           {audios.length > 0 ? (
             <>
               <AudioChips
@@ -1024,10 +1051,13 @@ export default function ParamsForm({
               </div>
             </>
           ) : (
-            <p className="rounded-md border border-dashed border-line px-3 py-2 text-[11px] text-muted">
-              Send how someone sounds: a character with a voice brings it along when you add the character, or pick
-              one under ＋ Sound. Refer to the sound with @Audio1 … in the prompt.
-            </p>
+            // Not while the song takes the voices' place (its note says what @Audio1 is).
+            !song?.audioNote && (
+              <p className="rounded-md border border-dashed border-line px-3 py-2 text-[11px] text-muted">
+                Send how someone sounds: a character with a voice brings it along when you add the character, or pick
+                one under ＋ Sound. Refer to the sound with @Audio1 … in the prompt.
+              </p>
+            )
           )}
           {!audioSupported && audios.length > 0 && (
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-accent">
@@ -1116,6 +1146,7 @@ export default function ParamsForm({
           onRemoveAudio={audioRefs.length ? removeAudios : undefined}
           onUseAudioModel={switchToAudioModel}
           audioModelName={audioModel?.name}
+          songFixes={song && { onNoSong: song.onNoSong, onChooseSinger: song.onChooseSinger }}
           language={language}
           belowInput={
             (linkedPrompt || canUndo) && (
@@ -1181,14 +1212,23 @@ export default function ParamsForm({
       </details>
 
       <div className="grid grid-cols-3 gap-2">
-        <label>
-          <span className="mb-1.5 block text-muted">Duration</span>
-          <select value={params.duration} onChange={(e) => set('duration', e.target.value)} className={select}>
-            {(model?.durations ?? [params.duration]).map((d) => (
-              <option key={d}>{d}</option>
-            ))}
-          </select>
-        </label>
+        {durationFixed ? (
+          <div title={durationFixed}>
+            <span className="mb-1.5 block text-muted">Duration</span>
+            <span className={`${select} block cursor-default truncate text-muted`}>
+              {params.duration.replace(/s$/, ' s')} · auto
+            </span>
+          </div>
+        ) : (
+          <label>
+            <span className="mb-1.5 block text-muted">Duration</span>
+            <select value={params.duration} onChange={(e) => set('duration', e.target.value)} className={select}>
+              {(model?.durations ?? [params.duration]).map((d) => (
+                <option key={d}>{d}</option>
+              ))}
+            </select>
+          </label>
+        )}
         {!!model?.resolutions.length && (
           <label>
             <span className="mb-1.5 block text-muted">Resolution</span>

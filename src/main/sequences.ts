@@ -54,6 +54,10 @@ import {
 import { outfitWearersAmong } from '@shared/outfits'
 import { knowsPromptLimit, rememberPromptLimits } from '@shared/prompt-compose'
 import { blockingContinuationError, blockingPromptError, findAudioTokens, findImageTokens } from '@shared/prompt-refs'
+import { songClipProblem, withSong } from '@shared/song-send'
+import { songPlacesProblem } from '@shared/song-trims'
+import { checkSongBoundaries, defaultSongPart, formatPlace, placesOf, splitPoint } from '@shared/song'
+import { songClipDuration, windowLength } from '@shared/song-window'
 import { NEEDS_CONSENT } from '@shared/types'
 import type {
   Asset,
@@ -71,7 +75,11 @@ import type {
   SequenceCast,
   SequenceCastSwap,
   SequenceKind,
+  SequenceSong,
   SequenceSummary,
+  SongLyrics,
+  SongPart,
+  SongWindow,
   Still,
   VideoModel
 } from '@shared/types'
@@ -84,6 +92,7 @@ import { concatClips, extractFrame, extractFrameAtOrAfter, frameStartAtOrAfter, 
 import { composeSubmission, prepareSubmission, toPublic, videoLocation, type JobManager } from './jobs'
 import {
   assertRootIntact,
+  ensureLibraryDir,
   FOLDERS,
   framesDir,
   fromStoredPath,
@@ -106,13 +115,17 @@ import { followSwap, swappedInPlace } from './inherited-swap'
 import { placeFile } from './references'
 import {
   buildConcatClips,
+  buildSongClips,
   buildStoryboardClips,
   exportCuts,
   missingTakesMessage,
   missingTransitionsMessage,
-  reserveExportPath
+  reserveExportPath,
+  songExportCuts
 } from './sequence-export'
 import * as store from './sequence-store'
+import { reconcileSongTrims } from './song-sync'
+import { cachedSongAnalysis } from './song-analysis'
 import { assertAgentFiles } from './upload-paths'
 import { sendOptionsOf, sendVariants, type SendOptions } from './variants'
 import { ensureImagesExist, type VeniceClient } from './venice'
@@ -333,9 +346,13 @@ export function chainOf(rows: readonly store.SegmentRow[]): ChainClip[] {
  * clip it continues from – with the previous clip's last frame going after them when the take is made; a clip that
  * otherwise takes a frame from a neighbour gets the image-to-video sibling of its model and no references. A
  * neighbour's frame is only filled in when the take is generated (until then the slot is empty, not a stale image).
+ * A clip of a sequence cut to a song that hears it sends its window of the song as its only reference audio, with the
+ * words sung there (song-send.ts withSong).
  */
 export function takeParams(rows: readonly store.SegmentRow[], index: number, chain = chainOf(rows)): GenerationParams {
-  return sendParams(chain, index)
+  const params = sendParams(chain, index)
+  // The sequence's song is only read for a clip with a place in it.
+  return params.song && rows[index] ? withSong(params, store.sequenceSong(rows[index].sequence_id)) : params
 }
 
 /** How the clip at `index` continues from the previous clip (continuation.ts), or undefined when it doesn't. */
@@ -438,7 +455,10 @@ function clipProblemAt(
 ): string | undefined {
   const problem = clipProblem(params, links, plan)
   const row = rows[index]
-  return problem === PROMPT_FIRST && row && store.ownClipMissing(row) ? store.ownClipMissingMessage(index + 1) : problem
+  if (problem === PROMPT_FIRST) return row && store.ownClipMissing(row) ? store.ownClipMissingMessage(index + 1) : problem
+  // A song clip that can't hear its window of the song (its model, its place) says so before its references do.
+  const song = params.song && row ? songClipProblem(params, store.sequenceSong(row.sequence_id)) : undefined
+  return song ?? problem
 }
 
 /** The word in front of an @AudioN inside a reference's brackets ("voice @Audio1", "röst @Audio1"). */
@@ -767,6 +787,75 @@ export function missingClipProblem(clip: MissingClip): string | undefined {
   return `Clip ${clip.clip}: ${clip.problem}`
 }
 
+// ── Songs ────────────────────────────────────────────────────────────────────
+// A sequence cut to a song (Sequence.song, main/song.ts): its clips cover the song end to end, in order, each with its
+// place in it (params.song). Places change only through the cut points (setSongSections); adding a clip splits the
+// place it is added after, deleting one gives its place to a neighbour, and the clips can't be reordered.
+
+/** Said when a song sequence's clip is moved. */
+export const SONG_MOVE_REFUSED = "A song's clips follow the song: move the boundaries in the song strip instead."
+
+/**
+ * The duration a song clip's take is made with: its place plus the headroom, as its model offers durations
+ * (song-window.ts songClipDuration). `keepUnknown`: without the model in the list, the duration stays as it is.
+ */
+function songDuration(params: GenerationParams, models: readonly VideoModel[] | undefined, keepUnknown = false): string {
+  if (!params.song) return params.duration
+  const info = models?.find((m) => m.id === params.model)
+  if (!info && keepUnknown) return params.duration
+  return songClipDuration(info?.durations, windowLength(params.song))
+}
+
+/**
+ * Params with their place in the song at [start, end): what it hears and who sings stay as they were (`part` for a
+ * clip that had no place), the words of an earlier window go, and the duration follows the new length.
+ */
+function withSongPlace(
+  params: GenerationParams,
+  start: number,
+  end: number,
+  part: SongPart,
+  models: readonly VideoModel[] | undefined
+): GenerationParams {
+  const was = params.song
+  const song: SongWindow = {
+    start,
+    end,
+    part: was?.part ?? part,
+    ...(was && was.singer !== undefined ? { singer: was.singer } : {})
+  }
+  const next = { ...params, song }
+  return { ...next, duration: songDuration(next, models) }
+}
+
+/**
+ * Params from the window or an agent for a clip whose place is `place`: the place stays where it is (the boundaries
+ * move it, nothing else), what it hears and who sings may change. A clip without a place gets none here.
+ */
+function keepSongPlace(params: GenerationParams, place: SongWindow | undefined): GenerationParams {
+  if (!place) {
+    if (!params.song) return params
+    const { song: _, ...rest } = params
+    return rest
+  }
+  const asked = params.song
+  const singer = asked ? asked.singer : place.singer
+  return {
+    ...params,
+    song: { start: place.start, end: place.end, part: asked?.part ?? place.part, ...(singer !== undefined ? { singer } : {}) }
+  }
+}
+
+/** Why a song sequence's clip can't be removed to fit fewer places; undefined for one nothing has been put in. */
+function songClipKept(row: store.SegmentRow, sending: boolean): string | undefined {
+  if (sending) return 'is being sent to Venice'
+  if (row.selected_generation_id || store.takeIdsForSegments([row.id]).length) return 'has takes'
+  if (store.parseParams(row.params).prompt.trim()) return 'has a prompt'
+  if ((row.notes ?? '').trim()) return 'has notes'
+  if (!store.isUntouchedSegment(row)) return 'has pictures, sounds or frame links of its own'
+  return undefined
+}
+
 export class SequenceService {
   private readonly runs = new Map<string, Run>()
   /** Runs whose loop hasn't returned yet; a stopped run's loop may still be finishing its current step. */
@@ -791,6 +880,8 @@ export class SequenceService {
   private fileTasks = 0
   /** Sequence name at which renaming the sequence's folder last failed, by sequence id. */
   private readonly folderSyncFailed = new Map<string, string>()
+  /** Song work reading or writing a sequence's Ljud/ right now (holdSongFolder), by sequence id: how many. */
+  private readonly songHolds = new Map<string, number>()
 
   private sql(): ReturnType<typeof db.getDb> {
     return db.getDb()
@@ -959,7 +1050,7 @@ export class SequenceService {
       }
       this.sql()
         .prepare('UPDATE sequences SET name = ?, defaults = ?, updated_at = ? WHERE id = ?')
-        .run(name, store.serializeDefaults(defaults, after), Date.now(), id)
+        .run(name, store.serializeDefaults(defaults, after, current.defaults), Date.now(), id)
       if (height !== undefined) store.setExportHeight(id, height)
       if (castChange && !sameCast(before, after)) this.followCast(id, before, after, swapped, library)
     })()
@@ -1125,8 +1216,12 @@ export class SequenceService {
     // Taking a frame from a neighbour may switch the model: the list says which sibling Venice offers and what
     // options it has. Fetched before the rows are read, so what is written below is built from what was read. A
     // clip made from a generation doesn't continue unless asked to, so it needs no list for that.
-    const linking = init.endFromNext || (init.continueFromPrevious ?? !init.fromGenerationId)
-    const models = linking ? await this.modelList() : undefined
+    // In a song sequence a new clip doesn't continue unless asked to, and its take's duration follows its place (the
+    // list's durations); the place it splits goes on the beat (the song's analysis, when there is one).
+    const song = store.sequenceSong(sequenceId)
+    const linking = init.endFromNext || (init.continueFromPrevious ?? (!init.fromGenerationId && !song))
+    const models = linking || song ? await this.modelList() : undefined
+    const analysis = song ? await cachedSongAnalysis(song) : undefined
     const sequence = store.requireSequenceRow(sequenceId)
     this.refuseWhileRunning(sequenceId, caller)
     const rows = store.listSegmentRows(sequenceId)
@@ -1137,6 +1232,26 @@ export class SequenceService {
       if (after >= 0) index = after + 1
     }
     const previous = index > 0 ? rows[index - 1] : undefined
+    // A song sequence: the clip it is added after gives the second half of its place to the new one (the whole song
+    // for a first clip).
+    let songSplit: { place: { start: number; end: number }; previous?: GenerationParams } | undefined
+    if (song) {
+      const was = previous ? store.parseParams(previous.params) : undefined
+      const place = was?.song
+      if (!previous) songSplit = { place: { start: 0, end: song.duration } }
+      else if (place && was) {
+        const cut = splitPoint(place.start, place.end, analysis?.beats)
+        if (cut === undefined) {
+          throw new Error(
+            `Clip ${index}'s place in the song (${formatPlace(place.start, place.end)}) is too short to split: each half needs at least 2 s. Move a boundary in the song strip first.`
+          )
+        }
+        songSplit = {
+          place: { start: cut, end: place.end },
+          previous: withSongPlace(was, place.start, cut, place.part, models)
+        }
+      }
+    }
 
     const source = init.fromGenerationId ? db.getGeneration(init.fromGenerationId) : undefined
     if (init.fromGenerationId && !source) throw new Error('The take no longer exists.')
@@ -1181,7 +1296,7 @@ export class SequenceService {
       }
     }
 
-    const continuing = !!previous && (init.continueFromPrevious ?? !source)
+    const continuing = !!previous && (init.continueFromPrevious ?? (!source && !song))
     if (castApplies && !continuing && !ending) {
       // A new shot with the cast. A negative prompt copied from the clip before was written against that clip's
       // references: its tokens move onto the cast's pictures (or go), so none names another picture now.
@@ -1221,10 +1336,24 @@ export class SequenceService {
     }
     // A clip moved to another model gets the options that model offers.
     if (params.model !== chosen) params = fitToModel(params, models)
+    // Its place in the song (not one copied from the clip before or a take), hearing what is sung there by default.
+    if (songSplit) {
+      const { start, end } = songSplit.place
+      const part = defaultSongPart(start, end, song?.lyrics, analysis?.fromVocals ? analysis.vocalActivity : undefined)
+      params = withSongPlace({ ...params, song: undefined }, start, end, part, models)
+    } else if (params.song) {
+      const { song: _, ...rest } = params
+      params = rest
+    }
 
     const id = randomUUID()
     const adopt = source && !source.segmentId
     this.sql().transaction(() => {
+      if (songSplit?.previous && previous) {
+        this.sql()
+          .prepare('UPDATE segments SET params = ? WHERE id = ?')
+          .run(store.serializeParams(songSplit.previous), previous.id)
+      }
       this.sql()
         .prepare(
           `INSERT INTO segments (id, sequence_id, position, params, continue_from_previous, end_from_next, notes,
@@ -1333,8 +1462,13 @@ export class SequenceService {
     const chosenMode = store.cleanContinueMode(patch.continueMode)
     // Turning a neighbour's frame on (or choosing how to continue) may switch the model (see below); fetched before
     // the row is read, so the write works on what was read.
+    // So does new params for a song clip: its take's duration follows its place, as its model offers durations.
+    const current = patch.params ? store.getSegmentRow(segmentId) : undefined
+    const songClip = !!current && !!store.parseParams(current.params).song
     const models =
-      patch.endFromNext || patch.continueFromPrevious || chosenMode !== undefined ? await this.modelList() : undefined
+      patch.endFromNext || patch.continueFromPrevious || chosenMode !== undefined || songClip
+        ? await this.modelList()
+        : undefined
     const row = store.requireSegmentRow(segmentId)
     this.refuseWhileRunning(row.sequence_id, caller)
     const rows = store.listSegmentRows(row.sequence_id)
@@ -1357,6 +1491,8 @@ export class SequenceService {
 
     const mode = chosenMode ?? store.continueModeOfRow(row)
     let params = patch.params ? store.sanitizeParams(patch.params) : store.parseParams(row.params)
+    // A song clip's place moves only with the boundaries (setSongSections); what it hears and who sings may change.
+    if (patch.params) params = keepSongPlace(params, store.parseParams(row.params).song)
     const chosen = params.model
     // A segment that continues in reference mode generates with its family's reference-to-video model (keeping its own
     // references, which override the ones it carries); one that otherwise takes a frame from a neighbour always
@@ -1377,6 +1513,7 @@ export class SequenceService {
     if (ending && !row.end_from_next) params = asKeyframed(params, true, models)
     // A clip moved to another model gets the options that model offers (when the list was fetched for a switch).
     if (params.model !== chosen) params = fitToModel(params, models)
+    if (params.song) params = { ...params, duration: songDuration(params, models, true) }
     // A clip that stops continuing is a new shot: without references of its own it takes the sequence's cast, as a new
     // clip does, its prompt's tokens following from what it carried (the frame's token goes).
     if (
@@ -1501,6 +1638,8 @@ export class SequenceService {
   ): Promise<Sequence> {
     const row = store.requireSegmentRow(segmentId)
     this.refuseWhileRunning(row.sequence_id, caller)
+    // A song clip's place goes to a neighbour, whose take's duration follows its longer place.
+    const models = store.parseParams(row.params).song ? await this.modelList() : undefined
     const freed = await this.withFiles(async () => {
       const current = store.getSegmentRow(row.id)
       if (!current) return []
@@ -1510,6 +1649,7 @@ export class SequenceService {
       const takeIds = store.takeIdsForSegments([row.id])
       await this.releaseTakes(takeIds)
       this.sql().transaction(() => {
+        this.mergeSongPlace(row.id, models)
         this.sql().prepare('DELETE FROM segments WHERE id = ?').run(row.id)
         store.renumberSegments(store.listSegmentRows(row.sequence_id).map((r) => r.id))
       })()
@@ -1522,6 +1662,7 @@ export class SequenceService {
 
   moveSegment(segmentId: string, toIndex: number, caller: Caller = {}): Sequence {
     const row = store.requireSegmentRow(segmentId)
+    if (store.sequenceSong(row.sequence_id)) throw new Error(SONG_MOVE_REFUSED)
     this.refuseWhileRunning(row.sequence_id, caller)
     const order = store
       .listSegmentRows(row.sequence_id)
@@ -1531,6 +1672,202 @@ export class SequenceService {
     order.splice(target, 0, row.id)
     this.sql().transaction(() => store.renumberSegments(order))()
     return this.changed(row.sequence_id)
+  }
+
+  // ── Songs (main/song.ts keeps the song's files, analysis and lyrics; the rules of its clips are here) ──────────
+
+  /**
+   * Song work (main/song.ts) reads or writes the sequence's Ljud/ folder by path until the returned function is
+   * called: the folder isn't renamed meanwhile (folderBusy), and a rename put off is tried again after.
+   */
+  holdSongFolder(sequenceId: string): () => void {
+    this.songHolds.set(sequenceId, (this.songHolds.get(sequenceId) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const left = (this.songHolds.get(sequenceId) ?? 1) - 1
+      if (left > 0) this.songHolds.set(sequenceId, left)
+      else this.songHolds.delete(sequenceId)
+      this.requestFolderSync(sequenceId)
+    }
+  }
+
+  /**
+   * Copies an audio file (or, with `move`, moves it) into the sequence's Ljud/ folder under `name`, or a free name
+   * like it ("Song (2).wav"), giving the sequence a folder first if it has none; resolves the new path. In the file
+   * queue, so the folder isn't being renamed meanwhile.
+   */
+  placeSongFile(sequenceId: string, from: string, name: string, opts: { move?: boolean } = {}): Promise<string> {
+    return this.withFiles(async () => {
+      const row = store.getSequenceRow(sequenceId)
+      const folder = row && this.ensureFolder(row.id)
+      if (!row || !folder) throw new Error('The sequence no longer exists.')
+      const dir = ensureLibraryDir(store.songFolderPath(folder))
+      const ext = extname(name).toLowerCase()
+      const base = safeName(basename(name, extname(name)), { fallback: 'Sång' })
+      const pick = (): string => join(dir, store.availableFileName(dir, base, ext))
+      return opts.move ? moveToFreeName(from, pick) : this.copyToFreeName(from, pick)
+    })
+  }
+
+  /**
+   * The clips' places in the song: `boundaries` are the cut points strictly inside it, ascending (checked with plain
+   * reasons, shared/song.ts checkSongBoundaries). Clips are added at the end (empty, with the cast, not continuing) or
+   * removed there if nothing has been put in them, and every clip gets its place in order, keeping who sings and what
+   * it hears (a new place, and an empty clip's part that Studio decided, hear what is sung there: defaultSongPart),
+   * with the duration its take needs. Refused, with
+   * nothing changed, when a clip that would go has takes, a prompt or notes. `opts.song`: the song to give the sequence
+   * in the same step (a song put on a sequence that has clips, or replaced).
+   */
+  async setSongSections(
+    sequenceId: string,
+    boundaries: unknown,
+    caller: Caller = {},
+    opts: { song?: SequenceSong } = {}
+  ): Promise<Sequence> {
+    store.requireSequenceRow(sequenceId)
+    const song = opts.song ?? store.sequenceSong(sequenceId)
+    if (!song) throw new Error('The sequence has no song. Make it from a song first (New sequence from a song…).')
+    const cuts = checkSongBoundaries(boundaries, song.duration)
+    this.refuseWhileRunning(sequenceId, caller)
+    const models = await this.modelList()
+    const analysis = await cachedSongAnalysis(song)
+    const activity = analysis?.fromVocals ? analysis.vocalActivity : undefined
+    const places = placesOf(cuts, song.duration)
+    this.sql().transaction(() => {
+      // Read in the transaction, after the awaits: the clips as they are now.
+      const sequence = store.requireSequenceRow(sequenceId)
+      const rows = store.listSegmentRows(sequenceId)
+      for (let i = places.length; i < rows.length; i++) {
+        const why = songClipKept(rows[i], this.submitting.has(rows[i].id))
+        if (!why) continue
+        throw new Error(
+          `These boundaries make ${places.length} ${places.length === 1 ? 'place' : 'places'} for the sequence's ${rows.length} clips, but clip ${i + 1} ${why}, so it can't be removed. Delete it yourself first, or keep ${rows.length} places.`
+        )
+      }
+      if (opts.song) store.writeSequenceSong(sequenceId, opts.song)
+      const update = this.sql().prepare('UPDATE segments SET params = ? WHERE id = ?')
+      const insert = this.sql().prepare(
+        `INSERT INTO segments (id, sequence_id, position, params, continue_from_previous, end_from_next, notes,
+           selected_generation_id, created_at, continue_mode)
+         VALUES (?, ?, ?, ?, 0, 0, '', NULL, ?, 'references')`
+      )
+      const order: string[] = []
+      places.forEach((place, i) => {
+        const part = defaultSongPart(place.start, place.end, song.lyrics, activity)
+        const existing = rows[i]
+        if (existing) {
+          let params = store.parseParams(existing.params)
+          // An empty clip whose part is the one its old place suggests hears what its new place suggests; a part that
+          // differs was chosen and stays.
+          const was = params.song
+          const automatic =
+            !!was &&
+            store.isUntouchedSegment(existing) &&
+            was.part === defaultSongPart(was.start, was.end, song.lyrics, activity)
+          if (was && automatic) params = { ...params, song: { ...was, part } }
+          params = withSongPlace(params, place.start, place.end, part, models)
+          const json = store.serializeParams(params)
+          if (json !== existing.params) update.run(json, existing.id)
+          order.push(existing.id)
+          return
+        }
+        const id = randomUUID()
+        const params = withSongPlace(this.newSongClipParams(sequence, models), place.start, place.end, part, models)
+        insert.run(id, sequenceId, i, store.serializeParams(params), Date.now())
+        order.push(id)
+      })
+      const remove = this.sql().prepare('DELETE FROM segments WHERE id = ?')
+      for (const r of rows.slice(places.length)) remove.run(r.id)
+      store.renumberSegments(order)
+    })()
+    return this.changed(sequenceId)
+  }
+
+  /**
+   * Takes the song off the sequence: its clips lose their places (their takes keep the ones they were made for) and
+   * keep everything else, and the song's files stay where they are, in the sequence's Ljud/ folder (they are the
+   * user's).
+   */
+  removeSong(sequenceId: string, caller: Caller = {}): Sequence {
+    store.requireSequenceRow(sequenceId)
+    this.refuseWhileRunning(sequenceId, caller)
+    this.sql().transaction(() => {
+      store.writeSequenceSong(sequenceId, null)
+      const update = this.sql().prepare('UPDATE segments SET params = ? WHERE id = ?')
+      for (const r of store.listSegmentRows(sequenceId)) {
+        const params = store.parseParams(r.params)
+        if (!params.song) continue
+        const { song: _, ...rest } = params
+        update.run(store.serializeParams(rest), r.id)
+      }
+    })()
+    return this.changed(sequenceId)
+  }
+
+  /**
+   * The song learned something new about where it is sung (its lyrics came, or its vocals were separated): the clips
+   * nothing has been put in hear again what their places now suggest (defaultSongPart) – those whose part is still the
+   * one `before` (what was known until now) suggested; a part that differs from it was chosen and stays. Returns whether
+   * a clip changed (then it is announced).
+   */
+  async redecideSongParts(
+    sequenceId: string,
+    before: { lyrics?: SongLyrics; vocalActivity?: readonly { start: number; end: number }[] }
+  ): Promise<boolean> {
+    const song = store.sequenceSong(sequenceId)
+    if (!song) return false
+    const analysis = await cachedSongAnalysis(song)
+    const activity = analysis?.fromVocals ? analysis.vocalActivity : undefined
+    let changed = false
+    this.sql().transaction(() => {
+      const update = this.sql().prepare('UPDATE segments SET params = ? WHERE id = ?')
+      for (const row of store.listSegmentRows(sequenceId)) {
+        const params = store.parseParams(row.params)
+        const place = params.song
+        if (!place || this.submitting.has(row.id) || !store.isUntouchedSegment(row)) continue
+        if (place.part !== defaultSongPart(place.start, place.end, before.lyrics, before.vocalActivity)) continue
+        const part = defaultSongPart(place.start, place.end, song.lyrics, activity)
+        if (part === place.part) continue
+        update.run(store.serializeParams({ ...params, song: { ...place, part } }), row.id)
+        changed = true
+      }
+    })()
+    if (changed) this.changed(sequenceId)
+    return changed
+  }
+
+  /** A new song clip's params: the sequence's output settings and its cast, made by a reference-to-video model. */
+  private newSongClipParams(sequence: store.SequenceRow, models: readonly VideoModel[] | undefined): GenerationParams {
+    let params = store.sanitizeParams({ ...DEFAULT_PARAMS, ...store.parseDefaults(sequence.defaults) })
+    if (kindOfModelId(params.model) !== 'reference-to-video') {
+      const model = referenceToVideoVariant(params.model, models?.map((m) => m.id)) ?? DEFAULT_PARAMS.model
+      params = fitToModel({ ...params, model, startImage: undefined, endImage: undefined }, models)
+    }
+    const cast = store.parseCast(sequence.defaults)
+    return castIsEmpty(cast) ? params : withCastReferences(params, cast)
+  }
+
+  /**
+   * Inside deleteSegment's transaction: a song clip's place goes to the clip before it (the next one for the first
+   * clip), so the clips still cover the song.
+   */
+  private mergeSongPlace(segmentId: string, models: readonly VideoModel[] | undefined): void {
+    const row = store.getSegmentRow(segmentId)
+    const place = row && store.parseParams(row.params).song
+    if (!row || !place || !store.sequenceSong(row.sequence_id)) return
+    const rows = store.listSegmentRows(row.sequence_id)
+    const i = rows.findIndex((r) => r.id === row.id)
+    const before = i > 0 ? rows[i - 1] : undefined
+    const neighbour = before ?? rows[i + 1]
+    const params = neighbour && store.parseParams(neighbour.params)
+    const theirs = params?.song
+    if (!neighbour || !params || !theirs) return
+    const next = before
+      ? withSongPlace(params, theirs.start, place.end, theirs.part, models)
+      : withSongPlace(params, place.start, theirs.end, theirs.part, models)
+    this.sql().prepare('UPDATE segments SET params = ? WHERE id = ?').run(store.serializeParams(next), neighbour.id)
   }
 
   // ── Keyframes ──────────────────────────────────────────────────────────────
@@ -2492,7 +2829,7 @@ export class SequenceService {
    * (ffmpeg opens the takes by path).
    */
   private folderBusy(sequenceId: string): boolean {
-    if (this.exports.has(sequenceId)) return true
+    if (this.exports.has(sequenceId) || this.songHolds.has(sequenceId)) return true
     if (store.listSegmentRows(sequenceId).some((r) => this.submitting.has(r.id))) return true
     return store.hasPendingTakes(sequenceId)
   }
@@ -2828,13 +3165,24 @@ export class SequenceService {
     try {
       // A take that is being moved is briefly missing from its recorded path.
       await this.filesSettled()
-      const rows = store.listSegmentRows(store.requireSequenceRow(sequenceId).id)
+      let rows = store.listSegmentRows(store.requireSequenceRow(sequenceId).id)
       if (!rows.length) {
         throw new Error(
           storyboard
             ? 'The storyboard has no transitions to export yet. Add at least two boards with images.'
             : 'The sequence has no clips to export.'
         )
+      }
+      // A sequence cut to a song: its clips' places must make the whole song, and each take is cut to its place where
+      // its singing starts (song-sync.ts); the song is the film's only sound.
+      const song = storyboard ? undefined : store.sequenceSong(sequenceId)
+      if (song) {
+        const problem = songPlacesProblem(rows.map((r) => store.parseParams(r.params).song), song.duration)
+        if (problem) throw new Error(problem)
+        if (!existsSync(song.path)) {
+          throw new Error(`The song's file is missing: ${basename(song.path)}. Put it back in the sequence's folder.`)
+        }
+        if (reconcileSongTrims(sequenceId)) rows = store.listSegmentRows(sequenceId)
       }
       const takes = rows.map((r) => store.selectedTake(r))
       const missing = takes.flatMap((t, i) => (store.isUsable(t) ? [] : [i + 1]))
@@ -2850,13 +3198,18 @@ export class SequenceService {
       started = true
       emit({ progress: 0 })
       const usable = takes.filter(store.isUsable)
-      const clips = storyboard ? await buildStoryboardClips(rows, usable) : await buildConcatClips(rows, usable)
+      const clips = storyboard
+        ? await buildStoryboardClips(rows, usable)
+        : song
+          ? buildSongClips(rows, usable)
+          : await buildConcatClips(rows, usable)
       // Where the clips meet in the film, recorded with it (the Editor's cut markers).
-      const cuts = await exportCuts(clips)
+      const cuts = song ? await songExportCuts(clips) : await exportCuts(clips)
       rendered = join(tmpDir(), `export-${randomUUID()}.mp4`)
       let lastStep = 0
       await concatClips(clips, rendered, {
         height,
+        ...(song ? { soundtrack: song.path } : {}),
         signal: controller.signal,
         onProgress: (fraction) => {
           progress = Math.min(1, Math.max(0, fraction))
@@ -2956,6 +3309,8 @@ export class SequenceService {
   /** Bumps updated_at (unless the caller already did), broadcasts and returns the fresh sequence. */
   private changed(sequenceId: string, touch = true): Sequence {
     if (touch) store.touchSequence(sequenceId)
+    // A song sequence's clips are cut to their places again (song-sync.ts): a place moved, a take nudged or selected.
+    reconcileSongTrims(sequenceId)
     this.deps.notify(sequenceId)
     // A folder rename that was put off may be possible now (e.g. the pending take's clip was deleted).
     this.requestFolderSync(sequenceId)

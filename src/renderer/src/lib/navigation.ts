@@ -35,6 +35,8 @@ export type Intent = (
   | { type: 'use-prompt'; promptId: string }
   /** Sequences view: open that sequence, on the given clip (else the newest one); generationId focuses that take. */
   | { type: 'open-sequence'; sequenceId: string; segmentId?: string; generationId?: string }
+  /** Sequences view: "New sequence from a song…" – pick an audio file, then the song's dialog. */
+  | { type: 'new-sequence-from-song' }
   /** Storyboards view: open that storyboard; transitionId opens the transition editor, boardId flashes the board. */
   | { type: 'open-storyboard'; storyboardId: string; transitionId?: string; boardId?: string }
   /**

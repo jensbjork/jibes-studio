@@ -10,6 +10,22 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **A music video from your song**: *＋ New sequence → From a song…* (also ⌘K, or drop an audio file on the
+  Sequences list) makes a sequence cut to an audio file of your own. The song is copied into the sequence's folder
+  (`Ljud/`), its vocals are separated on this Mac (free) and its lyrics transcribed with the time of every word (priced
+  first, the budget applies), then it is split into clips of about the length you choose, at its lines and phrases on
+  the beat. The *song strip* above the clips shows the waveform, the beat and each clip's place in the song: drag a
+  boundary (it snaps to the beat, ⌥ for anywhere), split at the playhead, merge with the next, and correct a lyric
+  line by clicking it. A clip shows its place and the words sung there, and what it hears of the song: *Vocals – lip
+  sync* (its window of the vocals is sent as the clip's audio reference, and the References legend says who sings
+  which words), *Music – mood and rhythm*, or *No song*. When a take finishes, Studio measures where its singing sits
+  against the song and starts it there in the cut (*In sync (+0.32 s)*, or *No singing found*), with ±1 frame /
+  ±0.1 s to nudge it. The preview and the export play the song over the whole film, frame-exact, instead of the
+  clips' own sound; the *Song* chip in the header replaces or removes it. Kept in the sequence's defaults and
+  `.studio/song-sync.json`, no schema change. Agents: `create_sequence_from_song`, `suggest_song_sections`,
+  `set_song_sections`, `edit_song_lyrics` and `request_song_lyrics` (asks for approval: the transcription is paid);
+  `get_sequence` shows the song, each clip's place, words and sync, `update_segment` takes `song: {part, singer}` and
+  `update_sequence` `song: null`. 96 tools in all (37 read, 49 write, 10 ask for approval).
 - **A sequence's cast**: *Cast* in the sequence's header chooses the characters, outfits (and who wears them),
   environments, products and poses once for the whole sequence instead of per clip – add (at the end, a character with
   its default outfit and voice), remove, move, swap for another asset, a voice on or off, who wears an outfit. New clips
@@ -31,7 +47,7 @@ breaking changes; they are called out under **Changed** or **Removed**.
   This costs $0.56 and takes today’s spending past your budget of $5.00 ($4.80 spent). Send it anyway?*). An agent's
   request past the budget says so in its approval dialog, and approving it is the yes. Agents: `get_spending` (the
   same numbers, the caps and the room left), and a paid request's answer carries `over_budget` and a `budget_note`;
-  only you set the budget. 91 tools in all (36 read, 46 write, 9 ask for approval).
+  only you set the budget.
 - **⌘K: search everywhere and go there**: one field, from any view (a text field too) or the search button by the
   wordmark (also in the rail), that finds the views, Media's tabs, Settings' sections, *Activity* and the agent, the
   actions (*New sequence*, *New storyboard*, *New edit*, *New character* … – the same as the list's *＋ New*, the

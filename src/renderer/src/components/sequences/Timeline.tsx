@@ -23,15 +23,25 @@ import {
   clipLength,
   continuationMismatch,
   endMismatch,
+  formatFrameTime,
   formatLength,
   pendingTake,
   readyTake,
   selectedTake,
   takeProgress
 } from './sequenceUtils'
+import { placeOf, placeText, songSeconds } from './song/songText'
 
 /** Drag payload of a clip being reordered (its id). */
 const SEGMENT_DRAG_TYPE = 'application/x-studio-segment'
+
+/**
+ * A card's width in a sequence cut to a song: as long as its place (22 px a second, an 8 s place as wide as an
+ * ordinary card), within bounds that keep short places legible and long ones from crowding the strip.
+ */
+function songCardWidth(seconds: number): number {
+  return Math.round(Math.min(320, Math.max(112, seconds * 22)))
+}
 
 /** Where a clip that isn't an empty AI clip comes from: the user's own file, the clip feed, the Editor's versions. */
 export type ClipSource = 'file' | 'feed' | 'edit'
@@ -61,7 +71,11 @@ interface Props {
   onBridge: (segmentId: string) => void
 }
 
-/** Horizontal strip of clips in cut order: select, insert, reorder by drag and drop, and drop own films onto. */
+/**
+ * Horizontal strip of clips in cut order: select, insert, reorder by drag and drop, and drop own films onto. In a
+ * sequence cut to a song the cards are as wide as their places, keep the song's order (no dragging: the boundaries
+ * move in the song strip), and "+" splits a clip in two.
+ */
 export default function Timeline({
   sequence,
   selectedId,
@@ -77,6 +91,7 @@ export default function Timeline({
   onBridge
 }: Props) {
   const segments = sequence.segments
+  const song = !!sequence.song
   const news = useMemo(() => newsBySegment(unseen), [unseen])
   // A take on its way to Venice has no row yet: its card says so from the store.
   const sending = useMemo(
@@ -152,6 +167,16 @@ export default function Timeline({
     else if (e.key === 'Enter' || e.key === ' ') onSelect(segments[i].id)
     else return
     e.preventDefault()
+  }
+
+  if (!segments.length && song) {
+    return (
+      <div className="shrink-0 border-b border-line p-4">
+        <div className="flex h-[143px] items-center justify-center rounded-lg border border-dashed border-line px-6 text-center text-muted">
+          The clips appear here once the song has been split – one for each phrase or line, on the beat.
+        </div>
+      </div>
+    )
   }
 
   if (!segments.length) {
@@ -239,6 +264,7 @@ export default function Timeline({
                   segment={s}
                   previous={segments[i - 1]}
                   number={i + 1}
+                  song={song}
                   dropHere={marker === i}
                   adding={adding}
                   onInsert={() => onAdd(segments[i - 1].id)}
@@ -254,6 +280,7 @@ export default function Timeline({
                 onBridge={() => onBridge(s.id)}
                 selected={s.id === selectedId}
                 dragging={s.id === dragId}
+                song={song}
                 refCallback={(el) => {
                   if (el) cards.current.set(s.id, el)
                   else cards.current.delete(s.id)
@@ -261,6 +288,10 @@ export default function Timeline({
                 onSelect={() => onSelect(s.id)}
                 onKeyDown={(e) => cardKeys(e, i)}
                 onDragStart={(e) => {
+                  if (song) {
+                    e.preventDefault()
+                    return
+                  }
                   e.dataTransfer.effectAllowed = 'move'
                   // A private type, so dropping a card on a text field doesn't paste anything.
                   e.dataTransfer.setData(SEGMENT_DRAG_TYPE, s.id)
@@ -283,7 +314,7 @@ export default function Timeline({
               <ImportCardView card={card} compact />
             </div>
           ))}
-          <AddSplitButton adding={adding} onAdd={() => onAdd()} onAddFrom={(source) => onAddFrom(source)} />
+          <AddSplitButton adding={adding} song={song} onAdd={() => onAdd()} onAddFrom={(source) => onAddFrom(source)} />
         </div>
       </div>
     </div>
@@ -302,13 +333,18 @@ function SourceLink({ onClick, children }: { onClick: () => void; children: stri
   )
 }
 
-/** "Add clip ▾": the button adds an empty clip to generate; the ▾ part offers the other sources. */
+/**
+ * "Add clip ▾": the button adds an empty clip to generate (in a song's sequence: splits the last clip in two, the
+ * new one taking the second half); the ▾ part offers the other sources.
+ */
 function AddSplitButton({
   adding,
+  song,
   onAdd,
   onAddFrom
 }: {
   adding: boolean
+  song: boolean
   onAdd: () => void
   onAddFrom: (source: ClipSource) => void
 }) {
@@ -319,11 +355,15 @@ function AddSplitButton({
       <button
         onClick={onAdd}
         disabled={adding}
-        title="Add a clip to generate, at the end"
-        className="flex flex-1 flex-col items-center justify-center gap-1.5 transition hover:bg-raised/60 hover:text-text disabled:opacity-40"
+        title={
+          song
+            ? 'Split the last clip in two at the beat nearest its middle; the new clip takes the second half'
+            : 'Add a clip to generate, at the end'
+        }
+        className="flex flex-1 flex-col items-center justify-center gap-1.5 px-1 text-center transition hover:bg-raised/60 hover:text-text disabled:opacity-40"
       >
         <PlusIcon size={16} />
-        Add clip
+        {song ? 'Split last clip' : 'Add clip'}
       </button>
       <button
         ref={anchor}
@@ -359,7 +399,8 @@ function AddMenu({
   open,
   onClose,
   onPick,
-  onEmpty
+  onEmpty,
+  empty = { label: 'New clip to generate', text: "An empty clip with the previous clip's settings." }
 }: {
   anchorRef: RefObject<HTMLElement | null>
   open: boolean
@@ -367,6 +408,8 @@ function AddMenu({
   onPick: (source: ClipSource) => void
   /** Also offers an empty clip to generate (the + between two clips). */
   onEmpty?: () => void
+  /** What that item says (a song's sequence splits the clip before instead). */
+  empty?: { label: string; text: string }
 }) {
   return (
     <Popover anchorRef={anchorRef} open={open} onClose={onClose} align="start" width={270} label="Add clip">
@@ -380,10 +423,8 @@ function AddMenu({
             onClick={onEmpty}
             className={`${menuRow} flex-col items-start gap-0.5`}
           >
-            <span>New clip to generate</span>
-            <span className="text-[11px] leading-snug text-muted">
-              An empty clip with the previous clip's settings.
-            </span>
+            <span>{empty.label}</span>
+            <span className="text-[11px] leading-snug text-muted">{empty.text}</span>
           </button>
         )}
         <button
@@ -435,6 +476,7 @@ function Joint({
   segment,
   previous,
   number,
+  song,
   dropHere,
   adding,
   onInsert,
@@ -443,6 +485,7 @@ function Joint({
   segment: Segment
   previous: Segment
   number: number
+  song: boolean
   dropHere: boolean
   adding: boolean
   onInsert: () => void
@@ -489,7 +532,7 @@ function Joint({
         disabled={adding}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        title={`Insert a clip between ${number - 1} and ${number}`}
+        title={song ? `Split clip ${number - 1}, or insert a clip after it` : `Insert a clip between ${number - 1} and ${number}`}
         className={`mt-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-line bg-raised text-muted transition hover:border-muted hover:text-text focus:opacity-100 group-hover/joint:opacity-100 disabled:opacity-0 ${
           menuOpen ? 'border-muted text-text opacity-100' : 'opacity-0'
         }`}
@@ -504,6 +547,14 @@ function Joint({
           setMenuOpen(false)
           onInsert()
         }}
+        empty={
+          song
+            ? {
+                label: `Split clip ${number - 1} in two`,
+                text: 'At the beat nearest its middle: the new clip takes the second half of its place.'
+              }
+            : undefined
+        }
         onPick={(source) => {
           setMenuOpen(false)
           onInsertFrom(source)
@@ -525,6 +576,7 @@ function SegmentCard({
   onBridge,
   selected,
   dragging,
+  song,
   refCallback,
   onSelect,
   onKeyDown,
@@ -542,6 +594,8 @@ function SegmentCard({
   onBridge: () => void
   selected: boolean
   dragging: boolean
+  /** A clip of a sequence cut to a song: as wide as its place, not dragged. */
+  song: boolean
   refCallback: (el: HTMLDivElement | null) => void
   onSelect: () => void
   onKeyDown: (e: KeyboardEvent) => void
@@ -557,24 +611,27 @@ function SegmentCard({
   const badge = chosen ? sourceBadge(chosen) : undefined
   const own = !!chosen && (badge?.kind === 'own' || badge?.kind === 'edited')
   const text = own ? generationTitle(chosen, 80) : prompt
+  const place = song ? placeOf(segment) : undefined
 
   return (
     <div
       ref={refCallback}
       role="button"
       tabIndex={0}
-      draggable
+      draggable={!song}
       aria-pressed={selected}
       onClick={onSelect}
       onKeyDown={onKeyDown}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      title="Click to edit, drag to move"
-      className={`group/card w-44 shrink-0 cursor-pointer overflow-hidden rounded-lg border bg-panel outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
+      title={place ? `Click to edit · ${placeText(place)} in the song` : 'Click to edit, drag to move'}
+      style={place ? { width: songCardWidth(place.end - place.start) } : undefined}
+      className={`group/card ${place ? '' : 'w-44'} shrink-0 cursor-pointer overflow-hidden rounded-lg border bg-panel outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
         selected ? 'border-accent ring-1 ring-accent/30' : 'border-line hover:border-muted/60'
       } ${dragging ? 'opacity-40' : ''}`}
     >
-      <div className="relative aspect-video bg-black">
+      {/* A song's cards differ in width only: the picture keeps an ordinary card's height (16:9 at w-44). */}
+      <div className={`relative bg-black ${place ? 'h-[99px]' : 'aspect-video'}`}>
         <CardPreview segment={segment} sending={sending} />
         <span className="absolute left-1.5 top-1.5 flex items-center gap-1">
           <span className="rounded bg-black/75 px-1.5 py-px text-[11px] font-semibold tabular-nums">{number}</span>
@@ -610,12 +667,19 @@ function SegmentCard({
         <p className={`truncate text-[12px] ${text ? '' : 'italic text-muted'}`} title={text || undefined}>
           {text || 'No prompt yet'}
         </p>
-        <p className="mt-0.5 flex justify-between text-[11px] text-muted">
-          <span className="tabular-nums">
-            {length !== undefined ? formatLength(length) : `≈ ${segment.params.duration.replace(/s$/, ' s')}`}
-          </span>
-          {trimmed && length !== undefined && <span>trimmed</span>}
-        </p>
+        {place ? (
+          <p className="mt-0.5 flex justify-between gap-2 text-[11px] tabular-nums text-muted">
+            <span className="truncate">{formatFrameTime(place.start)}</span>
+            <span className="shrink-0">{songSeconds(place.end - place.start)}</span>
+          </p>
+        ) : (
+          <p className="mt-0.5 flex justify-between text-[11px] text-muted">
+            <span className="tabular-nums">
+              {length !== undefined ? formatLength(length) : `≈ ${segment.params.duration.replace(/s$/, ' s')}`}
+            </span>
+            {trimmed && length !== undefined && <span>trimmed</span>}
+          </p>
+        )}
       </div>
     </div>
   )

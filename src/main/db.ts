@@ -803,8 +803,20 @@ function audioPaths(p: Partial<GenerationParams>): unknown[] {
 }
 
 /**
+ * The song file and its vocals in a sequence's defaults (`song`, sequence-store.parseSong); a clip's own `song` (its
+ * place in the song) holds no paths, so nothing is found there.
+ */
+function songPaths(p: object): unknown[] {
+  const song = (p as { song?: unknown }).song
+  if (!song || typeof song !== 'object') return []
+  const { path, vocalsPath } = song as { path?: unknown; vocalsPath?: unknown }
+  return [path, vocalsPath]
+}
+
+/**
  * The start/end/reference image paths, reference audio paths and source/reference video paths in a params JSON
- * string: generation and segment params, and a still's params (whose reference images are the only paths in it).
+ * string: generation and segment params, and a still's params (whose reference images are the only paths in it);
+ * in a sequence's defaults also its cast's and its song's (songPaths).
  */
 function paramFilePaths(json: string): string[] {
   try {
@@ -812,7 +824,7 @@ function paramFilePaths(json: string): string[] {
     if (!p || typeof p !== 'object') return []
     const refs = Array.isArray(p.referenceImages) ? p.referenceImages : []
     const videos = Array.isArray(p.referenceVideos) ? p.referenceVideos : []
-    return [p.startImage, p.endImage, ...refs, ...audioPaths(p), p.sourceVideo, ...videos].filter(
+    return [p.startImage, p.endImage, ...refs, ...audioPaths(p), p.sourceVideo, ...videos, ...songPaths(p)].filter(
       (v): v is string => typeof v === 'string' && v !== ''
     )
   } catch {
@@ -914,7 +926,7 @@ export function listStoredPaths(): string[] {
 
 /**
  * Applies map to the image, audio and video paths in a params JSON string (generation, segment or still params, a
- * sequence's defaults with its cast);
+ * sequence's defaults with its cast and its song);
  * returns undefined when nothing changed.
  */
 function mapParamsJson(json: string, map: (stored: string) => string): string | undefined {
@@ -946,6 +958,17 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
   }
   if ('sourceVideo' in out) out.sourceVideo = one(out.sourceVideo) as string | undefined
   if (Array.isArray(out.referenceVideos)) out.referenceVideos = out.referenceVideos.map(one) as string[]
+  // A sequence's song (its defaults): the file and its vocals. A clip's place in the song has no paths.
+  const song = (out as { song?: unknown }).song
+  if (song && typeof song === 'object' && !Array.isArray(song)) {
+    const s = song as Record<string, unknown>
+    if ('path' in s || 'vocalsPath' in s) {
+      const next = { ...s }
+      if ('path' in next) next.path = one(next.path)
+      if ('vocalsPath' in next) next.vocalsPath = one(next.vocalsPath)
+      ;(out as { song?: unknown }).song = next
+    }
+  }
   return changed ? JSON.stringify(out) : undefined
 }
 
@@ -997,7 +1020,7 @@ export function mapStoredPaths(
       changed++
     }
 
-    // A sequence's cast: the reference images and audio of its defaults (shared/cast.ts).
+    // A sequence's cast and song: the reference images and audio of its defaults (shared/cast.ts), its song's files.
     const sequences = conn.prepare('SELECT id, defaults FROM sequences').all() as { id: string; defaults: string }[]
     const updateDefaults = conn.prepare('UPDATE sequences SET defaults = ? WHERE id = ?')
     for (const r of sequences) {
@@ -1103,7 +1126,7 @@ export function takeRewrittenGenerations(): string[] {
 /**
  * Rewrites every stored relative path equal to or under oldRel to the same place under newRel: generations
  * (file_path, thumb_path, original_path, params incl. reference audio and source/reference videos),
- * segments.params, sequences.defaults (the cast), asset_images.file_path, asset_audio.file_path,
+ * segments.params, sequences.defaults (the cast, the song), asset_images.file_path, asset_audio.file_path,
  * edit_media.file_path, stills (file_path, the reference images in params), storyboard_boards.image_path,
  * exports.file_path.
  */

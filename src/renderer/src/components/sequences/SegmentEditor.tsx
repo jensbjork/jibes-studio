@@ -27,6 +27,9 @@ import ConfirmButton from './ConfirmButton'
 import { CameraIcon, ChevronDownIcon, PlayIcon } from './icons'
 import KeyframeBox from './KeyframeBox'
 import NotesField from './NotesField'
+import { withSong } from '@shared/song-send'
+import SongBox, { revealWhoSings } from './song/SongBox'
+import { durationText, placeOf } from './song/songText'
 import {
   clipKey,
   continuationOf,
@@ -301,6 +304,24 @@ export default function SegmentEditor({
   const ownTake = chosen && isOwnTake(chosen) ? chosen : undefined
   const [aiAsked, setAiAsked] = useState(false)
   const formOpen = !ownTake || aiAsked
+  // A clip of a sequence cut to a song: its place, and the duration that follows from it.
+  const place = sequence.song ? placeOf(segment) : undefined
+  // What a song clip sends instead of its own sound (its window of the song), for the form's legend and checks.
+  const sequenceSong = sequence.song
+  const sendWithSong = useCallback((p: GenerationParams) => withSong(p, sequenceSong), [sequenceSong])
+  const hears = params.song?.part ?? place?.part
+  const songForm = place && {
+    sendAs: sendWithSong,
+    audioNote:
+      hears === 'vocals'
+        ? `@Audio1 is the song's ${sequenceSong?.vocalsPath ? 'vocals' : 'sound (its vocals aren’t separated)'} at this clip's place – the voices here aren't sent while the clip hears the song.`
+        : hears === 'mix'
+          ? "@Audio1 is the song at this clip's place – the voices here aren't sent while the clip hears the song."
+          : undefined,
+    onNoSong: () =>
+      setParams((p) => (p.song ? { ...p, song: { ...p.song, start: place.start, end: place.end, part: 'none' } } : p)),
+    onChooseSinger: revealWhoSings
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -338,15 +359,33 @@ export default function SegmentEditor({
               From here
             </button>
             <ConfirmButton
-              question="Delete the clip?"
+              question={place ? `Delete? Its place joins clip ${index > 0 ? index : 2}.` : 'Delete the clip?'}
               onConfirm={remove}
-              title="Delete the clip (the takes stay in Media)"
+              title={
+                place
+                  ? `Delete the clip (the takes stay in Media); its place in the song joins clip ${index > 0 ? index : 2}'s`
+                  : 'Delete the clip (the takes stay in Media)'
+              }
               className={deleteButton}
             >
               Delete
             </ConfirmButton>
           </div>
         </div>
+
+        {place && (
+          <SongBox
+            sequence={sequence}
+            segment={segment}
+            params={params}
+            setParams={setParams}
+            referenceImages={shown.referenceImages ?? []}
+            sentModel={sent.model}
+            models={models}
+            take={readyTake(segment)}
+            store={store}
+          />
+        )}
 
         {ownTake && <OwnClipInfo take={ownTake} />}
 
@@ -428,6 +467,8 @@ export default function SegmentEditor({
               onSubmit={() => void generate()}
               navigate={navigate}
               sequenceId={sequence.id}
+              durationFixed={place ? `Automatic: ${durationText(params.duration, place)}` : undefined}
+              song={songForm || undefined}
             />
           </>
         )}

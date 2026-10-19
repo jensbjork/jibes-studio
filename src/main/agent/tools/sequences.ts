@@ -37,6 +37,10 @@ import {
   type PromptIssue
 } from '@shared/prompt-refs'
 import { reorderReferences } from '@shared/prompt-remap'
+import { longPlaceNote } from '@shared/song'
+import { songClipProblem, withSong } from '@shared/song-send'
+import { songCut, shortTakeNote } from '@shared/song-trims'
+import { lyricsInWindow, windowLength } from '@shared/song-window'
 import type {
   Asset,
   ContinueMode,
@@ -49,7 +53,9 @@ import type {
   SegmentPatch,
   Sequence,
   SequenceCast,
+  SequenceSong,
   SequenceSummary,
+  SongWindow,
   Storyboard,
   VideoModel,
   WorkSummary
@@ -57,6 +63,7 @@ import type {
 import * as db from '../../db'
 import * as store from '../../sequence-store'
 import { composeTakePrompt, withoutReferenceTokens } from '../../sequences'
+import { cachedSongAnalysis } from '../../song-analysis'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
 import {
@@ -210,10 +217,12 @@ export function assertNotRunning(sequence: Sequence): void {
 /**
  * The params a take of the clip would be sent with now (frames from neighbours left out until it is made): a clip
  * that continues in reference mode with the references it carries (its own, or the clip's it continues from), one
- * that otherwise takes a neighbour's frame image-to-video without references (the shared continuation.ts rules).
+ * that otherwise takes a neighbour's frame image-to-video without references (the shared continuation.ts rules). A
+ * clip of a sequence cut to a song that hears it sends its window of the song as its only audio (song-send.ts), as
+ * the sequence service's takeParams does.
  */
 export function asSent(sequence: Sequence, index: number): GenerationParams {
-  return sendParams(sequence.segments, index)
+  return withSong(sendParams(sequence.segments, index), sequence.song)
 }
 
 /** How the clip continues from the previous clip (continuation.ts), or undefined when it doesn't. */
@@ -230,8 +239,12 @@ export function sendProblem(
   generated: GenerationParams,
   continuing: boolean,
   ending: boolean,
-  plan: ContinuationPlan | undefined
+  plan: ContinuationPlan | undefined,
+  song?: SequenceSong
 ): string | undefined {
+  // A song clip that can't hear its window of the song (its model, its place) says so before its references do.
+  const heard = generated.prompt.trim() ? songClipProblem(generated, song) : undefined
+  if (heard) return heard
   if (!plan) return blockingProblem(generated, continuing, ending)
   if (!generated.prompt.trim()) return 'The prompt is empty.'
   if (plan.mode === 'references') return continuationProblem(generated, plan)
@@ -316,7 +329,7 @@ export function clipInfo(
   const ending = endsOnNext(sequence, index)
   const plan = continuationOf(sequence, index)
   const generated = asSent(sequence, index)
-  const problem = sendProblem(generated, continuing, ending, plan)
+  const problem = sendProblem(generated, continuing, ending, plan, sequence.song)
   const keyframed = kindOfModelId(generated.model) === 'image-to-video'
   const take = selectedTake(segment)
   const trimmed = segment.trimStart || segment.trimEnd
@@ -355,6 +368,8 @@ export function clipInfo(
         ? imageRef(generated.endImage, assets, stills)
         : null,
     supports_end_image: supportsEndImage(generated.model),
+    // A clip of a sequence cut to a song: its place in the song, and where its selected take sings against it.
+    ...clipSongInfo(sequence, index, generated, assets),
     issues: issueList(sendIssues(generated, plan)),
     ready: !problem,
     ...(problem ? { blocking_problem: problem } : {}),
@@ -376,6 +391,95 @@ export function clipInfo(
     take_count: segment.takes.length,
     ...(hasPendingTake(segment) ? { rendering: true } : {}),
     ...(trimmed ? { trim_start: segment.trimStart, trim_end: segment.trimEnd } : {})
+  }
+}
+
+const ms = (t: number): number => Math.round(t * 1000) / 1000
+
+/**
+ * A song clip's place as the tools show it (`song`): where it is in the song, what it hears, who sings – the character
+ * its singer names among the pictures it sends, else the first character among them (default: true), null for nobody –
+ * and the words sung there; and `take_sync`, where its selected take's singing was measured against the place the take
+ * was made for (offset: where the cut starts it; matched false: no singing found, offset 0), with short_by when the
+ * take is too short for its place from there. {} for a clip without a place.
+ */
+function clipSongInfo(
+  sequence: Sequence,
+  index: number,
+  generated: GenerationParams,
+  assets: AssetIndex
+): Record<string, unknown> {
+  const song = sequence.song
+  const segment = sequence.segments[index]
+  const place = segment.params.song
+  if (!song || !place) return {}
+  const characters = new Map<string, Asset>()
+  for (const path of generated.referenceImages ?? []) {
+    const asset = assets.photo(path)?.asset
+    if (asset?.kind === 'character' && !characters.has(asset.id)) characters.set(asset.id, asset)
+  }
+  const first = [...characters.values()][0]
+  const chosen = typeof place.singer === 'string' ? characters.get(place.singer) : undefined
+  const singer = place.singer === null ? undefined : (chosen ?? first)
+  const missing = typeof place.singer === 'string' && !chosen
+  const long = longPlaceNote(place.start, place.end)
+  const take = selectedTake(segment)
+  const sync = take ? segment.songSyncs?.[take.id] : undefined
+  const length = take && isUsableTake(take) ? (take.videoDuration ?? durationSeconds(take.params.duration)) : undefined
+  const short = length ? shortTakeNote(songCut(length, segment.trimStart, place).shortBy) : undefined
+  return {
+    song: {
+      start: ms(place.start),
+      end: ms(place.end),
+      length: seconds(windowLength(place)),
+      part: place.part,
+      ...(place.part === 'vocals'
+        ? {
+            singer: singer
+              ? { asset_id: singer.id, name: singer.name, ...(place.singer === undefined ? { default: true } : {}) }
+              : null
+          }
+        : {}),
+      ...(missing
+        ? {
+            singer_note: `The chosen singer (${assets.get(place.singer as string)?.name ?? place.singer}) is not among the clip's reference images, so ${singer ? singer.name : 'nobody'} sings in the References legend.`
+          }
+        : {}),
+      words: lyricsInWindow(song.lyrics, place.start, place.end),
+      ...(long ? { note: long } : {})
+    },
+    ...(take && length
+      ? {
+          take_sync: {
+            generation_id: take.id,
+            ...(sync
+              ? { offset: sync.offset, score: sync.score, matched: sync.matched, measured: sync.measured }
+              : { measured: null }),
+            ...(short ? { short_by: seconds(songCut(length, segment.trimStart, place).shortBy), note: short } : {})
+          }
+        }
+      : {})
+  }
+}
+
+/**
+ * The sequence's song as the tools show it: its file's name, length, whether its vocals are separated, and the lyrics
+ * (lines numbered from 1, as suggest_song_sections and edit_song_lyrics number them).
+ */
+function songInfo(song: SequenceSong): Record<string, unknown> {
+  return {
+    name: song.name,
+    duration: ms(song.duration),
+    has_vocals: !!song.vocalsPath,
+    lyrics: song.lyrics
+      ? song.lyrics.lines.map((l, i) => ({
+          line: i + 1,
+          start: ms(l.start),
+          end: ms(l.end),
+          text: l.text,
+          ...(l.edited ? { edited: true } : {})
+        }))
+      : null
   }
 }
 
@@ -468,6 +572,7 @@ export function sequenceInfo(sequence: Sequence, assets: AssetIndex, stills: Sti
     export_height: sequence.exportHeight ?? null,
     defaults: defaultsInfo(sequence),
     cast: castInfo(sequence, assets),
+    ...(sequence.song ? { song: songInfo(sequence.song) } : {}),
     generate_all_running: sequence.running,
     ...(sequence.runError ? { last_run_error: readableRunError(sequence.runError) } : {}),
     still_count: stills.stills.filter((s) => s.sequenceId === sequence.id).length,
@@ -873,8 +978,8 @@ async function clipParams(
   const clips: ChainClip[] = [...place.sequence.segments]
   clips.splice(place.index, place.insert ? 0 : 1, clip)
   const plan = continuationPlan(clips, place.index)
-  const sent = sendParams(clips, place.index)
-  const problem = sendProblem(sent, continuing, ending, plan)
+  const sent = withSong(sendParams(clips, place.index), place.sequence.song)
+  const problem = sendProblem(sent, continuing, ending, plan, place.sequence.song)
   if (problem) throw new Error(`Clip ${clipNumber}: ${problem}${plan?.note && plan.applies ? ` (${plan.note})` : ''}`)
   // Who wears which outfit: the agent's choices, checked against the pictures the clip has or carries, and the
   // stored ones kept to those (a choice for an outfit that left is forgotten, as in Studio's form).
@@ -1233,6 +1338,48 @@ async function addClipFrom(
   }
 }
 
+/**
+ * A clip's place in the song with an agent's update_segment `song` applied: what it hears and who sings (a character
+ * among the pictures it sends – `params`, the clip's new params when the same call changes them – or null for nobody);
+ * the place itself stays. Refused, naming the problem, for a clip without a place or a singer who can't be.
+ */
+function songChoice(
+  sequence: Sequence,
+  index: number,
+  input: { part?: SongWindow['part']; singer?: string | null },
+  params: GenerationParams | undefined,
+  assets: AssetIndex
+): SongWindow {
+  const place = sequence.segments[index].params.song
+  if (!sequence.song || !place) {
+    throw new Error(
+      `Clip ${index + 1} has no place in a song: only the clips of a sequence cut to a song (get_sequence: song) hear one.`
+    )
+  }
+  if (input.part === undefined && input.singer === undefined) throw new Error('Give song.part, song.singer or both.')
+  let singer = place.singer
+  if (input.singer === null) singer = null
+  else if (input.singer !== undefined) {
+    const asset = assets.get(input.singer.trim())
+    if (!asset) throw new Error(`There is no asset with id ${input.singer} (song.singer).`)
+    if (asset.kind !== 'character') throw new Error(`${q(asset.name)} is not a character – who sings is a character.`)
+    const sent = withSong(sendParams(sequence.segments, index), sequence.song)
+    const pictures = [...(params?.referenceImages ?? []), ...(sent.referenceImages ?? [])]
+    if (!pictures.some((path) => assets.photo(path)?.asset.id === asset.id)) {
+      throw new Error(
+        `${q(asset.name)} is not among clip ${index + 1}'s reference images – add them to its references first, or choose another singer.`
+      )
+    }
+    singer = asset.id
+  }
+  return {
+    start: place.start,
+    end: place.end,
+    part: input.part ?? place.part,
+    ...(singer !== undefined ? { singer } : {})
+  }
+}
+
 export function registerSequenceTools(server: McpServer, ctx: ToolContext): void {
   defineTool(
     server,
@@ -1272,7 +1419,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Get sequence',
       description:
-        "One sequence with its clips in order (for a storyboard use get_storyboard). Each clip has its notes (\"What happens\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next – a continuing clip also has continue_mode (\"references\" or \"exact\"), sent_as (how it goes now; continue_mode_note says why it differs or doesn't apply) and in reference mode carried_references (from_clip, inherited, the references and audio_references it sends – its own, or those of the clip it continues from – and start_frame_token, the @Image token of the previous clip's last frame, sent after them; not_sent when a reference gives way for it), while references / composed_prompt show what is sent, the instruction to start on the frame included –, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error, source; own_clip: true when it is the user's own film or a version from the Editor rather than a generation of the clip's prompt). The sequence's export_height is its Export format (null = the first clip's own size; update_sequence changes it), defaults what new clips start from, and cast its cast – the assets chosen for the whole sequence as token maps (references, audio_references), who wears each outfit (outfit_wearers) and following_clips; each clip's follows_cast says whether its references are exactly the cast's (it changes when the cast changes; with no cast chosen, a clip in reference mode without references follows the empty cast), and carries_cast_from_clip names the clip a continuation carries the cast from. With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
+        "One sequence with its clips in order (for a storyboard use get_storyboard). Each clip has its notes (\"What happens\"), prompt and settings, its own references as token maps (references for @ImageN, audio_references for @AudioN), its start_image and end_image ({kind: \"previous\"} = the previous clip's last frame, {kind: \"next\"} = the next clip's first frame, {kind: \"image\", still_id | asset_image_id, path} = a chosen picture, null = none), continue_from_previous / end_from_next – a continuing clip also has continue_mode (\"references\" or \"exact\"), sent_as (how it goes now; continue_mode_note says why it differs or doesn't apply) and in reference mode carried_references (from_clip, inherited, the references and audio_references it sends – its own, or those of the clip it continues from – and start_frame_token, the @Image token of the previous clip's last frame, sent after them; not_sent when a reference gives way for it), while references / composed_prompt show what is sent, the instruction to start on the frame included –, supports_end_image (whether its video model takes an end image), validation issues (ready: false means it can't be generated as it is), frame_problems (what still stops its automatic frames), composed_prompt (its prompt as it would be sent, with the descriptions of its referenced assets appended as a References legend) with description_entries, and its selected take (status, error, source; own_clip: true when it is the user's own film or a version from the Editor rather than a generation of the clip's prompt). The sequence's export_height is its Export format (null = the first clip's own size; update_sequence changes it), defaults what new clips start from, and cast its cast – the assets chosen for the whole sequence as token maps (references, audio_references), who wears each outfit (outfit_wearers) and following_clips; each clip's follows_cast says whether its references are exactly the cast's (it changes when the cast changes; with no cast chosen, a clip in reference mode without references follows the empty cast), and carries_cast_from_clip names the clip a continuation carries the cast from. A sequence cut to a song has song (name, duration, bpm when known, has_vocals, lyrics: its lines numbered from 1 with start, end and text) and each clip song – its place in the song (start, end, length in seconds), part (\"vocals\": it hears the separated vocals, for lip sync; \"mix\": the whole song, for mood and rhythm; \"none\": nothing of it), singer (who sings: a character among its references, null for nobody) and words (what is sung there) – and take_sync, where its selected take's singing was measured against its place (offset: where the cut starts the take, score 0–1, matched false: no singing found; short_by when the take is too short for its place). Its window of the song is its only audio reference (@Audio1), and the References legend says who sings it with the words. With include_thumbnails (default true) the poster frame of every finished selected take comes as an image, so you can check continuity across the cut; preview_segment_frames shows a clip's start and end images.",
       input: {
         sequence_id: z.string(),
         include_thumbnails: z.boolean().default(true)
@@ -1293,8 +1440,12 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           if (image) images.push({ label: `Clip ${i + 1} – selected take ${take.id} (poster frame)`, image })
         }
       }
+      const data = sequenceInfo(sequence, assets, stills)
+      // The song's tempo, when its analysis is there already (nothing is analysed for this).
+      const bpm = sequence.song ? (await cachedSongAnalysis(sequence.song))?.bpm : undefined
+      if (bpm && data.song) data.song = { ...(data.song as Record<string, unknown>), bpm: Math.round(bpm * 10) / 10 }
       return {
-        data: sequenceInfo(sequence, assets, stills),
+        data,
         images,
         summary: `looked at the sequence ${q(sequence.name)}`
       }
@@ -1446,7 +1597,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update clip',
       description:
-        "Changes a clip: only the fields you pass change. notes is the clip's \"What happens\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt, outfit_wearers who wears each outfit (the legend says it); reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens; swap_reference({target: {segment_id}}) swaps one of them (or a whole asset) for another, keeping every number. Changing a clip's references by hand stops it following the sequence's cast; use_cast: true gives it the cast again. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
+        "Changes a clip: only the fields you pass change. notes is the clip's \"What happens\" text. references replaces the clip's references (photos in @Image order, audio in @Audio order). start_image / end_image put a picture into the clip's start or end slot (a still, a library photo, a frame of a finished clip), make it automatic (\"previous\" / \"next\"), or clear it (null); any start or end image makes the clip image-to-video with its family's model (one that takes an end image when it has one) and drops its references – a prompt you don't rewrite loses its @ tokens, one you write must have none – except \"previous\" in reference mode: continue_mode \"references\" (the default) sends a continuing clip with the references it carries plus the previous clip's last frame, keeping its own references and tokens; \"exact\" makes it image-to-video from the frame (its tokens must go). Clearing every picture makes it a new shot that needs references (and switches it to the reference-to-video model unless you pass a model). selected_take_id selects which of the clip's finished takes is used in the cut (its takes are listed by get_generation's take_of and review_sequence; the old one stays and can be selected again) – a take selected again gets back the trims it last had. trim_start / trim_end trim the selected take (seconds cut off its start and its end; Studio keeps at least 0.2 s and says when it adjusted them). include_descriptions / excluded_description_asset_ids choose which descriptions of its referenced assets are appended to its prompt, outfit_wearers who wears each outfit (the legend says it); reorder_references({target: {segment_id}}) changes the order of its references and renumbers its tokens; swap_reference({target: {segment_id}}) swaps one of them (or a whole asset) for another, keeping every number. Changing a clip's references by hand stops it following the sequence's cast; use_cast: true gives it the cast again. In a sequence cut to a song, song: {part, singer} sets what the clip hears of its place in the song and who sings (its place itself moves only with set_song_sections), and a trim_start is a nudge of where its take starts: the trim_end follows, so the clip keeps exactly its place's length. The clip is validated like a generation; problems are returned as an error and nothing is saved. Existing takes are kept.",
       input: {
         segment_id: z.string(),
         ...clipFields,
@@ -1457,6 +1608,25 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           .describe("One of the clip's finished takes (a generation_id) to use in the cut."),
         trim_start: z.number().min(0).optional().describe('Seconds cut off the start of the selected take in the cut.'),
         trim_end: z.number().min(0).optional().describe('Seconds cut off the end of the selected take in the cut.'),
+        song: z
+          .object({
+            part: z
+              .enum(['vocals', 'mix', 'none'])
+              .optional()
+              .describe(
+                'What the clip hears of its place in the song: "vocals" (the separated vocals, sent as @Audio1 for lip sync), "mix" (the whole song, for mood and rhythm) or "none" (nothing of the song; its own audio references are sent as in any clip).'
+              ),
+            singer: z
+              .string()
+              .nullable()
+              .optional()
+              .describe(
+                "Who sings in the shot: a character's asset_id among the clip's reference images, or null for nobody on screen. Left out: unchanged (by default the first character among its references)."
+              )
+          })
+          .strict()
+          .optional()
+          .describe('A clip of a sequence cut to a song (get_sequence: song): what it hears and who sings.'),
         use_cast: z
           .literal(true)
           .optional()
@@ -1467,7 +1637,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       annotations: { ...WRITE, idempotentHint: true },
       summary: () => 'changed a clip'
     },
-    async ({ segment_id, notes, selected_take_id, trim_start, trim_end, use_cast, ...raw }) => {
+    async ({ segment_id, notes, selected_take_id, trim_start, trim_end, song, use_cast, ...raw }) => {
       let { sequence, index, segment } = await loadClip(segment_id)
       assertNotRunning(sequence)
       if (use_cast) {
@@ -1507,13 +1677,14 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       const result = touchesClip
         ? await clipParams(segment.params, input, slots, assets, clipNumber, { sequence, index, insert: false })
         : undefined
+      const songPlace = song ? songChoice(sequence, index, song, result?.params, assets) : undefined
       // The new params are built on the clip as it was read; whatever the user saved meanwhile would be written
       // over without a word. Compared right before the write (nothing can come in between). Notes and the
       // selected take are written as given, so only a change to the clip's settings matters.
       const row = store.getSegmentRow(segment.id)
       if (!row) throw new Error('The clip no longer exists.')
       if (
-        result &&
+        (result || songPlace) &&
         (store.serializeParams(store.parseParams(row.params)) !== store.serializeParams(segment.params) ||
           !!row.continue_from_previous !== segment.continueFromPrevious ||
           !!row.end_from_next !== segment.endFromNext ||
@@ -1532,12 +1703,14 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       const patch: SegmentPatch = {
         ...(result
           ? {
-              params: result.params,
+              params: songPlace ? { ...result.params, song: songPlace } : result.params,
               continueFromPrevious: slots.continuing,
               endFromNext: slots.ending,
               ...(input.continue_mode !== undefined ? { continueMode: input.continue_mode } : {})
             }
-          : {}),
+          : songPlace
+            ? { params: { ...segment.params, song: songPlace } }
+            : {}),
         ...(notes !== undefined ? { notes } : {}),
         ...(take ? { selectedGenerationId: take.id } : {}),
         ...(trim_start !== undefined ? { trimStart: trim_start } : {}),
@@ -1552,20 +1725,28 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       const saved = at >= 0 ? updated.segments[at] : undefined
       const trimNotes: string[] = []
       const kept = 'Studio keeps the trim within the take (at least 0.2 s left).'
+      // A song clip keeps exactly its place's length: its end trim follows from where its take starts.
+      const placed = !!updated.song && !!saved?.params.song
       if (saved && trim_start !== undefined && Math.abs(saved.trimStart - trim_start) > 0.001) {
         trimNotes.push(`trim_start became ${seconds(saved.trimStart)} s – ${kept}`)
       }
       if (saved && trim_end !== undefined && Math.abs(saved.trimEnd - trim_end) > 0.001) {
-        trimNotes.push(`trim_end became ${seconds(saved.trimEnd)} s – ${kept}`)
+        trimNotes.push(
+          placed
+            ? `trim_end is ${seconds(saved.trimEnd)} s – a song clip keeps exactly its place's length, so its end trim follows trim_start.`
+            : `trim_end became ${seconds(saved.trimEnd)} s – ${kept}`
+        )
       }
       const what =
-        use_cast && !result && !take && !trims && notes === undefined
-          ? `gave clip ${clipNumber} the cast`
-          : !result && take && notes === undefined && !trims
-            ? `selected a take for clip ${clipNumber}`
-            : !result && trims && notes === undefined && !take
-              ? `trimmed clip ${clipNumber}`
-              : `changed clip ${clipNumber}`
+        songPlace && !result && !take && !trims && notes === undefined
+          ? `changed what clip ${clipNumber} hears of the song`
+          : use_cast && !result && !take && !trims && notes === undefined
+            ? `gave clip ${clipNumber} the cast`
+            : !result && take && notes === undefined && !trims
+              ? `selected a take for clip ${clipNumber}`
+              : !result && trims && notes === undefined && !take
+                ? `trimmed clip ${clipNumber}`
+                : `changed clip ${clipNumber}`
       return {
         data: {
           ...(at >= 0 ? clipInfo(updated, at, assets, stillsNow) : { segment_id }),
@@ -1622,7 +1803,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Update sequence',
       description:
-        "Changes a sequence: its name (its folder follows), its defaults – the settings its first clip (and an own clip added to it) starts from: model (a reference-to-video or text-to-video model; a clip gets image-to-video from its own start image), duration, resolution, aspect_ratio, audio, checked against the model as Studio does, with what you leave out fitted to the model – its Export format (export_height: 480, 720 or 1080 pixels high, or null for the first clip's own size), which decides the film's size when own clips and AI clips are mixed – and its cast: the characters, outfits (and who wears them), environments, products and poses chosen once for the whole sequence. New clips start with the cast as their references (a continuation carries the references of the clip it continues from instead), and every clip that follows the cast (get_sequence: follows_cast – its references are exactly the cast's) changes with it in the same step, its prompt's tokens kept on their pictures: cast replaces the whole cast (keep the assets that stay in their order and add new ones at the end, so the numbers in the prompts stay; a removed asset's tokens leave the prompts, a reorder renumbers them), swap_cast_asset swaps one asset for another without changing any number (the name before its tokens follows; one character for another hands over the outfit, as swap_reference does). Clips whose references were changed by hand don't follow; update_segment({use_cast: true}) brings one back. Only the fields you pass change. Free.",
+        "Changes a sequence: its name (its folder follows), its defaults – the settings its first clip (and an own clip added to it) starts from: model (a reference-to-video or text-to-video model; a clip gets image-to-video from its own start image), duration, resolution, aspect_ratio, audio, checked against the model as Studio does, with what you leave out fitted to the model – its Export format (export_height: 480, 720 or 1080 pixels high, or null for the first clip's own size), which decides the film's size when own clips and AI clips are mixed – and its cast: the characters, outfits (and who wears them), environments, products and poses chosen once for the whole sequence. New clips start with the cast as their references (a continuation carries the references of the clip it continues from instead), and every clip that follows the cast (get_sequence: follows_cast – its references are exactly the cast's) changes with it in the same step, its prompt's tokens kept on their pictures: cast replaces the whole cast (keep the assets that stay in their order and add new ones at the end, so the numbers in the prompts stay; a removed asset's tokens leave the prompts, a reorder renumbers them), swap_cast_asset swaps one asset for another without changing any number (the name before its tokens follows; one character for another hands over the outfit, as swap_reference does). Clips whose references were changed by hand don't follow; update_segment({use_cast: true}) brings one back. song: null takes the song off a sequence cut to a song. Only the fields you pass change. Free.",
       input: {
         sequence_id: z.string(),
         name: z.string().min(1).max(120).optional(),
@@ -1660,22 +1841,30 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           })
           .strict()
           .optional()
-          .describe('Swaps one asset of the cast for another, keeping every @Image / @Audio number in the clips that follow it.')
+          .describe('Swaps one asset of the cast for another, keeping every @Image / @Audio number in the clips that follow it.'),
+        song: z
+          .null()
+          .optional()
+          .describe(
+            "null takes the song off a sequence cut to a song (create_sequence_from_song): its clips keep their prompts, takes and settings but no longer have places in it, and the song's files stay in the sequence's folder."
+          )
       },
       annotations: { ...WRITE, idempotentHint: true },
       summary: () => 'changed a sequence'
     },
-    async ({ sequence_id, name, defaults, export_height, cast, swap_cast_asset }) => {
+    async ({ sequence_id, name, defaults, export_height, cast, swap_cast_asset, song }) => {
       const sequence = await loadSequence(sequence_id)
       if (
         name === undefined &&
         defaults === undefined &&
         export_height === undefined &&
         cast === undefined &&
-        swap_cast_asset === undefined
+        swap_cast_asset === undefined &&
+        song === undefined
       ) {
-        throw new Error('Give name, defaults, export_height, cast or swap_cast_asset – otherwise there is nothing to change.')
+        throw new Error('Give name, defaults, export_height, cast, swap_cast_asset or song – otherwise there is nothing to change.')
       }
+      if (song === null && !sequence.song) throw new Error('The sequence has no song to take off.')
       if (cast && swap_cast_asset) throw new Error('Give either cast (the whole cast) or swap_cast_asset – not both.')
       const castChange = !!cast || !!swap_cast_asset
       if (castChange) assertNotRunning(sequence)
@@ -1709,6 +1898,8 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           // Refused by main below, with its reason.
         }
       }
+      // The song off first: a refusal (a run going on) leaves everything else as it was too.
+      if (song === null) await callService<Sequence>('songs:set', sequence.id, null)
       const updated = await callService<Sequence>('sequences:update', sequence.id, {
         ...(name !== undefined ? { name: name.trim() } : {}),
         ...(nextDefaults ? { defaults: nextDefaults } : {}),
@@ -1727,7 +1918,8 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         name !== undefined ? 'the name' : undefined,
         defaults ? 'the defaults' : undefined,
         export_height !== undefined ? 'the export format' : undefined,
-        castChange ? 'the cast' : undefined
+        castChange ? 'the cast' : undefined,
+        song === null ? 'the song (taken off)' : undefined
       ].filter((w): w is string => !!w)
       const said = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what[what.length - 1]}` : what[0]
       return {

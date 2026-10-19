@@ -4,6 +4,7 @@ import type { Sequence } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { CloseIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon } from './icons'
 import { MIN_CLIP_SECONDS, formatClock, readyTake } from './sequenceUtils'
+import SongPreview from './song/SongPreview'
 
 interface Clip {
   segmentId: string
@@ -31,12 +32,17 @@ function ignoreAbort(e: unknown): boolean {
 // Keeps clicks on controls from moving focus, so Space keeps meaning play/pause.
 const keepFocus = (e: ReactMouseEvent) => e.preventDefault()
 
+/** The sequence played through: its clips back to back, or – cut to a song – the song with the clips over it. */
+export default function PreviewPlayer(props: Props) {
+  return props.sequence.song ? <SongPreview {...props} /> : <ClipPreview {...props} />
+}
+
 /**
  * Plays the selected takes back-to-back with their trims, using a single <video>: each clip is loaded,
  * seeked to its start trim, and swapped for the next one when playback reaches its end trim.
  * Segments without a finished selected take are skipped.
  */
-export default function PreviewPlayer({ sequence, startSegmentId, onClose }: Props) {
+function ClipPreview({ sequence, startSegmentId, onClose }: Props) {
   const [measured, setMeasured] = useState<Record<string, number>>({})
   const clips = useMemo<Clip[]>(
     () =>

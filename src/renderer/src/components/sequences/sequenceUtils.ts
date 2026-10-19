@@ -9,6 +9,7 @@ import {
 } from '@shared/models'
 import { remapPromptReferences } from '@shared/prompt-remap'
 import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
+import { withSong } from '@shared/song-send'
 import {
   NEEDS_CONSENT,
   type ConsentRequest,
@@ -125,11 +126,16 @@ export function continues(segment: Segment, index: number): boolean {
  * clip's first frame" is turned on (and patchSegmentLocally does until its answer arrives), but a model the user
  * picks afterwards is theirs, and one that can't take an end image is refused (clipBlocked says so) rather than
  * priced as another model. Without `sequence` only the clip's own references are known (an inheriting clip is then
- * shown exactly).
+ * shown exactly). A clip of a sequence cut to a song sends its window of the song as its reference audio, with the
+ * words sung there and sound on for a singing shot (song-send.ts withSong, as main's takeParams) – known only with
+ * `sequence`.
  */
 export function effectiveParams(segment: Segment, index: number, sequence?: Sequence): GenerationParams {
-  if (!continues(segment, index) && !segment.endFromNext) return segment.params
-  return sendParams(chainWith(segment, index, sequence), index)
+  const params =
+    !continues(segment, index) && !segment.endFromNext
+      ? segment.params
+      : sendParams(chainWith(segment, index, sequence), index)
+  return params.song && sequence ? withSong(params, sequence.song) : params
 }
 
 /** How the clip continues from the previous clip (continuation.ts), with `segment` in its place; see effectiveParams. */

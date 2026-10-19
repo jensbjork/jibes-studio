@@ -1,12 +1,12 @@
 // Turns a sequence's (or a storyboard's) selected, trimmed takes into ffmpeg concat clips and picks the output file
-// name.
+// name. A sequence cut to a song is cut to its places in the song instead (buildSongClips).
 
 import { join } from 'node:path'
 import { endsOnFirstFrameOf, startsOnLastFrameOf, type SeamTake } from '@shared/seams'
 import type { Generation } from '@shared/types'
 import { frameSpan, probe, type ConcatClip, type ProbeResult } from './ffmpeg'
 import { dayStamp, timeStamp } from './paths'
-import { firstFreeName, folderBaseName, pathTaken, type SegmentRow } from './sequence-store'
+import { firstFreeName, folderBaseName, parseParams, pathTaken, type SegmentRow } from './sequence-store'
 
 const FALLBACK_FPS = 24
 /** Anything shorter than this after trimming is almost certainly a mistake, not an intended flash cut. */
@@ -154,6 +154,41 @@ export async function exportCuts(clips: readonly ConcatClip[]): Promise<number[]
     at += Math.max(frames / outFps, span.length)
   })
   return cuts
+}
+
+/**
+ * A song sequence's concat clips (concatClips): one per clip, each exactly its place in the song (`at`, frame-accurate
+ * on the film's grid) from its start trim on – song-sync.ts has set the trims where its take's singing starts. A take
+ * too short for its place holds its last frame. `takes[i]` must be the usable selected take of `rows[i]`, and every row
+ * must have a place (songPlacesProblem says when not).
+ */
+export function buildSongClips(rows: SegmentRow[], takes: (Generation & { filePath: string })[]): ConcatClip[] {
+  return rows.map((row, i) => {
+    const place = parseParams(row.params).song
+    if (!place) throw new Error(`Clip ${i + 1} has no place in the song.`)
+    const start = Math.max(0, row.trim_start)
+    return {
+      path: takes[i].filePath,
+      start,
+      end: start + (place.end - place.start),
+      at: { start: place.start, end: place.end }
+    }
+  })
+}
+
+/**
+ * Where a song sequence's clips meet in its film (the start of every clip after the first): on the film's frame grid,
+ * which the first clip's frame rate sets (as concatClips does). Undefined when it can't be read.
+ */
+export async function songExportCuts(clips: readonly ConcatClip[]): Promise<number[] | undefined> {
+  if (!clips.length) return []
+  let fps: number
+  try {
+    fps = Math.round((await probe(clips[0].path)).fps) || FALLBACK_FPS
+  } catch {
+    return undefined
+  }
+  return clips.slice(1).map((c) => Math.round((Math.round((c.at?.start ?? 0) * fps) / fps) * 1000) / 1000)
 }
 
 /** Two picture paths name the same file (letter case and Unicode form ignored, like the disk). */

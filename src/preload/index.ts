@@ -13,6 +13,10 @@ import type {
   WorkSummary
 } from '@shared/types'
 
+// Many views listen to the same few events (a sequence's clips, pickers and hover cards each follow library changes),
+// so Node's leak warning at 11 listeners per channel would fire on an ordinary screen. Every listener unsubscribes.
+ipcRenderer.setMaxListeners(50)
+
 /** Subscribes to a main → renderer event and returns an unsubscribe function. */
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: unknown, payload: T): void => cb(payload)
@@ -90,6 +94,19 @@ const api: StudioApi = {
   stopGenerateAll: (sequenceId) => ipcRenderer.invoke('sequences:stopGenerateAll', sequenceId),
   exportSequence: (sequenceId) => ipcRenderer.invoke('sequences:export', sequenceId),
   onSequenceChange: (cb) => on<string>('sequence:change', cb),
+  // Songs
+  createSequenceFromSong: (path, opts) => ipcRenderer.invoke('songs:createSequence', path, opts),
+  setSequenceSong: (sequenceId, path, opts) => ipcRenderer.invoke('songs:set', sequenceId, path, opts),
+  songOverview: (sequenceId) => ipcRenderer.invoke('songs:overview', sequenceId),
+  suggestSongSections: (sequenceId, targetSeconds) =>
+    ipcRenderer.invoke('songs:suggestSections', sequenceId, targetSeconds),
+  setSongSections: (sequenceId, boundaries) => ipcRenderer.invoke('songs:setSections', sequenceId, boundaries),
+  quoteSongLyrics: (sequenceId, model) => ipcRenderer.invoke('songs:quoteLyrics', sequenceId, model),
+  transcribeSong: (sequenceId, opts) => ipcRenderer.invoke('songs:transcribe', sequenceId, opts),
+  editSongLyricLine: (sequenceId, lineIndex, text) =>
+    ipcRenderer.invoke('songs:editLyricLine', sequenceId, lineIndex, text),
+  separateSongVocals: (sequenceId) => ipcRenderer.invoke('songs:separate', sequenceId),
+  syncSongTake: (generationId) => ipcRenderer.invoke('songs:syncTake', generationId),
   onExportProgress: (cb) => on<ExportProgress>('export:progress', cb),
 
   // Keyframes and "Redo between neighbours" (sequence clips)

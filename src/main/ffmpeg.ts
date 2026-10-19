@@ -584,6 +584,13 @@ export interface ConcatClip {
   path: string
   start: number
   end: number
+  /**
+   * The clip's place in the film (seconds; a song sequence's clip, its place in the song): it gets exactly the film's
+   * frames from round(start · fps) to round(end · fps), counted from the film's start so nothing adds up over many
+   * clips, its picture from `start` in the source on, held on its last frame when the source ends sooner. `end` is then
+   * not read.
+   */
+  at?: { start: number; end: number }
 }
 
 function even(n: number): number {
@@ -653,12 +660,14 @@ function progressReader(
 /**
  * Renders the clips back to back into one H.264/AAC mp4, normalised to the first clip's size and frame
  * rate. Clips without audio get silence so every cut has a soundtrack. `height` (the sequence's Exportformat)
- * makes the film that tall instead, in the first clip's shape (even pixels).
+ * makes the film that tall instead, in the first clip's shape (even pixels). `soundtrack` (a song sequence's song)
+ * is then the film's only sound, from its start, cut or padded to exactly the film's length; the clips' own sound is
+ * left out.
  */
 export async function concatClips(
   clips: ConcatClip[],
   outPath: string,
-  opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal; height?: number } = {}
+  opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal; height?: number; soundtrack?: string } = {}
 ): Promise<void> {
   if (!clips.length) throw new Error('There are no clips to export.')
   const { ffmpeg } = await binaries()
@@ -676,6 +685,7 @@ export async function concatClips(
   const h = even(height ?? first.height)
   const w = height ? even(Math.round((h * first.width) / first.height)) : even(first.width)
   const fps = Math.round(first.fps) || 24
+  const soundtrack = opts.soundtrack ? await requireAudio(opts.soundtrack) : undefined
 
   const graph: string[] = []
   const pairs: string[] = []
@@ -683,6 +693,27 @@ export async function concatClips(
   clips.forEach((clip, i) => {
     const p = probes[i]
     const start = clamp(clip.start, 0, p.duration)
+    if (clip.at) {
+      // Exactly its frames of the film from `start` on, the last one held if the take ends sooner. The fps after the
+      // frame trim gives the last frame its length again (without it the film comes out a frame short in time).
+      const frames = Math.round(clip.at.end * fps) - Math.round(clip.at.start * fps)
+      if (frames < 1) throw new Error(`Clip ${i + 1} is too short for its place.`)
+      total += frames / fps
+      graph.push(
+        `[${i}:V:0]trim=start=${secs(start)},setpts=PTS-STARTPTS,fps=${fps},tpad=stop_mode=clone:stop=${frames},` +
+          `trim=end_frame=${frames},setpts=PTS-STARTPTS,fps=${fps},` +
+          `scale=${w}:${h}:force_original_aspect_ratio=decrease:force_divisible_by=2,` +
+          `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v${i}]`
+      )
+      pairs.push(soundtrack ? `[v${i}]` : `[v${i}][a${i}]`)
+      if (!soundtrack) {
+        graph.push(
+          `anullsrc=r=48000:cl=stereo,atrim=duration=${secs(frames / fps)},` +
+            `aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a${i}]`
+        )
+      }
+      return
+    }
     const end = clamp(clip.end, start, p.duration)
     if (end - start < MIN_CLIP_SECONDS) throw new Error(`Clip ${i + 1} is too short after trimming.`)
     // The sound covers exactly the frames the picture keeps (see frameSpan).
@@ -706,12 +737,21 @@ export async function concatClips(
         : `anullsrc=r=48000:cl=stereo,atrim=duration=${secs(span.length)},` +
             `aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a${i}]`
     )
-    pairs.push(`[v${i}][a${i}]`)
+    pairs.push(soundtrack ? `[v${i}]` : `[v${i}][a${i}]`)
   })
-  graph.push(`${pairs.join('')}concat=n=${clips.length}:v=1:a=1[v][a]`)
+  if (soundtrack) {
+    // The song alone, from its first sample, exactly as long as the picture.
+    graph.push(`${pairs.join('')}concat=n=${clips.length}:v=1:a=0[v]`)
+    graph.push(
+      `[${clips.length}:${soundtrack.index}]atrim=start=0:end=${secs(total)},asetpts=PTS-STARTPTS,aresample=48000,` +
+        `${channelFilter(soundtrack.channels, 2) ?? 'anull'},` +
+        `aformat=sample_fmts=fltp:channel_layouts=stereo,apad=whole_dur=${secs(total)}[a]`
+    )
+  } else graph.push(`${pairs.join('')}concat=n=${clips.length}:v=1:a=1[v][a]`)
 
   const args = ['-nostdin', '-hide_banner', '-v', 'error']
   for (const clip of clips) args.push('-i', resolve(clip.path))
+  if (opts.soundtrack) args.push('-i', resolve(opts.soundtrack))
   const out = resolve(outPath)
   const tmp = `${out.replace(/\.mp4$/i, '')}.part.mp4`
   args.push(
@@ -2554,11 +2594,12 @@ export async function sceneCuts(path: string, threshold = 10, o: { signal?: Abor
 /**
  * A file's sound (first decodable audio stream) decoded to mono 32-bit float samples at `rate` (default 48 kHz),
  * from its first sample: what a decoder gives, without moving it onto a time line. At most `maxSeconds` (default
- * 15 min) is decoded, so a mistake can't fill memory. Rejects with "The file has no sound." without sound.
+ * 15 min) is decoded, so a mistake can't fill memory. `start`: from that many seconds in instead (a song's place,
+ * song-sync.ts). Rejects with "The file has no sound." without sound.
  */
 export async function decodeSamples(
   path: string,
-  o: { rate?: number; maxSeconds?: number; signal?: AbortSignal } = {}
+  o: { rate?: number; maxSeconds?: number; start?: number; signal?: AbortSignal } = {}
 ): Promise<Float32Array> {
   const source = await requireAudio(path)
   const rate = o.rate && o.rate > 0 ? Math.round(o.rate) : MIX_RATE
@@ -2570,6 +2611,7 @@ export async function decodeSamples(
       ffmpeg,
       [
         '-nostdin', '-hide_banner', '-v', 'error',
+        ...(o.start && o.start > 0 ? ['-ss', secs(o.start)] : []),
         '-i', resolve(path),
         '-map', `0:${source.index}`, '-vn', '-sn', '-dn',
         '-af', `aresample=${rate}${await resamplerOption()},${channelFilter(source.channels, 1) ?? 'anull'}`,

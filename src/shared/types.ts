@@ -79,6 +79,36 @@ export interface GenerationParams {
   referenceTask?: 'edit' | 'extend' | 'reference' | 'auto'
   /** Upscale models: `upscale_factor` on the queue, `resolution: "<n>x"` (and upscale_factor) on the quote. */
   upscaleFactor?: 1 | 2 | 4
+  /**
+   * A clip of a sequence cut to a song (Sequence.song): its place in the song and what it hears of it. Studio's own:
+   * never sent as such. At send time the window of the song (its vocals, or the whole mix) becomes the clip's only
+   * reference audio (@Audio1; the cast's voices give way to it) and the References legend says who sings it, with the
+   * words. A take keeps the window it was made for, so moving a boundary later can still place it (TakeSongSync).
+   */
+  song?: SongWindow
+}
+
+/** What a song clip hears of the song: the separated vocals (for lip sync), the whole mix (mood, rhythm) or nothing. */
+export type SongPart = 'vocals' | 'mix' | 'none'
+
+/** A clip's place in its sequence's song (GenerationParams.song). */
+export interface SongWindow {
+  /** Seconds in the song where the clip begins and ends (end > start). */
+  start: number
+  end: number
+  /**
+   * 'vocals': the window of the separated vocals is sent (the mix when the song has no vocals file), for a shot of
+   * someone singing; 'mix': the window of the whole song, for mood and rhythm; 'none': nothing of the song is sent
+   * (the cast's voices are, as in any clip). The song plays over every clip in the film either way.
+   */
+  part: SongPart
+  /**
+   * Who sings in the shot (part 'vocals'): a character asset id among the clip's references. Left out: the first
+   * character among them. null: nobody on screen sings.
+   */
+  singer?: string | null
+  /** Filled in when a take is sent: the words sung in the window, from the song's lyrics. Never edited by hand. */
+  lyrics?: string
 }
 
 /** One reference audio clip of a generation: the part of the file from `start` that lasts `length` seconds. */
@@ -591,6 +621,18 @@ export interface ComposedPrompt {
   truncated: boolean
   /** The legend was left out entirely: not even the names and tokens fit within the model's limit. */
   dropped: boolean
+  /**
+   * A song clip whose window of the song is sent (GenerationParams.song): the legend's line for it ("@Audio1 is the
+   * lead vocal of this moment of the song: Anna (@Image1) sings …"), also when nothing is appended, like `entries`; who
+   * sings it; and `singerMissing` when the clip's chosen singer isn't among its references (the line names the first
+   * character instead, or nobody).
+   */
+  song?: {
+    token: string
+    line: string
+    singer?: { assetId: string; name: string; tokens: string[] }
+    singerMissing?: boolean
+  }
 }
 
 // ── Prompt library ───────────────────────────────────────────────────────────
@@ -657,6 +699,11 @@ export interface Segment {
   trimEnd: number
   /** All takes for this segment, newest first. */
   takes: Generation[]
+  /**
+   * In a sequence with a song: where each take's singing sits against its place in the song, by take id (only takes
+   * that have been measured). The selected take's offset sets the clip's trims (TakeSongSync).
+   */
+  songSyncs?: Record<string, TakeSongSync>
   createdAt: number
 }
 
@@ -670,6 +717,16 @@ export interface Sequence {
    * them, and the clips whose own references are exactly these follow it when it changes. Empty when none is chosen.
    */
   cast: SequenceCast
+  /**
+   * The song the sequence is cut to ("New sequence from a song…"): every clip has its place in it (Segment.params.song),
+   * the clips cover it end to end, and the preview and the export play it over the whole film instead of the clips'
+   * own sound. Absent for an ordinary sequence.
+   */
+  song?: SequenceSong
+  /** The song is being copied in, separated, transcribed or analysed. */
+  songWork?: SongWork
+  /** Why the last song step failed (separation, transcription, analysis); cleared when one starts again. */
+  songError?: string
   segments: Segment[]
   /**
    * "Export format": the exported film's height in pixels (480, 720 or 1080); the width follows the first clip's
@@ -702,6 +759,103 @@ export interface SequenceCast {
  * that follow it (shared/reference-swap.ts swapReferenceAsset).
  */
 export type SequenceCastSwap = { fromAssetId: string; toAssetId: string }
+
+// ── Songs: a sequence cut to a song (shared/song.ts, main/song.ts, main/song-sync.ts) ─────────────────────────────
+
+/**
+ * A sequence's song (Sequence.song). Absolute paths over IPC; stored relative in the sequence's defaults JSON (key
+ * `song`), so moves and "Tidy up" rewrite them like every other stored path.
+ */
+export interface SequenceSong {
+  /** The song file, copied into the sequence's folder (Sekvenser/<name>/Ljud/). */
+  path: string
+  /** The file's name as it was imported ("My song.wav"), for display. */
+  name: string
+  /** Seconds. */
+  duration: number
+  /** The separated vocals (Ljud/<name> (sång).flac), what 'vocals' clips send; absent until separated or unavailable. */
+  vocalsPath?: string
+  /** The lyrics with the time of every word, once transcribed (and as corrected by hand). */
+  lyrics?: SongLyrics
+}
+
+export interface SongLyrics {
+  lines: SongLyricLine[]
+  /** The transcription model and language it was made with. */
+  model?: string
+  language?: string
+  /** What the transcription cost (USD). */
+  costUsd?: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** One sung line: its words with their times (seconds in the song). */
+export interface SongLyricLine {
+  start: number
+  end: number
+  text: string
+  words: TranscriptWord[]
+  /** Corrected by hand (or an agent): the words share the line's timing (shared/song.ts retimeLine). */
+  edited?: boolean
+}
+
+/** What is being done to a sequence's song right now (Sequence.songWork). */
+export interface SongWork {
+  stage: 'copying' | 'separating' | 'transcribing' | 'analysing' | 'splitting'
+  /** 0–1 when known. */
+  fraction?: number
+}
+
+/**
+ * Where a take's singing sits against the place in the song it was made for (Segment.songSyncs), measured when it
+ * finished (main/song-sync.ts): its sung voice against the song's vocals over that window.
+ */
+export interface TakeSongSync {
+  /**
+   * Seconds into the take where its place in the song begins: the cut starts the take there (trimStart) and keeps
+   * exactly the window's length. 0 when nothing was measured or matched.
+   */
+  offset: number
+  /** How alike the take's singing and the song's vocals are at that offset, 0–1. */
+  score: number
+  /** The take's singing was found (score over the threshold); false: offset 0, the take may not sing the words. */
+  matched: boolean
+  /** 'vocals': measured against the vocals; 'none': nothing to measure ('mix' / 'none' clips, a take without sound). */
+  measured: 'vocals' | 'none'
+}
+
+/** Choices when a song is imported (createSequenceFromSong, setSequenceSong). */
+export interface SongImportOptions {
+  /** The new sequence's name (createSequenceFromSong); default the song's file name without its extension. */
+  name?: string
+  /** Separate the vocals on this Mac (free). Default: on when separation is available here. */
+  separateVocals?: boolean
+  /** Transcribe the lyrics (paid, priced by quoteSongLyrics): true for the default model, or a model and language. */
+  lyrics?: boolean | { model?: string; language?: string }
+  /**
+   * Split the song into clips of about this many seconds (2–15) once it has been analysed (and transcribed), when the
+   * sequence has no clips yet. Default 8.
+   */
+  targetSeconds?: number
+  /** Go past the budget for the transcription (see OVER_BUDGET). */
+  confirmOverBudget?: boolean
+}
+
+/** What the song panel draws (songOverview; free, cached). */
+export interface SongOverview {
+  duration: number
+  /** 0–1 peaks of the whole song, evenly spaced over its length. */
+  peaks: number[]
+  /** The same for the separated vocals, when there are any. */
+  vocalPeaks?: number[]
+  /** Beat times (seconds), from the analysis; [] when no steady beat was found. */
+  beats: number[]
+  /** Bar starts among the beats, when the bars were found. */
+  bars?: number[]
+  /** Tempo, when a steady beat was found. */
+  bpm?: number
+}
 
 export interface SequenceSummary {
   id: string
@@ -1594,12 +1748,14 @@ export type RunningKind =
   | 'import'
   | 'approval'
   | 'upload'
+  /** A sequence's song being copied in, separated, transcribed, analysed or split into clips (main/song.ts). */
+  | 'song'
 
 /** Something under way right now. */
 export interface RunningWork {
   /**
    * Stable while it runs: 'gen:<id>', 'send:<token>', 'run:<sequenceId>', 'still:<token>', 'job:<id>',
-   * 'render:<token>', 'export:<sequenceId>', 'import:<path>', 'approval:<id>', 'upload:<id>'.
+   * 'render:<token>', 'export:<sequenceId>', 'import:<path>', 'approval:<id>', 'upload:<id>', 'song:<sequenceId>'.
    */
   key: string
   kind: RunningKind
@@ -1855,9 +2011,10 @@ export interface ApprovalRequest {
    * generation: the Generate form. segment: one sequence clip. generate-all: every clip still missing a take.
    * image: one still for a storyboard ("Create image"). edit: a paid operation in the Editor (or resuming a stopped
    * one). voice-design: a new voice for a character ("Design a voice with AI"). delete: removing things (free, but
-   * nothing an agent asks to remove goes without the user's OK).
+   * nothing an agent asks to remove goes without the user's OK). song-lyrics: transcribing a sequence's song ("Transcribe
+   * the lyrics").
    */
-  kind: 'generation' | 'segment' | 'generate-all' | 'image' | 'edit' | 'voice-design' | 'delete'
+  kind: 'generation' | 'segment' | 'generate-all' | 'image' | 'edit' | 'voice-design' | 'delete' | 'song-lyrics'
   /**
    * What will be generated: the form for 'generation', the clip's settings for 'segment' (a clip continuing
    * from the previous one gets that clip's last frame as its start image when it is generated).
@@ -1869,6 +2026,8 @@ export interface ApprovalRequest {
   edit?: ApprovalEditRequest
   /** 'delete': what will be removed (and, once approved, each item's outcome). */
   delete?: ApprovalDeleteRequest
+  /** 'song-lyrics': the song whose lyrics will be transcribed (the sequence is sequenceId). */
+  song?: ApprovalSongRequest
   /** 'image', once approved: the still it made. */
   stillId?: string
   /** Approved, but something after the paid step didn't work out, e.g. the clip was gone. */
@@ -1914,6 +2073,21 @@ export interface ApprovalRequest {
    * for none). The request lapses when one changes, so the dialog compares them with the legends composed now.
    */
   clipLegends?: Record<string, string>
+}
+
+/** What a 'song-lyrics' request transcribes (request_song_lyrics), as the approval dialog shows it. */
+export interface ApprovalSongRequest {
+  /** The song's name as it was imported, and its length (seconds). */
+  songName: string
+  duration: number
+  /** The transcription model (one that times every word), its name, and the language hint when one was given. */
+  model: string
+  modelName?: string
+  language?: string
+  /** From the separated vocals (cleaner), else from the whole song. */
+  fromVocals: boolean
+  /** The song has lyrics already: they are replaced, corrections too. */
+  replaces: boolean
 }
 
 /** Commands main sends to the window's agent bridge (see StudioApi.onAgentCommand). */
@@ -2265,6 +2439,42 @@ export interface StudioApi {
   /** Fires with the sequence id whenever a sequence, its segments or their takes change. */
   onSequenceChange(cb: (sequenceId: string) => void): () => void
   onExportProgress(cb: (p: ExportProgress) => void): () => void
+
+  // Songs: a sequence cut to a song (Sequence.song). Progress and results arrive via onSequenceChange.
+  /**
+   * "New sequence from a song…": a new sequence with the audio file at `path` as its song (copied into its folder).
+   * Resolves at once; the vocals are separated, the lyrics transcribed and the song split into clips as chosen, shown in
+   * Sequence.songWork. Refused with OVER_BUDGET when the transcription would pass the budget, unless confirmed.
+   */
+  createSequenceFromSong(path: string, opts?: SongImportOptions): Promise<Sequence>
+  /**
+   * Puts a song on a sequence (replacing the one it has: the clips keep their places, clamped to the new length) or
+   * takes it off (null: the clips keep their takes and become ordinary clips).
+   */
+  setSequenceSong(sequenceId: string, path: string | null, opts?: SongImportOptions): Promise<Sequence>
+  /** Peaks, beats and bars of the song (free, cached). */
+  songOverview(sequenceId: string): Promise<SongOverview>
+  /** The cut points the song suggests for clips of about `targetSeconds` (2–15): phrases and lines on the beat. */
+  suggestSongSections(sequenceId: string, targetSeconds: number): Promise<number[]>
+  /**
+   * The clips' places in the song: `boundaries` are the cut points strictly inside the song, ascending. Clips are
+   * added (empty, from the cast) or adjusted to match, in order; refused when it would remove a clip that has takes,
+   * a prompt or notes, or leave a place under 2 s.
+   */
+  setSongSections(sequenceId: string, boundaries: number[]): Promise<Sequence>
+  /** What transcribing the song's lyrics would cost (USD), with `model` or the default one. */
+  quoteSongLyrics(sequenceId: string, model?: string): Promise<number>
+  /** Transcribes the lyrics (paid), replacing any there are. Refused with OVER_BUDGET past the budget, unless confirmed. */
+  transcribeSong(
+    sequenceId: string,
+    opts?: { model?: string; language?: string; confirmOverBudget?: boolean }
+  ): Promise<Sequence>
+  /** Corrects one line of the lyrics; its words keep or share the line's timing. */
+  editSongLyricLine(sequenceId: string, lineIndex: number, text: string): Promise<Sequence>
+  /** Separates the vocals (again), free; e.g. when it failed or was left out at import. */
+  separateSongVocals(sequenceId: string): Promise<Sequence>
+  /** Measures again where a take's singing sits against its place in the song (TakeSongSync). */
+  syncSongTake(generationId: string): Promise<Sequence>
 
   // Keyframes and "Redo between neighbours" (sequence clips)
   /**

@@ -20,6 +20,8 @@ import {
   supportsAudioInput,
   type Kind
 } from './models'
+import { longPlaceNote } from './song'
+import { shortPlaceMessage, songAudioNumber } from './song-send'
 import type { GenerationParams } from './types'
 
 /** A canonical reference token: "@Image3" or "@Audio2", in any letter case ("@image3" counts too). */
@@ -53,6 +55,10 @@ export type PromptIssueCode =
   | 'audio-too-long'
   /** An audio clip the prompt never mentions. */
   | 'unused-audio'
+  /** A song clip's place in the song: under 2 s (error), or over 15 s, of which only the start is sent (warning). */
+  | 'song-place'
+  /** A song clip's chosen singer isn't among its reference images, so the legend names another (warning). */
+  | 'song-singer'
 
 export interface PromptIssue {
   /** Errors block a submission; warnings are advice. */
@@ -120,7 +126,21 @@ export interface ValidateOptions {
    * description – or, for an outfit, who wears it – Studio appends when "Include descriptions" is on for it). Those are
    * not reported as unmentioned: the legend tells the model what they are.
    */
-  explained?: { images?: readonly number[]; audios?: readonly number[] }
+  explained?: {
+    images?: readonly number[]
+    audios?: readonly number[]
+    /**
+     * A song clip whose chosen singer isn't among its pictures: the name the song's line gives instead ('' for nobody;
+     * explainedReferences).
+     */
+    singerFallback?: string
+  }
+  /**
+   * A clip of a sequence cut to a song whose window of the song is sent (song-send.ts): which audio clip it is
+   * (@Audio{audio}) and the place in the song it sends. Its length is checked as a place – under 2 s it can't be sent,
+   * over 15 s only its start is – rather than as an audio clip of the library.
+   */
+  song?: { audio: number; start: number; end: number }
 }
 
 // ── Scanning ──────────────────────────────────────────────────────────────────
@@ -977,9 +997,20 @@ function validateAudio(
   const lengths = (opts.audioLengths ?? []).slice(0, sent)
   let clipTooLong = false
   let total = 0
+  const song = opts.song
   lengths.forEach((length, i) => {
     if (typeof length !== 'number' || !Number.isFinite(length)) return
     total += Math.max(0, length)
+    if (song?.audio === i + 1) {
+      // The song's window: its place says what is wrong and what to do (the sent part is at most 15 s by itself).
+      if (isAudioClipTooShort(song.end - song.start)) {
+        out.general.push({ severity: 'error', code: 'song-place', message: shortPlaceMessage(song), ref: 'audio' })
+      } else {
+        const long = longPlaceNote(song.start, song.end)
+        if (long) out.advice.push({ severity: 'warning', code: 'song-place', message: long, ref: 'audio' })
+      }
+      return
+    }
     if (isAudioClipTooShort(length)) {
       out.general.push({
         severity: 'error',
@@ -1003,6 +1034,18 @@ function validateAudio(
       severity: 'error',
       code: 'audio-too-long',
       message: `The audio references are ${seconds(total, MAX_REFERENCE_AUDIO_SECONDS)} – at most ${MAX_REFERENCE_AUDIO_SECONDS} s in total.`,
+      ref: 'audio'
+    })
+  }
+
+  const fallback = song ? opts.explained?.singerFallback : undefined
+  if (fallback !== undefined) {
+    out.advice.push({
+      severity: 'warning',
+      code: 'song-singer',
+      message: fallback
+        ? `Who sings isn't among the clip's reference images – the song's line names ${fallback} instead.`
+        : "Who sings isn't among the clip's reference images, nor is any other character – the song's line says nobody on screen sings.",
       ref: 'audio'
     })
   }
@@ -1066,7 +1109,7 @@ export function validateNegativePrompt(
 
 type PromptParams = Pick<
   GenerationParams,
-  'model' | 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios' | 'referenceVideos'
+  'model' | 'prompt' | 'negativePrompt' | 'referenceImages' | 'referenceAudios' | 'referenceVideos' | 'song'
 >
 
 /**
@@ -1082,6 +1125,8 @@ export function validationContext(
   const referenceCount = kind === 'reference-to-video' ? (params.referenceImages?.length ?? 0) : 0
   const audios = kind === 'reference-to-video' ? (sanitizeReferenceAudios(params.referenceAudios) ?? []) : []
   const videos = kind === 'reference-to-video' && Array.isArray(params.referenceVideos) ? params.referenceVideos.length : 0
+  // A song clip's window of the song among them (song-send.ts withSong makes it the only one).
+  const songAudio = kind === 'reference-to-video' && params.song ? songAudioNumber({ ...params, referenceAudios: audios }) : 0
   return {
     referenceCount,
     options: {
@@ -1093,7 +1138,10 @@ export function validationContext(
       audioLengths: audios.map((a) => (a.length === undefined ? undefined : referenceAudioWindow(a).length)),
       audioInput: supportsAudioInput(params.model),
       maxAudios: maxReferenceAudios(params.model),
-      ...(extra.explained ? { explained: extra.explained } : {})
+      ...(extra.explained ? { explained: extra.explained } : {}),
+      ...(songAudio && params.song
+        ? { song: { audio: songAudio, start: params.song.start, end: params.song.end } }
+        : {})
     }
   }
 }

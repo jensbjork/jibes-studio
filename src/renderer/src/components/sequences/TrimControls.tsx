@@ -15,6 +15,8 @@ import type { Generation, Segment } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { pauseOthers } from '../feed/playback'
 import { MIN_CLIP_SECONDS, formatLength, formatTakeTime, round2 } from './sequenceUtils'
+import { shortTakeNote, songCut } from '@shared/song-trims'
+import { songSeconds } from './song/songText'
 import { useDraft, useRegisterFlush, type DraftStatus, type FlushRegistry } from './useDraft'
 import type { SequenceStore } from './useSequence'
 
@@ -57,6 +59,11 @@ interface Props {
   flushers: FlushRegistry
   /** The choice of take hasn't reached main yet: the trims wait, since they would land on the take before. */
   selecting?: boolean
+  /**
+   * A clip of a sequence cut to a song: the length of its place. The cut keeps exactly that much of the take, so only
+   * where it starts is chosen (main works out the end); `syncOffset` is where the measured singing put it.
+   */
+  song?: { length: number; syncOffset?: number }
   playRequest?: PlayRequest
   playerRef?: Ref<TakePlayerHandle>
   /** "Use this take": the previewed take becomes the chosen one. */
@@ -96,6 +103,7 @@ export default function TrimControls({
   patchSegment,
   flushers,
   selecting = false,
+  song,
   playRequest,
   playerRef,
   onChoosePreview,
@@ -302,6 +310,7 @@ export default function TrimControls({
             patchSegment={patchSegment}
             flushers={flushers}
             disabled={selecting}
+            song={song}
             video={video}
             time={time}
             onTime={setTime}
@@ -330,6 +339,7 @@ function TrimEditor({
   patchSegment,
   flushers,
   disabled,
+  song,
   video,
   time,
   onTime,
@@ -346,6 +356,7 @@ function TrimEditor({
   patchSegment: SequenceStore['patchSegment']
   flushers: FlushRegistry
   disabled: boolean
+  song?: { length: number; syncOffset?: number }
   video: RefObject<HTMLVideoElement | null>
   time: number
   onTime: (t: number) => void
@@ -354,7 +365,12 @@ function TrimEditor({
   onReport: (state: TrimState & { takeId: string }) => void
 }) {
   const segmentId = segment.id
-  const save = useCallback((t: Trims) => patchSegment(segmentId, t), [patchSegment, segmentId])
+  const songLength = song?.length
+  // A song clip sends only where it starts: main keeps the place's length (the end follows).
+  const save = useCallback(
+    (t: Trims) => patchSegment(segmentId, songLength !== undefined ? { trimStart: t.trimStart } : t),
+    [patchSegment, segmentId, songLength]
+  )
   const draft = useDraft<Trims>({ trimStart: segment.trimStart, trimEnd: segment.trimEnd }, save)
   const { value, setValue } = draft
   useRegisterFlush(flushers, draft.flush)
@@ -392,11 +408,82 @@ function TrimEditor({
     [setValue, video, onTime]
   )
 
+  /** A song clip: the take starts at `raw` and keeps the place's length (the end follows). */
+  const setStart = useCallback(
+    (raw: number, seek: boolean) => {
+      if (!Number.isFinite(raw) || songLength === undefined) return
+      const d = latest.current.duration
+      // As main cuts it (shared/song-trims.ts): from the start for the place's length, the rest off the end.
+      const { trimStart, trimEnd } = songCut(d, raw, { start: 0, end: songLength })
+      const next: Trims = { trimStart, trimEnd }
+      latest.current = { value: next, duration: d }
+      setValue(next)
+      const el = video.current
+      if (seek && el) {
+        el.pause()
+        el.currentTime = trimStart
+        onTime(trimStart)
+      }
+    },
+    [songLength, setValue, video, onTime]
+  )
+
   const seek = (t: number) => {
     const el = video.current
     if (!el) return
     el.currentTime = t
     onTime(t)
+  }
+
+  if (songLength !== undefined) {
+    const shortNote = shortTakeNote(songCut(duration, trimStart, { start: 0, end: songLength }).shortBy)
+    const synced = song?.syncOffset
+    const back = synced ?? 0
+    return (
+      <div className={`mt-3 space-y-3 transition-opacity ${disabled ? 'pointer-events-none opacity-50' : ''}`}>
+        {duration > 0 && (
+          <TrimBar
+            duration={duration}
+            trimStart={trimStart}
+            trimEnd={trimEnd}
+            time={time}
+            onSeek={seek}
+            onDrag={(key, t) => setStart(snap(key === 'trimStart' ? t : t - songLength), true)}
+            dragTitle="Drag to choose where the take starts – it keeps the place's length"
+          />
+        )}
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+          <SecondsInput
+            label="Starts at"
+            value={trimStart}
+            onChange={(v) => setStart(v, true)}
+            onHere={() => setStart(video.current?.currentTime ?? time, false)}
+            hereTitle="Start the take at the playhead"
+          />
+          <button
+            onClick={() => setStart(back, true)}
+            disabled={Math.abs(trimStart - back) < 0.005}
+            title={synced !== undefined ? 'Back to where the measured singing put it' : 'Start at the beginning of the take'}
+            className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            {synced !== undefined ? 'Back to the sync' : 'Reset'}
+          </button>
+          <label className="ml-auto flex items-center gap-2 pb-1.5 text-muted">
+            <input
+              type="checkbox"
+              checked={onlyTrimmed}
+              onChange={(e) => onOnlyTrimmed(e.target.checked)}
+              className="accent-accent"
+            />
+            Play only what's used
+          </label>
+        </div>
+        <p className="text-[11px] leading-relaxed text-muted">
+          The cut keeps {songSeconds(songLength)} of the take – the clip's place in the song – from where it starts.
+        </p>
+        {shortNote && <p className="text-[11px] leading-relaxed text-amber-300">{shortNote}</p>}
+      </div>
+    )
   }
 
   return (
@@ -470,7 +557,8 @@ function TrimBar({
   trimEnd,
   time,
   onSeek,
-  onDrag
+  onDrag,
+  dragTitle
 }: {
   duration: number
   trimStart: number
@@ -478,6 +566,8 @@ function TrimBar({
   time: number
   onSeek: (t: number) => void
   onDrag: (key: keyof Trims, t: number) => void
+  /** Both handles' tooltip (a song clip's move together); else each says which end it trims. */
+  dragTitle?: string
 }) {
   const bar = useRef<HTMLDivElement>(null)
   const pct = (t: number) => `${(Math.min(duration, Math.max(0, t)) / duration) * 100}%`
@@ -530,7 +620,7 @@ function TrimBar({
           <div
             key={key}
             onPointerDown={(e) => track(e, (t) => onDrag(key, t))}
-            title={key === 'trimStart' ? 'Drag to trim the start' : 'Drag to trim the end'}
+            title={dragTitle ?? (key === 'trimStart' ? 'Drag to trim the start' : 'Drag to trim the end')}
             className="absolute inset-y-0 z-10 flex w-4 -translate-x-1/2 cursor-ew-resize touch-none items-center justify-center"
             style={{ left: pct(key === 'trimStart' ? trimStart : duration - trimEnd) }}
           >

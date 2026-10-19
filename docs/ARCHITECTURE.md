@@ -87,6 +87,8 @@ folds the SQLite WAL back into `studio.db`.
 | `inherited-swap.ts` | A swap in place in the clip a continuation carries its references from (`swappedInPlace`: as many pictures and clips, every changed one gone from the list): the inheriting clips keep their tokens, and only the name in front of a fully swapped group follows (`followSwap`, the shared `renameReferenceNames`). Used by `SequenceService.keepInheritedTokens`. |
 | `sequence-store.ts` | Row access and assembly for sequences (with their `kind`), segments (notes, `endFromNext`, `continueMode`, the description switches and a transition's boards included) and stills, the refusals between kinds (`requirePlainSequence`, `requirePlainSegment`), take selection (`seamTrims`: a side the new take was made to meet exactly starts untrimmed; per-take trims in `take_trims`: `rememberTrims`, `trimsFor`, `forgetTrims`) and trim clamping, folder and file naming per kind, the *Export format* helpers and `recordExport` with the export's cut times (it returns the export's id). |
 | `sequence-export.ts` | Turns the selected, trimmed takes into ffmpeg concat clips (dropping the duplicated picture where a take was made from its neighbour's frame: `repeatsPreviousFrame`, `dropsLastFrame`; for a storyboard `buildStoryboardClips` with `repeatsBoardImage`), the cut times of the film it makes (`exportCuts`, recorded in `exports.cuts` for the Editor's cut markers: worked out on the film's own frame grid, so clips of other frame rates land where concat puts them) and reserves the export's file name. |
+| `song.ts` | `SongService` and the `songs:*` handlers but `songs:syncTake` (`registerSongIpc`): *New sequence from a song…* and a sequence's song — copied into `Sekvenser/<name>/Ljud/` through the sequence service's file queue (`placeSongFile`), its vocals separated, its lyrics transcribed (priced first, the budget applies, recorded as a `media_jobs` row), analysed and split into clips, one step after another per sequence in the background (`songWork`, `songError`, Activity's `song` items, busy for a library switch); lyric lines corrected by hand. See [Songs: data, analysis, lyrics](#songs-data-analysis-lyrics). |
+| `song-analysis.ts` | A song's peaks, beat, bars and vocal activity (onset envelope, tempo by autocorrelation, Ellis's beat tracker, bar accents, a loudness threshold on the vocals), cached in `.studio/tidslinje` by the files' identity (`analyseSong`, `cachedSongAnalysis`). |
 | `ffmpeg.ts` | Finds `ffmpeg`/`ffprobe`, probes videos and audio files (decoding when the header only estimates the length), extracts frames (the frame showing at a moment, and the first frame at or after a start trim: `extractFrameAtOrAfter`, `frameStartAtOrAfter`) and posters, decodes still pictures to PNG (`stillToPng`), cuts reference audio windows to mono MP3 (`encodeAudioClip`), JPEG frames and sound previews for agents' reviews (`extractFrames`, `extractAudioPreview`), renders the concat export (at the sequence's *Export format* height), and kills/cleans up running processes on quit. For own clips and the Editor: `probeMedia` (HDR, bit depth, rotation, variable frame rate, every audio stream and whether it decodes), `normalizeVideo` (the working copy: tone-mapped H.264 SDR, ≤1080p, constant frame rate, upright, square pixels, picture and sound both from the file's time zero, mono at full level on both sides, metadata stripped), `makeProxy` and `makeStandIn` (what a picture operation sends, and the stand-in its free quote uses), sample-exact audio (`extractAudio`, `encodeUpload`, `silences`, `loudness`, `timeStretch`, `renderMix` — the layered mix with gain envelopes, ducking, noise reduction and loudness —, `assembleAt`, `replaceAudioTrack`) and pictures (`spliceVideo`, frame-exact, and the timeline's `waveform` — placed by time over the film's length —, `filmstrip` and `sceneCuts`). The concat export upmixes mono at full level too. Partial files of every kind (`.part.mp4`, `.part.wav` …) are cleaned up. |
 | `media-protocol.ts` | The `media://` scheme (video — `.mp4`, `.mov`, `.m4v`, `.webm`, `.mkv` —, image and audio types). |
 | `imports.ts` | Own clips, from the window or an agent's video uploads (both handlers check an agent's files with `assertAgentFiles`), with `active()` for *Activity*: `imports:inspect` (probes every file, says whether it can be cloned — on the library's volume and that volume APFS, read from `mount` — and why a working copy is needed, finds an earlier import of the same file by size and SHA-256), `imports:import` (copy or APFS clone through the scratch folder into `Egna klipp/<day>/`, a working copy when needed or when cropping to the sequence's shape, poster, a completed `source = 'import'` row; into the feed, as new clips of a sequence or as a take of a clip; a disk-space check; *Cancel* leaves nothing behind) and `imports:cancel` (one file by path — its card's *Cancel*, the others go on — or every import), with `import:progress` events. |
@@ -116,7 +118,7 @@ folds the SQLite WAL back into `studio.db`.
 | `agent/storyboard-rows.ts` | Synchronous answers about storyboards for the tools and the submit guards: which kind an id is, a board's storyboard and place, the two boards a transition joins, and the pointer from a sequence tool to the storyboard tools. |
 | `agent/reorder.ts` | `reorder_references`: reading the new order an agent names (tokens, photo or clip ids, asset ids), which tokens moved, and the pictures past the model's limit; `referencesAnswer`, the answer `reorder_references` and `swap_reference` share. |
 | `agent/swap.ts` | `swap_reference`: reading the place and the new picture an agent names (`planSwap`; an upload is made a still last), the shared swap applied (`applySwap`), what the window is sent (`swapArgs`), which tokens show something else now (`swappedTokens`), and the notes and activity-log summary. |
-| `agent/tools/*.ts` | The MCP tools (`library.ts` with photos and sound for assets and prompt updates, `form.ts`, `sequences.ts` with keyframes, notes, trims, the sequence's settings, export and stopping a run, `stills.ts` for stills, image models, frame previews, bridging and importing pictures, `storyboards.ts` for storyboards, boards and transitions, `paid.ts` with the image, transition and storyboard requests, `editor.ts` for the Editor's read and free tools, `editor-paid.ts` for `request_edit_operation` (also resuming a stopped job) and `request_voice_design`, `edit-input.ts` for the operation input and its one converter, `review.ts` for reviewing clips, films and sequences, reviews and learnings, `uploads.ts` for uploads, `imports.ts` for importing own clips, `delete.ts` for `request_delete` — planning, verify and execute —, `work.ts` for `get_work_status`, `spending.ts` for `get_spending` and `overBudgetAnswer` — the `over_budget` and `budget_note` of a paid request's answer —, and `sources.ts`, the shared upload, URL and picture sources), the `defineTool` frame (`kit.ts`, image and audio content, older clients get a note instead of audio; `ToolContext` with the uploads and the session's peer and address) and registration of the tools, the `write_video_prompt` prompt and the `studio://guide` resource (`index.ts`). |
+| `agent/tools/*.ts` | The MCP tools (`library.ts` with photos and sound for assets and prompt updates, `form.ts`, `sequences.ts` with keyframes, notes, trims, the sequence's settings, export and stopping a run, `stills.ts` for stills, image models, frame previews, bridging and importing pictures, `storyboards.ts` for storyboards, boards and transitions, `paid.ts` with the image, transition and storyboard requests, `editor.ts` for the Editor's read and free tools, `editor-paid.ts` for `request_edit_operation` (also resuming a stopped job) and `request_voice_design`, `song.ts` for a sequence cut to a song (`create_sequence_from_song`, `suggest_song_sections`, `set_song_sections`, `edit_song_lyrics`, `request_song_lyrics`), `edit-input.ts` for the operation input and its one converter, `review.ts` for reviewing clips, films and sequences, reviews and learnings, `uploads.ts` for uploads, `imports.ts` for importing own clips, `delete.ts` for `request_delete` — planning, verify and execute —, `work.ts` for `get_work_status`, `spending.ts` for `get_spending` and `overBudgetAnswer` — the `over_budget` and `budget_note` of a paid request's answer —, and `sources.ts`, the shared upload, URL and picture sources), the `defineTool` frame (`kit.ts`, image and audio content, older clients get a note instead of audio; `ToolContext` with the uploads and the session's peer and address) and registration of the tools, the `write_video_prompt` prompt and the `studio://guide` resource (`index.ts`). |
 
 ### `native/` and `scripts/`
 
@@ -182,14 +184,14 @@ base folder is.
 | `generation_reviews` | Reviews of a generation: `author` (`user`, at most one per generation by a partial unique index, or an agent's name), `rating` -1 (thumbs down) or 1–3 stars, `tags` (JSON), `note`. Deleted with their generation. |
 | `learnings` | Insights about prompting: `title`, `insight`, `model` (NULL: every model), `tags` and `evidence` (generation ids, JSON), `author`, `pinned`. |
 | `prompts` | The prompt library: title, body, negative prompt, tags (JSON), favourite, use count, last used. |
-| `sequences` | Sequences and storyboards: name, `kind` (`sequence` or `storyboard`), `defaults` (JSON params for new clips; a storyboard's for new transitions; a sequence's cast is the references in it: `referenceImages`, `referenceAudios`, `outfitWearers` — see `shared/cast.ts`), `aspect_ratio` (a storyboard's format; NULL for sequences), `folder` (in `Sekvenser/` or `Storyboards/`), `export_height` (the *Export format*: 480, 720 or 1080; NULL = the first clip's size). |
+| `sequences` | Sequences and storyboards: name, `kind` (`sequence` or `storyboard`), `defaults` (JSON params for new clips; a storyboard's for new transitions; a sequence's cast is the references in it: `referenceImages`, `referenceAudios`, `outfitWearers` — see `shared/cast.ts`; a song sequence's song is its `song` key — see [Songs](#songs-data-analysis-lyrics)), `aspect_ratio` (a storyboard's format; NULL for sequences), `folder` (in `Sekvenser/` or `Storyboards/`), `export_height` (the *Export format*: 480, 720 or 1080; NULL = the first clip's size). |
 | `segments` | A sequence's clips, or a storyboard's transitions: `position`, `params` (JSON template for new takes; its `startImage` / `endImage` are the clip's keyframes, a transition's two board pictures), `continue_from_previous`, `continue_mode` (how a continuing clip starts on the previous clip's last frame: `references`, the default, or `exact`), `end_from_next` (take the end image from the next clip; always 0 for transitions), `notes` (what happens), `selected_generation_id`, `trim_start`, `trim_end`, and for a transition `from_board_id` / `to_board_id` (the boards it goes between; set to NULL if a board row goes). Deleted with their sequence. |
 | `storyboard_boards` | A storyboard's boards: `sequence_id` (the storyboard; deleted with it), `position`, `image_path` (the picture, a stored path; NULL for an empty board), `still_id` (the still it is, when it is one; set to NULL if the still row goes), `note` (what the picture shows). |
 | `stills` | The pictures of a sequence or a storyboard: `sequence_id` (set to NULL when it is deleted and the still is kept), `file_path`, `source` (`generated`, `upload`, `frame`), `prompt`, `model`, `params` (JSON: negative prompt, reference images, aspect ratio, resolution, quality; a saved frame's take and time), `cost`. |
 | `exports` | Exported films of sequences and storyboards (`file_path`, `sequence_id`), so they follow folder renames and library moves, and `cuts` (JSON seconds where the clips meet in the film, recorded at export; NULL for older films). |
 | `edits` | The Editor's edits: `name`, `folder` (in `Redigeringar/`), `origin_kind` (`generation`, `export` or `import`), `origin_generation_id` (v1), `origin_export_id`, `current_generation_id` (the version shown and built on); the foreign keys are set to NULL when their row goes. |
 | `edit_media` | An edit's own audio in its `Ljud/`: `kind` (`voice`, `speech`, `music`, `effect`, `audio` — an added file or library clip — or `bake`, a rendered bed), `file_path`, `label`, `model`, `cost`, `duration`, `details` (JSON, no paths). Deleted with the edit. |
-| `media_jobs` | Paid work of the Editor that takes several requests (and a picture operation's bookkeeping): `edit_id` (or `asset_id` for a designed voice), `base_generation_id`, `op`, `request` (the normalized operation, no paths), `status` (`running`, `completed`, `failed`, `cancelled`), `quote`, `cost` (what was sent so far), `take_generation_id` (the AI take of a picture operation), `result_generation_id` (the version it made), `error`. |
+| `media_jobs` | Paid work of the Editor that takes several requests (and a picture operation's bookkeeping): `edit_id` (or `asset_id` for a designed voice; neither for a song's lyrics, a finished `transcribe` row whose `request` names the sequence), `base_generation_id`, `op`, `request` (the normalized operation, no paths), `status` (`running`, `completed`, `failed`, `cancelled`), `quote`, `cost` (what was sent so far), `take_generation_id` (the AI take of a picture operation), `result_generation_id` (the version it made), `error`. |
 | `media_job_steps` | The requests of a job, in `position` order: `endpoint` (`voice-changer`, `audio-queue`, `speech`, `transcription`, `voice-clone`), `model`, `request` (JSON: range, text, voice …; no paths, no media), `status` (`pending`, `sending`, `queued`, `completed`, `failed`, `cancelled`), Venice's `queue_id`, `quote`, `error`. |
 | `transcripts` | One transcript per generation: `segments` (JSON lines with start, end, text and optional words), `model`, `language`, `source` (`venice`, `remapped` — carried across a cut — or `edited`), `cost`. |
 | `voice_clones` | Handles of a voice clip cloned at Venice (`audio_id`, `model`, `handle`, the sample window, `expires_at`; valid 7 days), reused while they last. |
@@ -236,8 +238,9 @@ The rules live in `src/main/paths.ts` and `src/main/db.ts`:
 - **Every path column is known.** `generations.file_path`, `generations.thumb_path`, `generations.original_path`, the
   `startImage`, `endImage`, `referenceImages`, `referenceAudios[].path`, `sourceVideo` and `referenceVideos` in
   `generations.params` and `segments.params`, `asset_images.file_path`, `asset_audio.file_path`, `stills.file_path`,
-  the `referenceImages` in `stills.params`, `storyboard_boards.image_path`, `exports.file_path` and
-  `edit_media.file_path`. The JSON of `recipe`, `details`, `request`, `segments` and `unseen.context`, `origin` and
+  the `referenceImages` in `stills.params`, `storyboard_boards.image_path`, `exports.file_path`,
+  `edit_media.file_path`, and in `sequences.defaults` the cast's references and the song's `song.path` and
+  `song.vocalsPath`. The JSON of `recipe`, `details`, `request`, `segments` and `unseen.context`, `origin` and
   `take_trims` hold ids only, never paths.
   `mapStoredPaths` visits all of them, and so do the "is this path recorded" checks (`isStoredPathRecorded` can leave
   one still's own row out: is anything *else* using its file?), the list of tracked files a library move carries and
@@ -310,6 +313,7 @@ with user-facing messages.
 | Assets | `listAssets`, `saveAsset`, `deleteAsset`, `addAssetImages`, `removeAssetImage`, `reorderAssetImages`, `addAssetAudio`, `removeAssetAudio`, `updateAssetAudio`, `reorderAssetAudio` | `assets:*` |
 | Prompt library | `listPrompts`, `savePrompt`, `deletePrompt`, `markPromptUsed` | `prompts:*` |
 | Sequences | `listSequences`, `getSequence`, `createSequence`, `updateSequence`, `deleteSequence`, `addSegment`, `updateSegment`, `deleteSegment`, `moveSegment`, `setSegmentImage`, `previewSegmentFrames`, `bridgeSegment`, `generateSegment`, `generateAllSegments`, `stopGenerateAll`, `exportSequence` | `sequences:*`, `segments:*` (`segments:setImage`, `segments:previewFrames`, `segments:bridge`) |
+| Songs | `createSequenceFromSong`, `setSequenceSong`, `songOverview`, `suggestSongSections`, `setSongSections`, `quoteSongLyrics`, `transcribeSong`, `editSongLyricLine`, `separateSongVocals`, `syncSongTake` (progress and results arrive as `sequence:change`) | `songs:*` |
 | Storyboards | `listStoryboards`, `getStoryboard`, `createStoryboard`, `updateStoryboard`, `deleteStoryboard`, `addBoard`, `updateBoard`, `moveBoard`, `deleteBoard`, `updateTransition`, `generateTransition`, `generateStoryboard`, `stopStoryboard`, `exportStoryboard`, `convertStoryboardToSequence` | `storyboards:*` (`storyboards:generateAll`, `storyboards:stop`, `storyboards:export`, `storyboards:toSequence`), `boards:*`, `transitions:update`, `transitions:generate` |
 | Images and stills | `listImageModels`, `quoteStill`, `generateStill`, `listStills`, `deleteStill`, `saveFrameAsStill` | `images:models`, `images:quote`, `images:generate`, `stills:list`, `stills:delete`, `stills:saveFrame` |
 | Library folder | `libraryStatus`, `chooseLibraryFolder`, `inspectLibraryFolder`, `setLibraryRoot`, `reorganizeLibrary`, `revealLibraryFolder` | `library:*` |
@@ -350,8 +354,9 @@ Two details matter when changing handlers:
 - **The agent file rule.** Handlers that take file paths check an agent's call with `assertAgentFiles`
   (`upload-paths.ts`): every path must be a file staged in `.studio/tmp/agent-uploads` or one the library records,
   never anything else on the Mac: `assets:addImages`, `assets:addAudio`, `imports:inspect`, `imports:import`,
-  `edits:addAudio`, `stills:import`, and the `{kind: 'file'}` pictures of `segments:setImage`, `boards:add` and
-  `boards:update`.
+  `edits:addAudio`, `stills:import`, `songs:createSequence`, `songs:set`, and the `{kind: 'file'}` pictures of
+  `segments:setImage`, `boards:add` and `boards:update`. An agent's call never starts a paid transcription itself:
+  `songs:transcribe` (and lyrics asked for at import) only run inside an approved request (`isConfirmedHere`).
 - Paid Editor calls (`edits:run` of a paid operation, `edits:resume`, `voices:design`) need the price the user
   saw (`expectedPriceUsd`; 0 when Venice gives none) and refuse when the price rose by more than $0.01. `edits:run`
   and `edits:resume` also take whether that price was unknown or partial (`expectedPartial`); when it wasn't, a part
@@ -579,6 +584,102 @@ trimmed for the cut.
   (`insertSegment`) gets the previous clip's settings with prompt and keyframes cleared (or the defaults), never
   the video's empty params, and doesn't continue from the previous clip. When its file is missing, `clipProblem`
   and `missingClips` say that clip N's own video is missing instead of asking for a prompt.
+
+## Songs: data, analysis, lyrics
+
+*New sequence from a song…* makes a sequence cut to the user's own song, for a music video: every clip has its place
+in the song, the clips cover it end to end, and the film plays the song instead of the clips' own sound.
+
+- **Data, without a migration.** The song is `Sequence.song` (`SequenceSong`: the file, its name as imported, its
+  length, the separated vocals, the lyrics), stored under the key `song` of the sequence's defaults JSON with relative
+  paths (`sequence-store.parseSong` / `writeSequenceSong` / `updateStoredSong`; `serializeDefaults` keeps it as stored,
+  and keys of it that main doesn't read are kept while the file stays the same). The takes' sync measurements are not
+  in it: they live in `.studio/song-sync.json` (see [Songs: sending, sync, export](#songs-sending-sync-export)). A clip's
+  place is `params.song` (`SongWindow`: start, end, what it hears — `vocals`, `mix` or `none` — and who sings), kept and
+  cleaned by `sanitizeParams`. What the song service is doing (`songWork`) and why its last step failed (`songError`)
+  live in memory and are merged in by `loadSequence`.
+- **Files.** The song is copied into `Sekvenser/<name>/Ljud/` and the vocals are written next to it as
+  `<name> (sång).flac`, through the sequence service's file queue, which also holds the folder while song work reads
+  or writes it (`holdSongFolder`: no rename meanwhile); a renamed sequence's folder carries them, and their stored
+  paths are rewritten like every other. Taking the song off leaves the files where they are.
+- **Background work** (`song.ts`), one step at a time per sequence: separate the vocals (`separateStems`, free), then
+  transcribe (if asked), analyse, and split the song into clips while its places haven't been chosen (no clips yet, one
+  empty clip, or empty clips Studio placed itself when the song was put on them). When the lyrics come, or the vocals'
+  analysis, the empty clips whose part Studio decided hear what their places now suggest (`redecideSongParts`: a part
+  other than the one Studio would have chosen was chosen by hand and stays). A step that fails sets `songError` and the
+  next goes on without it; progress is announced at most twice a second, and a step that can't tell (a transcription)
+  shows none.
+- **Lyrics.** Transcribed from the vocals when there are any (the mix otherwise) as 64 kb/s mono MP3, with a model that
+  times every word (Scribe by default, `lyricsModelOf`). The price (`transcriptionPriceUsd`) is checked against the
+  budget before anything is made (`OVER_BUDGET` unless confirmed); the paid call is recorded as a finished `media_jobs`
+  row (op `transcribe`, no edit, `request.sequenceId`, its cost) that Spending places on the sequence as a transcript,
+  noted as the agent's when an approved request ran it. Lines come from the ASR's segments, or are split at pauses over
+  0.6 s, at punctuation and at 10 words (`shared/song.ts lyricLines`). A corrected line keeps each word's time when it has
+  as many words, else its words share the line's span by length (`retimeLine`); an empty one is removed.
+- **Analysis** (`song-analysis.ts`, cached by the files' size, time and inode in `.studio/tidslinje/song-*.json`):
+  peaks of the song and the vocals (`ffmpeg.waveform`); the onset strength (log-magnitude spectral flux, 11.6 ms
+  frames at 11 025 Hz), its tempo by autocorrelation in 60–180 BPM leaning towards 120, the beats by dynamic
+  programming (a steady beat only: none for speech); bars when one beat of every three or four is clearly the loudest in
+  the low end; and where the vocals sing (28 dB under their loud parts, pauses under 0.3 s bridged).
+- **Places** (`shared/song.ts`). `suggestSections` chooses all cut points at once by dynamic programming over the
+  candidates — every beat, the middle of every pause between lines, a grid where nothing else is — so that every place
+  is 2–15 s and close to the target, and the cuts fall between lines (or vocal pauses) on a bar or beat rather than in a
+  word. `checkSongBoundaries` refuses cut points outside the song, out of order or making a place under 2 s, in words
+  the user can act on.
+- **The clips' rules** (`sequences.ts`). `setSongSections` gives the clips their places in order (a take's duration
+  follows: `songClipDuration` with the model's durations), adds clips at the end (empty, with the cast, not continuing)
+  or removes untouched ones there, and refuses — changing nothing — when a clip that would go has takes, a prompt or
+  notes. A new place hears the vocals where words are sung (or, without lyrics, where the vocals are active), else the
+  mix. In a song sequence clips can't be moved, a clip added splits the place of the clip before it on the beat nearest
+  its middle, a deleted clip's place goes to the clip before it (the next for the first), new params keep a clip's
+  place, and `removeSong` takes the song off, the clips keeping everything but their places.
+
+## Songs: sending, sync, export
+
+How a song sequence's clip is sent, where its takes sing, and how the film is cut to the song.
+
+- **Sending** (`shared/song-send.ts`). `takeParams` (main) and `asSent` (the agent tools) run the clip through
+  `withSong`: a clip that hears the song (`part` `vocals` or `mix`) sends exactly its window of the song as its only
+  reference audio (`songAudioReference`: the vocals file for `vocals`, the mix otherwise, at most 15 s), so the cast's
+  voices give way; `params.song.lyrics` is filled with the words sung in the window (`lyricsInWindow`), and a `vocals`
+  clip is made with sound (`audio: true`: the take's own sound is what the sync measures; the film never plays it). A
+  `none` clip sends what it has. The take's stored params keep the window and the words, so a moved place can still
+  place it. `songClipProblem` refuses, before anything is paid, a clip that hears the song with a model that takes no
+  reference audio, a place outside the song or under 2 s (`clipProblemAt`, the agents' `sendProblem`).
+- **The legend line** (`prompt-compose.ts`). The song's clip is found among the sent audio by its window
+  (`songAudioNumber`; no asset owns it) and explained by the References legend's last line, in the prompt language:
+  "@Audio1 is the lead vocal of this moment of the song: Anna (@Image1) sings exactly these words, on the beat, lips in
+  sync with every syllable: “…”." (the singer: `song.singer` among the pictures sent, else the first character, nobody
+  for null), or the music line for `mix`. It is not a description: it is appended with *Include descriptions* off too and
+  is never shortened (`ComposedPrompt.song`). The checks (`prompt-refs.ts`) count it as explained, refuse a place under
+  2 s as a place (`song-place`), note one over 15 s, and note a chosen singer who isn't among the pictures
+  (`song-singer`, from `explainedReferences().singerFallback`).
+- **Sync** (`song-sync.ts`, free). When a take of a `vocals` clip finishes (the job manager's `settled`, after the
+  sequence service has selected it), it is measured one at a time: its sound on its own time line (`extractAudio`), its
+  voice separated when the Mac can (`separateStems`), and the song's vocals over the place the take was made for (at
+  most the 15 s that were sent) are turned into log-RMS envelopes (5 ms steps at 16 kHz, floored 40 dB under their
+  loudest moment); the lag with the best Pearson correlation in [−0.25 s, the take's length − the place's] (refined
+  between steps on a parabola) is where the place begins in the take. `matched` when the correlation is at least
+  `SYNC_THRESHOLD` (0.5; tuned on the fixtures: the vocals however late ≥ 0.99, the mix sung over ≈ 0.87, another voice
+  0.77–0.97, the drums, noise, a tone, silence ≤ 0.37); else the offset is 0. It measures timing, not words. `mix` and
+  `none` clips get `measured: 'none'`. `songs:syncTake` measures a take again.
+- **The cut** (`reconcileSongTrims`, `shared/song-trims.ts`). Each clip with a place and a finished selected take starts
+  it at `songTrimBase` — the offset plus how far the clip's place starts after the place the take was made for — plus
+  the take's nudge there, and keeps exactly the place's length (`songCut`: the end trim follows, at least 0.2 s left; a
+  take too short keeps its end and says by how much, and the film holds its last frame). It runs whenever the sequence
+  service announces a change (`changed`: a place moved, a take selected, a trim changed), when a take settles or is
+  measured, and before an export. A start trim that differs from the one it last wrote is the user's nudge and is kept,
+  per take (a take selected again gets its own back). The measurements and that bookkeeping live in the library's
+  `.studio/song-sync.json` (`song-sync-store.ts`: per take its TakeSongSync and the place measured; per clip the take,
+  the trim written and the nudges), written through a temp file and pruned of takes and clips that are gone; no schema
+  change. `loadSequence` adds them as `Segment.songSyncs`.
+- **Export.** A song sequence's clips must cover the song end to end without gaps (`songPlacesProblem`, before
+  rendering, as is a missing song file). `buildSongClips` gives every clip its place on the film (`ConcatClip.at`):
+  `concatClips` makes each exactly round(end · fps) − round(start · fps) frames from its start trim (counted from the
+  song's start, so nothing drifts over many clips; `tpad` holds the last frame of a short take), and the song, from 0,
+  cut or padded to the picture, is the film's only sound (`soundtrack`); the cut points recorded are the places' first
+  frames (`songExportCuts`). The preview (the renderer) plays the takes muted under the song: song time = place start +
+  (time in the take − trim start).
 
 ## Keyframes and stills
 
@@ -989,7 +1090,7 @@ agent ──HTTP──▶ AgentServer (/mcp) ──▶ McpServer per session ─
   images and audio (each block after a text label; audio is replaced by a one-line note for a session whose
   protocol version predates audio content, 2025-03-26), turns exceptions into tool errors the agent can read
   (worded like the UI's) and records every call in the activity log. Tools carry MCP annotations (`readOnlyHint`,
-  `destructiveHint`, `openWorldHint`). The 91 tools live in `tools/library.ts`, `form.ts`, `sequences.ts`,
+  `destructiveHint`, `openWorldHint`). The 96 tools live in `tools/library.ts`, `form.ts`, `sequences.ts`, `song.ts`,
   `stills.ts`, `storyboards.ts`, `paid.ts`, `editor.ts`, `editor-paid.ts`, `review.ts`, `uploads.ts`, `imports.ts`,
   `delete.ts`, `work.ts` and `spending.ts`; [AGENTS.md](AGENTS.md#tools) lists them. No tool takes a file path.
 - **Same services as the window.** `recordIpcHandlers` wraps `ipcMain.handle` before any module registers its

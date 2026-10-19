@@ -55,6 +55,7 @@ import { READ_ONLY, defineTool, priceValue, quote, readForm, usd, type ToolConte
 import { overBudgetAnswer } from './spending'
 import { deleteApprovalInfo } from './delete'
 import { editApprovalInfo } from './editor-paid'
+import { songApprovalInfo } from './song'
 import {
   asSent,
   assertNotRunning,
@@ -608,7 +609,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
       const plan = continuationOf(sequence, index)
       const references = plan?.mode === 'references'
       const generated = asSent(sequence, index)
-      const problem = sendProblem(generated, continuing, endFromNext, plan)
+      const problem = sendProblem(generated, continuing, endFromNext, plan, sequence.song)
       if (problem) throw new Error(`Clip ${clip}: ${problem}`)
       if (continuing && !isUsableTake(selectedTake(sequence.segments[index - 1]))) {
         throw new Error(
@@ -1317,7 +1318,7 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get approval status',
       description:
-        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence, for generate-storyboard the storyboard with get_storyboard; for an image, the still_id – look at it with get_still – and assigned when it went into its board or clip; for an edit operation, the job's progress and then result_version – review it with review_generation; for a designed voice, the new Voice clip's audio_id once it is made; for request_delete, every item with its outcome – deleted, gone (already removed) or failed with its error – and a notice when some didn't go), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, replaced by a newer request, or – for a removal – something in it changed before the user answered) or failed (the error; a removal where nothing could be removed keeps its items' outcomes). Poll every 15–30 seconds while pending, and while an approved edit or voice job is still running.",
+        "The state of an approval request: pending (the user hasn't answered), approved (with generation_ids – follow them with get_generation; for generate-all, follow the sequence with get_sequence, for generate-storyboard the storyboard with get_storyboard; for an image, the still_id – look at it with get_still – and assigned when it went into its board or clip; for an edit operation, the job's progress and then result_version – review it with review_generation; for a designed voice, the new Voice clip's audio_id once it is made; for a song's lyrics, whether they are being transcribed and then how many lines they have; for request_delete, every item with its outcome – deleted, gone (already removed) or failed with its error – and a notice when some didn't go), declined (with the user's reason if they gave one), expired (unanswered for 30 minutes, replaced by a newer request, or – for a removal – something in it changed before the user answered) or failed (the error; a removal where nothing could be removed keeps its items' outcomes). Poll every 15–30 seconds while pending, and while an approved edit or voice job (or a song's transcription) is still running.",
       input: { approval_id: z.string() },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'checked the answer to a request'
@@ -1364,7 +1365,9 @@ export function registerPaidTools(server: McpServer, ctx: ToolContext): void {
         // The Editor's requests: the edit and version (or the character), the operation, and the job it started.
         ...(request.kind === 'edit' || request.kind === 'voice-design' ? await editApprovalInfo(request) : {}),
         // A removal: every item, and once approved what became of each (deleted, gone or failed).
-        ...(request.kind === 'delete' ? deleteApprovalInfo(request) : {})
+        ...(request.kind === 'delete' ? deleteApprovalInfo(request) : {}),
+        // A song's lyrics: the song, and once approved how the transcription went.
+        ...(request.kind === 'song-lyrics' ? await songApprovalInfo(request) : {})
       }
       if (request.status === 'approved') {
         if (request.stillId) {

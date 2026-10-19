@@ -1,5 +1,6 @@
 import { continuationProblem } from '@shared/continuation'
 import { kindOfModelId, supportsEndImage } from '@shared/models'
+import { songClipProblem, withSong } from '@shared/song-send'
 import type { GenerationParams, Sequence, VideoModel } from '@shared/types'
 import { missingInput, unavailableModel } from '../ParamsForm'
 import { continuationOf, continues, effectiveParams, readyTake } from './sequenceUtils'
@@ -21,8 +22,9 @@ export function ownEndImageRefused(params: GenerationParams, endFromNext: boolea
  * What stands in the way of the clip's prompt and references as its take would be sent (without the full stop,
  * for a button), or undefined: the words main's clipProblem uses. A clip that continues from the previous one
  * is checked the way it is sent – in reference mode against the references it carries with the previous clip's last
- * frame after them, exactly against none – and any other clip like a generation (missingInput). `params`: the editor's
- * draft for the clip (default: the stored params).
+ * frame after them, exactly against none – and any other clip like a generation (missingInput); a song clip with its
+ * window of the song as its reference audio (withSong). `params`: the editor's draft for the clip (default: the stored
+ * params).
  */
 export function sendInputProblem(
   sequence: Sequence,
@@ -33,7 +35,7 @@ export function sendInputProblem(
   if (!s || !params) return undefined
   const segment = { ...s, params }
   const plan = continues(segment, index) ? continuationOf(segment, index, sequence) : undefined
-  if (!plan) return missingInput(params, false)
+  if (!plan) return missingInput(params.song ? withSong(params, sequence.song) : params, false)
   if (!params.prompt.trim()) return 'Write a prompt'
   return continuationProblem(effectiveParams(segment, index, sequence), plan)?.replace(/\.\s*$/, '')
 }
@@ -65,7 +67,11 @@ export function clipBlocked({ sequence, index, params, models, modelsError, ffmp
   // The model the take is sent with (a continuation's family model), which must be there and online.
   const sent = effectiveParams({ ...s, params }, index, sequence)
   const model = models.find((m) => m.id === sent.model)
+  // A song clip that can't hear its window of the song (its model, its place) says so first – after a missing prompt,
+  // as main does.
+  const song = params.prompt.trim() ? songClipProblem(sent, sequence.song)?.replace(/\.\s*$/, '') : undefined
   return (
+    song ??
     sendInputProblem(sequence, index, params) ??
     ((continuing || endFromNext) && !ffmpegOk ? 'ffmpeg is needed for frames from the neighbouring clips' : undefined) ??
     (previous && !readyTake(previous) ? `Clip ${index} has no finished take` : undefined) ??

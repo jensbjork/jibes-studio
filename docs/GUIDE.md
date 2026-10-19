@@ -468,6 +468,44 @@ the one neighbour it has. The editor shows both frames and the price; the neighb
 When the new take is ready, click it in the take strip — the old take stays selected until you choose, and stays
 among the takes in case you want it back.
 
+**A music video from your song.** *＋ New sequence* → *From a song…* (also ⌘K *New sequence from a song…*, or drop an
+audio file on the list of sequences) takes an MP3, WAV, M4A, AAC, AIFF, FLAC or OGG file and shows its name and length
+(▶ to listen) with three choices. *Separate the vocals* (free, on this Mac; off, with the reason, on a Mac that can't)
+gives the singing shots only the voice to hear, which keeps the lips in time. *Transcribe the lyrics* (paid, the price
+on the box before anything is sent; *More* picks the model and the language) writes down the words with their times,
+so every clip knows what is sung in it. *Clips of about* 4, 6, 8, 10 or 12 s sets how finely the song is cut. The
+sequence opens at once and its **song strip** says what is going on (*Separating the vocals… 40%*, *Transcribing the
+lyrics…*, *Finding the beat…*); then the song is split into clips at its lines and phrases, on the beat, each clip
+empty and following the cast. Set the *Cast* — the singer, the outfit, the stage — and every clip has them.
+
+The song strip, above the clips, shows the waveform (the vocals tinted once separated), the beats and bars and every
+clip's place in the song. Drag a boundary to move a cut: it snaps to the beat, ⌥ puts it anywhere, and no place gets
+shorter than 2 s (the strip says why it stops). *Split at playhead* cuts the clip under the playhead in two, *Merge with
+next* gives the open clip the next one's place, a click on a place opens its clip, and the song plays, pauses and
+scrubs right there (Space while the strip has the focus). The lyric lines run under the waveform: click one to correct
+it — with as many words as before each keeps its time, otherwise the words share the line's. The cards below are as wide
+as their places and keep the song's order (the cuts move in the strip, not by dragging cards). *Song* in the header
+tells whether the vocals are separated and the lyrics transcribed (and does either again), and replaces or removes the
+song (the clips stay, as ordinary clips; the song's files stay in the sequence's folder); *⋯ → Add a song…* cuts a sequence you already have to
+a song.
+
+A song clip's editor starts with its **place in the song** ("0:16.0 – 0:24.0 · 8.0 s") and the words sung there, and
+*What the clip hears*: *Vocals – lip sync* sends the vocals of its place (the whole song where they aren't separated)
+as the clip's reference audio, for a shot of someone singing it; *Music – mood and rhythm* sends the whole song there,
+for a shot that moves with it; *No song* sends nothing of it. *Who sings* picks the singer among the clip's characters,
+or *Nobody on screen*. The duration is automatic — the shortest the model offers that holds the place and a second more
+("9 s for 8.0 s of the song") — and the prompt is written as usual: "@Image1 sings into a microphone on a concert stage,
+medium close-up, static camera". Hearing the song takes a model with reference audio (Seedance 2.5 R2V).
+
+When a take of a singing clip is done, Studio measures where its singing sits against the song and starts the take
+there in the cut: the clip says *In sync (+0.32 s)* or *No singing found – check the lips*, and so does the take's tile.
+Nudge the start by a frame or a tenth of a second (the cut keeps the place's length) or *Measure again*. *Preview* and
+*Export* play the song over the whole film and leave the clips' own sound out.
+
+Tips: singing shots work best as close-ups or medium close-ups with the singer facing the camera; put the wide shots,
+the band and the crowd on *Music – mood and rhythm*. A singing place sends at most its first 15 s. Check the lips of
+every singing take before you export — *In sync* means the voice lines up, not that each syllable looks right.
+
 ## Storyboards
 
 A **storyboard** is a different way to make a film: first the milestones as pictures, then the motion between them.
@@ -541,7 +579,7 @@ an edit's frames show a larger picture the same way when hovered or tabbed to. N
 can be looked at there, not changed — and Esc closes a card before it closes the dialog.
 
 Turn it on under **Settings → Agent connection**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 91
+Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 96
 tools, sending files, the review loop and troubleshooting.
 
 ## Security

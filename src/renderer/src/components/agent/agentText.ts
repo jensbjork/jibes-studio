@@ -162,6 +162,8 @@ export function approvalTitle(a: ApprovalRequest, sequenceName?: string): string
     }
     case 'voice-design':
       return a.edit?.assetName ? `A new voice for ${a.edit.assetName}` : 'A new voice for a character'
+    case 'song-lyrics':
+      return `The lyrics of “${a.song?.songName ?? 'the song'}”${inSequence}`
     case 'image': {
       const board = a.image?.assignToBoard
       if (board) return `The image for board ${board.boardNumber}${inSequence}`
@@ -202,11 +204,12 @@ export function expiresText(expiresAt: number, now: number): string {
 
 /**
  * The verb for what the agent asks: "wants to generate" a video, "wants to create" a picture or a voice, "wants to
- * edit" a film, "wants to delete" things.
+ * edit" a film, "wants to transcribe" a song's lyrics, "wants to delete" things.
  */
 export function approvalVerb(a: ApprovalRequest): string {
   if (a.kind === 'delete') return 'wants to delete'
   if (a.kind === 'edit') return 'wants to edit'
+  if (a.kind === 'song-lyrics') return 'wants to transcribe'
   return a.kind === 'image' || a.kind === 'voice-design' ? 'wants to create' : 'wants to generate'
 }
 
@@ -222,6 +225,8 @@ export function approvalHeading(a: ApprovalRequest): string {
       return 'wants to edit a film'
     case 'voice-design':
       return 'wants to create a voice'
+    case 'song-lyrics':
+      return 'wants to transcribe the lyrics'
     case 'delete':
       return 'wants to delete'
     default:
@@ -231,11 +236,12 @@ export function approvalHeading(a: ApprovalRequest): string {
 
 /**
  * The approve button: "Approve and generate", "… and create" for a picture or a voice, "… and run" for an edit,
- * "… and delete" for a removal.
+ * "… and transcribe" for a song's lyrics, "… and delete" for a removal.
  */
 export function approveLabel(a: ApprovalRequest): string {
   if (a.kind === 'delete') return 'Approve and delete'
   if (a.kind === 'edit') return 'Approve and run'
+  if (a.kind === 'song-lyrics') return 'Approve and transcribe'
   return a.kind === 'image' || a.kind === 'voice-design' ? 'Approve and create' : 'Approve and generate'
 }
 
@@ -279,7 +285,8 @@ const FAILED: Record<ApprovalRequest['kind'], string> = {
   image: 'The image couldn’t be created.',
   edit: 'The change couldn’t be started.',
   'voice-design': 'The voice couldn’t be created.',
-  delete: 'Nothing could be deleted.'
+  delete: 'Nothing could be deleted.',
+  'song-lyrics': 'The lyrics couldn’t be transcribed.'
 }
 
 /** Why an approval didn't lead to a generation, when main gave no message. */
@@ -297,6 +304,9 @@ export function approvalOutcome(a: ApprovalRequest): string {
       }
       if (a.kind === 'voice-design') {
         return `Approved – the voice is being created and will be added under Voice${a.edit?.assetName ? ` for ${a.edit.assetName}` : ''} when it’s done.`
+      }
+      if (a.kind === 'song-lyrics') {
+        return 'Approved – the lyrics are being transcribed. They appear under the song strip when they’re done.'
       }
       if (a.kind !== 'image') {
         // A later variant that couldn't be sent: main says how many were.
