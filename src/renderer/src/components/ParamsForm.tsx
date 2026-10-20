@@ -81,7 +81,7 @@ import {
 } from './pickers/audioRefs'
 import Popover from './pickers/Popover'
 import PromptLibraryPicker from './pickers/PromptLibraryPicker'
-import ReferenceVideos from './pickers/ReferenceVideos'
+import ReferenceVideos, { isVideoFile, videoFilesAsCandidates } from './pickers/ReferenceVideos'
 import { moveItem } from './pickers/reorder'
 import SavePromptDialog from './pickers/SavePromptDialog'
 import { formatClipSeconds } from './pickers/text'
@@ -512,6 +512,23 @@ export default function ParamsForm({
     !supportsReferenceVideos(params.model) && videoModel && kinds.includes('reference-to-video')
       ? () => set('model', videoModel.id)
       : undefined
+
+  /**
+   * Files that aren't pictures dropped on the reference images (the first place one drops a clip): a video becomes a
+   * reference video when the model takes them, as if dropped on that row; otherwise a note says why it can't be used.
+   */
+  const dropOtherOnReferences = async (paths: string[]) => {
+    const videoPaths = paths.filter(isVideoFile)
+    if (!videoPaths.length) return setRefNote('Only pictures (JPG, PNG or WebP) can be reference images.')
+    if (!videoLimits) {
+      return setRefNote(
+        `${model?.name ?? 'This model'} doesn’t take reference videos${videoModel ? ` – choose ${videoModel.name} under Model` : ''}.`
+      )
+    }
+    const { candidates, note } = await videoFilesAsCandidates(videoPaths)
+    if (candidates.length) addVideoRefs(candidates)
+    if (note) setVideoNote(note)
+  }
 
   const setRefs = (next: string[], swap?: { from: Asset[]; to: Asset | null }) => setReferences({ refs: next }, swap)
 
@@ -983,6 +1000,7 @@ export default function ParamsForm({
             showCount={false}
             value={refs}
             onChange={(v) => setRefs(v)}
+            onOtherFiles={(paths) => void dropOtherOnReferences(paths)}
             onSwap={swapReference}
             caption={caption}
             library={assets}

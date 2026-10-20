@@ -58,6 +58,11 @@ interface Props {
    * Left out, a swap is an ordinary change through onChange.
    */
   onSwap?: (index: number, choice: SwapChoice) => void
+  /**
+   * Gets the dropped files that aren't pictures (a video, a document) instead of their being ignored, so the form can
+   * put a video where it belongs or say why a file can't be used. Left out, they are ignored.
+   */
+  onOtherFiles?: (paths: string[]) => void
 }
 
 /** The swap picker: for the picture with this key (it follows the picture when the list changes meanwhile). */
@@ -88,7 +93,8 @@ export default function ImageInput({
   library = NO_ASSETS,
   stills,
   sequenceId,
-  onSwap
+  onSwap,
+  onOtherFiles
 }: Props) {
   const [over, setOver] = useState(false)
   const [swapping, setSwapping] = useState<Swapping>()
@@ -130,9 +136,9 @@ export default function ImageInput({
 
   const onDragOver = (e: DragEvent) => {
     if (reorder.onDragOver(e)) return
-    // Anything else (an audio chip, a still, text) can't be dropped here, nor files on a full strip, and the cursor
-    // should say so.
-    if (!carriesFiles(e) || !room) return
+    // Anything else (an audio chip, a still, text) can't be dropped here, nor files on a full strip (unless the parent
+    // takes the files that aren't pictures), and the cursor should say so.
+    if (!carriesFiles(e) || (!room && !onOtherFiles)) return
     e.preventDefault()
     setOver(true)
   }
@@ -141,7 +147,10 @@ export default function ImageInput({
     if (reorder.onDrop(e)) return
     e.preventDefault()
     setOver(false)
-    add(Array.from(e.dataTransfer.files).map((f) => window.studio.pathForFile(f)))
+    const paths = Array.from(e.dataTransfer.files).map((f) => window.studio.pathForFile(f))
+    add(paths)
+    const others = paths.filter((p) => !IMAGE_EXT.test(p))
+    if (others.length) onOtherFiles?.(others)
   }
 
   const pick = async () => add(await window.studio.pickImages(multiple))

@@ -29,6 +29,33 @@ export const REFERENCE_VIDEO_DRAG_TYPE = 'application/x-studio-reference-video'
 /** The video files main reads (MP4, MOV and the like); anything else dropped is refused with a note. */
 const VIDEO_EXT = /\.(mp4|m4v|mov|webm|mkv|avi)$/i
 
+/** Whether a file on disk is a video a reference video can be made from (by its name). */
+export const isVideoFile = (path: string): boolean => VIDEO_EXT.test(path)
+
+/**
+ * Video files from disk as candidates for the form: measured first (their length decides the window); the note says
+ * what couldn't be used (not a video, unreadable). Also used for videos dropped on the reference images.
+ */
+export async function videoFilesAsCandidates(paths: string[]): Promise<{ candidates: VideoCandidate[]; note?: string }> {
+  const files = paths.filter(isVideoFile)
+  if (!files.length) {
+    return { candidates: [], note: paths.length ? 'Only video files (MP4 or MOV) can be reference videos.' : undefined }
+  }
+  let measured: Map<string, VideoFacts>
+  try {
+    measured = await measureVideos(files)
+  } catch {
+    return { candidates: [], note: 'The videos couldn’t be read.' }
+  }
+  const unreadable = files.filter((p) => measured.get(p)?.error)
+  return {
+    candidates: files
+      .filter((p) => !measured.get(p)?.error)
+      .map((p) => ({ path: p, duration: measured.get(p)?.duration })),
+    note: unreadable.length ? measured.get(unreadable[0])?.error : undefined
+  }
+}
+
 
 interface Props {
   /** The form's reference videos, in @VideoN order (also the ones that aren't sent). */
@@ -110,26 +137,9 @@ export default function ReferenceVideos({
 
   /** Files from disk: measured first (their length decides the window), then added; others get a note. */
   const addFiles = async (paths: string[]) => {
-    const files = paths.filter((p) => VIDEO_EXT.test(p))
-    const refused = paths.length - files.length
-    if (!files.length) {
-      if (refused) onNote('Only video files (MP4 or MOV) can be reference videos.')
-      return
-    }
-    let measured: Map<string, VideoFacts>
-    try {
-      measured = await measureVideos(files)
-    } catch {
-      onNote('The videos couldn’t be read.')
-      return
-    }
-    const unreadable = files.filter((p) => measured.get(p)?.error)
-    onAdd(
-      files
-        .filter((p) => !measured.get(p)?.error)
-        .map((p) => ({ path: p, duration: measured.get(p)?.duration }))
-    )
-    if (unreadable.length) onNote(measured.get(unreadable[0])?.error)
+    const { candidates, note } = await videoFilesAsCandidates(paths)
+    if (candidates.length) onAdd(candidates)
+    if (note) onNote(note)
   }
 
   const pickFile = async () => {
