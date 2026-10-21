@@ -153,6 +153,9 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   operations directly, paid ones by request), *request* paid generations, pictures, edits and voices — and any
   removal — that you approve or decline in an in-app dialog, follow what runs, and look back at finished clips and
   exported films (frames, sound, the references used) to review them and record learnings for the next prompt.
+  Claude Desktop connects in one click: *Add to Claude Desktop* installs Studio there as an extension.
+- **Updates from GitHub**: a check once a day (it can be switched off) and *Check for Updates…*; *Update now*
+  downloads the new version, checks it and installs it in place (see [Updates](#updates)).
 - **Separate development profile** ("Studio Dev") so development never touches the library the installed app uses.
 
 ## Status
@@ -233,11 +236,37 @@ without it, and runs without voice separation). The app is signed ad hoc (no App
 which is enough to run it on the Mac that built it. Studio.app uses the real profile
 (`~/Library/Application Support/Studio/`). The icon is drawn in `build/icon.svg`.
 
+## Updates
+
+Studio asks GitHub once a day, when it starts, whether a newer version is out – and whenever you ask: **Check for
+Updates…** in the Studio menu (macOS) or **Check for updates** under **Settings → About Studio**. A newer version shows
+as a small notice in the bottom right corner: **Update now** downloads it, checks it and installs it, **Release notes**
+opens its page on GitHub, and **Later** hides that version until a newer one comes out.
+
+- **On a Mac** Studio replaces itself where it is (in Applications or wherever you keep it) and restarts; the old
+  version goes to the Trash. It must be allowed to write there: if it isn't – another user's copy, a read-only disk, or
+  Studio opened straight from Downloads, which macOS runs from a temporary place – the notice says so and offers the
+  release page instead. Running the install command from the README again also updates it.
+- **On Windows** Studio downloads the installer (`Studio-win-x64-setup.exe`), closes and runs it without questions;
+  it updates Studio where it is installed and opens it again. The portable zip can't update itself: download the new
+  zip from the release page.
+- **Checked before it is installed.** The download must match the SHA-256 checksum GitHub records for the file (or the
+  release's `SHA256SUMS.txt`); one that doesn't is never installed. Nothing is installed while something runs that a
+  restart would cut off – generations at Venice, an export, an import, a library export or import, an agent's request
+  – Studio says what to wait for. If anything goes wrong, the Studio you have stays as it was.
+- **What it sends:** the check is one request to GitHub (`api.github.com`) for the newest release's details, the
+  download only happens when you choose *Update now*, and nothing about you or your library goes with either. Turn the
+  daily check off with **Check for updates automatically** under **Settings → About Studio**; Studio then only asks
+  when you do.
+- **Studio Dev** and other development builds (`npm run dev`, `npm run dev:real`) never look for updates: they come
+  from git.
+
 ## Where things are stored
 
 **Settings** live in `~/Library/Application Support/Studio/settings.json`: the base folder, the prompt language,
 *Safe mode for images* (Venice blurs adult content in pictures it makes; on by default), the spending budget,
-accepted Venice consents and the agent connection's port. The Venice API key and the agent token are stored
+accepted Venice consents, the agent connection's port and the daily update check (on or off, and when Studio last
+checked). The Venice API key and the agent token are stored
 encrypted with Electron `safeStorage` (macOS Keychain).
 
 **The library** lives in a base folder you choose on first launch (suggested: `~/Movies/Studio`). It can be switched
@@ -687,15 +716,23 @@ an edit's frames show a larger picture the same way when hovered or tabbed to. N
 can be looked at there, not changed — and Esc closes a card before it closes the dialog.
 
 Turn it on under **Settings → Agent connection**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 96
+Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 99
 tools, sending files, the review loop and troubleshooting.
+
+**Claude Desktop** needs no configuration: in the same section, **Add to Claude Desktop** makes a Claude Desktop
+extension with this Mac's address and the token and opens it in Claude Desktop, which asks you to install it. For
+Claude Desktop on another computer in your tailnet, choose the Tailscale address and save the file there instead. The
+file holds the token, so don't share it; after you change the token, add Studio to Claude Desktop again. If Claude
+Desktop starts before Studio, its Studio tools appear once Studio is running.
 
 ## Security
 
 Studio is a local app. The agent connection is off by default, listens only on loopback and the Tailscale
 interface (never on your LAN or `0.0.0.0`), requires a 256-bit bearer token, refuses browser requests, fetches
 agents' URLs only from public addresses (or the agent's own machine), and paid actions and removals always need your
-approval in the app. Secrets are encrypted with the macOS Keychain. Details, the threat
+approval in the app. Secrets are encrypted with the macOS Keychain. Apart from Venice, the only thing Studio contacts
+on its own is GitHub, once a day, to see whether a newer Studio is out (switch it off under **Settings → About
+Studio**). Details, the threat
 model and how to report a vulnerability: **[SECURITY.md](../SECURITY.md)**.
 
 ## Documentation

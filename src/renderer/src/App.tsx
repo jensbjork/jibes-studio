@@ -17,6 +17,7 @@ import SequencesView from './components/sequences/SequencesView'
 import SettingsView from './components/SettingsView'
 import Sidebar, { SIDEBAR_WIDTH } from './components/Sidebar'
 import StoryboardsView from './components/storyboards/StoryboardsView'
+import UpdateNotice from './components/updates/UpdateNotice'
 import SeenToast from './components/work/SeenToast'
 import WorkPanel from './components/work/WorkPanel'
 import WorkStillViewer from './components/work/WorkStillViewer'
@@ -83,11 +84,22 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [library])
 
-  // Everything else reads from the library, so nothing mounts until it is ready.
-  if (!library) return <Starting error={libraryError} onRetry={() => void refreshLibrary()} />
-  if (library.state === 'switching') return <SwitchingOverlay phase={{ kind: 'waiting' }} />
-  if (library.state !== 'ready') return <LibrarySetup status={library} onRetry={refreshLibrary} devProfile={devProfile} />
-  return <Workspace />
+  // Everything else reads from the library, so nothing mounts until it is ready. A newer Studio (or the answer to
+  // Check for Updates…) shows over whichever it is.
+  return (
+    <>
+      {!library ? (
+        <Starting error={libraryError} onRetry={() => void refreshLibrary()} />
+      ) : library.state === 'switching' ? (
+        <SwitchingOverlay phase={{ kind: 'waiting' }} />
+      ) : library.state !== 'ready' ? (
+        <LibrarySetup status={library} onRetry={refreshLibrary} devProfile={devProfile} />
+      ) : (
+        <Workspace />
+      )}
+      <UpdateNotice />
+    </>
+  )
 }
 
 /** Whether the sidebar is the icon rail: per profile (this window's storage), not library data. */

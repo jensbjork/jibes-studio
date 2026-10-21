@@ -1,0 +1,59 @@
+{
+  "manifest_version": "0.3",
+  "name": "studio",
+  "display_name": "Studio",
+  "version": "0.0.0",
+  "description": "Work in Studio, your desktop video studio, from Claude. Anything that costs money or removes something waits for your approval in Studio.",
+  "long_description": "Connects Claude to Studio's agent connection, on this computer or on another one in your tailnet (Tailscale). Claude can then do nearly everything you can in Studio: read the library and look at its photos, create characters, environments, products, outfits and poses, write prompts, fill in the Generate form, build sequences and storyboards and edit films. It can never spend money or remove anything on its own: every generation, paid edit and removal is a request you approve in Studio.\n\nStudio must be running, with **Settings → Agent connection → Allow agents to connect** switched on. The address and the token come from Studio; if you change the token there, add Studio to Claude Desktop again.",
+  "author": {
+    "name": ""
+  },
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "STUDIO_URL": "${user_config.studio_url}",
+        "STUDIO_TOKEN": "${user_config.studio_token}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "get_studio_guide", "description": "How Studio works and how to write video prompts that work." },
+    { "name": "list_assets", "description": "The library's characters, environments, products, outfits and poses." },
+    { "name": "set_form", "description": "Fill in the Generate form in Studio's window." },
+    { "name": "create_sequence", "description": "Start a sequence of clips." },
+    { "name": "request_generation", "description": "Ask you to approve a paid generation in Studio." },
+    { "name": "request_delete", "description": "Ask you to approve a removal in Studio." }
+  ],
+  "tools_generated": true,
+  "prompts_generated": true,
+  "keywords": ["video", "studio", "storyboard", "sequence", "venice"],
+  "license": "MIT",
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  },
+  "user_config": {
+    "studio_url": {
+      "type": "string",
+      "title": "Studio's address",
+      "description": "Where Studio listens for agents, as shown in Studio under Settings → Agent connection → Addresses.",
+      "default": "http://127.0.0.1:8770/mcp",
+      "required": false
+    },
+    "studio_token": {
+      "type": "string",
+      "title": "Token",
+      "description": "Studio's token, from Settings → Agent connection → Token. If you change the token in Studio, paste the new one here or add Studio to Claude Desktop again.",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}

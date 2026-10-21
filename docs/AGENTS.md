@@ -83,9 +83,70 @@ dialog (otherwise it uses the name the MCP client reports, which may be generic)
 
 ## Client configuration
 
-Settings → Agent connection shows ready-made snippets for OpenClaw and Hermes Agent with your address, and its copy
-buttons include the real token. The examples below use placeholders: replace `<token>` and the URL. Treat the token
-like a password and keep it out of files you commit or share.
+Claude Desktop needs no configuration: Settings → Agent connection adds Studio to it in one click (see
+[Claude Desktop](#claude-desktop)). For OpenClaw and Hermes Agent the same section shows ready-made snippets with your
+address, and its copy buttons include the real token. The examples below use placeholders: replace `<token>` and the
+URL. Treat the token like a password and keep it out of files you commit or share.
+
+### Claude Desktop
+
+In Studio, open **Settings → Agent connection → Claude Desktop** and click **Add to Claude Desktop**. Studio makes a
+Claude Desktop extension — a `.mcpb` file ([MCP Bundle](https://github.com/modelcontextprotocol/mcpb), manifest
+version 0.3) with this computer's address and the current token filled in — and opens it in Claude Desktop, which asks
+you to install it. That's all: Claude Desktop starts the extension whenever it runs, and Studio shows *Claude* among
+the connected agents, in the activity log and in its approval dialogs.
+
+- **The connection must be on** (*Allow agents to connect*); the button waits for it. Without Claude Desktop the card
+  links to [claude.ai/download](https://claude.ai/download). Studio looks for it in `/Applications` and
+  `~/Applications` (on Windows: its per-user install in `%LOCALAPPDATA%\AnthropicClaude`, or the Microsoft Store
+  package), and only looks: it never reads or changes Claude Desktop's settings.
+- **Claude Desktop on another computer:** open *For Claude Desktop on another computer…*, choose the Tailscale
+  address (or name) and click *Save…*. On that computer, double-click the file, or install it in Claude Desktop under
+  *Settings → Extensions → Advanced settings → Install Extension…*. The computer must be in your tailnet. The same
+  works for this computer (*This Mac*) if Claude Desktop doesn't open the file by itself.
+- **The token is in the extension.** A saved file holds the token: don't share it. The file Studio hands Claude
+  Desktop is deleted after 15 minutes, or when Studio quits. The address and the token are the extension's two
+  settings (*Studio's address*, *Token*), filled in as their defaults, and Claude Desktop keeps the installed extension
+  — the token with it — in its own folder for your user account, as it keeps the configuration of `mcp-remote` below.
+  **After you replace the token in Studio, add Studio to Claude Desktop again**, or paste the new token into the
+  extension's settings in Claude Desktop.
+- **What runs:** the extension is a small bridge (`server/index.js`, built from `src/mcpb/bridge.ts`) that Claude
+  Desktop starts with its own Node.js. It passes MCP between Claude Desktop (stdio) and Studio (Streamable HTTP, with
+  the token and `X-Studio-Agent-Name: Claude`) unchanged: Studio's instructions, tools, prompt and resource. If Studio
+  isn't running when Claude Desktop starts, the extension starts anyway with a single tool, `studio_status`, that
+  says why Studio's tools are missing, and keeps trying; once Studio answers, it tells Claude Desktop that the tool
+  list changed. After Studio restarts, the next call opens a new session by itself. Every failure is an MCP error
+  that says what to do: Studio not reachable (not running, the connection off, or — from another computer — not in
+  the tailnet), the token refused (it was replaced), an address that isn't Studio's, or Studio closing in the middle
+  of a call.
+
+#### By hand, with mcp-remote
+
+If you'd rather not install an extension — or Claude Desktop can't install one (an organisation may switch that
+off) — Claude Desktop's configuration file can start [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which
+bridges to Studio the same way. In `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "studio": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://127.0.0.1:8770/mcp",
+        "--transport", "http-only",
+        "--header", "Authorization:${STUDIO_AUTH}",
+        "--header", "X-Studio-Agent-Name:Claude"
+      ],
+      "env": { "STUDIO_AUTH": "Bearer <token>" }
+    }
+  }
+}
+```
+
+`mcp-remote` only allows plain `http://` for `localhost`/`127.0.0.1`; to reach Studio over Tailscale from another
+Mac, use the `100.x.y.z` or `.ts.net` URL and add `--allow-http`. Restart Claude Desktop after editing the file.
 
 ### OpenClaw
 
@@ -149,39 +210,12 @@ Or in a project's `.mcp.json`, reading the token from the environment so it is n
 }
 ```
 
-### Claude Desktop
-
-Claude Desktop's configuration file starts local (stdio) servers, so bridge to Studio with
-[`mcp-remote`](https://www.npmjs.com/package/mcp-remote). In
-`~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "studio": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "http://127.0.0.1:8770/mcp",
-        "--transport", "http-only",
-        "--header", "Authorization:${STUDIO_AUTH}",
-        "--header", "X-Studio-Agent-Name:Claude"
-      ],
-      "env": { "STUDIO_AUTH": "Bearer <token>" }
-    }
-  }
-}
-```
-
-`mcp-remote` only allows plain `http://` for `localhost`/`127.0.0.1`; to reach Studio over Tailscale from another
-Mac, use the `100.x.y.z` or `.ts.net` URL and add `--allow-http`. Restart Claude Desktop after editing the file.
-
 ### Any other MCP client
 
 Any client that supports **Streamable HTTP** with custom headers works: point it at the URL and send the
-`Authorization` header. Clients that only support stdio can use `mcp-remote` as above. Browser-based clients cannot
-connect (see [Troubleshooting](#troubleshooting)).
+`Authorization` header. Clients that only support stdio can use `mcp-remote` as above, or the Claude Desktop
+extension's bridge (`node server/index.js` with `STUDIO_URL` and `STUDIO_TOKEN` in its environment). Browser-based
+clients cannot connect (see [Troubleshooting](#troubleshooting)).
 
 ## Tools
 
@@ -839,7 +873,13 @@ explains the error. Check the macOS firewall (System Settings → Network → Fi
 allow Studio in Windows Defender Firewall (*Allow an app through firewall*).
 
 **HTTP 401 Unauthorized.** The `Authorization: Bearer <token>` header is missing or the token is wrong — typically
-after the token was replaced. Copy the current token from Agent connection.
+after the token was replaced. Copy the current token from Agent connection. The Claude Desktop extension says *Studio
+refused the token*: add Studio to Claude Desktop again.
+
+**Claude Desktop has no Studio tools, or only `studio_status`.** Ask Claude to call `studio_status`: it says why.
+Usually Studio isn't running or *Allow agents to connect* is off; the tools appear by themselves once Studio answers.
+If they don't, switch the extension off and on in Claude Desktop (*Settings → Extensions*). The extension's log in
+Claude Desktop has its lines prefixed `[studio]` (never the token).
 
 **HTTP 403 Forbidden.** The request came from an address that isn't allowed on the socket it reached: the
 loopback address only serves this Mac, and the Tailscale address only serves tailnet peers (not devices on a LAN

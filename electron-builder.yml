@@ -28,6 +28,10 @@ mac:
   extraResources:
     - from: build/bin/studio-voice-isolate
       to: bin/studio-voice-isolate
+    # The Claude Desktop extension's parts (scripts/build-mcpb.mjs, run by build:helpers), zipped into a .mcpb with the
+    # address and the token when the user adds Studio to Claude Desktop (src/main/claude-desktop.ts).
+    - from: build/mcpb
+      to: mcpb
   # Fixed names, so https://github.com/<owner>/studio/releases/latest/download/Studio-mac-arm64.zip always points at
   # the newest release (install.sh downloads it).
   artifactName: ${productName}-mac-${arch}.${ext}
@@ -72,6 +76,9 @@ win:
         - '*.dll'
         - LICENSE.txt
         - SOURCE.txt
+    # The Claude Desktop extension's parts, as on the Mac (the release workflow runs scripts/build-mcpb.mjs first).
+    - from: build/mcpb
+      to: mcpb
 nsis:
   artifactName: ${productName}-win-${arch}-setup.${ext}
   # The assisted installer, per user by default (no administrator needed, installed under %LOCALAPPDATA%\Programs),

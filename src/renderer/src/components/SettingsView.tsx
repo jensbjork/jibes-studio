@@ -122,8 +122,12 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
               <ToolsSettings ffmpeg={ffmpeg} />
             </SettingsSection>
 
-            <SettingsSection id={SECTION.about} title="About Studio" description="The version you are running.">
-              <AboutSettings devProfile={settings.devProfile} />
+            <SettingsSection
+              id={SECTION.about}
+              title="About Studio"
+              description="The version you are running, and updates."
+            >
+              <AboutSettings settings={settings} onChanged={onChanged} />
             </SettingsSection>
           </div>
         </div>

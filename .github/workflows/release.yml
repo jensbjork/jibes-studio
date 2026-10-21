@@ -3,6 +3,8 @@ name: Release
 # Pushing a version tag (v0.3.0) builds Studio on GitHub's runners and publishes one release with four files:
 #   Studio-mac-arm64.zip (what install.sh downloads) and Studio-mac-arm64.dmg (for a download by hand) – Apple Silicon
 #   Studio-win-x64-setup.exe (the installer) and Studio-win-x64.zip (portable) – 64-bit Windows
+# and SHA256SUMS.txt, their SHA-256 checksums. Studio updates itself from the newest release (src/main/updates.ts):
+# the Mac zip or the Windows installer, checked against GitHub's digest of the file or, without one, SHA256SUMS.txt.
 # The Windows build is started and checked first (scripts/smoke-test.mjs); nothing is published unless both builds pass.
 # "Run workflow" builds the same files without publishing anything, as artifacts of the run.
 
@@ -50,6 +52,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # The Swift helper, and the Claude Desktop extension's bridge and manifest (build/mcpb).
       - name: Build native helpers
         run: npm run build:helpers
 
@@ -60,6 +63,10 @@ jobs:
       # in a browser needs "Open Anyway" once (see the README).
       - name: Package
         run: npx electron-builder --mac zip dmg --arm64 --publish never
+
+      # electron-builder only warns about a missing extraResources folder; Settings' Add to Claude Desktop needs it.
+      - name: Check the Claude Desktop extension is in the app
+        run: test -f dist/mac-arm64/Studio.app/Contents/Resources/mcpb/server/index.js
 
       - name: Upload the build
         uses: actions/upload-artifact@v4
@@ -108,7 +115,11 @@ jobs:
       - name: Fetch ffmpeg
         run: node scripts/fetch-ffmpeg-win.mjs --check
 
-      # The Swift voice separation helper is macOS only: build-helpers isn't run here.
+      # The Swift voice separation helper is macOS only: build-helpers isn't run here, only the Claude Desktop
+      # extension's part of it (build/mcpb, which the package step puts in resources\mcpb).
+      - name: Build the Claude Desktop extension
+        run: node scripts/build-mcpb.mjs
+
       - name: Build
         run: npx electron-vite build
 
@@ -116,6 +127,9 @@ jobs:
       # loads better-sqlite3's own Node-API binary (prebuilds/win32-x64.node), which works in Electron as it is.
       - name: Package
         run: npx electron-builder --win nsis zip --x64 --publish never -c.npmRebuild=false
+
+      - name: Check the Claude Desktop extension is in the app
+        run: test -f dist/win-unpacked/resources/mcpb/server/index.js
 
       # Starts dist/win-unpacked/Studio.exe with a throwaway profile and checks over the DevTools protocol that the
       # window shows Studio, that the bundled ffmpeg reports its version, that a new library opens and Settings renders.
@@ -157,6 +171,14 @@ jobs:
           merge-multiple: true
           path: dist
 
+      # The files' SHA-256, as sha256sum writes them ("<hex>  <name>"): what Studio checks an update against when the
+      # API gives no digest for a file, and for anyone checking a download by hand (shasum -a 256 -c SHA256SUMS.txt).
+      - name: Write the checksums
+        working-directory: dist
+        run: |
+          sha256sum Studio-mac-arm64.zip Studio-mac-arm64.dmg Studio-win-x64-setup.exe Studio-win-x64.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -165,5 +187,6 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             dist/Studio-mac-arm64.zip dist/Studio-mac-arm64.dmg \
             dist/Studio-win-x64-setup.exe dist/Studio-win-x64.zip \
+            dist/SHA256SUMS.txt \
             --title "Studio $GITHUB_REF_NAME" \
             --generate-notes

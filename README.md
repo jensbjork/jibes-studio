@@ -21,6 +21,8 @@ stops it: open **System Settings → Privacy & Security** and click **Open Anywa
 unzip `Studio-win-x64.zip` anywhere. ffmpeg comes with it. The app isn't signed, so SmartScreen warns the first
 time: click **More info → Run anyway**.
 
+Studio tells you when a new version is out and updates itself when you choose **Update now**.
+
 ## Get started
 
 1. Choose a folder for your library.

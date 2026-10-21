@@ -26,13 +26,14 @@ import { variantsPrice } from '@shared/variants'
 import { AgentService, recordIpcHandlers, registerAgentIpc } from './agent'
 import { isAgentCall } from './agent/local-ipc'
 import { assertWithinBudget } from './budget'
+import { registerClaudeDesktopIpc } from './claude-desktop'
 import * as db from './db'
 import { registerEditIpc, type EditServiceHandle } from './edits'
 import { ffmpegStatus, stopAllFfmpeg } from './ffmpeg'
 import { registerImportIpc, VIDEO_FILE_TYPES, type ImportService } from './imports'
 import { JobManager, prepareSubmission, toPublic } from './jobs'
 import { assetWorkBusy, AUDIO_FILE_TYPES, registerLibraryIpc } from './library'
-import { archiveBusyReason, registerArchiveIpc, stopLibraryArchive } from './library-archive'
+import { archiveBusyReason, archiveJobReason, registerArchiveIpc, stopLibraryArchive } from './library-archive'
 import { prepareLibrary, registerLibraryRootIpc } from './library-root'
 import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty, toStoredPath } from './paths'
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
@@ -49,6 +50,7 @@ import { registerSongSyncIpc } from './song-sync'
 import { registerStoryboardIpc, type StoryboardService } from './storyboards'
 import { setTaskbarBadge, showTaskbarBadgeOn } from './taskbar'
 import { acceptConsent, getApiKey, getSettings, setApiKey, setImageSafeMode, setPromptLanguage } from './settings'
+import { checkForUpdatesFromMenu, registerUpdateIpc, startUpdateChecks } from './updates'
 import {
   activeStills,
   importStillFile,
@@ -605,12 +607,59 @@ function registerIpc(): void {
   registerSessionIpc()
 
   registerAgentIpc(agent)
+  // Settings → Agent connection → Claude Desktop: Studio as an extension there (window only).
+  registerClaudeDesktopIpc(agent)
+  // Updates from GitHub Releases (updates.ts): never while a switch would be refused, nor under a library import.
+  registerUpdateIpc({ busy: () => libraryBusyReason() ?? archiveJobReason(), showWindow })
+}
+
+/** Studio's window in front (a new one when none is open), for Check for Updates…. */
+function showWindow(): BrowserWindow {
+  const win = BrowserWindow.getAllWindows()[0] ?? createWindow()
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  return win
+}
+
+/**
+ * macOS' menu: Electron's default one, with Check for Updates… under About Studio. Should building it fail, the
+ * default menu stays.
+ */
+function setMacMenu(): void {
+  try {
+    const appMenu: MenuItemConstructorOptions[] = [
+      { role: 'about' },
+      { label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() },
+      { type: 'separator' },
+      { role: 'services' },
+      { type: 'separator' },
+      { role: 'hide' },
+      { role: 'hideOthers' },
+      { role: 'unhide' },
+      { type: 'separator' },
+      { role: 'quit' }
+    ]
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        { label: app.name, submenu: appMenu },
+        { role: 'fileMenu' },
+        { role: 'editMenu' },
+        { role: 'viewMenu' },
+        { role: 'windowMenu' },
+        { role: 'help', submenu: [] }
+      ])
+    )
+  } catch (err) {
+    console.warn('Setting up the menu failed:', err)
+  }
 }
 
 /**
  * Windows' menu, never shown (createWindow hides its bar), only for its shortcuts: Ctrl+0, Ctrl+= and Ctrl+- zoom,
  * F11 full screen and, in development only, Ctrl+R reload and Ctrl+Shift+I the developer tools. No Edit menu: text
- * fields copy, paste and undo by themselves on Windows. macOS keeps Electron's default menu.
+ * fields copy, paste and undo by themselves on Windows. macOS has Electron's default menu plus Check for Updates…
+ * (setMacMenu).
  */
 function windowsMenu(): Menu {
   const view: MenuItemConstructorOptions[] = [
@@ -631,6 +680,7 @@ void app.whenReady().then(async () => {
     nativeTheme.themeSource = 'dark'
     Menu.setApplicationMenu(windowsMenu())
   }
+  if (IS_MAC) setMacMenu()
   handleMediaProtocol()
   jobs.on('update', (g: Generation) => broadcastGeneration(g))
   registerIpc()
@@ -642,6 +692,8 @@ void app.whenReady().then(async () => {
     console.error('Preparing the library failed:', err)
   }
   createWindow()
+  // Clears what an earlier update left behind; then the daily check, unless switched off (never in a development build).
+  startUpdateChecks()
   // Asks the voice separation helper once in the background (free, local), so Settings and the Editor's sound
   // cards know at once whether removing the voice and keeping only the background can be offered.
   void separationStatus().catch((err: unknown) => console.warn('Checking voice separation failed:', err))

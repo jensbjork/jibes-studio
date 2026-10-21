@@ -1,11 +1,13 @@
 # Dependencies
 node_modules/
 
-# Build output (electron-vite → out/, electron-builder → dist/, native helpers → build/bin/, the Windows build's
-# ffmpeg → build/ffmpeg-win/)
+# Build output (electron-vite → out/, electron-builder → dist/, native helpers → build/bin/, the Claude Desktop
+# extension's parts → build/mcpb/, the Windows build's ffmpeg → build/ffmpeg-win/)
 out/
 dist/
 build/bin/
+build/mcpb/
+build/mcpb.tmp/
 build/ffmpeg-win/
 build/ffmpeg-win.part/
 build/.ffmpeg-*.part

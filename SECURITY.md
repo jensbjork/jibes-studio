@@ -144,6 +144,34 @@ Plain HTTP is used on purpose: loopback traffic never leaves the Mac, and Tailsc
 by WireGuard. Every device in the user's tailnet that has the token can connect; Tailscale ACLs can restrict that
 further.
 
+### Updates
+
+Studio looks for a newer version of itself on GitHub and can install it. What it contacts, and when:
+
+- **The check**: one HTTPS request to `api.github.com` for the newest release of Studio's repository (its version,
+  notes and files), sent with `User-Agent: Studio/<version>` and nothing else — no identifier, nothing about the user
+  or the library. It runs once a day when Studio starts and whenever the user chooses *Check for updates*. Switch the
+  daily check off under **Settings → About Studio → Check for updates automatically**; Studio then never contacts
+  GitHub unless asked. Development builds (Studio Dev, `npm run dev`) never check.
+- **The download**, only after *Update now*: the release's file for this computer from `github.com`, redirected to
+  GitHub's asset host (`*.githubusercontent.com`). Every hop must be HTTPS on those hosts; any other redirect is
+  refused, and the file must come from the repository's own `releases/download/` path.
+- **Integrity**: the file is installed only if its SHA-256 equals the `digest` GitHub's API reports for that file (or,
+  for a file without one, its line in the release's `SHA256SUMS.txt`). On macOS the unpacked app must also have the
+  same bundle id, the release's version, a newer version than the running one and an intact code signature
+  (`codesign --verify`) before it replaces the running app; on Windows the installer runs silently over the installed
+  copy. Agents can't start an update (the calls are window-only), and nothing is installed while work runs that the
+  restart would interrupt.
+
+### Claude Desktop
+
+*Add to Claude Desktop* (Settings → Agent connection) makes a Desktop Extension (`.mcpb`) that holds the agent
+server's address and the current token. The file handed to Claude Desktop is written readable only by the user into a
+private temporary folder and deleted after 15 minutes (or when Studio quits); a file saved for another computer holds
+the token too, so don't share it. Once installed, Claude Desktop keeps the extension with the token in its own
+per-user folder, as it would an `mcp-remote` configuration. Replacing the token in Studio locks the extension out until
+it is added again. Only the window can make the file; agents can't.
+
 ### Out of scope
 
 - An attacker who already controls the user's macOS account or the Studio process.
@@ -166,6 +194,9 @@ welcome.
 - A URL fetch is allowed to reach the agent's own machine (its session's peer address) on any port but Studio's, so
   a token holder can make Studio fetch from a local service on that machine; for an agent on the same Mac that means
   this Mac's loopback services. The fetched bytes must still pass the upload checks, and only the agent sees them.
+- Updates are checked against the checksum GitHub publishes with the release, not against a signature of the
+  maintainer's: the checksum proves the download is the file in the release, so whoever can publish a release in the
+  repository decides what Studio installs. Nothing is installed until the user chooses *Update now*.
 - Builds are signed ad hoc, without hardened runtime or notarization, and are meant to be built and run on the same
   Mac. The voice separation helper (`studio-voice-isolate`, built from `native/voice-isolate/main.swift` by
   `npm run build:helpers`) is signed the same way; it only reads and writes the audio files Studio passes it and

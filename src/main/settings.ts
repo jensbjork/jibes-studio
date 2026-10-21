@@ -36,6 +36,10 @@ interface StoredSettings {
   /** Spending caps in USD (Settings → Spending); a cap left out means none. */
   budget?: BudgetSettings
   agent?: StoredAgentSettings
+  /** Look for a newer Studio once a day (Settings → About Studio); unset means on, only `false` turns it off. */
+  autoUpdateCheck?: boolean
+  /** When Studio last got an answer from GitHub about its newest release (ISO): the daily check counts from it. */
+  lastUpdateCheck?: string
 }
 
 const file = () => join(app.getPath('userData'), 'settings.json')
@@ -108,6 +112,31 @@ export function isDevProfile(): boolean {
   return !!process.env.STUDIO_DEV_PROFILE
 }
 
+/**
+ * STUDIO_UPDATE_TEST_SERVER, for tests only: a stand-in for GitHub on this computer (http://127.0.0.1:<port>) that
+ * updates.ts asks instead, so a test instance can be shown an update. Anything else in it is ignored.
+ */
+export function updateTestServer(): URL | undefined {
+  const raw = process.env.STUDIO_UPDATE_TEST_SERVER
+  if (!raw) return undefined
+  try {
+    const url = new URL(raw)
+    const local = url.hostname === '127.0.0.1' || url.hostname === 'localhost'
+    return url.protocol === 'http:' && local && !url.username && !url.password ? url : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A development build – Studio Dev or any other unpackaged one (`npm run dev:real`) – never looks for updates: it is
+ * updated from git. A test instance pointed at a stand-in for GitHub (updateTestServer) behaves as a release, except
+ * that it never replaces itself (updates.ts).
+ */
+export function isDevelopmentBuild(): boolean {
+  return (!app.isPackaged || isDevProfile()) && !updateTestServer()
+}
+
 /** Where a phase-2 library would be: its old setting if one was ever written, else ~/Movies/Studio. */
 export function legacyLibraryDir(): string {
   const old = load().libraryDir
@@ -138,6 +167,9 @@ export function getSettings(): Settings {
     hasApiKey: !!s.apiKeyEncrypted,
     libraryDir: isLibraryReady() ? libraryRoot() : '',
     devProfile: isDevProfile(),
+    autoUpdateCheck: s.autoUpdateCheck !== false,
+    lastUpdateCheck: lastUpdateCheckOf(s)?.toISOString(),
+    developmentBuild: isDevelopmentBuild(),
     promptLanguage: promptLanguageOf(s),
     imageSafeMode: s.imageSafeMode !== false,
     budget: budgetOf(s)
@@ -192,6 +224,36 @@ export function setImageSafeMode(on: unknown): void {
   if (typeof on !== 'boolean') throw new Error('Invalid value for safe mode.')
   const s = load()
   s.imageSafeMode = on
+  save(s)
+}
+
+// ── Updates ──────────────────────────────────────────────────────────────────
+
+/** Whether Studio looks for a newer version once a day (updates.ts); on unless switched off. */
+export function getAutoUpdateCheck(): boolean {
+  return load().autoUpdateCheck !== false
+}
+
+export function setAutoUpdateCheck(on: unknown): void {
+  if (typeof on !== 'boolean') throw new Error('Invalid value for checking for updates.')
+  const s = load()
+  s.autoUpdateCheck = on
+  save(s)
+}
+
+function lastUpdateCheckOf(s: StoredSettings): Date | undefined {
+  const at = typeof s.lastUpdateCheck === 'string' ? new Date(s.lastUpdateCheck) : undefined
+  return at && Number.isFinite(at.getTime()) ? at : undefined
+}
+
+/** When Studio last got an answer from GitHub about its newest release; undefined if never (or unreadable). */
+export function getLastUpdateCheck(): Date | undefined {
+  return lastUpdateCheckOf(load())
+}
+
+export function setLastUpdateCheck(at: Date): void {
+  const s = load()
+  s.lastUpdateCheck = at.toISOString()
   save(s)
 }
 

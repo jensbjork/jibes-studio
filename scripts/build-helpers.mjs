@@ -1,19 +1,22 @@
 #!/usr/bin/env node
-// Builds Studio's native helpers into build/bin (gitignored), from where development runs them and electron-builder
-// copies them into the app (extraResources → Contents/Resources/bin). Today that is one helper:
+// Builds Studio's helpers into build/ (gitignored), from where development runs them and electron-builder copies them
+// into the app (extraResources). Today that is:
 //
-//   studio-voice-isolate  native/voice-isolate/main.swift  (voice/background separation with AUSoundIsolation)
+//   build/bin/studio-voice-isolate  native/voice-isolate/main.swift  (voice/background separation with AUSoundIsolation)
+//   build/mcpb/                     src/mcpb/  (the Claude Desktop extension's bridge and manifest: scripts/build-mcpb.mjs)
 //
 // Run by `npm run build:helpers`, and before `dev`, `build` and `app`, so it must be quick when nothing changed: a
 // stamp file next to the binary records a hash of the source and the compiler flags, and an up-to-date helper is left
 // alone. Without the Swift compiler (or off macOS) it skips with a note; Studio then runs without voice separation.
-// Set STUDIO_SKIP_HELPERS=1 to skip on purpose, or pass --force to rebuild.
+// Set STUDIO_SKIP_HELPERS=1 to skip the Swift helper on purpose, or pass --force to rebuild it. The Claude Desktop
+// extension is built every time, on every system (esbuild, a fraction of a second).
 
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildMcpb } from './build-mcpb.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = join(root, 'build', 'bin')
@@ -49,7 +52,8 @@ function stampOf(helper, compilerVersion) {
   return hash.digest('hex')
 }
 
-function main() {
+async function main() {
+  await buildMcpb()
   if (process.env.STUDIO_SKIP_HELPERS === '1') {
     log('skipped (STUDIO_SKIP_HELPERS=1); voice separation stays unavailable in this build.')
     return
@@ -99,8 +103,8 @@ function main() {
   }
 }
 
-try {
-  main()
-} catch {
+main().catch((err) => {
+  // A failed compile has printed its own errors; anything else says what it was.
+  if (!(err && err.status !== undefined)) console.error(`build-helpers: ${err instanceof Error ? err.message : String(err)}`)
   process.exit(1)
-}
+})

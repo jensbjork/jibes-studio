@@ -10,6 +10,20 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Updates from GitHub**: Studio looks for a newer release once a day when it starts (*Settings → About Studio* to
+  switch it off or check now; on a Mac also **Check for Updates…** in the app menu; never in a development build). A
+  newer one is offered in a small notice – **Update now**, **Release notes**, **Later** (which skips that version):
+  Studio downloads the file for this computer from the release, checks it against the SHA-256 GitHub publishes (or the
+  release's new `SHA256SUMS.txt`), and installs it in place – on a Mac it checks the new app's id, version and signature,
+  swaps it in and restarts; on Windows the installer runs silently and reopens Studio. Nothing is installed while work
+  runs that a restart would interrupt, anything that fails leaves the current Studio as it was, and a copy Studio can't
+  replace (the Windows zip, a read-only folder) says so and offers the release page. Agents can't start an update.
+- **Studio in Claude Desktop**: *Settings → Agent connection → Add to Claude Desktop* makes a Desktop Extension
+  (`.mcpb`, manifest 0.3) with this Studio's address and token and opens it in Claude Desktop, which asks to install it –
+  then Studio is one of Claude's connectors, with all its tools. *For Claude Desktop on another computer…* saves the file
+  with the Tailscale address instead. The extension's small bridge connects Claude to Studio's agent server, answers
+  clearly when Studio isn't running or the token was replaced, and reconnects when Studio comes back. The `mcp-remote`
+  configuration remains as the way by hand.
 - **Directors**: a new kind in the library (*Directors*, folder `Regissörer/`) – a way of making a film that every
   prompt it directs carries: *editing* (with the shot length a sequence aims for and whether shots cut or flow on),
   *look*, *camera*, *light*, *framing*, *rhythm*, *performance*, *sound* (only for clips with sound) and *avoid* (added

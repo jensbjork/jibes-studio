@@ -146,6 +146,14 @@ export function archiveBusyReason(): string | undefined {
   return job?.kind === 'export' ? EXPORT_RUNNING : undefined
 }
 
+/** A running export or import, in words: Studio isn't quit for an update under either (updates.ts). */
+export function archiveJobReason(): string | undefined {
+  if (!job) return undefined
+  return job.kind === 'export'
+    ? EXPORT_RUNNING
+    : 'A library is being imported right now. Wait until the import is done and try again.'
+}
+
 function emit(p: ArchiveProgress): void {
   try {
     if (deps.progress) deps.progress(p)

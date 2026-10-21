@@ -342,12 +342,62 @@ export interface GenerationFilter {
   unseen?: boolean
 }
 
+/** What GitHub Releases has compared with this Studio (checkForUpdates). */
+export interface UpdateInfo {
+  /** This Studio's version (package.json). */
+  current: string
+  /** The newest release's version, without the "v". */
+  latest: string
+  /** latest is newer than current (semver). */
+  available: boolean
+  /** The release's page on GitHub. */
+  notesUrl: string
+  /** The release's notes (Markdown), trimmed. */
+  notes?: string
+  publishedAt?: string
+  /** The file this computer would install (Studio-mac-arm64.zip, Studio-win-x64-setup.exe), when the release has it. */
+  asset?: { name: string; size: number }
+  /**
+   * Why Studio can't update itself here (a development build, a copy it can't replace, no file for this computer):
+   * the window offers the release page instead of Update now.
+   */
+  installBlocked?: string
+  /**
+   * The user asked (Check for Updates… in the app menu, Check for updates in Settings): the window shows the answer
+   * even for a version "Later" hid, and says so when Studio is up to date or the check failed.
+   */
+  requested?: boolean
+  /** Why a check the user asked for from the app menu failed (latest is then ''). */
+  error?: string
+}
+
+/** How an update in place is going (onUpdateProgress). */
+export interface UpdateProgress {
+  stage: 'downloading' | 'verifying' | 'installing' | 'restarting' | 'failed'
+  /** 0–1 while downloading. */
+  fraction?: number
+  error?: string
+}
+
+/** Whether Claude Desktop is on this computer (claudeDesktopStatus). */
+export interface ClaudeDesktopStatus {
+  installed: boolean
+  /** Where it was found, for the hint; undefined when not installed. */
+  appPath?: string
+}
+
 export interface Settings {
   hasApiKey: boolean
   /** The current base folder (grundmapp), or '' while no library is open. */
   libraryDir: string
   /** Running as "Studio Dev" (npm run dev) with its own settings and library, separate from Studio.app. */
   devProfile: boolean
+  /** Look for a newer Studio on GitHub once a day when Studio starts (default on; never in Studio Dev). */
+  autoUpdateCheck: boolean
+  /** When Studio last asked GitHub for its newest release (ISO), if it ever has (Settings → About Studio). */
+  lastUpdateCheck?: string
+  /** A development build (Studio Dev, any unpackaged build): it never looks for updates – they come from git. */
+  developmentBuild?: boolean
   /**
    * "Prompt language": the language video prompts are written in. Decides the words the prompt editor inserts
    * between references (en: "Anna (@Image1) wearing …", sv: "Anna (@Image1) i …") and what agents are told.
@@ -2513,6 +2563,33 @@ export interface StudioApi {
   ffmpegStatus(): Promise<FfmpegStatus>
   setPromptLanguage(lang: PromptLanguage): Promise<void>
   setBudget(budget: BudgetSettings): Promise<void>
+
+  // Updates (GitHub Releases) – see UpdateInfo
+  /** Asks GitHub for the newest release now (Check for Updates…). */
+  checkForUpdates(): Promise<UpdateInfo>
+  /**
+   * Downloads the newest release's file for this computer, checks it and installs it in place of this Studio, then
+   * restarts (macOS: the app is replaced; Windows: the installer runs). Progress arrives via onUpdateProgress;
+   * rejects with the reason when it can't (installBlocked, a failed download or check).
+   */
+  installUpdate(): Promise<void>
+  onUpdateProgress(cb: (p: UpdateProgress) => void): () => void
+  /**
+   * A newer release was found – by the daily check, Check for updates in Settings or Check for Updates… in the app menu –
+   * for the window to offer; from the app menu also any other answer (up to date, a development build, a failed
+   * check), with `requested` set.
+   */
+  onUpdateAvailable(cb: (info: UpdateInfo) => void): () => void
+  setAutoUpdateCheck(on: boolean): Promise<void>
+
+  // Claude Desktop – Studio as an extension (connector) there
+  claudeDesktopStatus(): Promise<ClaudeDesktopStatus>
+  /**
+   * Makes a Claude Desktop extension (.mcpb) that connects Claude to this Studio's agent server at `address` (default
+   * this computer's 127.0.0.1) with the current token, and opens it in Claude Desktop (which asks to install it) – or,
+   * with `save`, asks where to save it (for Claude Desktop on another computer). Resolves with what happened.
+   */
+  addToClaudeDesktop(opts?: { address?: string; save?: boolean }): Promise<{ opened: boolean; savedTo?: string }>
   /** Spending as Studio recorded it (see SpendingSummary). */
   getSpending(): Promise<SpendingSummary>
   /** "Safe mode for images" (Venice blurs adult content in generated stills while it is on). */

@@ -34,6 +34,15 @@ const api: StudioApi = {
   ffmpegStatus: () => ipcRenderer.invoke('ffmpeg:status'),
   setPromptLanguage: (lang) => ipcRenderer.invoke('settings:setPromptLanguage', lang),
   setBudget: (budget) => ipcRenderer.invoke('settings:setBudget', budget),
+  // Updates
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  onUpdateProgress: (cb) => on('updates:progress', cb),
+  onUpdateAvailable: (cb) => on('updates:available', cb),
+  setAutoUpdateCheck: (on_) => ipcRenderer.invoke('settings:setAutoUpdateCheck', on_),
+  // Claude Desktop
+  claudeDesktopStatus: () => ipcRenderer.invoke('claude:status'),
+  addToClaudeDesktop: (opts) => ipcRenderer.invoke('claude:addExtension', opts),
   getSpending: () => ipcRenderer.invoke('spending:get'),
   setImageSafeMode: (on) => ipcRenderer.invoke('settings:setImageSafeMode', on),
   onSettingsChange: (cb) => on<void>('settings:change', () => cb()),

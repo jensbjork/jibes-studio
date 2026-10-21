@@ -44,7 +44,8 @@ differs):
 - ffmpeg: `node scripts/fetch-ffmpeg-win.mjs` puts the same pinned build the Windows app ships into
   `build/ffmpeg-win/` (gitignored), where a development build finds it; otherwise `ffmpeg.exe` and `ffprobe.exe` on
   `PATH`.
-- No Swift helper: `build:helpers` skips itself, and voice separation is off (it is macOS only).
+- No Swift helper: `build:helpers` skips it (building only the Claude Desktop extension's parts), and voice
+  separation is off (it is macOS only).
 - The `dev` scripts set variables the POSIX way, which `cmd.exe` (npm's default shell on Windows) doesn't
   understand. In PowerShell run `$env:STUDIO_DEV_PROFILE = '1'; npx electron-vite dev -w` instead, or point npm at
   Git Bash once: `npm config set script-shell "C:\Program Files\Git\bin\bash.exe"`. `npm run typecheck`,
@@ -57,7 +58,7 @@ differs):
 | `npm run dev` | Builds the native helper if needed, then the electron-vite dev server with watch (`-w`), as **Studio Dev** (`STUDIO_DEV_PROFILE=1`). The renderer hot-reloads; main and preload changes rebuild and restart Electron. |
 | `npm run dev:real` | The same, with the real **Studio** profile. Quit Studio.app first. |
 | `npm run build` | Builds the native helper if needed, then main, preload and renderer into `out/`. |
-| `npm run build:helpers` | Builds the voice separation helper into `build/bin/` (see [Native helper](#native-helper)). |
+| `npm run build:helpers` | Builds the voice separation helper into `build/bin/` (see [Native helper](#native-helper)) and the Claude Desktop extension's parts into `build/mcpb/` (see [Claude Desktop extension](#claude-desktop-extension)). |
 | `npm start` | Runs the built `out/` with electron-vite preview — **with the real profile**, like `dev:real`. |
 | `npm run typecheck` | `tsc --noEmit` for the Node side (`tsconfig.node.json`) and the web side (`tsconfig.web.json`). |
 | `npm run check` | `typecheck` + `build` — what CI runs, and what must pass before a pull request. |
@@ -498,6 +499,23 @@ Studio runs the helper with a watchdog: no `progress=` line for two minutes, or 
 printing progress every few percent. Before it starts, `separateStems` checks that the scratch WAVs (the sound three
 times over as 32-bit float at 48 kHz) fit on the library's disk with 1 GB to spare.
 
+## Claude Desktop extension
+
+*Add to Claude Desktop* (Settings → Agent connection) zips the parts in `build/mcpb/` into a `.mcpb` with the address
+and the token (see [ARCHITECTURE.md](ARCHITECTURE.md#claude-desktop)). `scripts/build-mcpb.mjs` builds them — the
+bridge `src/mcpb/bridge.ts` bundled with the MCP SDK into `server/index.js` by esbuild, the manifest template
+`src/mcpb/manifest.json` with the version from `package.json`, the licences and the icon — in well under a second;
+`build:helpers` runs it every time, so `dev`, `build` and `app` always have it. Packaged, it is in
+`Contents/Resources/mcpb/` (`resources\mcpb\` on Windows).
+
+Try the bridge by hand against a running Studio Dev (the token from its Settings), and validate the manifest with
+Anthropic's [MCPB CLI](https://github.com/modelcontextprotocol/mcpb):
+
+```bash
+STUDIO_URL=http://127.0.0.1:8770/mcp STUDIO_TOKEN=<token> STUDIO_BRIDGE_DEBUG=1 node build/mcpb/server/index.js
+npx @anthropic-ai/mcpb validate build/mcpb
+```
+
 ## Packaging
 
 ### macOS
@@ -515,6 +533,8 @@ times over as 32-bit float at 48 kHz) fit on the library's disk with 1 GB to spa
   binaries for other platforms are left out.
 - **Native helper:** `build/bin/studio-voice-isolate` is copied to `Contents/Resources/bin/` (`extraResources`). A
   build without it only gets a warning from electron-builder, and that app runs without voice separation.
+- **Claude Desktop extension:** `build/mcpb/` is copied to `Contents/Resources/mcpb/` (both systems: `extraResources`);
+  without it *Add to Claude Desktop* says the build has no extension. The release workflow checks it is there.
 - **Info.plist:** the folder-access usage descriptions (Documents, Desktop, Downloads, removable and network
   volumes) are set in `electron-builder.yml`; `electronLanguages` keeps only `en`.
 - **Node and `require(esm)`:** electron-builder 26 `require()`s ES-module-only dependencies. Node 22.12 and later
@@ -583,8 +603,8 @@ Releases are built on GitHub, not on a laptop (`.github/workflows/release.yml`):
    - `windows` (a Windows runner): fetches and checks the pinned ffmpeg, packages `Studio-win-x64-setup.exe` and
      `Studio-win-x64.zip`, and runs the smoke test on `dist/win-unpacked/Studio.exe` (its screenshot is kept as the
      `smoke-test-windows` artifact, also when it fails);
-   - `publish` (tags only, once both have passed) creates the GitHub release `v0.2.0` with all four files and
-     generated notes.
+   - `publish` (tags only, once both have passed) writes `SHA256SUMS.txt` (the four files' SHA-256) and creates the
+     GitHub release `v0.2.0` with all five files and generated notes.
 
    *Run workflow* on the Actions tab builds the same files as artifacts of the run without publishing anything.
 
@@ -599,6 +619,15 @@ STUDIO_ZIP=dist/Studio-mac-arm64.zip STUDIO_APPS_DIR=/tmp/apps STUDIO_NO_OPEN=1 
 ```
 
 It only quits a running Studio when that is the copy it replaces.
+
+Installed copies find the release by themselves (the daily check, or *Check for Updates…*) and install
+`Studio-mac-arm64.zip` or `Studio-win-x64-setup.exe` after checking it against GitHub's digest of the file or
+`SHA256SUMS.txt` (see [ARCHITECTURE.md](ARCHITECTURE.md#updates)); the release's tag must be the version in
+`package.json`, and the files must keep their names. A development build never checks. To try the update UI without
+GitHub, point a build at a stand-in for its API with `STUDIO_UPDATE_TEST_SERVER=http://127.0.0.1:<port>` (loopback
+only; it serves `/repos/<owner>/<repo>/releases/latest` and the files): an unpackaged build then checks and downloads
+like a release but refuses to install itself, and a packaged one in a throwaway folder (with `STUDIO_PROFILE_DIR`)
+goes all the way, reopening with the same two variables.
 
 ## Screenshots
 

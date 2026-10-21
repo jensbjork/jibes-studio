@@ -8,6 +8,7 @@ import ConfirmButton from '../sequences/ConfirmButton'
 import { MoreAbout, SettingsItem } from '../settings/SettingsLayout'
 import Switch from '../settings/Switch'
 import { clientDetail, formatTime } from './agentText'
+import ClaudeDesktopCard from './ClaudeDesktopCard'
 import CopyButton from './CopyButton'
 
 const MASK = '•'.repeat(28)
@@ -23,6 +24,8 @@ type EndpointId = 'tailscale' | 'dns' | 'local'
 interface Endpoint {
   id: EndpointId
   label: string
+  /** What an agent connects to: an address or the MagicDNS name (the Claude Desktop extension is made with it). */
+  host: string
   url: string
   hint: string
 }
@@ -34,21 +37,25 @@ function endpointsOf(status: AgentStatus): Endpoint[] {
     list.push({
       id: 'tailscale',
       label: 'Tailscale address',
+      host: status.tailscaleAddress,
       url: `http://${status.tailscaleAddress}:${port}/mcp`,
       hint: `For agents on other computers in your tailnet, such as a server or another ${COMPUTER}.`
     })
   }
   if (status.tailscaleDnsName) {
+    const name = status.tailscaleDnsName.replace(/\.$/, '')
     list.push({
       id: 'dns',
       label: 'Tailscale name',
-      url: `http://${status.tailscaleDnsName.replace(/\.$/, '')}:${port}/mcp`,
+      host: name,
+      url: `http://${name}:${port}/mcp`,
       hint: 'The same, with the computer’s name (MagicDNS) instead of the IP address.'
     })
   }
   list.push({
     id: 'local',
     label: `This ${COMPUTER}`,
+    host: '127.0.0.1',
     url: `http://127.0.0.1:${port}/mcp`,
     hint: 'Only for agents running on this computer.'
   })
@@ -248,6 +255,8 @@ export default function AgentSettingsSection() {
             )
           ))}
       </SettingsItem>
+
+      <ClaudeDesktopCard status={status} addresses={endpoints.map(({ id, label, host }) => ({ id, label, host }))} />
 
       {endpoint && (
         <SettingsItem
