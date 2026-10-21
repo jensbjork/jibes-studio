@@ -37,6 +37,7 @@ import { prepareLibrary, registerLibraryRootIpc } from './library-root'
 import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty, toStoredPath } from './paths'
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
 import { IS_MAC, IS_WINDOWS } from './platform'
+import { directParams } from './directors'
 import { probeReferenceVideo } from './reference-videos'
 import { attachReviewSummary, registerReviewIpc } from './reviews'
 import { registerSessionIpc } from './session'
@@ -332,7 +333,8 @@ function registerIpc(): void {
 
   ipcMain.handle('models:list', (_e, force?: boolean) => loadVideoModels(force === true))
 
-  ipcMain.handle('video:quote', (_e, params: GenerationParams) => venice.quote(params))
+  // Directed as a submission sends it (idempotent): a director's style videos count in Seedance's price.
+  ipcMain.handle('video:quote', (_e, params: GenerationParams) => venice.quote(directParams(params)))
   ipcMain.handle('referenceVideos:probe', (_e, path: unknown, at: unknown) => probeReferenceVideo(path, at))
   // `opts`: GenerateOptions – the variants (1–4 takes of the same form, each its own generation) and the
   // over-budget confirmation; resolves with the first take, the others reach the window as generation updates.

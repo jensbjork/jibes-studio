@@ -2,13 +2,15 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { audioForModel, pickOption, PREFERRED, supportsEndImage } from '@shared/models'
 import { workKey, type Generation, type Storyboard, type StoryboardTransition, type VideoModel } from '@shared/types'
 import { variantsPrice } from '@shared/variants'
-import { ipcErrorMessage } from '../../lib/hooks'
+import { resolveDirector } from '@shared/direction'
+import { ipcErrorMessage, useDirectorAssets } from '../../lib/hooks'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
 import { shortcut } from '../../lib/platform'
 import { useVariantCount, withVariants } from '../../lib/variants'
 import { markSeen } from '../../lib/work'
 import VariantPicker from '../VariantPicker'
 import { pauseOthers } from '../feed/playback'
+import DirectedByNote from '../directors/DirectedByNote'
 import ConfirmButton from '../sequences/ConfirmButton'
 import { ArrowRightIcon, CloseIcon } from '../sequences/icons'
 import { useDraft, useRegisterFlush, type FlushRegistry } from '../sequences/useDraft'
@@ -80,6 +82,8 @@ interface Props {
   /** A refusal to show above the storyboard (choosing a take failed). */
   onError: (message: string) => void
   onClose: () => void
+  /** Opens the storyboard's director in Directors. */
+  onOpenDirector?: (directorId: string) => void
 }
 
 /**
@@ -104,7 +108,8 @@ export default function TransitionEditor({
   onDeleteTake,
   onEditTake,
   onError,
-  onClose
+  onClose,
+  onOpenDirector
 }: Props) {
   const { mutate } = store
   const transitionId = t.id
@@ -122,6 +127,9 @@ export default function TransitionEditor({
     [mutate, transitionId]
   )
   const draft = useDraft<TransitionDraft>(draftOf(t), save, 600)
+  // The storyboard's director directs every transition: its direction follows the prompt when it is sent.
+  const directors = useDirectorAssets()
+  const director = useMemo(() => resolveDirector(storyboard.director, directors), [storyboard.director, directors])
   useRegisterFlush(flushers, draft.flush)
   const value = draft.value
   const set = <K extends keyof TransitionDraft>(key: K, v: TransitionDraft[K]) =>
@@ -472,6 +480,14 @@ export default function TransitionEditor({
             Describe the motion from the first image to the second – ideally in English. The clip starts exactly on
             board {fromNumber} and ends exactly on board {toNumber}.
           </p>
+          {director && (
+            <DirectedByNote
+              params={{ ...t.params, ...value }}
+              director={director}
+              whose="the storyboard’s"
+              onOpen={onOpenDirector && (() => onOpenDirector(director.id))}
+            />
+          )}
           {/* An agent can give a transition a negative prompt (update_transition); it is sent with every take. */}
           {t.params.negativePrompt && (
             <div className="mt-2 flex items-start gap-2 rounded-md border border-line px-3 py-2 text-[12px] leading-relaxed">

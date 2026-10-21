@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react'
 import type { WorkView } from '@shared/types'
-import { ASSET_COPY, ASSET_KINDS, ASSET_VIEW } from '../lib/assets'
+import { ASSET_COPY, ASSET_VIEW, LIBRARY_KINDS } from '../lib/assets'
 import type { View } from '../lib/navigation'
 import { isMac, shortcut } from '../lib/platform'
 import { useRunning, useUnseen, useViewWork } from '../lib/work'
@@ -38,10 +38,10 @@ const CREATE: Item[] = [
 ]
 
 // Media (everything made: videos, pictures, films), every asset kind in the app's order (Characters, Environments,
-// Products, Outfits, Poses), then the prompt library.
+// Products, Outfits, Poses, then Directors), then the prompt library.
 const LIBRARY: Item[] = [
   { id: 'media', label: 'Media', icon: <MediaIcon /> },
-  ...ASSET_KINDS.map((kind) => ({
+  ...LIBRARY_KINDS.map((kind) => ({
     id: ASSET_VIEW[kind],
     label: ASSET_COPY[kind].plural,
     icon: <AssetIcon kind={kind} size={16} />

@@ -11,9 +11,9 @@ interface Props {
 
 /**
  * The symbol of each kind (sidebar, picker tabs, chips, empty states), on the same 16-unit grid as the window's
- * other icons: a ringed dot for characters, a mountain for environments, a box for products, a shirt for outfits
- * and a figure in mid-stride for poses. Every kind has its own branch, so a kind added later can't silently take
- * another kind's symbol.
+ * other icons: a ringed dot for characters, a mountain for environments, a box for products, a shirt for outfits,
+ * a figure in mid-stride for poses and a clapperboard for directors. Every kind has its own branch, so a kind added
+ * later can't silently take another kind's symbol.
  */
 export default function AssetIcon({ kind, size = '1.05em' }: Props) {
   return (
@@ -53,6 +53,20 @@ export default function AssetIcon({ kind, size = '1.05em' }: Props) {
             strokeWidth={1.7}
             strokeLinecap="round"
             strokeLinejoin="round"
+          />
+        </>
+      ) : kind === 'director' ? (
+        // A clapperboard: the board, and its arm lifted at an angle, both striped (the stripes cut out in the panel
+        // colour, as the product's edges are) so it reads as a slate rather than a box at sidebar size.
+        <>
+          <path d="M1.5 7.2h13v5.8c0 .8-.6 1.4-1.4 1.4H2.9c-.8 0-1.4-.6-1.4-1.4z" />
+          <path d="M1.1 5.3l12.3-3.4c.4-.1.8.1.9.5l.4 1.4L2 7.2z" />
+          <path
+            d="M4.6 4.4l1.6 1.9M8.4 3.3l1.6 1.9M12.1 2.3l1.4 1.7M5 7.2l-1.3 2M9 7.2l-1.3 2M13 7.2l-1.3 2"
+            fill="none"
+            stroke="var(--color-panel)"
+            strokeWidth={1.1}
+            strokeLinecap="round"
           />
         </>
       ) : null}

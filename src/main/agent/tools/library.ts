@@ -9,6 +9,7 @@ import { PROMPT_BLOCK_GROUPS, promptBlockGroups, type PromptBlockContext } from 
 import { inGenerateSession } from '@shared/session'
 import {
   ASSET_KINDS,
+  LIBRARY_KINDS,
   type Asset,
   type AssetKind,
   type EditRecipe,
@@ -51,6 +52,8 @@ import {
   seconds,
   usableModels
 } from '../studio'
+import { resolvedDirectorOf } from '@shared/direction'
+import { directionInfo, directionInput, directorInfo, mergedDirection } from './directors'
 import { agentOpName, operationOutput } from './edit-input'
 import { READ_ONLY, WRITE, defineTool, priceValue, type LabeledAudio, type LabeledImage, type ToolContext } from './kit'
 import { URL_WAIT_MS, originOf, stageFiles, uploadSource, urlSource, type FileSource } from './sources'
@@ -64,14 +67,16 @@ const KIND_PLURALS: Record<AssetKind, string> = {
   environment: 'the environments',
   product: 'the products',
   outfit: 'the outfits',
-  pose: 'the poses'
+  pose: 'the poses',
+  director: 'the directors'
 }
 const KIND_DEFINITE: Record<AssetKind, string> = {
   character: 'the character',
   environment: 'the environment',
   product: 'the product',
   outfit: 'the outfit',
-  pose: 'the pose'
+  pose: 'the pose',
+  director: 'the director'
 }
 
 /** The asset service's own refusal for audio on other kinds (assets.ts noAudioReason). */
@@ -81,6 +86,8 @@ const NO_AUDIO_KIND = 'Only characters (voice) and environments (soundscape) can
 const AUDIO_KINDS: ReadonlySet<AssetKind> = new Set(['character', 'environment'])
 
 export const assetKind = z.enum(ASSET_KINDS)
+/** Every kind the library holds: the reference kinds and directors. */
+const libraryKind = z.enum(LIBRARY_KINDS)
 
 /** Case- and accent-tolerant text match for the query parameters. */
 export function matches(query: string | undefined, ...fields: (string | undefined)[]): boolean {
@@ -101,6 +108,10 @@ function assetSummary(a: Asset, index: AssetIndex): Record<string, unknown> {
     ...(AUDIO_KINDS.has(a.kind) ? { audio: audioClipsInfo(a) } : {}),
     ...(a.kind === 'character'
       ? { default_outfit_id: a.defaultOutfitId ?? null, default_outfit_name: outfit?.name }
+      : {}),
+    // A director: its photos are its style frames; what it directs with.
+    ...(a.kind === 'director'
+      ? { director_id: a.id, direction: directionInfo(a.direction), style_video_count: a.direction?.videos?.length ?? 0 }
       : {})
   }
 }
@@ -400,11 +411,13 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'List assets',
       description:
-        "Lists the user's library assets: characters (who is in the shot), environments (where it takes place), products (a specific item to show in the film: a package, a bottle, a gadget), outfits (what a character wears) and poses (photos or sketches of how people stand and where, relative to each other). Each entry has its id, name, the user's description, how many photos it has and their image_ids (photo 1 first), for characters and environments their audio clips (a character's voice, an environment's soundscape: audio_id, duration and the reference window clip_start/clip_length that is sent; for a character's voice also clone_consent – whether the user allows cloning it for new spoken lines in the Editor, which only they can switch on), and for characters the default outfit. Use the ids with get_asset (to see the photos and hear the voice), set_references, add_segment and update_segment.",
+        "Lists the user's library assets: characters (who is in the shot), environments (where it takes place), products (a specific item to show in the film: a package, a bottle, a gadget), outfits (what a character wears) and poses (photos or sketches of how people stand and where, relative to each other) – and the user's directors (kind \"director\": a way of making a film, never a reference; list_directors has the ready-made ones too). Each entry has its id, name, the user's description, how many photos it has and their image_ids (photo 1 first), for characters and environments their audio clips (a character's voice, an environment's soundscape: audio_id, duration and the reference window clip_start/clip_length that is sent; for a character's voice also clone_consent – whether the user allows cloning it for new spoken lines in the Editor, which only they can switch on), and for characters the default outfit. Use the ids with get_asset (to see the photos and hear the voice), set_references, add_segment and update_segment.",
       input: {
-        kind: assetKind
+        kind: libraryKind
           .optional()
-          .describe('Only this kind: "character", "environment", "product", "outfit" or "pose". All kinds when left out.'),
+          .describe(
+            'Only this kind: "character", "environment", "product", "outfit", "pose" or "director". All kinds when left out.'
+          ),
         query: z.string().optional().describe('Only assets whose name or description contains this text (case-insensitive).')
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
@@ -483,6 +496,10 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
           })),
           ...(asset.kind === 'character' && outfit ? { default_outfit: { id: outfit.id, name: outfit.name } } : {}),
           ...(asset.kind === 'outfit' ? { default_outfit_of: wornBy.map((a) => ({ id: a.id, name: a.name })) } : {}),
+          // A director: its photos are its style frames; its section as the user's prompt language writes it.
+          ...(asset.kind === 'director'
+            ? { director: directorInfo(resolvedDirectorOf(asset), ctx.promptLanguage()), photos_are: 'style frames' }
+            : {}),
           images_returned: images.length,
           ...(include_audio || audio_id ? { audio_returned: audio.length } : {}),
           ...data
@@ -501,23 +518,34 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Create asset',
       description:
-        'Creates a new character, environment, product, outfit or pose with a name and a description (looks, place, garments, for a product its brand, model, colours, material, size and what the packaging says, or for a pose who stands where, body posture, distance and camera angle – whatever helps keep it consistent). Then add photos with add_asset_images (from uploads, URLs, stills, other photos or frames of clips) and, for characters and environments, sound with add_asset_audio. Returns the new asset.',
+        'Creates a new character, environment, product, outfit, pose or director with a name and a description (looks, place, garments, for a product its brand, model, colours, material, size and what the packaging says, for a pose who stands where, body posture, distance and camera angle – whatever helps keep it consistent; for a director one line on what it is good for, and its direction). A director\'s photos (add_asset_images) are its style frames: pictures whose look – grade, light, texture – its generations match. Then add photos with add_asset_images (from uploads, URLs, stills, other photos or frames of clips) and, for characters and environments, sound with add_asset_audio. Returns the new asset.',
       input: {
-        kind: assetKind.describe('"character", "environment", "product", "outfit" or "pose".'),
+        kind: libraryKind.describe('"character", "environment", "product", "outfit", "pose" or "director".'),
         name: z
           .string()
           .min(1)
           .describe(
             'Short name as the user would say it, e.g. "Anna", "Beach promenade", "Coffee tin" or "Hug" (a brand in a product\'s name when it helps).'
           ),
-        description: z.string().default('').describe('Free text, in whatever language the user prefers.')
+        description: z.string().default('').describe('Free text, in whatever language the user prefers.'),
+        direction: directionInput
+          .optional()
+          .describe(
+            'Directors only: how it makes a film – editing, look, camera, light, framing, rhythm, performance, sound, avoid, shot_seconds, continuity and defaults (see list_directors). Short concrete phrases, as in get_prompt_blocks.'
+          )
       },
       annotations: WRITE,
       summary: ({ kind, name }) => `created ${KIND_DEFINITE[kind]} ${q(name)}`
     },
-    async ({ kind, name, description }) => {
+    async ({ kind, name, description, direction }) => {
       requireLibrary()
-      const asset = await callService<Asset>('assets:save', { kind, name, description })
+      if (direction && kind !== 'director') throw new Error('Only directors have a direction.')
+      const asset = await callService<Asset>('assets:save', {
+        kind,
+        name,
+        description,
+        ...(kind === 'director' && direction ? { direction: mergedDirection({}, direction) } : {})
+      })
       return { data: assetSummary(asset, new AssetIndex([asset])) }
     }
   )
@@ -529,25 +557,32 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Update asset',
       description:
-        "Changes an asset's name, description and/or (characters only) default outfit. Fields you leave out stay as they are. Renaming also renames its folder in the user's library. default_outfit_id must be an outfit's id; null removes the default outfit. The name and description are appended to every prompt that sends the asset's photos or voice (the References legend), from the next generation on – so keep the description concrete and visual (what the photos can't say), and expect a pending approval that uses the asset to lapse when you change it.",
+        "Changes an asset's name, description, (characters only) default outfit and/or (directors only) direction. Fields you leave out stay as they are. Renaming also renames its folder in the user's library. default_outfit_id must be an outfit's id; null removes the default outfit. The name and description are appended to every prompt that sends the asset's photos or voice (the References legend), from the next generation on – so keep the description concrete and visual (what the photos can't say), and expect a pending approval that uses the asset to lapse when you change it.",
       input: {
         asset_id: z.string(),
         name: z.string().min(1).optional(),
         description: z.string().optional(),
-        default_outfit_id: z.string().nullable().optional().describe("Characters only: an outfit's id, or null for none.")
+        default_outfit_id: z.string().nullable().optional().describe("Characters only: an outfit's id, or null for none."),
+        direction: directionInput
+          .optional()
+          .describe(
+            'Directors only: the parts to change (given fields replace, null removes one; the rest stay). Its style videos stay (add_director_videos adds more).'
+          )
       },
       annotations: { ...WRITE, idempotentHint: true },
       summary: () => 'changed an asset'
     },
-    async ({ asset_id, name, description, default_outfit_id }) => {
+    async ({ asset_id, name, description, default_outfit_id, direction }) => {
       const index = await AssetIndex.load()
       const current = index.require(asset_id)
+      if (direction && current.kind !== 'director') throw new Error(`${q(current.name)} is not a director: only directors have a direction.`)
       const asset = await callService<Asset>('assets:save', {
         id: current.id,
         kind: current.kind,
         name: name ?? current.name,
         description: description ?? current.description,
-        defaultOutfitId: default_outfit_id
+        defaultOutfitId: default_outfit_id,
+        ...(direction ? { direction: { ...mergedDirection(current.direction, direction), videos: current.direction?.videos } } : {})
       })
       const fresh = await AssetIndex.load()
       return { data: assetSummary(asset, fresh), summary: `changed ${q(asset.name)}` }

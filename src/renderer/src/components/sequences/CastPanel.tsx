@@ -4,7 +4,7 @@ import { maxReferenceImages, supportsAudioInput } from '@shared/models'
 import { resolveOutfitWearers } from '@shared/outfits'
 import type { Asset, AssetKind, Sequence, SequenceCast, SequenceCastSwap } from '@shared/types'
 import { ipcErrorMessage, useAssets } from '../../lib/hooks'
-import { ASSET_COPY } from '../../lib/assets'
+import { ASSET_COPY, isReferenceKind } from '../../lib/assets'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
 import AssetPicker from '../pickers/AssetPicker'
@@ -190,7 +190,7 @@ function CastPanel({
         {error && <p className="px-3 pt-2 text-[11px] text-accent select-text">{error}</p>}
         <AssetPicker
           assets={assets}
-          initialKind={swap?.kind ?? 'character'}
+          initialKind={swap && isReferenceKind(swap.kind) ? swap.kind : 'character'}
           title={swap ? `Swap ${swap.name} for…` : 'Add to the cast'}
           hint={
             swap

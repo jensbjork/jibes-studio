@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { agentDisplayName } from '@shared/agent-name'
 import { overBudgetFor, overBudgetText } from '@shared/budget'
+import { effectiveDirectorId, resolveDirector, withDirection } from '@shared/direction'
 import {
   KINDS,
   kindOfModelId,
@@ -231,7 +232,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   // A still for a storyboard (Venice's image models) rather than a video.
   const image = a.kind === 'image' ? (a.image ?? null) : undefined
   const clips = useMemo(
-    () => (storyboardId ? [] : withDescriptions(clipsOf(a, sequence), a, composer)),
+    () => (storyboardId ? [] : withDescriptions(clipsOf(a, sequence), a, composer, sequence)),
     [a, sequence, composer, storyboardId]
   )
   // The transitions it generates: the two board pictures each goes between, with the prompt and settings.
@@ -796,7 +797,7 @@ interface Composer {
    * The prompt as main sends it (src/shared/prompt-compose.ts): canonical tokens, the inputs the model takes, the
    * params' own description switches, the prompt language and the model's prompt limit.
    */
-  compose: (params: GenerationParams) => ComposedPrompt
+  compose: (params: GenerationParams, ownerDirector?: string, continuationFrame?: boolean) => ComposedPrompt
   /** The model's prompt limit (prompt_character_limit), when it has one. */
   limitOf: (modelId: string) => number | undefined
 }
@@ -807,9 +808,16 @@ function makeComposer(assets: readonly Asset[], language: PromptLanguage, models
   const limitOf = (modelId: string): number | undefined => limits.get(modelId) || undefined
   return {
     limitOf,
-    compose: (params) => {
-      const sent = paramsForSubmit(canonicalizeParams(params))
-      return composePrompt(sent, described, composeOptionsFor(sent, language, limitOf(sent.model)))
+    compose: (params, ownerDirector, continuationFrame) => {
+      // Directed as main composes it: its style frames and videos among the references (withDirection is idempotent,
+      // so params a request or a clip's effectiveParams directed already stay as they are), its Direction section after
+      // the legend.
+      const director = resolveDirector(effectiveDirectorId(params.director, ownerDirector), assets)
+      const sent = paramsForSubmit(canonicalizeParams(withDirection(params, director, { continuationFrame })))
+      return composePrompt(sent, described, {
+        ...composeOptionsFor(sent, language, limitOf(sent.model)),
+        ...(director ? { director } : {})
+      })
     }
   }
 }
@@ -823,11 +831,20 @@ const shownLegend = (legend: string | undefined): string | undefined => legend?.
  * "generate all" are read live, so they show today's legend, marked when it isn't the one the request was made
  * with (main refuses that too).
  */
-function withDescriptions(clips: Clip[], a: ApprovalRequest, composer: Composer | undefined): Clip[] {
+function withDescriptions(
+  clips: Clip[],
+  a: ApprovalRequest,
+  composer: Composer | undefined,
+  sequence?: Sequence
+): Clip[] {
   const captured = (a.kind === 'generation' || a.kind === 'segment') && !!a.params
   const legends = a.kind === 'generate-all' ? a.clipLegends : undefined
+  // A sequence's clips follow its director unless they choose their own (Generate's form has none to follow).
+  const owner = a.kind === 'generation' ? undefined : sequence?.director
   return clips.map((asked) => {
-    const live = composer?.compose(asked.params)
+    // A clip continuing in reference mode keeps the previous clip's frame last: no style frames (as main sends it).
+    const framed = asked.continuesFrom !== undefined && kindOfModelId(asked.params.model) === 'reference-to-video'
+    const live = composer?.compose(asked.params, owner, framed)
     const limit = composer?.limitOf(asked.params.model)
     // A reference the legend explains (its description, or who wears an outfit) isn't warned about as unmentioned.
     const clip = live ? { ...asked, warnings: warningsOf(asked.checked, explainedReferences(live)) } : asked
@@ -1208,7 +1225,16 @@ function DescriptionLegend({
   return (
     <div className={`mt-2 rounded-md border border-dashed px-3 py-2 ${changed ? 'border-accent/60' : 'border-line'}`}>
       <div className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-muted">
-        <span>Added to the prompt · the References legend</span>
+        <span>
+          Added to the prompt ·{' '}
+          {/^(References|Referenser):/.test(legend)
+            ? /\n(Direction|Regi)\b[^\n]*:\n/.test(legend)
+              ? 'the References legend and the direction'
+              : 'the References legend'
+            : /^(Direction|Regi)\b/.test(legend)
+              ? 'the direction'
+              : 'the References legend'}
+        </span>
         {sentLength !== undefined && (
           <span
             className="ml-auto tabular-nums"

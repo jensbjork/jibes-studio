@@ -15,7 +15,7 @@ import {
 } from '@shared/types'
 import { withBudgetConfirm } from '../../lib/budget'
 import { ASSET_VIEW } from '../../lib/assets'
-import { ipcErrorMessage, useModels } from '../../lib/hooks'
+import { ipcErrorMessage, useDirectorAssets, useModels } from '../../lib/hooks'
 import { LAST_SEQUENCE_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
 import type { Intent, Navigate } from '../../lib/navigation'
@@ -481,6 +481,13 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     await store.mutate(() => window.studio.updateSequence(sequenceId, patch))
   }
 
+  /** The sequence's director (null: none): the clip editor's edits first, as for the cast. */
+  const changeDirector = async (director: string | null): Promise<void> => {
+    if (!sequenceId) return
+    if (!(await flushAll())) throw new Error("The clip's changes couldn't be saved. Try again.")
+    await store.mutate(() => window.studio.updateSequence(sequenceId, { director }))
+  }
+
   const rename = (name: string) => {
     if (!sequenceId) return
     store.update((s) => ({ ...s, name }))
@@ -818,16 +825,18 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
+  // Priced as sent: a director's style videos raise the price (its own, or the library's as they change).
+  const directors = useDirectorAssets()
   const runPlan = useMemo(() => {
     const toGenerate: GenerationParams[] = []
     let generating = 0
     sequence?.segments.forEach((s, i) => {
       if (!needsTake(s)) return
       if (pendingTake(s)) generating++
-      else toGenerate.push(effectiveParams(s, i, sequence))
+      else toGenerate.push(effectiveParams(s, i, sequence, directors))
     })
     return { toGenerate, generating }
-  }, [sequence])
+  }, [sequence, directors])
   const runQuote = useTotalQuote(runPlan.toGenerate)
 
   const notReady = sequence ? sequence.segments.flatMap((s, i) => (readyTake(s) ? [] : [i + 1])) : []
@@ -1083,6 +1092,8 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               onDelete={() => void deleteSequence(sequence.id)}
               onCastChange={changeCast}
               onManageAssets={(kind) => navigate(ASSET_VIEW[kind])}
+              onDirectorChange={changeDirector}
+              onOpenDirector={(id) => navigate('directors', id ? { type: 'open-asset', assetId: id } : undefined)}
               onPickSong={() => void pickSong()}
               onRemoveSong={removeSong}
               onSeparateSong={() => store.mutate(() => window.studio.separateSongVocals(sequence.id))}

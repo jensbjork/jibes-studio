@@ -10,9 +10,13 @@ import {
 } from 'react'
 import { generationTitle, sourceBadge } from '@shared/generation-label'
 import type { FinishedWork, RunningWork, Segment, Sequence } from '@shared/types'
+import { directorName } from '../../lib/directors'
+import { useDirectorAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import { useSeenWhenVisible } from '../../lib/work'
+import AssetIcon from '../assets/AssetIcon'
 import { carriesFiles, droppedVideoPaths, ImportCardView, type ImportCard } from '../feed/ownClips'
+import { KIND_TONE } from '../pickers/assetKinds'
 import Popover from '../pickers/Popover'
 import { menuRow, onMenuKeyDown } from '../storyboards/ui'
 import { freshTakesLabel, newsBySegment, pendingPhase, type SegmentNews } from '../takes/takeText'
@@ -276,6 +280,7 @@ export default function Timeline({
                 number={i + 1}
                 news={news.get(s.id)}
                 sending={sending.has(s.id)}
+                sequenceDirector={sequence.director}
                 bridgeTitle={bridgeDescription(i, segments.length)}
                 onBridge={() => onBridge(s.id)}
                 selected={s.id === selectedId}
@@ -572,6 +577,7 @@ function SegmentCard({
   number,
   news,
   sending,
+  sequenceDirector,
   bridgeTitle,
   onBridge,
   selected,
@@ -589,6 +595,8 @@ function SegmentCard({
   news?: SegmentNews
   /** A take of it is being sent to Venice. */
   sending: boolean
+  /** The sequence's director, which the clip follows unless it chooses its own (or none). */
+  sequenceDirector?: string
   /** What "Redo between neighbours" does here; undefined for a clip without neighbours. */
   bridgeTitle?: string
   onBridge: () => void
@@ -635,6 +643,7 @@ function SegmentCard({
         <CardPreview segment={segment} sending={sending} />
         <span className="absolute left-1.5 top-1.5 flex items-center gap-1">
           <span className="rounded bg-black/75 px-1.5 py-px text-[11px] font-semibold tabular-nums">{number}</span>
+          <OwnDirectorMark own={segment.params.director} sequenceDirector={sequenceDirector} />
           {own && badge && (
             <span
               title={badge.description}
@@ -682,6 +691,30 @@ function SegmentCard({
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * A clapperboard by the number when the clip doesn't follow the sequence's director: one of its own (in the directors'
+ * colour, named in the tooltip) or none (struck through).
+ */
+function OwnDirectorMark({ own, sequenceDirector }: { own: string | null | undefined; sequenceDirector?: string }) {
+  const directors = useDirectorAssets()
+  const none = own === null && !!sequenceDirector
+  const other = typeof own === 'string' && !!own && own !== sequenceDirector
+  if (!none && !other) return null
+  const title = none
+    ? 'No director: the sequence’s isn’t used for this clip'
+    : `Directed by ${directorName(own ?? undefined, directors)} – its own`
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      className={`relative flex items-center rounded bg-black/75 px-1 py-[3px] text-[11px] ${none ? 'text-muted' : KIND_TONE.director.text}`}
+    >
+      <AssetIcon kind="director" />
+      {none && <span aria-hidden className="absolute inset-x-0.5 top-1/2 h-px -rotate-45 bg-current" />}
+    </span>
   )
 }
 

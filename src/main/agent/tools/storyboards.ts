@@ -1,12 +1,14 @@
 import { existsSync } from 'node:fs'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
+import { effectiveDirectorId } from '@shared/direction'
 import { kindOfModelId, supportsEndImage } from '@shared/models'
 import { findAudioTokens, findImageTokens } from '@shared/prompt-refs'
 import {
   STORYBOARD_ASPECT_RATIOS,
   type BoardImageSource,
   type Generation,
+  type GenerationParams,
   type Sequence,
   type Storyboard,
   type StoryboardBoard,
@@ -17,6 +19,8 @@ import {
 } from '@shared/types'
 import * as db from '../../db'
 import { frameStartAtOrAfter } from '../../ffmpeg'
+import { composeSubmission } from '../../jobs'
+import { isLibraryReady } from '../../paths'
 import * as store from '../../sequence-store'
 import { imageBlock } from '../images'
 import { callService } from '../local-ipc'
@@ -42,6 +46,7 @@ import {
   usableModels
 } from '../studio'
 import { READ_ONLY, WRITE, defineTool, priceValue, quote, usd, type LabeledImage, type ToolContext } from './kit'
+import { clipDirectorInfo, directorInput, directorRef } from './directors'
 import { isUsableTake } from './sequences'
 import { URL_WAIT_MS, stageFiles, uploadSource, urlSource } from './sources'
 
@@ -220,6 +225,8 @@ export function transitionInfo(storyboard: Storyboard, index: number): Record<st
     resolution: p.resolution,
     ...(p.aspectRatio ? { aspect_ratio: p.aspectRatio } : {}),
     audio: p.audio,
+    // Directed by the storyboard's director (none of its own): the prompt as it is sent, with its Direction section.
+    ...transitionDirection(storyboard, p),
     selected_take: take
       ? {
           generation_id: take.id,
@@ -246,6 +253,22 @@ export function transitionInfo(storyboard: Storyboard, index: number): Record<st
   }
 }
 
+/**
+ * Who directs a transition (the storyboard's director, unless it chose its own or none) and, when one does, the prompt
+ * it is sent with: the Direction section after it (composed_prompt) and what of the director goes along (direction).
+ */
+function transitionDirection(storyboard: Storyboard, p: GenerationParams): Record<string, unknown> {
+  const info = clipDirectorInfo(p.director, storyboard.director)
+  const id = effectiveDirectorId(p.director, storyboard.director)
+  if (!id || !isLibraryReady()) return info
+  const sent = composeSubmission({ ...p, director: id })
+  return {
+    ...info,
+    composed_prompt: sent.prompt,
+    ...(sent.direction?.notes.length ? { direction_notes: sent.direction.notes } : {})
+  }
+}
+
 /** The whole storyboard as the tools show it. */
 export function storyboardInfo(storyboard: Storyboard, assets: AssetIndex, stills: StillIndex): Record<string, unknown> {
   const missing = storyboard.transitions.flatMap((t, i) => (transitionDone(t) ? [] : [i + 1]))
@@ -253,6 +276,8 @@ export function storyboardInfo(storyboard: Storyboard, assets: AssetIndex, still
     storyboard_id: storyboard.id,
     name: storyboard.name,
     aspect_ratio: storyboard.aspectRatio,
+    // Directs every transition and the pictures made for its boards (update_storyboard director).
+    director: directorRef(storyboard.director),
     board_count: storyboard.boards.length,
     transition_count: storyboard.transitions.length,
     transitions_done: storyboard.transitions.length - missing.length,
@@ -524,23 +549,28 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
     'update_storyboard',
     {
       title: 'Update storyboard',
-      description: `Renames a storyboard (its folder follows) and/or changes its aspect ratio (${STORYBOARD_ASPECT_RATIOS.join(', ')}): new pictures are made in it; boards whose picture has another format are marked aspect_mismatch. Only the fields you pass change.`,
+      description: `Renames a storyboard (its folder follows), changes its aspect ratio (${STORYBOARD_ASPECT_RATIOS.join(', ')}): new pictures are made in it; boards whose picture has another format are marked aspect_mismatch – and/or its director (list_directors; null for none), which directs every transition (its Direction section after the prompt, its avoid in the negative prompt) and the pictures made for its boards (request_image_generation with storyboard_id: its look, light and framing as text); choosing one also applies its defaults where they fit (an end-image model, the resolution, its aspect ratio). Existing transitions keep their settings. Only the fields you pass change.`,
       input: {
         storyboard_id: z.string(),
         name: z.string().min(1).max(120).optional(),
-        aspect_ratio: z.string().optional()
+        aspect_ratio: z.string().optional(),
+        director: z.string().nullable().optional().describe('A director_id (list_directors), or null for none.')
       },
       annotations: { ...WRITE, idempotentHint: true },
       summary: () => 'changed a storyboard'
     },
-    async ({ storyboard_id, name, aspect_ratio }) => {
+    async ({ storyboard_id, name, aspect_ratio, director }) => {
       const before = await loadStoryboard(storyboard_id)
       assertStoryboardIdle(before)
       const ratio = storyboardRatio(aspect_ratio)
-      if (name === undefined && ratio === undefined) throw new Error('Give name or aspect_ratio – otherwise there is nothing to change.')
+      const chosen = directorInput(director)
+      if (name === undefined && ratio === undefined && chosen === undefined) {
+        throw new Error('Give name, aspect_ratio or director – otherwise there is nothing to change.')
+      }
       const storyboard = await callService<Storyboard>('storyboards:update', before.id, {
         ...(name !== undefined ? { name } : {}),
-        ...(ratio !== undefined ? { aspectRatio: ratio } : {})
+        ...(ratio !== undefined ? { aspectRatio: ratio } : {}),
+        ...(chosen !== undefined ? { director: chosen } : {})
       })
       const [assets, stills] = await Promise.all([AssetIndex.load(), StillIndex.load()])
       const mismatched = storyboard.boards.flatMap((b, i) => (b.aspectMismatch ? [i + 1] : []))
@@ -549,6 +579,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
           storyboard_id: storyboard.id,
           name: storyboard.name,
           aspect_ratio: storyboard.aspectRatio,
+          director: directorRef(storyboard.director),
           boards: storyboard.boards.map((_, i) => boardInfo(storyboard, i, assets, stills)),
           ...(mismatched.length
             ? { note: `Boards ${mismatched.join(', ')} have pictures of another format than ${storyboard.aspectRatio}.` }

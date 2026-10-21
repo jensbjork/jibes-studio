@@ -5,6 +5,7 @@ import AgentPresence from './components/agent/AgentPresence'
 import ApprovalDialog from './components/agent/ApprovalDialog'
 import BudgetDialog from './components/BudgetDialog'
 import AssetsView from './components/assets/AssetsView'
+import DirectorsView from './components/directors/DirectorsView'
 import EditorView from './components/editor/EditorView'
 import GenerateView from './components/GenerateView'
 import LibrarySetup from './components/library/LibrarySetup'
@@ -204,6 +205,9 @@ function Workspace() {
             onIntentHandled={intentHandled}
             navigate={navigate}
           />
+        )}
+        {view === 'directors' && (
+          <DirectorsView intent={intent} onIntentHandled={intentHandled} navigate={navigate} />
         )}
         {view === 'prompts' && <PromptsView navigate={navigate} />}
         {view === 'sequences' && (

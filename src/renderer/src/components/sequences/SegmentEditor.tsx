@@ -13,7 +13,7 @@ import type {
 } from '@shared/types'
 import { variantsPrice, variantsText } from '@shared/variants'
 import { withBudgetConfirm } from '../../lib/budget'
-import { ipcErrorMessage, useQuote } from '../../lib/hooks'
+import { ipcErrorMessage, useDirectorAssets, useQuote } from '../../lib/hooks'
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import { FILE_MANAGER, shortcut } from '../../lib/platform'
@@ -155,8 +155,9 @@ export default function SegmentEditor({
     }
   }, [handleRef, setShown])
 
-  // Priced as it is sent: a continuation with its family's model for the way it starts.
-  const sent = effectiveParams({ ...segment, params }, index, sequence)
+  // Priced as it is sent: a continuation with its family's model for the way it starts, the director's style videos.
+  const directors = useDirectorAssets()
+  const sent = effectiveParams({ ...segment, params }, index, sequence, directors)
   const model = models.find((m) => m.id === sent.model)
   const quote = useQuote(sent, model)
   // ×1–×4 beside "Generate take" (⌘+Enter sends as many): each variant becomes a take of the clip.
@@ -481,6 +482,7 @@ export default function SegmentEditor({
               sequenceId={sequence.id}
               durationFixed={place ? `Automatic: ${durationText(params.duration, place)}` : undefined}
               song={songForm || undefined}
+              followDirector={{ what: 'sequence', directorId: sequence.director }}
             />
           </>
         )}

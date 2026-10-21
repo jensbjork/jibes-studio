@@ -14,8 +14,9 @@ import {
   includesDescriptions,
   type ComposedPrompt
 } from '@shared/prompt-compose'
+import type { ResolvedDirector } from '@shared/direction'
 import type { ValidateOptions } from '@shared/prompt-refs'
-import type { Asset, GenerationParams, PromptLanguage } from '@shared/types'
+import type { Asset, ComposedDirection, GenerationParams, PromptLanguage } from '@shared/types'
 
 /** One described asset among the sent references (or an outfit somebody wears), as the box lists it. */
 export interface DescriptionRow {
@@ -55,22 +56,28 @@ export interface DescriptionsView {
   /** Not even names and tokens fit the limit, so no legend is sent at all. */
   dropped: boolean
   /**
-   * The @ImageN / @AudioN numbers the legend that is sent explains (ValidateOptions.explained): the prompt checks
-   * don't report those as unmentioned.
+   * The @ImageN / @AudioN numbers the legend that is sent explains (ValidateOptions.explained), and the @ImageN /
+   * @VideoN of a director's style frames and videos: the prompt checks don't report those as unmentioned.
    */
   explained: NonNullable<ValidateOptions['explained']>
+  /** The director's Direction section, when one directs the params (composed.direction). */
+  direction?: ComposedDirection
+  /** What the director adds to the negative prompt (its `avoid`), when it directs the params. */
+  directionAvoid?: string
 }
 
 /**
  * What the box shows for a set of params: the rows (also the ones switched off, so they can be switched on
  * again), the referenced assets without a description, and the composed prompt with its length – and which
- * references the sent legend explains, for the prompt checks.
+ * references the sent legend explains, for the prompt checks. `director`: the one directing the params (which are
+ * then withDirection's): its Direction section is composed after the legend, as main composes it.
  */
 export function descriptionsView(
   params: GenerationParams,
   assets: readonly Asset[],
   language: PromptLanguage,
-  promptCharacterLimit?: number
+  promptCharacterLimit?: number,
+  director?: ResolvedDirector
 ): DescriptionsView {
   const described = describedAssets(assets)
   const byId = new Map(assets.map((a) => [a.id, a]))
@@ -84,7 +91,10 @@ export function descriptionsView(
     { language, include: true }
   )
   const candidates = composePrompt(params, described, { language, include: true })
-  const composed = composePrompt(params, described, composeOptionsFor(params, language, promptCharacterLimit))
+  const composed = composePrompt(params, described, {
+    ...composeOptionsFor(params, language, promptCharacterLimit),
+    ...(director ? { director } : {})
+  })
   const include = includesDescriptions(params)
   const blank = !params.prompt.trim()
   const excluded = new Set(params.excludedDescriptionAssetIds ?? [])
@@ -122,7 +132,9 @@ export function descriptionsView(
     ...(promptCharacterLimit ? { limit: promptCharacterLimit } : {}),
     truncated: composed.truncated && !composed.dropped,
     dropped: composed.dropped,
-    explained: explainedReferences(composed)
+    explained: explainedReferences(composed),
+    ...(composed.direction ? { direction: composed.direction } : {}),
+    ...(director?.direction.avoid ? { directionAvoid: director.direction.avoid } : {})
   }
 }
 

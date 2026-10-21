@@ -24,6 +24,13 @@ import {
   type CastSwap
 } from '@shared/cast'
 import {
+  continuesByDefault,
+  effectiveDirectorId,
+  shotDuration,
+  withDirection,
+  type ResolvedDirector
+} from '@shared/direction'
+import {
   CONTINUATION_FRAME_PLACEHOLDER,
   continuationPlan,
   continuationProblem,
@@ -96,6 +103,7 @@ import { isAgentCall } from './agent/local-ipc'
 import { listAssets } from './assets'
 import { assertRunWithinBudget, assertWithinBudget, confirmedOf, quoteTotal, runConfirmed } from './budget'
 import * as db from './db'
+import { checkedDirectorId, defaultsOnChoosing, libraryDirector } from './directors'
 import { concatClips, extractFrame, extractFrameAtOrAfter, frameStartAtOrAfter, probe } from './ffmpeg'
 import { composeSubmission, prepareSubmission, toPublic, videoLocation, type JobManager } from './jobs'
 import {
@@ -203,6 +211,12 @@ interface SequencePatch {
   cast?: SequenceCast
   /** One asset of the cast swapped for another, keeping every number in the clips that follow it. */
   castSwap?: SequenceCastSwap
+  /**
+   * The director of the whole sequence (an asset id or a ready-made one); null: none. A new one's defaults (model,
+   * aspect ratio, resolution – each only when the model offers it) become the sequence's defaults; existing clips keep
+   * their settings.
+   */
+  director?: string | null
 }
 
 /**
@@ -355,12 +369,20 @@ export function chainOf(rows: readonly store.SegmentRow[]): ChainClip[] {
  * otherwise takes a frame from a neighbour gets the image-to-video sibling of its model and no references. A
  * neighbour's frame is only filled in when the take is generated (until then the slot is empty, not a stale image).
  * A clip of a sequence cut to a song that hears it sends its window of the song as its only reference audio, with the
- * words sung there (song-send.ts withSong).
+ * words sung there (song-send.ts withSong). A clip is directed by its own director, else by the sequence's (or the
+ * storyboard's, for a transition), none for null (direction.ts effectiveDirectorId): its params then carry that
+ * director's id and are directed by it (withDirection) – no style frames for a continuation in reference mode, whose
+ * last picture is the previous clip's frame.
  */
 export function takeParams(rows: readonly store.SegmentRow[], index: number, chain = chainOf(rows)): GenerationParams {
   const params = sendParams(chain, index)
+  const row = rows[index]
   // The sequence's song is only read for a clip with a place in it.
-  return params.song && rows[index] ? withSong(params, store.sequenceSong(rows[index].sequence_id)) : params
+  const sung = params.song && row ? withSong(params, store.sequenceSong(row.sequence_id)) : params
+  const id = effectiveDirectorId(chain[index]?.params.director, row ? store.sequenceDirector(row.sequence_id) : undefined)
+  const director = libraryDirector(id)
+  if (!director) return sung
+  return withDirection(sung, director, { continuationFrame: continuationPlan(chain, index)?.mode === 'references' })
 }
 
 /** How the clip at `index` continues from the previous clip (continuation.ts), or undefined when it doesn't. */
@@ -640,6 +662,8 @@ function checkedCast(
   const photos = new Map<string, Asset>()
   const clips = new Set<string>()
   for (const asset of library) {
+    // A director's photos are its style frames: it directs a sequence (update({director})), it is never in its cast.
+    if (asset.kind === 'director') continue
     for (const image of asset.images) if (!photos.has(image.path)) photos.set(image.path, asset)
     for (const clip of asset.audio ?? []) clips.add(clip.path)
   }
@@ -685,6 +709,27 @@ function fitToModel(params: GenerationParams, models: readonly VideoModel[] | un
     aspectRatio: pickOption(info.aspectRatios, params.aspectRatio, PREFERRED.aspectRatios),
     audio: audioForModel(info, params.audio)
   }
+}
+
+/**
+ * A sequence's defaults with what choosing `director` sets (direction.ts directorDefaults: its model, aspect ratio and
+ * resolution, each only when the model offers it), the rest fitted to a model it switched to. Without the model list
+ * nothing is checked, so nothing changes.
+ */
+function fitDirectorDefaults(
+  defaults: Partial<GenerationParams>,
+  director: ResolvedDirector,
+  models: readonly VideoModel[] | undefined
+): Partial<GenerationParams> {
+  const current = { model: defaults.model ?? DEFAULT_PARAMS.model, ...defaults }
+  const changes = defaultsOnChoosing(current, director, models)
+  if (!Object.keys(changes).length) return defaults
+  const next = { ...current, ...changes }
+  if (changes.model) {
+    const fitted = fitToModel({ ...DEFAULT_PARAMS, ...next, prompt: '' } as GenerationParams, models)
+    return store.pickDefaults({ ...fitted, ...changes })
+  }
+  return next
 }
 
 /**
@@ -1036,12 +1081,19 @@ export class SequenceService {
    */
   async update(id: string, patch: SequencePatch, caller: Caller = {}): Promise<Sequence> {
     patch = patch ?? {}
+    // Checked before anything is read or written: a director that doesn't exist changes nothing.
+    const director = patch.director === undefined ? undefined : checkedDirectorId(patch.director)
+    const chosen = director ? libraryDirector(director) : undefined
+    // A sequence's defaults follow a director chosen now (a storyboard's: storyboards.ts).
+    const models = chosen?.direction.defaults ? await this.modelList() : undefined
     const row = store.requireSequenceRow(id)
     const name = patch.name !== undefined ? store.cleanSequenceName(patch.name, store.kindOf(row)) : row.name
     // Checked before anything is written: a wrong height must not leave the name changed and the format not.
     const height = patch.exportHeight !== undefined ? store.cleanExportHeight(patch.exportHeight) : undefined
     const swap = cleanCastSwap(patch.castSwap)
     if (patch.cast !== undefined && swap) throw new Error('Change the cast or swap one of its assets – not both at once.')
+    // A run sends the clips as they are then: a director changed under it would direct takes the user never saw.
+    if (director !== undefined && director !== store.parseDirector(row.defaults)) this.refuseWhileRunning(id, caller)
     const castChange = patch.cast !== undefined || !!swap
     if (castChange) {
       if (store.kindOf(row) !== 'sequence') throw new Error(store.IS_STORYBOARD)
@@ -1051,9 +1103,12 @@ export class SequenceService {
     this.sql().transaction(() => {
       // Read in the transaction, so the clips are changed from exactly the cast they followed.
       const current = store.requireSequenceRow(id)
-      const defaults = patch.defaults
+      let defaults = patch.defaults
         ? { ...store.parseDefaults(current.defaults), ...store.pickDefaults(patch.defaults) }
         : store.parseDefaults(current.defaults)
+      if (chosen && director !== store.parseDirector(current.defaults) && store.kindOf(current) === 'sequence') {
+        defaults = fitDirectorDefaults(defaults, chosen, models)
+      }
       const before = store.parseCast(current.defaults)
       let after = before
       let swapped: CastSwap | undefined
@@ -1064,7 +1119,7 @@ export class SequenceService {
       }
       this.sql()
         .prepare('UPDATE sequences SET name = ?, defaults = ?, updated_at = ? WHERE id = ?')
-        .run(name, store.serializeDefaults(defaults, after, current.defaults), Date.now(), id)
+        .run(name, store.serializeDefaults(defaults, after, current.defaults, director), Date.now(), id)
       if (height !== undefined) store.setExportHeight(id, height)
       if (castChange && !sameCast(before, after)) this.followCast(id, before, after, swapped, library)
     })()
@@ -1233,8 +1288,13 @@ export class SequenceService {
     // In a song sequence a new clip doesn't continue unless asked to, and its take's duration follows its place (the
     // list's durations); the place it splits goes on the beat (the song's analysis, when there is one).
     const song = store.sequenceSong(sequenceId)
-    const linking = init.endFromNext || (init.continueFromPrevious ?? (!init.fromGenerationId && !song))
-    const models = linking || song ? await this.modelList() : undefined
+    // The sequence's director decides whether a new clip continues ('flow') or starts a new shot ('cut'), and the length
+    // of a clip Studio makes (its shot length, the nearest the model offers; a song's clips follow their places).
+    const director = libraryDirector(store.sequenceDirector(sequenceId))?.direction
+    const flows = continuesByDefault(director)
+    const shot = !init.fromGenerationId && !init.params && !song ? director?.shotSeconds : undefined
+    const linking = init.endFromNext || (init.continueFromPrevious ?? (!init.fromGenerationId && (flows ?? !song)))
+    const models = linking || song || shot !== undefined ? await this.modelList() : undefined
     const analysis = song ? await cachedSongAnalysis(song) : undefined
     const sequence = store.requireSequenceRow(sequenceId)
     this.refuseWhileRunning(sequenceId, caller)
@@ -1311,7 +1371,7 @@ export class SequenceService {
       }
     }
 
-    const continuing = !!previous && (init.continueFromPrevious ?? (!source && !song))
+    const continuing = !!previous && (init.continueFromPrevious ?? (!source && (flows ?? !song)))
     if (castApplies && !continuing && !ending) {
       // A new shot with the cast. A negative prompt copied from the clip before was written against that clip's
       // references: its tokens move onto the cast's pictures (or go), so none names another picture now.
@@ -1352,6 +1412,11 @@ export class SequenceService {
     }
     // A clip moved to another model gets the options that model offers.
     if (params.model !== chosen) params = fitToModel(params, models)
+    // The director's shot length, as near as the model offers.
+    if (shot !== undefined) {
+      const duration = shotDuration(shot, models?.find((m) => m.id === params.model)?.durations ?? [])
+      if (duration) params = { ...params, duration }
+    }
     // Its place in the song (not one copied from the clip before or a take), hearing what is sung there by default.
     if (songSplit) {
       const { start, end } = songSplit.place

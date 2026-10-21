@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { directorDefaults, resolveDirector } from '@shared/direction'
 import {
   DEFAULT_MODEL,
   KINDS,
@@ -40,6 +41,7 @@ import { addPaths, sameList } from '../components/pickers/assetRefs'
 import { addAudios, audioSourcesByPath, sameAudios, windowOf } from '../components/pickers/audioRefs'
 import { appendVideoWindows } from '../components/pickers/videoRefs'
 import { ASSET_VIEW } from './assets'
+import { directorById, isPresetId } from './directors'
 import { followGenerateAudio, generateParamsFrozen, getGenerateParams, setGenerateParams } from './generateStore'
 import { ipcErrorMessage, loadModels } from './hooks'
 import { SELECTED_ASSET_KEYS, fileName, followAssetImages, isAbsolutePath, readRememberedImageIds } from './library'
@@ -197,7 +199,8 @@ export function applySetForm(
   current: GenerationParams,
   rawArgs: unknown,
   models: readonly VideoModel[],
-  modelsError?: string
+  modelsError?: string,
+  assets: readonly Asset[] = []
 ): FormChange {
   const args = asArgs(rawArgs)
   const modeValue = field(args, 'mode')
@@ -213,6 +216,7 @@ export function applySetForm(
   const includeValue = field(args, 'include_descriptions')
   const excludedValue = field(args, 'excluded_description_asset_ids')
   const wearersValue = field(args, 'outfit_wearers')
+  const directorValue = field(args, 'director')
   const explicit = new Set(
     ['duration', 'resolution', 'aspect_ratio', 'audio'].filter((key) => given(field(args, key)))
   )
@@ -399,6 +403,34 @@ export function applySetForm(
       const wearers = sanitizeOutfitWearers(wearersValue)
       if (wearers) next.outfitWearers = wearers
       else delete next.outfitWearers
+    }
+  }
+
+  // The director (an asset id or a ready-made one's; null: none), as the form's picker sets it: choosing one applies
+  // its defaults – model, aspect ratio, resolution – where the models offer them, unless the same call sets them.
+  if (directorValue !== undefined) {
+    if (directorValue === null || directorValue === '') delete next.director
+    else if (typeof directorValue !== 'string') errors.push('director must be a director id, or null for none.')
+    else {
+      const director = resolveDirector(directorValue.trim(), assets)
+      if (!director) {
+        errors.push(`The director “${directorValue}” doesn't exist. See list_directors for the ones that do.`)
+      } else {
+        next.director = director.id
+        const set = directorDefaults(next, director.direction, models.filter((m) => !m.offline))
+        const keep = {
+          ...(set.model && !given(modelValue) && !mode ? { model: set.model } : {}),
+          ...(set.aspectRatio && !explicit.has('aspect_ratio') ? { aspectRatio: set.aspectRatio } : {}),
+          ...(set.resolution && !explicit.has('resolution') ? { resolution: set.resolution } : {})
+        }
+        if (keep.model) {
+          const chosen = models.find((m) => m.id === keep.model)
+          Object.assign(next, snapToModel({ ...next, model: keep.model }, chosen), keep)
+          notes.push(`${director.name} chose the model ${chosen?.name ?? keep.model}.`)
+        } else Object.assign(next, keep)
+        if (keep.aspectRatio) notes.push(`${director.name} set the aspect ratio to ${keep.aspectRatio}.`)
+        if (keep.resolution) notes.push(`${director.name} set the resolution to ${keep.resolution}.`)
+      }
     }
   }
 
@@ -968,7 +1000,7 @@ export async function applyOpen(rawArgs: unknown, ctx: BridgeContext): Promise<A
   if (view === 'editor') return openEditorView(args, ctx)
   if (args.view !== 'sequences' && args.view !== 'sequence') {
     throw new BridgeError(
-      'view must be “generate”, “media”, “sequences”, “storyboards”, “editor”, “prompts” or a library view (“characters”, “environments”, “products”, “outfits”, “poses”).'
+      'view must be “generate”, “media”, “sequences”, “storyboards”, “editor”, “prompts” or a library view (“characters”, “environments”, “products”, “outfits”, “poses”, “directors”).'
     )
   }
   const segmentId = optionalId(field(args, 'segment_id'))
@@ -1043,12 +1075,27 @@ function selectedAsset(kind: AssetKind): string | undefined {
   }
 }
 
-/** Shows an asset in its library view (Characters, Environments, Products, Outfits or Poses). */
+/**
+ * Shows an asset in its library view (Characters, Environments, Products, Outfits, Poses or Directors); a ready-made
+ * director's id ("preset:noir") opens it in Directors.
+ */
 async function openAssetView(view: View, args: Args, ctx: BridgeContext): Promise<AgentOpenResult> {
   const assetId = optionalId(field(args, 'asset_id'))
   if (!assetId) {
     ctx.show(view)
     return { view: view as AgentOpenResult['view'] }
+  }
+  if (isPresetId(assetId)) {
+    const preset = directorById(assetId, [])
+    if (!preset) throw new BridgeError("The ready-made director doesn't exist.")
+    ctx.show('directors', { type: 'open-asset', assetId, source: 'agent' })
+    const shown = await settled(() => selectedAsset('director') === assetId)
+    return {
+      view: 'directors',
+      assetId,
+      assetName: preset.name,
+      ...(shown ? {} : { note: "The view is shown, but the director wasn't selected in time – ask the user to pick it in the list." })
+    }
   }
   const asset = (await window.studio.listAssets()).find((a) => a.id === assetId)
   if (!asset) throw new BridgeError("The asset doesn't exist (any more).")
@@ -1172,7 +1219,7 @@ async function run(cmd: AgentCommand, ctx: BridgeContext): Promise<unknown> {
   // Read after the awaits, so the change builds on the form as it is now (the user may have typed meanwhile).
   const change: FormChange & Partial<Pick<ReorderChange, 'moved'>> =
     command === 'set_form'
-      ? applySetForm(getGenerateParams(), cmd.args, models, error)
+      ? applySetForm(getGenerateParams(), cmd.args, models, error, assets)
       : command === 'set_references'
         ? applySetReferences(getGenerateParams(), cmd.args, models, assets)
         : command === 'swap_reference'

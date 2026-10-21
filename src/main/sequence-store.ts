@@ -6,6 +6,7 @@ import { readdir, rm, rmdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { castReferences, sameCastReferences, sanitizeCast } from '@shared/cast'
 import { continueModeOf, isContinueMode, type ChainClip } from '@shared/continuation'
+import { sanitizeDirectorId } from '@shared/direction'
 import { DEFAULT_PARAMS, durationSeconds, sanitizeReferenceAudios, sanitizeReferenceVideos } from '@shared/models'
 import { sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
@@ -253,7 +254,8 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v 
  * clips and reference videos keep their windows; whether the model can use them is decided when a take is sent (paramsForSubmit).
  * The description switches (includeDescriptions, excludedDescriptionAssetIds) and who wears each outfit
  * (outfitWearers) are kept: they decide what a take appends to its prompt, and "Use again" on a take brings them
- * back. So is a song clip's place in its song (song, shared/song.ts).
+ * back. So is a song clip's place in its song (song, shared/song.ts), and the clip's own director (director: an id, or
+ * null for none even where the sequence has one; left out: the sequence's).
  */
 export function sanitizeParams(input: Partial<GenerationParams> | undefined): GenerationParams {
   const p = input ?? {}
@@ -262,6 +264,7 @@ export function sanitizeParams(input: Partial<GenerationParams> | undefined): Ge
     : undefined
   const wearers = sanitizeOutfitWearers(p.outfitWearers)
   const song = sanitizeSongWindow(p.song)
+  const director = sanitizeDirectorId(p.director)
   return {
     model: str(p.model) ?? DEFAULT_PARAMS.model,
     prompt: typeof p.prompt === 'string' ? p.prompt : '',
@@ -278,7 +281,8 @@ export function sanitizeParams(input: Partial<GenerationParams> | undefined): Ge
     referenceVideos: sanitizeReferenceVideos(p.referenceVideos),
     ...sanitizeDescriptionFlags(p),
     ...(wearers ? { outfitWearers: wearers } : {}),
-    ...(song ? { song } : {})
+    ...(song ? { song } : {}),
+    ...(director !== undefined ? { director } : {})
   }
 }
 
@@ -344,19 +348,53 @@ export function parseCast(json: string): SequenceCast {
 
 /**
  * The defaults JSON as stored: the output settings (pickDefaults) and the cast's references (see parseCast). `stored`:
- * the row's defaults as they are, whose song (see parseSong) is kept exactly as it was stored.
+ * the row's defaults as they are, whose song (see parseSong) is kept exactly as it was stored, and so is its director
+ * (see parseDirector) unless `director` is given (null: none).
  */
-export function serializeDefaults(defaults: Partial<GenerationParams>, cast: SequenceCast, stored?: string): string {
+export function serializeDefaults(
+  defaults: Partial<GenerationParams>,
+  cast: SequenceCast,
+  stored?: string,
+  director?: string | null
+): string {
   const clean = sanitizeCast(cast)
   const refs = toStoredParams({ model: '', prompt: '', duration: '', ...castReferences(clean) })
   const song = stored === undefined ? undefined : storedSong(stored)
+  const chosen = director === undefined ? (stored === undefined ? undefined : parseDirector(stored)) : director
   return JSON.stringify({
     ...pickDefaults(defaults),
     ...(refs.referenceImages?.length ? { referenceImages: refs.referenceImages } : {}),
     ...(refs.referenceAudios?.length ? { referenceAudios: refs.referenceAudios } : {}),
     ...(refs.outfitWearers ? { outfitWearers: refs.outfitWearers } : {}),
-    ...(song ? { song } : {})
+    ...(song ? { song } : {}),
+    ...(chosen ? { director: chosen } : {})
   })
+}
+
+// ── The director ─────────────────────────────────────────────────────────────
+
+/**
+ * The director of a sequence or storyboard (Sequence.director, Storyboard.director): the key `director` of its defaults
+ * JSON, an asset id or a ready-made one; undefined for none.
+ */
+export function parseDirector(defaultsJson: string): string | undefined {
+  const value = defaultsObject(defaultsJson)?.director
+  return typeof value === 'string' && value ? value : undefined
+}
+
+/** The director of the sequence (or storyboard) with this id; undefined for none (or a sequence that is gone). */
+export function sequenceDirector(sequenceId: string): string | undefined {
+  const row = typeof sequenceId === 'string' ? getSequenceRow(sequenceId) : undefined
+  return row ? parseDirector(row.defaults) : undefined
+}
+
+/**
+ * A defaults JSON with every key of `stored` that the output settings don't hold kept as it was (the cast, the song, the
+ * director): for writers that only change the settings (a storyboard remembering a transition's).
+ */
+export function withStoredExtras(settings: Partial<GenerationParams>, stored: string): string {
+  const { model: _m, duration: _d, resolution: _r, aspectRatio: _a, audio: _au, ...extras } = defaultsObject(stored) ?? {}
+  return JSON.stringify({ ...pickDefaults(settings), ...extras })
 }
 
 // ── The song (a sequence cut to a song) ──────────────────────────────────────
@@ -700,11 +738,13 @@ export function loadSequence(id: string, run: RunInfo): Sequence {
   // A sequence cut to a song: the song, and what is being done to it right now (main/song.ts).
   const song = parseSong(row.defaults)
   const songNow = songRuntimeOf(row.id)
+  const director = parseDirector(row.defaults)
   return {
     id: row.id,
     name: row.name,
     defaults: parseDefaults(row.defaults),
     cast: parseCast(row.defaults),
+    ...(director ? { director } : {}),
     ...(song ? { song } : {}),
     ...(songNow.work ? { songWork: songNow.work } : {}),
     ...(songNow.error ? { songError: songNow.error } : {}),

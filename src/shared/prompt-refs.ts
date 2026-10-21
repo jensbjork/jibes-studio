@@ -169,6 +169,11 @@ export interface ValidateOptions {
     images?: readonly number[]
     audios?: readonly number[]
     /**
+     * @VideoN numbers explained by the prompt as composed: a director's style videos, which its Direction section
+     * explains (direction.ts). The reference video lines of the legend don't count: they say how, not what for.
+     */
+    videos?: readonly number[]
+    /**
      * A song clip whose chosen singer isn't among its pictures: the name the song's line gives instead ('' for nobody;
      * explainedReferences).
      */
@@ -1383,8 +1388,10 @@ function validateVideo(
   }
 
   const mentioned = new Set([...tokens.map((t) => t.index), ...malformed.flatMap((m) => m.meant)])
+  // A director's style videos are explained by its Direction section: never "not mentioned".
+  const explained = new Set(opts.explained?.videos ?? [])
   const unused: number[] = []
-  for (let n = 1; n <= sent; n++) if (!mentioned.has(n)) unused.push(n)
+  for (let n = 1; n <= sent; n++) if (!mentioned.has(n) && !explained.has(n)) unused.push(n)
   if (unused.length && text.trim()) {
     out.advice.push({
       severity: 'warning',

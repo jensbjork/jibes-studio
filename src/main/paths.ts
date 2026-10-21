@@ -20,6 +20,8 @@ export const FOLDERS = {
   products: 'Produkter',
   outfits: 'Kläder',
   poses: 'Poser',
+  /** Directors: one folder per director with its style frames, style videos and description. */
+  directors: 'Regissörer',
   references: 'Referensbilder',
   generations: 'Genereringar',
   sequences: 'Sekvenser',
@@ -31,13 +33,14 @@ export const FOLDERS = {
   appData: '.studio'
 } as const
 
-/** The folder each kind of asset (character, environment, product, outfit, pose) keeps its own folders in. */
+/** The folder each kind of asset (character, environment, product, outfit, pose, director) keeps its own folders in. */
 export const ASSET_FOLDERS: Readonly<Record<AssetKind, string>> = {
   character: FOLDERS.characters,
   environment: FOLDERS.environments,
   product: FOLDERS.products,
   outfit: FOLDERS.outfits,
-  pose: FOLDERS.poses
+  pose: FOLDERS.poses,
+  director: FOLDERS.directors
 }
 
 /** A kind this version of Studio knows (the database may come from a newer one). */
@@ -470,7 +473,7 @@ function folderSegment(name: string): string {
   return name
 }
 
-/** Karaktärer, Miljöer, Produkter, Kläder or Poser by kind [/<folder>] */
+/** Karaktärer, Miljöer, Produkter, Kläder, Poser or Regissörer by kind [/<folder>] */
 export function assetsDir(kind: AssetKind, folder?: string): string {
   if (!isAssetKind(kind)) throw new Error('Unknown kind of library item.')
   const base = join(libraryRoot(), ASSET_FOLDERS[kind])

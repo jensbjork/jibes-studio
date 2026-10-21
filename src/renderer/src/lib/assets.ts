@@ -2,16 +2,26 @@ import { isGenericAgentName } from '@shared/agent-name'
 import { MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
 import {
   ASSET_KINDS,
+  LIBRARY_KINDS,
   type Asset,
   type AssetAudio,
   type AssetFileOrigin,
   type AssetKind,
-  type LibraryFolderTarget
+  type LibraryFolderTarget,
+  type ReferenceKind
 } from '@shared/types'
 import type { View } from './navigation'
 
-/** Every kind, in the order the app lists them (Characters, Environments, Products, Outfits, Poses). */
-export { ASSET_KINDS }
+/**
+ * The kinds a prompt refers to, in the order the app lists them (Characters, Environments, Products, Outfits, Poses):
+ * the pickers, chips and filters. LIBRARY_KINDS adds Directors after them (the sidebar, ⌘K).
+ */
+export { ASSET_KINDS, LIBRARY_KINDS }
+
+/** Whether the kind is one a prompt refers to (not a director, which directs a clip instead). */
+export function isReferenceKind(kind: AssetKind): kind is ReferenceKind {
+  return (ASSET_KINDS as readonly AssetKind[]).includes(kind)
+}
 
 /** "2–15 seconds": how long the part of a sound clip sent to Venice may be. */
 const CLIP_SECONDS = `${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} seconds`
@@ -39,7 +49,7 @@ export interface AudioCopy {
   firstBadge?: { label: string; title: string }
 }
 
-/** The wording for one kind of library asset (character, environment, product, outfit, pose). */
+/** The wording for one kind of library asset (character, environment, product, outfit, pose, director). */
 export interface AssetCopy {
   /** Sidebar and list title: "Characters". */
   plural: string
@@ -64,6 +74,11 @@ export interface AssetCopy {
   listHint: string
   /** Advice under the image drop area. */
   imageTips: string
+  /**
+   * The images' section, when it isn't "Reference images" (a director's style frames): its title, the line under it
+   * and the note when there are more than a generation takes.
+   */
+  images?: { title: string; intro: string; many: string }
   /** How the asset is used when generating, shown in the editor when the kind needs explaining. */
   usage?: string
   /** Kinds that can have sound clips (characters' voices, environments' sounds); absent for the others. */
@@ -193,6 +208,34 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
       'Add the pose in Generate together with the characters, and the prompt says who should stand like that, ' +
       'e.g. “Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)”. It is the positions that are borrowed, not ' +
       'the people in the image.'
+  },
+  director: {
+    plural: 'Directors',
+    singular: 'director',
+    definite: 'the director',
+    possessive: "the director's",
+    newName: 'New director',
+    generatePhrase: 'with the director',
+    descriptionPlaceholder: 'What the director is good for, in one line…',
+    descriptionHint: 'Shown in the pickers',
+    emptyTitle: 'No directors of your own yet',
+    emptyText:
+      'A director is a way of making a film – how it is cut, its look, the camera, the light, the framing, the rhythm, ' +
+      'the acting and the sound, what it never does, and pictures and videos of the style. Choose one in Generate, for ' +
+      'a sequence or a storyboard, and every prompt it directs gets the same direction.',
+    listHint: 'Directors you create show up here. Start from a ready-made one with “Use a copy”.',
+    imageTips:
+      'Stills whose grade, light and texture the clips should match – never their people, places or objects. Three or ' +
+      'four that agree with each other work best.',
+    images: {
+      title: 'Style frames',
+      intro:
+        'Sent after a clip’s own reference images, in this order, so the clip matches their look – grade, light, ' +
+        'texture – never their people, places or objects. Only in reference mode. The first is the cover.',
+      many:
+        'A clip takes only as many style frames as the model has places left after its own reference images; the ' +
+        'first ones come along.'
+    }
   }
 }
 
@@ -202,19 +245,22 @@ export const ASSET_VIEW: Record<AssetKind, View> = {
   environment: 'environments',
   product: 'products',
   outfit: 'outfits',
-  pose: 'poses'
+  pose: 'poses',
+  director: 'directors'
 }
 
-/** The library folder that holds each kind (on disk: Karaktärer, Miljöer, Produkter, Kläder, Poser). */
+/** The library folder that holds each kind (on disk: Karaktärer, Miljöer, Produkter, Kläder, Poser, Regissörer). */
 export const ASSET_FOLDER: Record<AssetKind, LibraryFolderTarget> = {
   character: 'characters',
   environment: 'environments',
   product: 'products',
   outfit: 'outfits',
-  pose: 'poses'
+  pose: 'poses',
+  director: 'directors'
 }
 
-export function assetKindOfView(view: View): AssetKind | undefined {
+/** The reference kind a library view lists (Characters … Poses); Directors has a view of its own. */
+export function assetKindOfView(view: View): ReferenceKind | undefined {
   return ASSET_KINDS.find((kind) => ASSET_VIEW[kind] === view)
 }
 

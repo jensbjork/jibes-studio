@@ -95,6 +95,9 @@ export async function planSwap(
       )
     }
     const to = index.require(replacement.asset_id)
+    if (to.kind === 'director') {
+      throw new Error(`${q(to.name)} is a director, not a reference: choose it with director (set_form, update_segment, update_sequence).`)
+    }
     if (!to.images.length) {
       throw new Error(`${q(to.name)} has no photos to swap to. Add images with add_asset_images first.`)
     }

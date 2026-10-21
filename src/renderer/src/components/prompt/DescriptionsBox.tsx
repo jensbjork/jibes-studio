@@ -1,7 +1,9 @@
 import { useId, useState } from 'react'
-import type { Asset } from '@shared/types'
+import { DIRECTION_PART_LABELS } from '@shared/direction'
+import type { Asset, ComposedDirection, DirectionLine } from '@shared/types'
 import AssetAvatar from '../assets/AssetAvatar'
-import { KIND_TONE } from '../pickers/assetKinds'
+import AssetIcon from '../assets/AssetIcon'
+import { KIND_TONE, VIDEO_TONE } from '../pickers/assetKinds'
 import type { DescriptionRow, DescriptionsView } from './descriptions'
 
 interface Props {
@@ -17,6 +19,8 @@ interface Props {
   onToggle: (assetId: string, on: boolean) => void
   /** "Edit description": opens the asset in its library view. */
   onOpenAsset?: (asset: Asset) => void
+  /** Opens the director directing the form in Directors. */
+  onOpenDirector?: () => void
 }
 
 /**
@@ -25,39 +29,49 @@ interface Props {
  * it is then, so an edited description applies to the next generation), with who wears each outfit. One row per
  * described asset (and per outfit somebody wears) with its tokens and an excerpt, a toggle for each and a master
  * switch, a link to edit the description, and the length of the prompt as sent against the model's limit, with a
- * note when descriptions had to be shortened or left out to fit. Hidden while no reference that is sent has a
- * description and no outfit is worn.
+ * note when descriptions had to be shortened or left out to fit. A director's Direction section follows, line by line
+ * (a part left out to fit dimmed), with what of it isn't sent and why. Hidden while no reference that is sent has a
+ * description, no outfit is worn and no director directs the form.
  */
-export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset }: Props) {
+export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset, onOpenDirector }: Props) {
   const [showText, setShowText] = useState(false)
   const titleId = useId()
   const textId = useId()
-  const { rows, undescribed, include, composed, blank, truncated, dropped, limit } = view
-  if (!rows.length) return null
+  const { rows, undescribed, include, composed, blank, truncated, dropped, limit, direction } = view
+  if (!rows.length && !direction) return null
 
   const length = composed.prompt.length
   const over = limit !== undefined && length > limit
   const sent = rows.filter((r) => r.sent).length
   const legend = composed.legend.replace(/^\s+/, '')
-  const note = !include
-    ? { tone: 'text-muted', text: 'The descriptions aren’t sent.' }
-    : dropped
-      ? {
-          tone: 'text-accent',
-          text:
-            `The descriptions don’t fit within the model’s limit of ${limit} characters and aren’t sent. ` +
-            'Shorten the prompt or switch some of them off.'
-        }
-      : !sent
-        ? { tone: 'text-muted', text: 'No descriptions are sent.' }
-        : blank
-          ? { tone: 'text-muted', text: 'Added after the prompt once you have written it.' }
-          : truncated
-            ? {
-                tone: 'text-amber-300',
-                text: `The descriptions have been shortened so the prompt fits within the model’s limit of ${limit} characters.`
-              }
-            : { tone: 'text-muted', text: 'Sent after the prompt, as a list of the references.' }
+  // With descriptions, the note is theirs (the Direction block says what of the direction isn't sent).
+  const directionNote = (): { tone: string; text: string } =>
+    blank
+      ? { tone: 'text-muted', text: 'Added after the prompt once you have written it.' }
+      : direction?.dropped || !direction?.section
+        ? { tone: 'text-accent', text: 'Nothing of the direction is sent.' }
+        : { tone: 'text-muted', text: 'Sent after the prompt.' }
+  const note = !rows.length
+    ? directionNote()
+    : !include
+      ? { tone: 'text-muted', text: 'The descriptions aren’t sent.' }
+      : dropped
+        ? {
+            tone: 'text-accent',
+            text:
+              `The descriptions don’t fit within the model’s limit of ${limit} characters and aren’t sent. ` +
+              'Shorten the prompt or switch some of them off.'
+          }
+        : !sent
+          ? { tone: 'text-muted', text: 'No descriptions are sent.' }
+          : blank
+            ? { tone: 'text-muted', text: 'Added after the prompt once you have written it.' }
+            : truncated
+              ? {
+                  tone: 'text-amber-300',
+                  text: `The descriptions have been shortened so the prompt fits within the model’s limit of ${limit} characters.`
+                }
+              : { tone: 'text-muted', text: 'Sent after the prompt, as a list of the references.' }
 
   return (
     <section aria-labelledby={titleId} className="mt-3 overflow-hidden rounded-md border border-line">
@@ -65,34 +79,42 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
         <h4 id={titleId} className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted">
           Added to the prompt
         </h4>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={include}
-          onClick={() => onInclude(!include)}
-          title={
-            include
-              ? 'The descriptions of the references are added after the prompt when it is sent'
-              : 'Add the descriptions of the references after the prompt when it is sent'
-          }
-          className="flex shrink-0 items-center gap-1.5 rounded text-[11px] text-muted transition hover:text-text"
-        >
-          Include descriptions
-          <Track on={include} />
-        </button>
+        {rows.length > 0 && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={include}
+            onClick={() => onInclude(!include)}
+            title={
+              include
+                ? 'The descriptions of the references are added after the prompt when it is sent'
+                : 'Add the descriptions of the references after the prompt when it is sent'
+            }
+            className="flex shrink-0 items-center gap-1.5 rounded text-[11px] text-muted transition hover:text-text"
+          >
+            Include descriptions
+            <Track on={include} />
+          </button>
+        )}
       </div>
 
-      <ul className="divide-y divide-line/60">
-        {rows.map((row) => (
-          <Row
-            key={row.asset.id}
-            row={row}
-            include={include}
-            onToggle={(on) => onToggle(row.asset.id, on)}
-            onOpen={onOpenAsset && (() => onOpenAsset(row.asset))}
-          />
-        ))}
-      </ul>
+      {rows.length > 0 && (
+        <ul className="divide-y divide-line/60">
+          {rows.map((row) => (
+            <Row
+              key={row.asset.id}
+              row={row}
+              include={include}
+              onToggle={(on) => onToggle(row.asset.id, on)}
+              onOpen={onOpenAsset && (() => onOpenAsset(row.asset))}
+            />
+          ))}
+        </ul>
+      )}
+
+      {direction && (
+        <DirectionBlock direction={direction} avoid={view.directionAvoid} blank={blank} onOpen={onOpenDirector} />
+      )}
 
       {undescribed.length > 0 && (
         <p className="border-t border-line/60 px-2.5 py-1.5 text-[11px] leading-snug text-muted">
@@ -155,7 +177,7 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
           id={textId}
           className="max-h-40 overflow-y-auto border-t border-line/60 bg-raised/60 px-2.5 py-2 text-[11px] leading-relaxed whitespace-pre-wrap break-words text-muted select-text"
         >
-          <LegendText text={legend} rows={rows} />
+          <LegendText text={legend} rows={rows} direction={direction} />
         </p>
       )}
     </section>
@@ -258,20 +280,139 @@ function Row({
 }
 
 /** The legend as it is sent, its tokens coloured like the assets they belong to (as in the prompt above). */
-function LegendText({ text, rows }: { text: string; rows: readonly DescriptionRow[] }) {
-  const tones = new Map(
-    rows.flatMap((r) => [
+function LegendText({
+  text,
+  rows,
+  direction
+}: {
+  text: string
+  rows: readonly DescriptionRow[]
+  direction?: ComposedDirection
+}) {
+  const tones = new Map([
+    ...rows.flatMap((r) => [
       // A wearer without a row of its own (no description) is named in its outfit's line.
       ...(r.wornBy?.tokens.map((t) => [t, KIND_TONE[r.wornBy!.asset.kind].token] as const) ?? []),
       ...r.tokens.map((t) => [t, KIND_TONE[r.asset.kind].token] as const)
-    ])
-  )
+    ]),
+    // A director's style frames and videos, in its section.
+    ...(direction?.styleFrames.map((t) => [t, KIND_TONE.director.token] as const) ?? []),
+    ...(direction?.styleVideos.map((t) => [t, VIDEO_TONE.token] as const) ?? [])
+  ])
   // split() with a capturing group puts the tokens at the odd indices.
   return (
     <>
-      {text.split(/(@(?:Image|Audio)\d+)/g).map((part, i) =>
+      {text.split(/(@(?:Image|Audio|Video)\d+)/g).map((part, i) =>
         i % 2 ? (
           <span key={i} className={`rounded-[3px] ${tones.get(part) ?? 'text-text'}`}>
+            {part}
+          </span>
+        ) : (
+          part
+        )
+      )}
+    </>
+  )
+}
+
+/** What a line of the Direction section is called in the box: its part, or the style frames' and videos'. */
+function lineLabel(line: DirectionLine): string {
+  if (line.part === 'styleFrames') return 'Style frames'
+  if (line.part === 'styleVideo') return 'Style video'
+  return DIRECTION_PART_LABELS[line.part]
+}
+
+/**
+ * A line's text without its label, for the box, which shows the label apart: "Look: …" → "…", "Style frames (@Image4,
+ * @Image5): match …" → "@Image4, @Image5: match …"; a style video's line starts with its token already.
+ */
+function lineText(line: DirectionLine): string {
+  if (line.part === 'styleVideo') return line.text
+  if (line.part === 'styleFrames') return line.text.replace(/^[^(]*\(([^)]*)\):\s*/, '$1: ')
+  return line.text.replace(/^[^:]+:\s*/, '')
+}
+
+/**
+ * The director's lines: each part it writes (dimmed when left out to fit the model's limit), the style frames' and
+ * videos' lines with their tokens, and what of it isn't sent and why.
+ */
+function DirectionBlock({
+  direction,
+  avoid,
+  blank,
+  onOpen
+}: {
+  direction: ComposedDirection
+  /** Its `avoid`, which goes into the negative prompt rather than the section. */
+  avoid?: string
+  blank: boolean
+  onOpen?: () => void
+}) {
+  return (
+    <div className="border-t border-line/60 px-2.5 py-2">
+      <div className="mb-1 flex items-center gap-1.5 text-[12px]">
+        <span className={`flex ${KIND_TONE.director.text}`}>
+          <AssetIcon kind="director" />
+        </span>
+        <span className="min-w-0 flex-1 truncate font-medium">
+          Direction{direction.name ? ` (${direction.name})` : ''}
+        </span>
+        {onOpen && (
+          <button
+            type="button"
+            onClick={onOpen}
+            title="Open the director in Directors"
+            className="shrink-0 text-[11px] text-muted transition hover:text-text hover:underline"
+          >
+            Open
+          </button>
+        )}
+      </div>
+      {direction.lines.length ? (
+        <ul className="space-y-0.5 text-[11px] leading-snug">
+          {direction.lines.map((line, i) => (
+            <li
+              key={`${line.part}:${i}`}
+              className={`flex gap-1.5 ${line.sent || blank ? '' : 'opacity-45'}`}
+              title={line.sent || blank ? line.text : `Left out to fit the model’s limit: ${line.text}`}
+            >
+              <span className="w-[74px] shrink-0 text-muted">{lineLabel(line)}</span>
+              <span className="min-w-0 flex-1 truncate text-text/90">
+                <TokenText text={lineText(line)} direction={direction} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        !avoid && <p className="text-[11px] text-muted">The director has nothing written for this clip.</p>
+      )}
+      {avoid && (
+        <p className="mt-0.5 flex gap-1.5 text-[11px] leading-snug" title={`Added to the negative prompt: ${avoid}`}>
+          <span className="w-[74px] shrink-0 text-muted">Avoid</span>
+          <span className="min-w-0 flex-1 truncate text-text/90">
+            {avoid} <span className="text-muted">· negative prompt</span>
+          </span>
+        </p>
+      )}
+      {direction.notes.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-[11px] leading-snug text-amber-300">
+          {direction.notes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** A line's style tokens coloured: frames in the directors' colour, videos as videos. */
+function TokenText({ text, direction }: { text: string; direction: ComposedDirection }) {
+  const frames = new Set(direction.styleFrames)
+  return (
+    <>
+      {text.split(/(@(?:Image|Video)\d+)/g).map((part, i) =>
+        i % 2 ? (
+          <span key={i} className={`rounded-[3px] ${frames.has(part) ? KIND_TONE.director.token : VIDEO_TONE.token}`}>
             {part}
           </span>
         ) : (

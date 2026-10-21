@@ -1,6 +1,6 @@
 import { useMemo, useState, type KeyboardEvent } from 'react'
-import { ASSET_KINDS, type Asset, type AssetKind } from '@shared/types'
-import { ASSET_COPY, englishList } from '../../lib/assets'
+import { ASSET_KINDS, type Asset, type AssetKind, type ReferenceKind } from '@shared/types'
+import { ASSET_COPY, englishList, isReferenceKind } from '../../lib/assets'
 import { mediaUrl } from '../../lib/media'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
@@ -13,7 +13,7 @@ interface Props {
   /** The whole library, all kinds. */
   assets: Asset[]
   /** The tab shown when the picker opens. */
-  initialKind: AssetKind
+  initialKind: ReferenceKind
   title: string
   /** Shown under the title, e.g. how many reference slots are left. */
   hint?: string
@@ -53,8 +53,8 @@ export default function AssetPicker({
   const [query, setQuery] = useState('')
   const byId = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
   const counts = useMemo(() => {
-    const n: Record<AssetKind, number> = { character: 0, environment: 0, product: 0, outfit: 0, pose: 0 }
-    for (const a of assets) if (a.kind in n) n[a.kind] += 1
+    const n: Record<ReferenceKind, number> = { character: 0, environment: 0, product: 0, outfit: 0, pose: 0 }
+    for (const a of assets) if (a.kind in n) n[a.kind as ReferenceKind] += 1
     return n
   }, [assets])
 
@@ -63,7 +63,7 @@ export default function AssetPicker({
   const visible = ofKind.filter((a) => matchesQuery(`${a.name} ${a.description}`, query))
   const selected = new Set(selectedPaths)
 
-  const showTab = (k: AssetKind) => {
+  const showTab = (k: ReferenceKind) => {
     setKind(k)
     setQuery('')
   }
@@ -254,7 +254,9 @@ function AssetRow({
         disabled={!total}
         title={
           !total
-            ? PICKER_COPY[a.kind].needsImages
+            ? isReferenceKind(a.kind)
+              ? PICKER_COPY[a.kind].needsImages
+              : 'Add images first'
             : reference
               ? `Add all images${voice ? (outfit ? ', the voice' : ' and the voice') : ''}` +
                 (outfit ? ` and the default outfit “${outfit.name}”` : '')

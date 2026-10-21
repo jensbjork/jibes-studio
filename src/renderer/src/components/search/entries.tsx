@@ -13,7 +13,8 @@ import type {
   Storyboard,
   StoryboardSummary
 } from '@shared/types'
-import { ASSET_COPY, ASSET_KINDS, ASSET_VIEW } from '../../lib/assets'
+import { ASSET_COPY, ASSET_VIEW, LIBRARY_KINDS } from '../../lib/assets'
+import { directorSummary, presetEntries, styleFrameCount, styleVideoCount } from '../../lib/directors'
 import { requestCreate } from '../../lib/createRequest'
 import type { Navigate, View } from '../../lib/navigation'
 import { ARCHIVE_UNAVAILABLE, shortcut } from '../../lib/platform'
@@ -95,7 +96,7 @@ export const GROUP_ORDER: readonly GroupId[] = [
   'recent',
   'goto',
   'actions',
-  ...ASSET_KINDS,
+  ...LIBRARY_KINDS,
   'prompts',
   'sequences',
   'storyboards',
@@ -114,6 +115,7 @@ export const GROUPS: Record<GroupId, GroupInfo> = {
   product: { label: ASSET_COPY.product.plural, cap: 5 },
   outfit: { label: ASSET_COPY.outfit.plural, cap: 5 },
   pose: { label: ASSET_COPY.pose.plural, cap: 5 },
+  director: { label: ASSET_COPY.director.plural, cap: 8 },
   prompts: { label: 'Prompts', cap: 5 },
   sequences: { label: 'Sequences', cap: 6 },
   storyboards: { label: 'Storyboards', cap: 6 },
@@ -139,11 +141,11 @@ const PLACES: Place[] = [
   { view: 'storyboards', title: 'Storyboards', icon: <StoryboardIcon size={16} />, keywords: 'boards transitions' },
   { view: 'editor', title: 'Editor', icon: <ScissorsIcon size={16} />, keywords: 'edits cut trim versions' },
   { view: 'media', title: 'Media', icon: <MediaIcon />, keywords: 'videos images films clips feed' },
-  ...ASSET_KINDS.map((kind) => ({
+  ...LIBRARY_KINDS.map((kind) => ({
     view: ASSET_VIEW[kind],
     title: ASSET_COPY[kind].plural,
     icon: <AssetIcon kind={kind} size={16} />,
-    keywords: 'library'
+    keywords: kind === 'director' ? 'library direction style look camera editing ready-made' : 'library'
   })),
   { view: 'prompts', title: 'Prompts', icon: <QuoteIcon />, keywords: 'saved library learnings' },
   { view: 'settings', title: 'Settings', icon: <GearIcon />, keywords: 'preferences options' }
@@ -252,7 +254,7 @@ export function commandEntries(sidebarCollapsed: boolean): Entry[] {
     },
     create('storyboard', 'New storyboard', 'storyboards', true),
     create('edit', 'New edit', 'editor', true),
-    ...ASSET_KINDS.map((kind) => create(kind, ASSET_COPY[kind].newName, ASSET_VIEW[kind], kind === 'character')),
+    ...LIBRARY_KINDS.map((kind) => create(kind, ASSET_COPY[kind].newName, ASSET_VIEW[kind], kind === 'character')),
     {
       key: 'sidebar',
       group: 'actions',
@@ -310,7 +312,10 @@ function joined(...parts: (string | undefined)[]): string {
 function assetEntry(a: Asset): Entry {
   const copy = ASSET_COPY[a.kind]
   // The kind is the group's heading (and the context in Recent).
-  const meta = [plural(a.images.length, 'image')]
+  const meta =
+    a.kind === 'director'
+      ? [styleFrameCount(a.images.length), styleVideoCount(a.direction?.videos?.length ?? 0)]
+      : [plural(a.images.length, 'image')]
   if (a.audio.length && copy.audio) meta.push(copy.audio.listLabel)
   return {
     key: a.id,
@@ -516,10 +521,25 @@ function exportEntry(e: ExportSummary): Entry {
   }
 }
 
+/** The ready-made directors (always there): opened in Directors, where "Use a copy" makes one to change. */
+function presetDirectorEntries(): Entry[] {
+  return presetEntries().map((d) => ({
+    key: d.id,
+    group: 'director',
+    title: d.name,
+    context: 'Ready-made',
+    detail: directorSummary(d),
+    keywords: 'director ready-made preset style',
+    icon: <AssetIcon kind="director" size={16} />,
+    run: ({ navigate }) => navigate('directors', { type: 'open-asset', assetId: d.id })
+  }))
+}
+
 /** Everything the loaded lists hold, as entries. */
 export function libraryEntries(data: PaletteData): Entry[] {
   return [
     ...(data.assets ?? []).map(assetEntry),
+    ...presetDirectorEntries(),
     ...(data.prompts ?? []).map(promptEntry),
     ...(data.sequences ?? []).map(sequenceEntry),
     ...(data.sequenceDetails ?? []).flatMap(clipEntries),
@@ -537,7 +557,7 @@ const RECENT_KINDS: Partial<Record<GroupId, string>> = {
   sequences: 'Sequence',
   storyboards: 'Storyboard',
   edits: 'Edit',
-  ...Object.fromEntries(ASSET_KINDS.map((kind) => [kind, capitalized(ASSET_COPY[kind].singular)]))
+  ...Object.fromEntries(LIBRARY_KINDS.map((kind) => [kind, capitalized(ASSET_COPY[kind].singular)]))
 }
 
 /** For the empty query: the sequences, storyboards, edits and assets changed last. */

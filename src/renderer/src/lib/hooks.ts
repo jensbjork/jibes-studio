@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { paramsForSubmit, rememberModelKinds } from '@shared/models'
 import type {
   Asset,
@@ -9,6 +9,7 @@ import type {
   SeparationStatus,
   VideoModel
 } from '@shared/types'
+import { directorAssets, rememberDirectors, subscribeDirectors } from './directors'
 import { isMac } from './platform'
 
 // The model list rarely changes; share one request across all views (and the agent bridge). Venice does add and
@@ -115,8 +116,19 @@ function useLibraryList<T>(key: string, load: () => Promise<T[]>): LibraryList<T
 
 /** Characters, environments and outfits (one kind, or all of them), sorted by name. */
 export function useAssetsState(kind?: AssetKind): { assets: Asset[]; loaded: boolean } {
-  const { items, loaded } = useLibraryList(`assets:${kind ?? 'all'}`, () => window.studio.listAssets(kind))
+  const { items, loaded } = useLibraryList(`assets:${kind ?? 'all'}`, () =>
+    window.studio.listAssets(kind).then((list) => {
+      // What a sequence clip's director sends is worked out from these (lib/directors).
+      if (!kind || kind === 'director') rememberDirectors(list)
+      return list
+    })
+  )
   return { assets: items, loaded }
+}
+
+/** The user's own directors, live: re-renders when a load of the library's assets brings changed ones. */
+export function useDirectorAssets(): readonly Asset[] {
+  return useSyncExternalStore(subscribeDirectors, directorAssets, directorAssets)
 }
 
 export function useAssets(kind?: AssetKind): Asset[] {

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { directorDefaults, resolveDirector, withoutDirection } from '@shared/direction'
 import { continuationFrameOf } from '@shared/seams'
 import { canUseAgain } from '@shared/generation-label'
 import { DEFAULT_MODEL } from '@shared/models'
@@ -6,6 +7,7 @@ import { NEEDS_CONSENT, type ConsentRequest, type Generation, type GenerationPar
 import { variantsPrice, variantsText } from '@shared/variants'
 import { ASSET_COPY } from '../lib/assets'
 import { withBudgetConfirm } from '../lib/budget'
+import { directedParams, directorOf } from '../lib/directors'
 import { getGenerateParams, useGenerateParams } from '../lib/generateStore'
 import { ipcErrorMessage, useAssetsState, useModels, useQuote } from '../lib/hooks'
 import {
@@ -56,13 +58,20 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
   const [folderError, setFolderError] = useState<string>()
 
   const model = models.find((m) => m.id === params.model)
-  const quote = useQuote(params, model)
+  // The photos of characters, environments and outfits move when one is renamed (its folder follows the
+  // name) or tidied up. The form remembers which library image each of its paths is, and follows the image
+  // to its new place.
+  const { assets, loaded: assetsLoaded } = useAssetsState()
+  // What is sent: the form with its director's `avoid`, style frames and videos (main does the same), so the price –
+  // style videos raise it – and the checks are those of what Venice gets.
+  const sentParams = useMemo(() => directedParams(params, assets), [params, assets])
+  const quote = useQuote(sentParams, model)
   // ×1–×4 beside Generate (⌘+Enter sends as many); the button shows what they cost together.
   const [count, setCount] = useVariantCount('generate')
   const total = variantsPrice(quote, count)
   // A wrong @ImageN would send the wrong picture (or none) in a paid generation, so missingInput blocks on it
   // with the words main would refuse it with.
-  const missing = missingInput(params) ?? unavailableModel(model)
+  const missing = missingInput(sentParams) ?? unavailableModel(model)
 
   useEffect(() => {
     if (!folderError) return
@@ -70,10 +79,6 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
     return () => clearTimeout(t)
   }, [folderError])
 
-  // The photos of characters, environments and outfits move when one is renamed (its folder follows the
-  // name) or tidied up. The form remembers which library image each of its paths is, and follows the image
-  // to its new place.
-  const { assets, loaded: assetsLoaded } = useAssetsState()
   const imageIds = useRef<Record<string, string>>(readRememberedImageIds())
   useEffect(() => {
     if (assetsLoaded) setParams((p) => followAssetImages(p, assets, imageIds.current) ?? p)
@@ -92,11 +97,18 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
   const modelsReady = models.length > 0 || !!modelsError
 
   useEffect(() => {
-    if (!intent || (intent.type !== 'use-asset' && intent.type !== 'use-prompt' && intent.type !== 'use-generation'))
+    if (
+      !intent ||
+      (intent.type !== 'use-asset' &&
+        intent.type !== 'use-prompt' &&
+        intent.type !== 'use-generation' &&
+        intent.type !== 'use-director')
+    )
       return
     if (handledIntent.current === intent) return
-    // The reference model is chosen from the model list, so wait for it; a clip is looked up in the loaded list.
-    if (intent.type === 'use-asset' && !modelsReady) return
+    // The reference model (a director's default model) is chosen from the model list, so wait for it; a clip is
+    // looked up in the loaded list.
+    if ((intent.type === 'use-asset' || intent.type === 'use-director') && !modelsReady) return
     if (intent.type === 'use-generation' && !feed.loaded) return
     handledIntent.current = intent
     void applyIntent(intent).finally(onIntentHandled)
@@ -126,6 +138,19 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
             `${asset.name} has no images yet – add reference photos under ${ASSET_COPY[asset.kind].plural}.`
           )
         } else setNotice(note && `${asset.name}: ${note}`)
+      } else if (i.type === 'use-director') {
+        // "Generate with the director": the form directed by it, with its defaults where the models offer them.
+        const director = resolveDirector(i.directorId, await window.studio.listAssets())
+        if (!director) {
+          setNotice('The director is no longer in the library.')
+          return
+        }
+        const usable = models.filter((m) => !m.offline)
+        setParams((p) => {
+          const next = { ...p, director: director.id }
+          return { ...next, ...directorDefaults(next, director.direction, usable) }
+        })
+        setNotice(undefined)
       } else if (i.type === 'use-prompt') {
         const prompt = (await window.studio.listPrompts()).find((p) => p.id === i.promptId)
         if (!prompt) {
@@ -202,17 +227,22 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
 
   // Stable, so the feed's memoized cards don't re-render for it. Only a Venice generation's settings make a form: an
   // own film's or a version's are placeholders, and a take made from a video in the Editor can't be made here.
+  const assetsRef = useRef(assets)
+  assetsRef.current = assets
   const reuse = useCallback(
     (g: Generation) => {
       if (!canUseAgain(g)) return
+      // A take records what was sent, its director's style frames, videos and `avoid` too: the form gets the clip's
+      // own, and the director (kept by id) adds them again when it is sent.
+      const own = withoutDirection(g.params, directorOf(g.params, assetsRef.current))
       // A sequence clip continued in reference mode carries the previous clip's last frame as its last reference;
       // that frame only meant something in the sequence, so the form gets the clip's own references without it.
       const frame = continuationFrameOf(g.params)
       if (frame?.mode === 'references') {
-        setParams({ ...g.params, referenceImages: (g.params.referenceImages ?? []).slice(0, -1) })
+        setParams({ ...own, referenceImages: (own.referenceImages ?? []).slice(0, -1) })
         return
       }
-      setParams({ ...g.params })
+      setParams({ ...own })
     },
     [setParams]
   )

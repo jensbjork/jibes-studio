@@ -9,6 +9,7 @@ import OpenFolderButton from '../library/OpenFolderButton'
 import Popover from '../pickers/Popover'
 import { menuRow, onMenuKeyDown } from '../storyboards/ui'
 import { Spinner } from '../work/StatusMark'
+import DirectorChip from '../directors/DirectorChip'
 import CastButton, { type CastPatch } from './CastPanel'
 import { CheckAllIcon, MoreIcon, NoteIcon, PlayIcon } from './icons'
 import SongChip from './song/SongChip'
@@ -49,6 +50,10 @@ interface Props {
   onCastChange: (patch: CastPatch) => Promise<void>
   /** Opens the library view of a kind (from the Cast panel's picker). */
   onManageAssets?: (kind: AssetKind) => void
+  /** The sequence's director (null: none); rejects with main's refusal, which the Director panel shows. */
+  onDirectorChange: (directorId: string | null) => Promise<void>
+  /** Opens a director (or, without an id, Directors). */
+  onOpenDirector: (directorId?: string) => void
   /** "Add a song…" (a sequence without one) and "Replace the song…": pick a file, then the import dialog. */
   onPickSong: () => void
   /** "Remove the song", after its question; rejects with main's refusal. */
@@ -102,6 +107,8 @@ export default function SequenceHeader({
   onDelete,
   onCastChange,
   onManageAssets,
+  onDirectorChange,
+  onOpenDirector,
   onPickSong,
   onRemoveSong,
   onSeparateSong,
@@ -136,6 +143,17 @@ export default function SequenceHeader({
           />
         )}
         <CastButton sequence={sequence} onChange={onCastChange} onManage={onManageAssets} />
+        <DirectorChip
+          directorId={sequence.director}
+          what="sequence"
+          intro={
+            'Directs every clip that doesn’t choose otherwise: its direction is added to their prompts. Choosing one ' +
+            'sets its defaults, shot length and what happens between shots for new clips – existing clips aren’t changed.'
+          }
+          exceptions={directorExceptions(sequence)}
+          onChange={onDirectorChange}
+          onOpen={onOpenDirector}
+        />
         <OpenFolderButton
           target="sequences"
           id={sequence.id}
@@ -216,6 +234,34 @@ export default function SequenceHeader({
       </div>
     </div>
   )
+}
+
+/** "1", "1 and 3", "1, 3 and 4". */
+function numbers(list: readonly number[]): string {
+  return list.length === 1 ? `${list[0]}` : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`
+}
+
+/**
+ * "Clip 3 has a director of its own · clip 5 has none": the clips that don't follow the sequence's director (or, in a
+ * sequence without one, that have one of their own); undefined when every clip follows it.
+ */
+export function directorExceptions(sequence: Sequence): string | undefined {
+  const own: number[] = []
+  const none: number[] = []
+  sequence.segments.forEach((s, i) => {
+    const d = s.params.director
+    if (d === null && sequence.director) none.push(i + 1)
+    else if (typeof d === 'string' && d && d !== sequence.director) own.push(i + 1)
+  })
+  const parts = [
+    own.length
+      ? `${own.length === 1 ? 'Clip' : 'Clips'} ${numbers(own)} ${own.length === 1 ? 'has a director' : 'have directors'} of ${own.length === 1 ? 'its' : 'their'} own`
+      : '',
+    none.length ? `${none.length === 1 ? 'clip' : 'clips'} ${numbers(none)} ${none.length === 1 ? 'has' : 'have'} none` : ''
+  ].filter(Boolean)
+  if (!parts.length) return undefined
+  const text = parts.join(' · ')
+  return text.charAt(0).toUpperCase() + text.slice(1) + '.'
 }
 
 /** The newest export of the sequence whose film is still there, if any. */

@@ -1,5 +1,6 @@
 import { sameCastReferences } from '@shared/cast'
 import { continuationPlan, sendParams, type ContinuationPlan } from '@shared/continuation'
+import { effectiveDirectorId, resolveDirector, withDirection, type DirectorSource } from '@shared/direction'
 import {
   durationSeconds,
   endImageVariant,
@@ -11,6 +12,7 @@ import {
 import { remapPromptReferences } from '@shared/prompt-remap'
 import { endsOnFirstFrameOf, startsOnLastFrameOf } from '@shared/seams'
 import { withSong } from '@shared/song-send'
+import { directorAssets } from '../../lib/directors'
 import {
   NEEDS_CONSENT,
   type ConsentRequest,
@@ -130,14 +132,37 @@ export function continues(segment: Segment, index: number): boolean {
  * priced as another model. Without `sequence` only the clip's own references are known (an inheriting clip is then
  * shown exactly). A clip of a sequence cut to a song sends its window of the song as its reference audio, with the
  * words sung there and sound on for a singing shot (song-send.ts withSong, as main's takeParams) – known only with
- * `sequence`.
+ * `sequence`. Last, its director – its own, else the sequence's (null: none) – adds its `avoid`, style frames and
+ * style videos (direction.ts withDirection); `directors`: the user's own (default: as last loaded, lib/directors).
  */
-export function effectiveParams(segment: Segment, index: number, sequence?: Sequence): GenerationParams {
+export function effectiveParams(
+  segment: Segment,
+  index: number,
+  sequence?: Sequence,
+  directors: readonly DirectorSource[] = directorAssets()
+): GenerationParams {
+  const continuing = continues(segment, index)
   const params =
-    !continues(segment, index) && !segment.endFromNext
-      ? segment.params
-      : sendParams(chainWith(segment, index, sequence), index)
-  return params.song && sequence ? withSong(params, sequence.song) : params
+    !continuing && !segment.endFromNext ? segment.params : sendParams(chainWith(segment, index, sequence), index)
+  const songed = params.song && sequence ? withSong(params, sequence.song) : params
+  // A clip that starts on the previous clip's last frame in reference mode gets no style frames (the frame goes last).
+  const framed = continuing && continuationOf(segment, index, sequence)?.mode === 'references'
+  return withClipDirector(songed, segment.params.director, sequence, directors, framed)
+}
+
+/**
+ * `params` as a clip's director sends them: the clip's own director (`own`, its params' `director`; null: none), else
+ * the sequence's (direction.ts withDirection). Unchanged without one.
+ */
+export function withClipDirector(
+  params: GenerationParams,
+  own: string | null | undefined,
+  sequence: Pick<Sequence, 'director'> | undefined,
+  directors: readonly DirectorSource[] = directorAssets(),
+  continuationFrame = false
+): GenerationParams {
+  const director = resolveDirector(effectiveDirectorId(own, sequence?.director), directors)
+  return director ? withDirection(params, director, { continuationFrame }) : params
 }
 
 /** How the clip continues from the previous clip (continuation.ts), with `segment` in its place; see effectiveParams. */

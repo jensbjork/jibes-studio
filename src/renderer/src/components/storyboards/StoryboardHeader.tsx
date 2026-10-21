@@ -5,6 +5,7 @@ import { formatUsd } from '../../lib/media'
 import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { markAllSeen, useOwnerWork } from '../../lib/work'
 import { ScissorsIcon } from '../feed/icons'
+import DirectorChip from '../directors/DirectorChip'
 import FolderIcon from '../library/FolderIcon'
 import Popover from '../pickers/Popover'
 import { CheckAllIcon, MoreIcon, PlayIcon } from '../sequences/icons'
@@ -46,6 +47,10 @@ interface Props {
   /** "Edit latest export": opens that film in the Editor. */
   onEditExport: (exportId: string) => void
   onError: (message: string) => void
+  /** The storyboard's director (null: none); rejects with main's refusal, which the Director panel shows. */
+  onDirectorChange: (directorId: string | null) => Promise<void>
+  /** Opens a director (or, without an id, Directors). */
+  onOpenDirector: (directorId?: string) => void
 }
 
 /** Name, format and the storyboard-wide actions, inside the window's drag bar. */
@@ -74,7 +79,9 @@ export default function StoryboardHeader({
   onConvert,
   onDelete,
   onEditExport,
-  onError
+  onError,
+  onDirectorChange,
+  onOpenDirector
 }: Props) {
   const count = storyboard.transitions.length
   const exporting = exportProgress !== undefined
@@ -111,6 +118,17 @@ export default function StoryboardHeader({
       )}
 
       <div className="no-drag ml-auto flex shrink-0 items-center gap-2">
+        <DirectorChip
+          directorId={storyboard.director}
+          what="storyboard"
+          intro={
+            'Directs every transition: its direction is added to their prompts and its look, light and framing to the ' +
+            'pictures you create for the boards. Choosing one sets its defaults for new transitions – existing ones ' +
+            'aren’t changed.'
+          }
+          onChange={onDirectorChange}
+          onOpen={onOpenDirector}
+        />
         {storyboard.running ? (
           <>
             <span className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-muted" aria-live="polite">

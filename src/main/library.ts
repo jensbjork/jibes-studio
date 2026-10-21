@@ -6,6 +6,8 @@ import { isAgentCall } from './agent/local-ipc'
 import {
   addAssetAudio,
   addAssetImages,
+  addDirectorVideos,
+  copyDirectorPreset,
   deleteAsset,
   listAssets,
   removeAssetAudio,
@@ -22,7 +24,8 @@ import { assertAgentFiles } from './upload-paths'
 export { assetFolderPath, assetWorkBusy, AUDIO_FILE_TYPES } from './assets'
 
 // The library the user builds up themselves: assets (characters, environments, products, outfits and poses, with
-// their photos and audio clips — see assets.ts) and the prompt library. Agents reach the same handlers (local-ipc);
+// their photos and audio clips, and directors with their style frames and videos — see assets.ts) and the prompt
+// library. Agents reach the same handlers (local-ipc);
 // the files they add must be uploads or files the library already has (assertAgentFiles), and each photo or clip
 // they add records which agent added it.
 
@@ -171,7 +174,22 @@ export function registerLibraryIpc(notify: () => void, filesMoved: () => void = 
   setAssetListeners({ changed: notify, filesMoved })
 
   ipcMain.handle('assets:list', (_e, kind?: unknown) => listAssets(kind))
-  ipcMain.handle('assets:save', (_e, input: AssetInput) => saveAsset(input))
+  ipcMain.handle('assets:save', (e, input: AssetInput) => {
+    // A director's style videos given as paths are copied in: an agent's must be uploads or library files.
+    const videos = (input?.direction as { videos?: unknown } | undefined)?.videos
+    if (Array.isArray(videos)) {
+      assertAgentFiles(
+        e,
+        videos.map((v: unknown) => (v && typeof v === 'object' ? (v as { path?: unknown }).path : v))
+      )
+    }
+    return saveAsset(input)
+  })
+  ipcMain.handle('directors:copyPreset', (_e, presetId: string) => copyDirectorPreset(presetId))
+  ipcMain.handle('directors:addVideos', (e, assetId: string, paths: string[]) => {
+    assertAgentFiles(e, paths)
+    return addDirectorVideos(assetId, paths)
+  })
   ipcMain.handle('assets:delete', (_e, id: string) => deleteAsset(id))
   ipcMain.handle('assets:addImages', (e, assetId: string, paths: string[], origin?: AgentOrigin) => {
     assertAgentFiles(e, paths)

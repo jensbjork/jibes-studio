@@ -1,7 +1,7 @@
 // Picker wording and kind colours for using library assets in the generate form (pickers, chips, captions).
 // The general per-kind wording (plural, singular, possessive…) lives in lib/assets.
 
-import type { AssetKind } from '@shared/types'
+import type { AssetKind, ReferenceKind } from '@shared/types'
 
 interface PickerCopy {
   /** Header button, after "＋ ". */
@@ -18,7 +18,8 @@ interface PickerCopy {
   needsImages: string
 }
 
-export const PICKER_COPY: Record<AssetKind, PickerCopy> = {
+/** Per reference kind: directors are never picked as references. */
+export const PICKER_COPY: Record<ReferenceKind, PickerCopy> = {
   character: {
     add: 'Character',
     addTitle: 'Add a saved character’s images (and its default outfit)',
@@ -126,6 +127,14 @@ export const KIND_TONE: Record<AssetKind, KindTone> = {
     ring: 'ring-pink-400/70',
     caption: 'bg-pink-700/85',
     token: 'bg-pink-400/15 text-pink-300'
+  },
+  // A director's style frames and videos, where they show beside a clip's references ("from the director").
+  director: {
+    text: 'text-indigo-300',
+    chip: 'border-indigo-400/30 bg-indigo-400/10 hover:border-indigo-400/60',
+    ring: 'ring-indigo-400/70',
+    caption: 'bg-indigo-700/85',
+    token: 'bg-indigo-400/15 text-indigo-200'
   }
 }
 

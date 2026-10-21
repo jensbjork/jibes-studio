@@ -13,7 +13,9 @@ import {
 } from '@shared/types'
 import { ASSET_VIEW } from '../../lib/assets'
 import { withBudgetConfirm } from '../../lib/budget'
+import { resolveDirector } from '@shared/direction'
 import { ipcErrorMessage, useAssets } from '../../lib/hooks'
+import { ImageDirectionNote } from '../directors/DirectedByNote'
 import { samePath } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
@@ -183,6 +185,11 @@ function CreateImageDialogBody({
   const storyboard = owner?.kind === 'storyboard' ? owner.storyboard : undefined
   const isStoryboard = !!boardId || !!storyboard
   const ownerName = (storyboard?.name ?? sequence?.name)?.trim() || undefined
+  // The sequence's or storyboard's director gives the picture its look (main adds it as it sends the prompt).
+  const director = useMemo(
+    () => resolveDirector(storyboard?.director ?? sequence?.director, assets),
+    [storyboard?.director, sequence?.director, assets]
+  )
 
   const segmentIndex = slotTarget && sequence ? sequence.segments.findIndex((s) => s.id === slotTarget.segmentId) : -1
   const segment = segmentIndex === -1 ? undefined : sequence?.segments[segmentIndex]
@@ -598,6 +605,10 @@ function CreateImageDialogBody({
                 {shortcut('⌘ + Enter')} creates the image.
               </span>
             </label>
+
+            {director && (
+              <ImageDirectionNote director={director} whose={storyboard ? 'the storyboard’s' : 'the sequence’s'} />
+            )}
 
             {previousImagePath && (
               <PreviousImageOption path={previousImagePath} checked={usingPrevious} onChange={togglePrevious} />

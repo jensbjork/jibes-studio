@@ -50,6 +50,7 @@ import {
   type VideoModel
 } from '@shared/types'
 import * as db from '../db'
+import { directParams } from '../directors'
 import { generationTitle } from '@shared/generation-label'
 import { composeSubmission } from '../jobs'
 import { isLibraryReady, toStoredPath } from '../paths'
@@ -165,7 +166,7 @@ export class AssetIndex {
     const asset = this.byId.get(id)
     if (!asset) {
       throw new Error(
-        `There is no character, environment, product, outfit or pose with id ${id}. Use list_assets to see what there is.`
+        `There is no character, environment, product, outfit, pose or director with id ${id}. Use list_assets to see what there is.`
       )
     }
     return asset
@@ -660,6 +661,11 @@ export function resolveReferences(
       continue
     }
     const asset = index.require(item.asset_id)
+    if (asset.kind === 'director') {
+      throw new Error(
+        `${q(asset.name)} is a director, not a reference: it directs a generation instead. Choose it with director on set_form, add_segment or update_segment, or for a whole sequence or storyboard with update_sequence / update_storyboard.`
+      )
+    }
     const images = chosenImages(asset, item)
     const tooShort: AssetAudio[] = []
     const clips = chosenAudio(asset, item, target, notes, tooShort)
@@ -931,7 +937,9 @@ export function asGenerated(params: GenerationParams, continuing: boolean, endFr
  */
 export function promptIssues(params: GenerationParams, composed?: ComposedPrompt): PromptIssue[] {
   const sent = composed ?? (isLibraryReady() ? composeSubmission(params) : undefined)
-  const { prompt, negativePrompt } = validateGenerationParams(params, sent ? { explained: explainedReferences(sent) } : {})
+  // Checked as sent: a director's style frames and videos among the references, explained by its section.
+  const directed = isLibraryReady() ? directParams(params) : params
+  const { prompt, negativePrompt } = validateGenerationParams(directed, sent ? { explained: explainedReferences(sent) } : {})
   return [...prompt, ...negativePrompt]
 }
 
@@ -946,7 +954,9 @@ export function issueList(issues: readonly PromptIssue[]): { severity: string; c
  * image-to-video with that clip's last frame (extracted when it is generated) and sends no references.
  * `endFromNext`: it ends on the next clip's first frame, so its model must take an end image.
  */
-export function blockingProblem(params: GenerationParams, continuing = false, endFromNext = false): string | undefined {
+export function blockingProblem(given: GenerationParams, continuing = false, endFromNext = false): string | undefined {
+  // As sent: a director's style frames count among the references (directed by params.director, as a submit does).
+  const params = isLibraryReady() ? directParams(given) : given
   const kind = kindOfModelId(params.model)
   if (!params.prompt.trim()) return 'The prompt is empty.'
   // An end image the model can't take would be dropped on the way to Venice: a keyframe paid for and lost.
@@ -1072,8 +1082,9 @@ export function descriptionInfo(params: GenerationParams, index: AssetIndex): Re
       tokens: e.tokens,
       description: (used ?? e).description,
       included: !!used,
-      // composePrompt lists every entry also when it appends none (an empty prompt, a legend that doesn't fit).
-      sent: !!used && !!sent.legend,
+      // composePrompt lists every entry also when it appends none (an empty prompt, a legend that doesn't fit); the
+      // legend may hold a director's section alone.
+      sent: !!used && !!sent.legend && !sent.dropped,
       ...(used?.shortened ? { shortened: true } : {}),
       ...(wearer ? { worn_by: { asset_id: wearer.assetId, name: wearer.name, tokens: wearer.tokens } } : {})
     }
@@ -1085,6 +1096,7 @@ export function descriptionInfo(params: GenerationParams, index: AssetIndex): Re
       : sent.entries.length && !sent.legend
         ? 'Nothing is appended to an empty prompt; the descriptions come along once there is one.'
         : undefined
+  const direction = sent.direction
   return {
     composed_prompt: sent.prompt,
     description_entries: entries,
@@ -1092,7 +1104,21 @@ export function descriptionInfo(params: GenerationParams, index: AssetIndex): Re
     ...(excluded.length ? { excluded_description_asset_ids: excluded } : {}),
     composed_characters: sent.prompt.length,
     ...(limit ? { prompt_character_limit: limit } : {}),
-    ...(note ? { descriptions_note: note } : {})
+    ...(note ? { descriptions_note: note } : {}),
+    // The director's Direction section (after the legend in composed_prompt), what it sends besides, and what not.
+    ...(direction
+      ? {
+          direction: {
+            director_id: direction.directorId,
+            director_name: direction.name,
+            section: direction.section.replace(/^\n+/, ''),
+            ...(direction.styleFrames.length ? { style_frames: direction.styleFrames } : {}),
+            ...(direction.styleVideos.length ? { style_videos: direction.styleVideos } : {}),
+            ...(direction.droppedParts.length ? { parts_left_out: direction.droppedParts } : {}),
+            ...(direction.notes.length ? { notes: direction.notes } : {})
+          }
+        }
+      : {})
   }
 }
 

@@ -247,7 +247,7 @@ async function videoFile(ctx: ToolContext, video: VideoReferenceInput['video'], 
  * is left of the film) filled in, so what the form or clip stores is what is sent. Refused when the window starts at or
  * after the film's end. A window outside the model family's limits is left as asked: the prompt checks say why.
  */
-async function resolveVideoReference(
+export async function resolveVideoReference(
   ctx: ToolContext,
   item: VideoReferenceInput,
   importUploads: boolean

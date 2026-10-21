@@ -1,8 +1,9 @@
 // The base folder (grundmapp): opening it at startup, switching to another folder or moving the library
 // there, converting a phase-2 library (~/Movies/Studio with studio.db, generations/, thumbs/, …) to the
 // new layout, and "Tidy up", which puts every file the library knows about in its proper folder:
-// characters, environments, products, outfits and poses (assets) in Karaktärer/, Miljöer/, Produkter/, Kläder/ and
-// Poser/, one folder each holding the asset's photos and audio clips; a sequence's takes, stills and exports in its
+// characters, environments, products, outfits, poses and directors (assets) in Karaktärer/, Miljöer/, Produkter/,
+// Kläder/, Poser/ and Regissörer/, one folder each holding the asset's photos and audio clips (a director's style
+// frames and style videos); a sequence's takes, stills and exports in its
 // folder in Sekvenser/ (Tagningar/, Storyboard/ and the folder itself), and a storyboard's in its folder in
 // Storyboards/ (Övergångar/, Bilder/ and the folder itself); the user's own films in Egna klipp/<day>/, and an edit's
 // versions, AI takes and audio in its folder in Redigeringar/ (the folder itself, Tagningar/ and Ljud/). Where a
@@ -108,6 +109,7 @@ const VISIBLE_FOLDERS = [
   FOLDERS.products,
   FOLDERS.outfits,
   FOLDERS.poses,
+  FOLDERS.directors,
   FOLDERS.references,
   FOLDERS.generations,
   FOLDERS.sequences,
@@ -542,12 +544,13 @@ const ADDED_FOLDERS: readonly { name: string; since: number; what: string }[] = 
   { name: FOLDERS.storyboards, since: db.STORYBOARDS_SCHEMA_VERSION, what: 'storyboards' },
   { name: FOLDERS.ownClips, since: db.EDITS_SCHEMA_VERSION, what: 'own clips' },
   { name: FOLDERS.edits, since: db.EDITS_SCHEMA_VERSION, what: 'edits' },
-  { name: FOLDERS.products, since: db.PRODUCTS_SCHEMA_VERSION, what: 'products' }
+  { name: FOLDERS.products, since: db.PRODUCTS_SCHEMA_VERSION, what: 'products' },
+  { name: FOLDERS.directors, since: db.DIRECTORS_SCHEMA_VERSION, what: 'directors' }
 ]
 
 /**
  * A library from before one of those folders whose base folder already holds a folder of the user's own by
- * that name, e.g. Miljöer, Kläder, Poser, Storyboards, Egna klipp, Redigeringar or Produkter (the setup screen
+ * that name, e.g. Miljöer, Kläder, Poser, Storyboards, Egna klipp, Redigeringar, Produkter or Regissörer (the setup screen
  * promised that files already there are left alone): opening it would make it the library's – its paths stored
  * relative, "Move" taking it along, submits using its files in place instead of copying them into
  * Referensbilder. Refused, before anything changes, until they have renamed it.
@@ -1348,7 +1351,7 @@ async function relocate(
 }
 
 /**
- * What owns a folder: an asset (in the folder of its kind: Karaktärer, Miljöer, Produkter, Kläder or Poser), a
+ * What owns a folder: an asset (in the folder of its kind: Karaktärer, Miljöer, Produkter, Kläder, Poser or Regissörer), a
  * sequence (in Sekvenser), a storyboard (in Storyboards) or an edit (in Redigeringar). Folder names only have to be
  * unique among owners that share a parent folder.
  */
@@ -1470,7 +1473,8 @@ const ASSET_LABELS: Readonly<Record<AssetKind, string>> = {
   environment: 'The environment',
   product: 'The product',
   outfit: 'The outfit',
-  pose: 'The pose'
+  pose: 'The pose',
+  director: 'The director'
 }
 
 /**
@@ -1532,8 +1536,41 @@ async function tidyAsset(id: string, report: ReorganizeReport): Promise<string |
       report.errors.push(`${basename(abs)}: ${message(err)}`)
     }
   }
+
+  // A director's style videos (assets.direction) keep their own names too; their stored paths follow the move.
+  if (row.kind === 'director') {
+    for (const stored of styleVideoPathsOf(id)) {
+      const abs = fromStoredPath(stored)
+      if (!isInsideRoot(abs)) continue
+      if (!isFile(abs)) {
+        report.missing++
+        continue
+      }
+      try {
+        await relocate(abs, dir, report, { stillTracked: () => styleVideoPathsOf(id).includes(toStoredPath(abs)) })
+      } catch (err) {
+        report.errors.push(`${basename(abs)}: ${message(err)}`)
+      }
+    }
+  }
   await writeDescriptionIfMissing(dir, row.description)
   return folder
+}
+
+/** The stored paths of a director's style videos (assets.direction), as the row has them now. */
+function styleVideoPathsOf(id: string): string[] {
+  const json = db.getDb().prepare('SELECT direction FROM assets WHERE id = ?').pluck().get(id) as string | null | undefined
+  if (typeof json !== 'string' || !json) return []
+  try {
+    const videos = (JSON.parse(json) as { videos?: unknown } | null)?.videos
+    return Array.isArray(videos)
+      ? videos
+          .map((v: unknown) => (v && typeof v === 'object' ? (v as { path?: unknown }).path : undefined))
+          .filter((p): p is string => typeof p === 'string' && p !== '')
+      : []
+  } catch {
+    return []
+  }
 }
 
 /**
@@ -1847,6 +1884,7 @@ const REVEAL_FOLDERS: Readonly<Record<Exclude<LibraryFolderTarget, 'root'>, stri
   products: FOLDERS.products,
   outfits: FOLDERS.outfits,
   poses: FOLDERS.poses,
+  directors: FOLDERS.directors,
   references: FOLDERS.references,
   generations: FOLDERS.generations,
   sequences: FOLDERS.sequences,
@@ -1860,7 +1898,8 @@ const ASSET_TARGETS: ReadonlySet<LibraryFolderTarget> = new Set<LibraryFolderTar
   'environments',
   'products',
   'outfits',
-  'poses'
+  'poses',
+  'directors'
 ])
 
 /** Targets arrive over IPC: anything else is refused rather than opening some other folder. */

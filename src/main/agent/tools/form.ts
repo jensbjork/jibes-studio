@@ -121,6 +121,7 @@ import {
   type ToolOutput
 } from './kit'
 import { reorderClipReferences, swapClipReference } from './sequences'
+import { directorInput, directorRef } from './directors'
 import { importAsStill, resolvePictureReferences, uploadSource } from './sources'
 
 // The Generate form in Studio's window and what the user is looking at. These tools go through the window (the
@@ -165,6 +166,8 @@ async function formInfo(state: AgentFormState, index: AssetIndex, withPrice: boo
   const reference = kindOfModelId(params.model) === 'reference-to-video'
   return {
     ...paramsInfo(params, index),
+    // The form's director (set_form director): its section is in composed_prompt (direction).
+    director: directorRef(params.director),
     ...(reference ? notSentInfo(formImages(state), params.model, index) : {}),
     ...descriptionInfo(params, index),
     issues: issueList(promptIssues(params)),
@@ -221,7 +224,8 @@ function formChanges(args: Record<string, unknown>): string {
     ['end_image', 'end image'],
     ['include_descriptions', 'descriptions'],
     ['excluded_description_asset_ids', 'descriptions'],
-    ['outfit_wearers', 'who wears the outfits']
+    ['outfit_wearers', 'who wears the outfits'],
+    ['director', 'director']
   ]
   const others = [...new Set(labels.filter(([key]) => args[key] !== undefined).map(([, label]) => label))]
   const prompt = args.prompt !== undefined
@@ -237,7 +241,8 @@ const ASSET_VIEWS: Record<AssetKind, AssetViewId> = {
   environment: 'environments',
   product: 'products',
   outfit: 'outfits',
-  pose: 'poses'
+  pose: 'poses',
+  director: 'directors'
 }
 
 /**
@@ -452,7 +457,14 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         ),
         include_descriptions: includeDescriptionsInput,
         excluded_description_asset_ids: excludedDescriptionsInput,
-        outfit_wearers: outfitWearersInput
+        outfit_wearers: outfitWearersInput,
+        director: z
+          .string()
+          .nullable()
+          .optional()
+          .describe(
+            "The director of the generation (list_directors: the user's own or a ready-made one), or null for none. Choosing one applies its defaults (model, aspect ratio, resolution – each only when offered) unless you pass those too; its Direction section, avoid and style references then go along (composed_prompt, direction)."
+          )
       },
       annotations: WRITE,
       summary: (args) => formChanges(args)
@@ -534,6 +546,8 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       if (input.end_image !== undefined) args.end_image = await formPicture(ctx, input.end_image, index)
       if (input.include_descriptions !== undefined) args.include_descriptions = input.include_descriptions
       if (excluded !== undefined) args.excluded_description_asset_ids = excluded
+      const director = directorInput(input.director)
+      if (director !== undefined) args.director = director
 
       const state = await ctx.bridge.send<AgentFormState>('set_form', args)
       const notes = [...(state.notes ?? [])]
@@ -544,6 +558,9 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
       }
       if (excluded !== undefined && !sameIds(state.params.excludedDescriptionAssetIds, excluded)) {
         notes.push('The Studio window didn\'t change which descriptions are switched off – check description_entries in the answer.')
+      }
+      if (director !== undefined && (state.params.director ?? null) !== director) {
+        notes.push("The Studio window didn't change the director – check director in the answer.")
       }
       if (input.outfit_wearers !== undefined && !sameWearers(state.params.outfitWearers, wearers)) {
         notes.push('The Studio window didn\'t change who wears the outfits – check worn_by in description_entries in the answer.')
@@ -583,13 +600,19 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
             "Use the Generate form's references and model for whatever you don't pass (and, with the form's references, its description switches). Default true."
           ),
         include_descriptions: includeDescriptionsInput,
-        excluded_description_asset_ids: excludedDescriptionsInput
+        excluded_description_asset_ids: excludedDescriptionsInput,
+        director: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("Check as directed by this director (list_directors), or null for none. Default: the form's director with use_form, else none.")
       },
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'checked a prompt'
     },
     async (input) => {
       const index = await AssetIndex.load()
+      const director = directorInput(input.director)
       // A check changes nothing: an uploaded picture is checked as the upload itself, not made a still.
       const explicitRefs: ReferenceItem[] | undefined = input.references
         ? await resolvePictureReferences(ctx, input.references, false)
@@ -635,7 +658,9 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         includeDescriptions: input.include_descriptions ?? switches?.includeDescriptions,
         ...(excluded?.length ? { excludedDescriptionAssetIds: excluded } : {}),
         // Who wears what goes with the form's references too; other references get Studio's default.
-        ...(switches?.outfitWearers ? { outfitWearers: switches.outfitWearers } : {})
+        ...(switches?.outfitWearers ? { outfitWearers: switches.outfitWearers } : {}),
+        // The director: the one asked for, else the form's (with use_form).
+        ...(director !== undefined ? (director ? { director } : {}) : form?.params.director ? { director: form.params.director } : {})
       }
       const issues = promptIssues(params)
       const mentioned = new Set(findImageTokens(input.prompt).map((t) => t.index))

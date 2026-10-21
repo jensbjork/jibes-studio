@@ -11,6 +11,7 @@ import {
   promptLimitOf,
   rememberPromptLimits
 } from '@shared/prompt-compose'
+import { withDirection } from '@shared/direction'
 import { generationTitle } from '@shared/generation-label'
 import { sanitizeOutfitWearers } from '@shared/outfits'
 import { blockingPromptError, canonicalizeParams } from '@shared/prompt-refs'
@@ -25,6 +26,7 @@ import {
 } from '@shared/types'
 import { describedAssetsFor } from './assets'
 import * as db from './db'
+import { libraryDirector } from './directors'
 import { extractThumbnail, ffmpegStatus, probe } from './ffmpeg'
 import {
   dayStamp,
@@ -118,19 +120,23 @@ export function continuationLeadInFor(frameToken: number | undefined): string {
  * within the model's prompt limit: `characterLimit` when given, else the one remembered from the model list.
  * `continuationFrame`: a sequence clip continuing in reference mode, whose last reference image (@Image{n}) is the
  * previous clip's last frame; the instruction to start on it goes in front of the prompt (continuationLeadInFor).
- * Tokens are canonicalised first, as they are sent. Synchronous, so a check (an approval's) can compare it on the
- * very database state a submit reads. Needs an open library.
+ * Tokens are canonicalised first, as they are sent. A director (params.director) directs the params first, as a
+ * submission sends them (withDirection: its style frames and videos among the references), and its Direction section
+ * follows the legend, the director as the library has it right now. Synchronous, so a check (an approval's) can
+ * compare it on the very database state a submit reads. Needs an open library.
  */
 export function composeSubmission(
   params: GenerationParams,
   opts: { characterLimit?: number; continuationFrame?: number } = {}
 ): ComposedPrompt {
-  const p = canonicalizeParams(params)
+  const director = libraryDirector(params.director)
+  const p = canonicalizeParams(withDirection(params, director, { continuationFrame: !!opts.continuationFrame }))
   const limit = opts.characterLimit ?? promptLimitOf(p.model)
   const leadIn = continuationLeadInFor(opts.continuationFrame)
   return composePrompt(p, describedAssetsFor(paramsForSubmit(p)), {
     ...composeOptionsFor(p, getPromptLanguage(), limit),
-    ...(leadIn ? { leadIn } : {})
+    ...(leadIn ? { leadIn } : {}),
+    ...(director ? { director } : {})
   })
 }
 
@@ -153,7 +159,9 @@ function withCleanWearers(params: GenerationParams): GenerationParams {
 }
 
 /**
- * The params exactly as a paid submission sends them, or a refusal: the prompt's @ImageN, @AudioN and @VideoN
+ * The params exactly as a paid submission sends them, or a refusal: a director (params.director) directs them first
+ * (withDirection: its avoid in the negative prompt, its style frames and videos after the references – none after a
+ * continuation's frame, which stays the last picture), then the prompt's @ImageN, @AudioN and @VideoN
  * references are checked against what the caller has (so a token past the model's limit is reported as such),
  * tokens are canonicalised, inputs the model doesn't use are dropped (paramsForSubmit), the prompt as composed with
  * the descriptions legend (composeSubmission) is checked too, and every reference audio clip and reference video is
@@ -164,9 +172,11 @@ function withCleanWearers(params: GenerationParams): GenerationParams {
  * submission; callers that quote first (a sequence take) run it before the quote too.
  */
 export async function prepareSubmission(params: GenerationParams): Promise<GenerationParams> {
-  const problem = blockingPromptError(params)
+  // Directed as it is sent: idempotent, so params a sequence take (or an earlier call) directed already stay as they are.
+  const directed = withDirection(params, libraryDirector(params.director))
+  const problem = blockingPromptError(directed)
   if (problem) throw new Error(problem)
-  const checked = withCleanWearers(paramsForSubmit(canonicalizeParams(params)))
+  const checked = withCleanWearers(paramsForSubmit(canonicalizeParams(directed)))
   checkComposed(checked, composeSubmission(checked))
   const videos = videosAreReferences(checked) ? referenceVideosOf(checked).length : 0
   if (!checked.referenceAudios?.length && !videos) return checked

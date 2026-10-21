@@ -12,12 +12,18 @@
 //
 // (the song's line for a clip of a sequence cut to a song, whose window of the song is its reference audio:
 // song-send.ts; a line per reference video last, Seedance 2.x, sent as "<Video 1>": prompt-refs toVeniceVideoTokens).
+// A generation a director directs gets its Direction section after the legend (direction.ts composeDirection):
+//
+//   Direction (Noir):
+//   - Look: high-contrast black and white, deep inky shadows, fine film grain
+//   - Style frames (@Image5): match their look – …
 //
 // Composed at send time, never written into the editor's text: a description edited in the library applies to the
 // next generation, the prompt stays readable, and "Use again" can't append it twice. Pure and shared, so the
 // editor's "Added to the prompt" box (renderer), the submit (main) and the agent tools all compose exactly the
 // same text.
 
+import { composeDirection, styleVideoNumbers, type ResolvedDirector } from './direction'
 import { pathKey } from './generation-filter'
 import { paramsForSubmit, videosAreReferences } from './models'
 import { resolveOutfitWearers } from './outfits'
@@ -79,6 +85,13 @@ export interface ComposeExtras {
    * character limit like the prompt; not sent with an empty prompt (nothing is).
    */
   leadIn?: string
+  /**
+   * The director directing the generation (direction.ts resolveDirector; the params are withDirection's): its Direction
+   * section is appended after the References legend, within what the limit leaves after the legend (the prompt and the
+   * legend win), and its style videos are explained there rather than by the reference video lines. Not a description:
+   * appended with "Include descriptions" off too.
+   */
+  director?: ResolvedDirector
 }
 
 /** "@" and its full-width form: what starts a reference token (prompt-refs). */
@@ -242,6 +255,9 @@ function shorten(text: string, max: number): string {
  *   the action, camera movement and style in @Video1 – a reference only: …" (VIDEO_LINE; Swedish too), Venice's
  *   reference wording, so the model never takes a video for footage to edit or extend (`videos`). Like the song's
  *   line it is no description: appended with "Include descriptions" off too, and never shortened.
+ * - A director (`opts.director`, with params that withDirection made) gets its Direction section after all that, in
+ *   `legend` too (`direction`; direction.ts composeDirection): in the room the limit leaves after the legend, its parts
+ *   left out from the end when they don't fit. A director's assets are never described as references.
  * - With a character limit, descriptions that would take the prompt past it are shortened in proportion to their
  *   length, at word boundaries, ending in "…" (`truncated`); if not even the names and tokens fit, no legend is
  *   appended at all (`dropped`). Entries are listed either way.
@@ -250,6 +266,34 @@ function shorten(text: string, max: number): string {
  * for every candidate with `include: true`. composeOptionsFor gives the options a submission uses.
  */
 export function composePrompt(
+  params: GenerationParams,
+  assets: readonly DescribedAsset[],
+  opts: ComposeOptions & ComposeExtras
+): ComposedPrompt {
+  const references = composeReferences(params, assets, opts)
+  const director = opts.director
+  if (!director) return references
+  // After the References legend, in the room it leaves: the user's prompt and the legend win.
+  const userPrompt = typeof params.prompt === 'string' ? params.prompt : ''
+  const leadIn = typeof opts.leadIn === 'string' && userPrompt.trim() ? opts.leadIn.trim() : ''
+  const own = userPrompt.trimEnd()
+  const base = references.legend ? references.prompt : (leadIn ? `${leadIn}\n\n` : '') + own
+  const limit = isLimit(opts.characterLimit)
+    ? opts.characterLimit
+    : isLimit(opts.promptCharacterLimit)
+      ? opts.promptCharacterLimit
+      : undefined
+  const direction = composeDirection(paramsForSubmit(params), director, {
+    language: opts.language === 'sv' ? 'sv' : 'en',
+    ...(limit !== undefined ? { room: limit - base.length } : {}),
+    blank: !own.trim()
+  })
+  if (!direction.section) return { ...references, direction }
+  return { ...references, prompt: base + direction.section, legend: references.legend + direction.section, direction }
+}
+
+/** composePrompt without the director's section: the References legend (see composePrompt). */
+function composeReferences(
   params: GenerationParams,
   assets: readonly DescribedAsset[],
   opts: ComposeOptions & ComposeExtras
@@ -263,10 +307,14 @@ export function composePrompt(
   // A song clip's window of the song is explained whether descriptions are included or not: it isn't one.
   const songNumber = songAudioNumber(sent)
   const language: PromptLanguage = opts.language === 'sv' ? 'sv' : 'en'
-  // Reference videos are said to be references whatever else is appended: it decides how Seedance takes them.
+  // Reference videos are said to be references whatever else is appended: it decides how Seedance takes them. A
+  // director's style videos are explained by its Direction section instead (camera movement only).
+  const styleVideos = new Set(opts.director ? styleVideoNumbers(sent, opts.director) : [])
   const videoLines =
     sent.referenceVideos?.length && videosAreReferences(sent)
-      ? sent.referenceVideos.map((_, i) => ({ token: `@Video${i + 1}`, line: VIDEO_LINE[language](`@Video${i + 1}`) }))
+      ? sent.referenceVideos
+          .map((_, i) => ({ token: `@Video${i + 1}`, line: VIDEO_LINE[language](`@Video${i + 1}`) }))
+          .filter((_, i) => !styleVideos.has(i + 1))
       : []
   const withVideos = (c: ComposedPrompt): ComposedPrompt => (videoLines.length ? { ...c, videos: videoLines } : c)
   if (!opts.include && !songNumber && !videoLines.length) return none
@@ -279,7 +327,8 @@ export function composePrompt(
   const describes = (asset: DescribedAsset): boolean => !excluded.has(asset.id) && !!legendText(asset.description)
   for (const first of [true, false]) {
     for (const asset of assets) {
-      if (!asset || describes(asset) !== first) continue
+      // A director's photos are its style frames, which its Direction section explains: never a reference of its own.
+      if (!asset || asset.kind === 'director' || describes(asset) !== first) continue
       for (const [index, paths] of [
         [byImage, asset.imagePaths],
         [byAudio, asset.audioPaths]
@@ -507,23 +556,35 @@ export function knowsPromptLimit(modelId: string): boolean {
 
 /**
  * The @ImageN / @AudioN numbers the legend explains when it is sent (not when it was left out: a blank prompt, or not
- * even the names fitted): the prompt checks don't report those as unmentioned (ValidateOptions.explained). A song
+ * even the names fitted), and the @ImageN / @VideoN of a director's style frames and videos its Direction section
+ * explains (`videos`): the prompt checks don't report those as unmentioned (ValidateOptions.explained). A song
  * clip's window of the song counts too, and a chosen singer who isn't among its pictures is noted (`singerFallback`:
  * the name its line gives instead, '' for nobody).
  */
-export function explainedReferences(composed: Pick<ComposedPrompt, 'legend' | 'entries' | 'song'>): {
+export function explainedReferences(
+  composed: Pick<ComposedPrompt, 'legend' | 'entries' | 'song'> & Partial<Pick<ComposedPrompt, 'dropped' | 'direction'>>
+): {
   images: number[]
   audios: number[]
+  videos?: number[]
   singerFallback?: string
 } {
   const images: number[] = []
   const audios: number[] = []
+  const videos: number[] = []
   const song = composed.song
   const fallback = song?.singerMissing ? { singerFallback: song.singer?.name ?? '' } : {}
-  if (!composed.legend) return { images, audios, ...fallback }
-  for (const token of [...composed.entries.flatMap((e) => e.tokens), ...(song ? [song.token] : [])]) {
-    const m = /^@(Image|Audio)(\d+)$/.exec(token)
-    if (m) (m[1] === 'Image' ? images : audios).push(Number(m[2]))
+  const tokens: string[] = []
+  // The legend's own entries only when it was appended (the Direction section may be there without it).
+  if (composed.legend && !composed.dropped) tokens.push(...composed.entries.flatMap((e) => e.tokens), ...(song ? [song.token] : []))
+  // A director's style frames and videos, explained by its section when it is appended.
+  const direction = composed.direction
+  if (direction?.section) {
+    for (const line of direction.lines) if (line.sent && line.tokens) tokens.push(...line.tokens)
   }
-  return { images, audios, ...fallback }
+  for (const token of tokens) {
+    const m = /^@(Image|Audio|Video)(\d+)$/.exec(token)
+    if (m) (m[1] === 'Image' ? images : m[1] === 'Audio' ? audios : videos).push(Number(m[2]))
+  }
+  return { images, audios, ...(videos.length ? { videos } : {}), ...fallback }
 }

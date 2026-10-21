@@ -50,6 +50,11 @@ interface Props<T extends SideListItem> {
   searchPlaceholder: string
   /** What the search looks in besides the name (a description, where a film came from). */
   searchText?: (item: T) => string
+  /**
+   * A heading above each run of items with the same group (Directors: the user's own, then "Ready-made"); items keep
+   * the view's order, so a group's items must be next to each other. No headings when left out.
+   */
+  groupOf?: (item: T) => string | undefined
   /** In the list while there is nothing at all. */
   emptyText: ReactNode
   renderRow: (item: T, control: SideRowControl) => ReactNode
@@ -85,6 +90,7 @@ export default function SideList<T extends SideListItem>({
   onSelect,
   searchPlaceholder,
   searchText,
+  groupOf,
   emptyText,
   renderRow,
   deleteQuestion,
@@ -336,8 +342,15 @@ export default function SideList<T extends SideListItem>({
           </div>
         ) : (
           <ul ref={listRef} aria-label={title} onKeyDown={onListKey} className="flex flex-col gap-0.5">
-            {visible.map((item) => (
+            {visible.map((item, i) => (
               <li key={item.id}>
+                {groupOf && groupOf(item) !== undefined && (i === 0 || groupOf(visible[i - 1]) !== groupOf(item)) && (
+                  <p
+                    className={`px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted/80 ${i === 0 ? 'pt-0.5' : 'pt-3'}`}
+                  >
+                    {groupOf(item)}
+                  </p>
+                )}
                 {asking === item.id ? (
                   <div
                     ref={questionRef}
@@ -409,8 +422,8 @@ interface RowProps {
   status?: ReactNode
   /** The row's tooltip. */
   title?: string
-  /** The ✕'s tooltip ("Delete sequence"). */
-  deleteTitle: string
+  /** The ✕'s tooltip ("Delete sequence"); a row without one has no ✕ (a ready-made director can't be deleted). */
+  deleteTitle?: string
   /** Lit up as a drop target. */
   highlight?: boolean
   /** Finder files dropped on the row (Characters and the other kinds). */
@@ -448,20 +461,28 @@ export function SideListRow({
           <span className="block truncate text-[11px] text-muted">{meta}</span>
         </span>
         {/* Steps aside where the ✕ takes its place: on hover, and while the row or the ✕ has the keyboard focus. */}
-        <span className="flex h-6 min-w-6 shrink-0 items-center justify-end transition-opacity group-hover:opacity-0 group-has-[[data-side-row]:focus-visible]:opacity-0 group-has-[[data-side-delete]:focus]:opacity-0">
+        <span
+          className={`flex h-6 min-w-6 shrink-0 items-center justify-end transition-opacity ${
+            deleteTitle
+              ? 'group-hover:opacity-0 group-has-[[data-side-row]:focus-visible]:opacity-0 group-has-[[data-side-delete]:focus]:opacity-0'
+              : ''
+          }`}
+        >
           {status}
         </span>
       </button>
-      <button
-        type="button"
-        data-side-delete
-        onClick={onAskDelete}
-        title={deleteTitle}
-        aria-label={`Delete ${name}`}
-        className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted opacity-0 transition hover:bg-line hover:text-accent focus:opacity-100 group-hover:opacity-100 group-has-[[data-side-row]:focus-visible]:opacity-100"
-      >
-        <CloseIcon size={11} />
-      </button>
+      {deleteTitle && (
+        <button
+          type="button"
+          data-side-delete
+          onClick={onAskDelete}
+          title={deleteTitle}
+          aria-label={`Delete ${name}`}
+          className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted opacity-0 transition hover:bg-line hover:text-accent focus:opacity-100 group-hover:opacity-100 group-has-[[data-side-row]:focus-visible]:opacity-100"
+        >
+          <CloseIcon size={11} />
+        </button>
+      )}
     </div>
   )
 }

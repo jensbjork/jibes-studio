@@ -329,7 +329,7 @@ function Wearers({ wearers, onOpen }: { wearers: Asset[]; onOpen: (characterId: 
   )
 }
 
-function SaveIndicator({ state }: { state: SaveState }) {
+export function SaveIndicator({ state }: { state: SaveState }) {
   if (state.kind === 'saving') return <span className="text-[11px] text-muted">Saving…</span>
   if (state.kind === 'saved') return <span className="text-[11px] text-muted">Saved</span>
   if (state.kind === 'error') {
@@ -343,7 +343,7 @@ function SaveIndicator({ state }: { state: SaveState }) {
 }
 
 /** Inline two-step confirm; falls back to the plain button after a few seconds. The wording is the list's too. */
-function DeleteControl({
+export function DeleteControl({
   question,
   filesNote,
   note,

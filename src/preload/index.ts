@@ -64,6 +64,8 @@ const api: StudioApi = {
   // Assets (characters, environments, products, outfits, poses)
   listAssets: (kind) => ipcRenderer.invoke('assets:list', kind),
   saveAsset: (input) => ipcRenderer.invoke('assets:save', input),
+  copyDirectorPreset: (presetId) => ipcRenderer.invoke('directors:copyPreset', presetId),
+  addDirectorVideos: (assetId, paths) => ipcRenderer.invoke('directors:addVideos', assetId, paths),
   deleteAsset: (id) => ipcRenderer.invoke('assets:delete', id),
   addAssetImages: (assetId, paths) => ipcRenderer.invoke('assets:addImages', assetId, paths),
   removeAssetImage: (imageId) => ipcRenderer.invoke('assets:removeImage', imageId),

@@ -41,6 +41,7 @@ import {
 import { isAgentCall } from './agent/local-ipc'
 import { assertRunWithinBudget, confirmedOf, quoteTotal, runConfirmed } from './budget'
 import * as db from './db'
+import { checkedDirectorId, libraryDirector } from './directors'
 import { probe } from './ffmpeg'
 import { ratioOf } from './images'
 import { jpegOrientation } from './input-image'
@@ -598,6 +599,7 @@ export class StoryboardService {
     const row = requireStoryboardRow(id)
     const run = this.runs.get(id)
     const aspectRatio = aspectOf(row)
+    const director = store.parseDirector(row.defaults)
     const boardRows = listBoardRows(id)
     const boards: StoryboardBoard[] = boardRows.map((b, i) => {
       const imagePath = boardImage(b)
@@ -642,6 +644,7 @@ export class StoryboardService {
       aspectRatio,
       boards,
       transitions,
+      ...(director ? { director } : {}),
       running: run?.running ?? false,
       ...(run?.error ? { runError: run.error } : {}),
       createdAt: row.created_at,
@@ -668,11 +671,44 @@ export class StoryboardService {
     return this.get(id)
   }
 
-  async update(id: string, patch: { name?: unknown; aspectRatio?: unknown }, caller: Caller = {}): Promise<Storyboard> {
+  async update(
+    id: string,
+    patch: { name?: unknown; aspectRatio?: unknown; director?: unknown },
+    caller: Caller = {}
+  ): Promise<Storyboard> {
     patch = patch ?? {}
     requireStoryboardRow(id)
     this.refuseWhileRunning(id, caller)
-    const aspect = patch.aspectRatio === undefined ? undefined : checkAspectRatio(patch.aspectRatio)
+    let aspect = patch.aspectRatio === undefined ? undefined : checkAspectRatio(patch.aspectRatio)
+    // A director chosen now: its transitions' defaults (an end-image model, the resolution) and its aspect ratio, each
+    // only when it can be had; existing transitions keep their settings.
+    const director = patch.director === undefined ? undefined : checkedDirectorId(patch.director)
+    const before = store.parseDirector(requireStoryboardRow(id).defaults)
+    if (director !== undefined && director !== before) {
+      const wanted = director ? libraryDirector(director)?.direction.defaults : undefined
+      const models = wanted?.model || wanted?.resolution ? await this.modelList() : undefined
+      const row = requireStoryboardRow(id)
+      this.refuseWhileRunning(id, caller)
+      const defaults = { ...TRANSITION_DEFAULTS, ...store.parseDefaults(row.defaults) }
+      const model = wanted?.model ? models?.find((m) => m.id === wanted.model) : undefined
+      if (model && supportsEndImage(model.id) && kindOfModelId(model.id) === 'image-to-video') {
+        Object.assign(defaults, fitToModel({ ...defaults, model: model.id } as GenerationParams, aspectOf(row), model))
+      }
+      const info = models?.find((m) => m.id === defaults.model)
+      if (wanted?.resolution && info?.resolutions.includes(wanted.resolution)) defaults.resolution = wanted.resolution
+      const { director: _, ...rest } = JSON.parse(store.withStoredExtras(defaults, row.defaults)) as Record<string, unknown>
+      conn()
+        .prepare('UPDATE sequences SET defaults = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(director ? { ...rest, director } : rest), Date.now(), id)
+      if (
+        aspect === undefined &&
+        wanted?.aspectRatio &&
+        wanted.aspectRatio !== aspectOf(row) &&
+        (STORYBOARD_ASPECT_RATIOS as readonly string[]).includes(wanted.aspectRatio)
+      ) {
+        aspect = wanted.aspectRatio
+      }
+    }
     if (aspect !== undefined) {
       const models = await this.modelList()
       requireStoryboardRow(id)
@@ -938,7 +974,10 @@ export class StoryboardService {
           ...store.parseDefaults(storyboard.defaults),
           ...store.pickDefaults({ model: m, duration, resolution, audio })
         }
-        conn().prepare('UPDATE sequences SET defaults = ? WHERE id = ?').run(JSON.stringify(defaults), storyboard.id)
+        // Its director (and anything else the defaults hold besides the settings) stays.
+        conn()
+          .prepare('UPDATE sequences SET defaults = ? WHERE id = ?')
+          .run(store.withStoredExtras(defaults, storyboard.defaults), storyboard.id)
       }
     })()
     // Selecting goes through the sequence service: trims, and a generation from the feed moving into the folder.
@@ -1349,7 +1388,7 @@ export function registerStoryboardIpc(deps: StoryboardDeps): StoryboardService {
   ipcMain.handle('storyboards:list', () => s.list())
   ipcMain.handle('storyboards:get', (_e, id: string) => s.get(id))
   ipcMain.handle('storyboards:create', (_e, name: unknown, aspectRatio?: unknown) => s.create(name, aspectRatio))
-  ipcMain.handle('storyboards:update', (e, id: string, patch: { name?: unknown; aspectRatio?: unknown }) =>
+  ipcMain.handle('storyboards:update', (e, id: string, patch: { name?: unknown; aspectRatio?: unknown; director?: unknown }) =>
     s.update(id, patch ?? {}, callerOf(e))
   )
   ipcMain.handle('storyboards:delete', (_e, id: string) => s.delete(id))

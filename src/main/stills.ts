@@ -10,6 +10,7 @@ import { constants, createReadStream, existsSync } from 'node:fs'
 import { copyFile, link, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { app, ipcMain, shell } from 'electron'
+import { withImageDirection } from '@shared/direction'
 import { generationTitle } from '@shared/generation-label'
 import {
   NEEDS_CONSENT,
@@ -22,6 +23,7 @@ import {
 } from '@shared/types'
 import { assertWithinBudget, confirmedOf } from './budget'
 import * as db from './db'
+import { libraryDirector } from './directors'
 import { extractFrame } from './ffmpeg'
 import {
   DEFAULT_EDIT_MODEL,
@@ -60,7 +62,7 @@ import {
 } from './paths'
 import { fileErrorReason, importExternalReferences, placeFile } from './references'
 import { noteRequestedBy } from './requested-by'
-import { parseDefaults, removeDirIfEmpty, type StillRow } from './sequence-store'
+import { parseDefaults, parseDirector, removeDirIfEmpty, type StillRow } from './sequence-store'
 import { assertAgentFiles } from './upload-paths'
 
 /** The aspect ratio of a still when neither the request nor its sequence says (Studio's video default). */
@@ -618,6 +620,12 @@ export interface StillPlan {
   priceUsd?: number
   /** What was adjusted on the way, e.g. an aspect ratio the model doesn't have. */
   notes: string[]
+  /**
+   * The sequence's or storyboard's director (Sequence.director), whose look, light and framing go along as text after
+   * the prompt and whose `avoid` joins the negative prompt (direction.ts withImageDirection). `params` keep the user's
+   * prompt (what "Create again" sends again, directed as it is then); this is what Venice gets.
+   */
+  directed?: { directorId: string; name: string; prompt: string; negativePrompt?: string }
 }
 
 /** The model a request names, or the default for it (references: an edit model; none: a text-to-image model). */
@@ -733,6 +741,29 @@ async function plan(input: unknown): Promise<{ plan: StillPlan; model: ImageMode
   const resolution = effectiveResolution(model, params.resolution)
   const quality = effectiveQuality(model, params.quality)
 
+  // The sequence's (or storyboard's) director: its look, light and framing as plain text (image prompts carry no
+  // tokens), its `avoid` in the negative prompt – the parts that fit the model's limits.
+  let directed: StillPlan['directed']
+  const director = params.sequenceId ? libraryDirector(sequenceDirectorOf(params.sequenceId)) : undefined
+  if (director) {
+    const sent = withImageDirection(params.prompt, model.edit ? undefined : negativePrompt, director)
+    const promptFits = !limit || sent.prompt.length <= limit
+    const negativeFits = !limit || !sent.negativePrompt || sent.negativePrompt.length <= limit
+    const prompt = promptFits ? sent.prompt : params.prompt
+    // Models that combine images take no negative prompt (see above): the avoid can't go along there.
+    const negative = model.edit ? undefined : negativeFits ? sent.negativePrompt : negativePrompt
+    if (prompt !== params.prompt || negative !== negativePrompt) {
+      directed = {
+        directorId: director.id,
+        name: director.name,
+        prompt,
+        ...(negative ? { negativePrompt: negative } : {})
+      }
+      notes.push(`Directed by ${director.name}: its look, light and framing are added to the prompt.`)
+    }
+    if (!promptFits) notes.push(`${director.name}'s look, light and framing don't fit ${model.name}'s prompt limit, so they aren't added.`)
+  }
+
   const resolved: StillParams = { prompt: params.prompt, model: model.id }
   if (params.sequenceId) resolved.sequenceId = params.sequenceId
   if (negativePrompt) resolved.negativePrompt = negativePrompt
@@ -745,10 +776,19 @@ async function plan(input: unknown): Promise<{ plan: StillPlan; model: ImageMode
       params: resolved,
       model: publicImageModel(model),
       priceUsd: priceImage(model, { resolution, quality, inputImages: refs.length }),
-      notes
+      notes,
+      ...(directed ? { directed } : {})
     },
     model
   }
+}
+
+/** The director of the sequence or storyboard with this id (its defaults' `director`); undefined for none. */
+function sequenceDirectorOf(sequenceId: string): string | undefined {
+  const defaults = conn().prepare('SELECT defaults FROM sequences WHERE id = ?').pluck().get(sequenceId) as
+    | string
+    | undefined
+  return typeof defaults === 'string' ? parseDirector(defaults) : undefined
 }
 
 /**
@@ -889,10 +929,11 @@ async function makeStill(
   }
 
   requested()
+  // A director's look goes along with the prompt; the still records the user's own prompt.
   const result = await requestImage({
     model,
-    prompt: params.prompt,
-    negativePrompt: params.negativePrompt,
+    prompt: checked.directed?.prompt ?? params.prompt,
+    negativePrompt: checked.directed ? checked.directed.negativePrompt : params.negativePrompt,
     referenceImages: refs,
     aspectRatio: params.aspectRatio,
     resolution: params.resolution,

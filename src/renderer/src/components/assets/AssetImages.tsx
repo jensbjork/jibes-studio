@@ -12,13 +12,15 @@ const DRAG_TYPE = 'application/x-studio-asset-image'
 const MAX_REFERENCES = maxReferenceImages(DEFAULT_MODEL['reference-to-video'])
 
 // Places, and poses with people side by side, are mostly photographed wide; people and clothes upright; products
-// as packshots, square.
+// as packshots, square; a director's style frames are film stills.
 const LAYOUT: Record<AssetKind, { grid: string; tile: string }> = {
   character: { grid: 'grid-cols-[repeat(auto-fill,minmax(140px,1fr))]', tile: 'aspect-[3/4]' },
   environment: { grid: 'grid-cols-[repeat(auto-fill,minmax(190px,1fr))]', tile: 'aspect-[4/3]' },
   product: { grid: 'grid-cols-[repeat(auto-fill,minmax(150px,1fr))]', tile: 'aspect-square' },
   outfit: { grid: 'grid-cols-[repeat(auto-fill,minmax(140px,1fr))]', tile: 'aspect-[3/4]' },
-  pose: { grid: 'grid-cols-[repeat(auto-fill,minmax(190px,1fr))]', tile: 'aspect-[4/3]' }
+  pose: { grid: 'grid-cols-[repeat(auto-fill,minmax(190px,1fr))]', tile: 'aspect-[4/3]' },
+  // A director's style frames: stills from films, wide.
+  director: { grid: 'grid-cols-[repeat(auto-fill,minmax(200px,1fr))]', tile: 'aspect-video' }
 }
 
 interface Props {
@@ -161,12 +163,13 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
     <div>
       <div className="mb-3 flex items-end justify-between gap-4">
         <div>
-          <h2 className="font-medium">Reference images</h2>
+          <h2 className="font-medium">{copy.images?.title ?? 'Reference images'}</h2>
           {images.length > 0 && (
             <p className="mt-0.5 text-[11px] text-muted">
-              {images.length > 1 ? 'Drag to reorder. ' : ''}The first image is the cover. The images come along in
-              this order when you generate – they get their @Image numbers in Generate, after the images already
-              there.
+              {images.length > 1 ? 'Drag to reorder. ' : ''}
+              {copy.images?.intro ??
+                'The first image is the cover. The images come along in this order when you generate – they get ' +
+                  'their @Image numbers in Generate, after the images already there.'}
             </p>
           )}
         </div>
@@ -239,8 +242,12 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
 
       {images.length > MAX_REFERENCES && (
         <p className="mt-3 text-[11px] text-muted">
-          Venice takes at most {MAX_REFERENCES} reference images per generation, in total. When you generate{' '}
-          {copy.generatePhrase}, the first ones come along, as many as fit.
+          {copy.images?.many ?? (
+            <>
+              Venice takes at most {MAX_REFERENCES} reference images per generation, in total. When you generate{' '}
+              {copy.generatePhrase}, the first ones come along, as many as fit.
+            </>
+          )}
         </p>
       )}
 

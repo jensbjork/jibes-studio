@@ -373,7 +373,14 @@ const migrations: string[] = [
   CREATE INDEX generation_reviews_by_generation ON generation_reviews(generation_id);
   CREATE UNIQUE INDEX generation_reviews_user ON generation_reviews(generation_id) WHERE author = 'user';
   ALTER TABLE segments ADD COLUMN continue_mode TEXT NOT NULL DEFAULT 'references'
-    CHECK (continue_mode IN ('references', 'exact'));`
+    CHECK (continue_mode IN ('references', 'exact'));`,
+
+  // Phase 25. Directors are a new asset kind (assets.kind = 'director', free text) that owns the Regissörer folder
+  // from this version on. assets.direction: a director's way of making a film (JSON Direction: editing, look, camera …,
+  // avoid, defaults, and its style videos with their windows, paths stored like every other – relative inside the
+  // library); NULL for every other kind. Its photos are its style frames (asset_images). A sequence's or storyboard's
+  // director is the key `director` of its defaults JSON, a clip's that of its params: no schema change.
+  `ALTER TABLE assets ADD COLUMN direction TEXT;`
 ]
 
 
@@ -400,6 +407,11 @@ export const EDITS_SCHEMA_VERSION = 11
  * on Produkter is its own folder.
  */
 export const PRODUCTS_SCHEMA_VERSION = 12
+
+/**
+ * The user_version from which a library has directors (assets.direction): from then on Regissörer is its own folder.
+ */
+export const DIRECTORS_SCHEMA_VERSION = 14
 
 /**
  * Why this build doesn't open a library whose database a newer Studio has migrated: it doesn't know the newer
@@ -813,6 +825,13 @@ function videoPaths(p: Partial<GenerationParams>): unknown[] {
   return videos.map((v: unknown) => (v && typeof v === 'object' ? (v as { path?: unknown }).path : v))
 }
 
+/** A director's style videos (assets.direction, Direction.videos): { path } windows. */
+function styleVideoPaths(p: object): unknown[] {
+  const videos = (p as { videos?: unknown }).videos
+  if (!Array.isArray(videos)) return []
+  return videos.map((v: unknown) => (v && typeof v === 'object' ? (v as { path?: unknown }).path : v))
+}
+
 /**
  * The song file and its vocals in a sequence's defaults (`song`, sequence-store.parseSong); a clip's own `song` (its
  * place in the song) holds no paths, so nothing is found there.
@@ -827,16 +846,24 @@ function songPaths(p: object): unknown[] {
 /**
  * The start/end/reference image paths, reference audio paths and source/reference video paths in a params JSON
  * string: generation and segment params, and a still's params (whose reference images are the only paths in it);
- * in a sequence's defaults also its cast's and its song's (songPaths).
+ * in a sequence's defaults also its cast's and its song's (songPaths); in a director's direction its style videos
+ * (styleVideoPaths).
  */
 function paramFilePaths(json: string): string[] {
   try {
     const p = JSON.parse(json) as Partial<GenerationParams> | null
     if (!p || typeof p !== 'object') return []
     const refs = Array.isArray(p.referenceImages) ? p.referenceImages : []
-    return [p.startImage, p.endImage, ...refs, ...audioPaths(p), p.sourceVideo, ...videoPaths(p), ...songPaths(p)].filter(
-      (v): v is string => typeof v === 'string' && v !== ''
-    )
+    return [
+      p.startImage,
+      p.endImage,
+      ...refs,
+      ...audioPaths(p),
+      p.sourceVideo,
+      ...videoPaths(p),
+      ...songPaths(p),
+      ...styleVideoPaths(p)
+    ].filter((v): v is string => typeof v === 'string' && v !== '')
   } catch {
     return []
   }
@@ -845,7 +872,8 @@ function paramFilePaths(json: string): string[] {
 /**
  * Whether a row records this stored path (letter case ignored, like the disk): a generation's file or original
  * (an import's untouched copy), an export, asset image, asset audio, edit media or still file, a storyboard
- * board's image, or an image, audio clip or video in generation, segment or still params or a sequence's cast. A row
+ * board's image, or an image, audio clip or video in generation, segment or still params, a sequence's cast or a
+ * director's style videos (assets.direction). A row
  * whose file was deleted in Finder still claims its name: a new file given that name would otherwise be taken
  * for the old row's file — deleting that row would take the new file with it, and an old generation or clip
  * whose picture was removed would silently use somebody else's picture on "Use again" or a regenerated take.
@@ -876,7 +904,8 @@ export function isStoredPathRecorded(stored: string, opts: { ignoreStillId?: str
       `SELECT params FROM generations WHERE instr(studio_fold(params), @n) > 0
        UNION ALL SELECT params FROM segments WHERE instr(studio_fold(params), @n) > 0
        UNION ALL SELECT defaults FROM sequences WHERE instr(studio_fold(defaults), @n) > 0
-       UNION ALL SELECT params FROM stills WHERE instr(studio_fold(params), @n) > 0 AND (@i IS NULL OR id != @i)`
+       UNION ALL SELECT params FROM stills WHERE instr(studio_fold(params), @n) > 0 AND (@i IS NULL OR id != @i)
+       UNION ALL SELECT direction FROM assets WHERE direction IS NOT NULL AND instr(studio_fold(direction), @n) > 0`
     )
     .pluck()
     .all({ n: needle, i: ignore }) as string[]
@@ -914,7 +943,8 @@ export function isStoredPrefixRecorded(folder: string): boolean {
       `SELECT params FROM generations WHERE instr(studio_fold(params), @n) > 0
        UNION ALL SELECT params FROM segments WHERE instr(studio_fold(params), @n) > 0
        UNION ALL SELECT defaults FROM sequences WHERE instr(studio_fold(defaults), @n) > 0
-       UNION ALL SELECT params FROM stills WHERE instr(studio_fold(params), @n) > 0`
+       UNION ALL SELECT params FROM stills WHERE instr(studio_fold(params), @n) > 0
+       UNION ALL SELECT direction FROM assets WHERE direction IS NOT NULL AND instr(studio_fold(direction), @n) > 0`
     )
     .pluck()
     .all({ n: needle }) as string[]
@@ -936,7 +966,7 @@ export function listStoredPaths(): string[] {
 
 /**
  * Applies map to the image, audio and video paths in a params JSON string (generation, segment or still params, a
- * sequence's defaults with its cast and its song);
+ * sequence's defaults with its cast and its song, a director's direction with its style videos);
  * returns undefined when nothing changed.
  */
 function mapParamsJson(json: string, map: (stored: string) => string): string | undefined {
@@ -977,6 +1007,16 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
       return next === path ? v : { ...v, path: next }
     }) as GenerationParams['referenceVideos']
   }
+  // A director's style videos (assets.direction): windows, like reference videos.
+  const styleVideos = (out as { videos?: unknown }).videos
+  if (Array.isArray(styleVideos)) {
+    ;(out as { videos?: unknown }).videos = styleVideos.map((v: unknown) => {
+      if (!v || typeof v !== 'object') return v
+      const path = (v as { path?: unknown }).path
+      const next = one(path)
+      return next === path ? v : { ...v, path: next }
+    })
+  }
   // A sequence's song (its defaults): the file and its vocals. A clip's place in the song has no paths.
   const song = (out as { song?: unknown }).song
   if (song && typeof song === 'object' && !Array.isArray(song)) {
@@ -993,7 +1033,7 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
 
 /**
  * Runs map over every stored path in the library database (generation files, originals, posters and params,
- * segment params, sequences' casts, asset images and audio, edit media, stills and the reference images in their
+ * segment params, sequences' casts, directors' style videos, asset images and audio, edit media, stills and the reference images in their
  * params, storyboard board images, exports) in one transaction and writes back what changed. `contains`, when given, skips rows that can't hold a
  * matching path. `onGeneration` hears the id of every generation changed. Returns the number of rows changed.
  */
@@ -1047,6 +1087,19 @@ export function mapStoredPaths(
       const defaults = mapParamsJson(r.defaults, map)
       if (defaults === undefined) continue
       updateDefaults.run(defaults, r.id)
+      changed++
+    }
+
+    // A director's style videos (assets.direction, schema 14).
+    const directions = conn
+      .prepare('SELECT id, direction FROM assets WHERE direction IS NOT NULL')
+      .all() as { id: string; direction: string }[]
+    const updateDirection = conn.prepare('UPDATE assets SET direction = ? WHERE id = ?')
+    for (const r of directions) {
+      if (!hit(r.direction)) continue
+      const direction = mapParamsJson(r.direction, map)
+      if (direction === undefined) continue
+      updateDirection.run(direction, r.id)
       changed++
     }
 
@@ -1145,7 +1198,8 @@ export function takeRewrittenGenerations(): string[] {
 /**
  * Rewrites every stored relative path equal to or under oldRel to the same place under newRel: generations
  * (file_path, thumb_path, original_path, params incl. reference audio and source/reference videos),
- * segments.params, sequences.defaults (the cast, the song), asset_images.file_path, asset_audio.file_path,
+ * segments.params, sequences.defaults (the cast, the song), assets.direction (style videos), asset_images.file_path,
+ * asset_audio.file_path,
  * edit_media.file_path, stills (file_path, the reference images in params), storyboard_boards.image_path,
  * exports.file_path.
  */

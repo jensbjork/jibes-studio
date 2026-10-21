@@ -32,6 +32,7 @@ import { isAgentCall } from './agent/local-ipc'
 import { AUDIO_FILE_TYPES } from './assets'
 import { assertWithinBudget } from './budget'
 import * as db from './db'
+import { libraryDirector } from './directors'
 import { DEFAULT_ASR } from './edit-ops'
 import { extractAudio, probeAudio } from './ffmpeg'
 import { isInsideRoot, tmpDir, toStoredPath } from './paths'
@@ -422,7 +423,7 @@ export class SongService {
       throw err
     }
     this.setError(sequenceId, undefined)
-    this.prepare(sequenceId, { separate, lyrics, targetSeconds: opts.targetSeconds ?? DEFAULT_SONG_TARGET_SECONDS })
+    this.prepare(sequenceId, { separate, lyrics, targetSeconds: opts.targetSeconds ?? songTargetSeconds(sequenceId) })
     this.announce(sequenceId)
     return this.deps.sequences.get(sequenceId)
   }
@@ -560,7 +561,8 @@ export class SongService {
   /** The cut points the song suggests for places of about `targetSeconds` (shared/song.ts suggestSections). */
   async suggestSections(sequenceId: string, targetSeconds: unknown): Promise<number[]> {
     const song = this.requireSongFile(sequenceId)
-    const target = typeof targetSeconds === 'number' && Number.isFinite(targetSeconds) ? targetSeconds : DEFAULT_SONG_TARGET_SECONDS
+    const target =
+      typeof targetSeconds === 'number' && Number.isFinite(targetSeconds) ? targetSeconds : songTargetSeconds(sequenceId)
     return suggestedCuts(song, target, (await cachedSongAnalysis(song)) ?? (await analyseSong(song)))
   }
 
@@ -685,6 +687,17 @@ function dedupeCuts(cuts: readonly number[]): number[] {
  * only files it uploaded (or the library's own) and never starts a paid transcription itself: that goes through
  * request_song_lyrics, whose approval runs it.
  */
+/**
+ * The clip length a song is split into by default: the shot length of the sequence's director (Direction.shotSeconds,
+ * within the 2–15 s a place may have), else DEFAULT_SONG_TARGET_SECONDS.
+ */
+function songTargetSeconds(sequenceId: string): number {
+  const shot = libraryDirector(store.sequenceDirector(sequenceId))?.direction.shotSeconds
+  return typeof shot === 'number'
+    ? Math.min(MAX_SONG_WINDOW_SECONDS, Math.max(MIN_SONG_WINDOW_SECONDS, shot))
+    : DEFAULT_SONG_TARGET_SECONDS
+}
+
 export function registerSongIpc(deps: SongDeps): SongService {
   const s = new SongService(deps)
   const sequence = (id: unknown): string => store.requirePlainSequence(id as string).id

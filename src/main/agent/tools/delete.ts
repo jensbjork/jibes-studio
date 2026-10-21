@@ -40,7 +40,8 @@ const THE: Record<AssetKind, string> = {
   environment: 'The environment',
   product: 'The product',
   outfit: 'The outfit',
-  pose: 'The pose'
+  pose: 'The pose',
+  director: 'The director'
 }
 
 /** The group heading of each kind in the dialog. */
@@ -49,7 +50,8 @@ const KIND_GROUP: Record<AssetKind, string> = {
   environment: 'Environments',
   product: 'Products',
   outfit: 'Outfits',
-  pose: 'Poses'
+  pose: 'Poses',
+  director: 'Directors'
 }
 
 /**
@@ -196,6 +198,50 @@ function usedOutsideAsset(stored: string): boolean {
      LIMIT 1`,
     { n: JSON.stringify(stored) }
   )
+}
+
+/** A director's style videos (assets.direction) as files of it: their stored paths. */
+function styleVideosOf(id: string): { file_path: string }[] {
+  const json = row<{ direction: string | null }>('SELECT direction FROM assets WHERE id = ?', id)?.direction
+  if (!json) return []
+  try {
+    const videos = (JSON.parse(json) as { videos?: unknown } | null)?.videos
+    return Array.isArray(videos)
+      ? videos.flatMap((v: unknown) => {
+          const path = v && typeof v === 'object' ? (v as { path?: unknown }).path : undefined
+          return typeof path === 'string' && path ? [{ file_path: path }] : []
+        })
+      : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * What deleting a director changes besides its files: the sequences and storyboards it directs, and the clips that
+ * chose it, are directed by no one from then on (assets.ts forgetDirector). Generations keep the id they were made with.
+ */
+function directedEffects(id: string): string[] {
+  const owners = rows<{ name: string; kind: string }>(
+    `SELECT name, kind FROM sequences WHERE json_valid(defaults) AND json_extract(defaults, '$.director') = ? ORDER BY name`,
+    id
+  )
+  const clips =
+    row<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM segments WHERE json_valid(params) AND json_extract(params, '$.director') = ?`,
+      id
+    )?.n ?? 0
+  const effects: string[] = []
+  const sequences = owners.filter((o) => o.kind !== 'storyboard').map((o) => q(o.name))
+  const storyboards = owners.filter((o) => o.kind === 'storyboard').map((o) => q(o.name))
+  if (sequences.length) {
+    effects.push(`${sequences.length === 1 ? 'The sequence' : 'The sequences'} ${andList(sequences)} will have no director`)
+  }
+  if (storyboards.length) {
+    effects.push(`${storyboards.length === 1 ? 'The storyboard' : 'The storyboards'} ${andList(storyboards)} will have no director`)
+  }
+  if (clips) effects.push(`${count(clips, 'clip that chose it is', 'clips that chose it are')} directed by no one`)
+  return effects
 }
 
 /** Sequence clips that use a picture (stored path) as their start or end image. */
@@ -368,10 +414,13 @@ const kindOf = (kind: string): AssetKind | undefined => (isAssetKind(kind) ? kin
 const theOf = (kind: string): string => (isAssetKind(kind) ? THE[kind] : 'The asset')
 
 async function planAsset(input: DeleteInput, id: string): Promise<Planned> {
-  const asset = assetRow(id) ?? refuse(`There is no character, environment, product, outfit or pose with id ${id}.`)
+  const asset =
+    assetRow(id) ?? refuse(`There is no character, environment, product, outfit, pose or director with id ${id}.`)
   const kind = kindOf(asset.kind)
   const images = imageRows(id)
-  const audio = audioRows(id)
+  // A director's style videos are files of its own too (its direction); counted with the "sound clips" slot's sibling.
+  const videos = kind === 'director' ? styleVideosOf(id) : []
+  const audio = [...audioRows(id), ...videos]
   const usedImages = images.filter((f) => usedOutsideAsset(f.file_path)).length
   const usedAudio = audio.filter((f) => usedOutsideAsset(f.file_path)).length
   const wearers = rows<{ name: string }>(
@@ -379,7 +428,10 @@ async function planAsset(input: DeleteInput, id: string): Promise<Planned> {
     id
   ).map((w) => w.name)
   const files = (photos: number, clips: number): string =>
-    andList([photos ? count(photos, 'photo', 'photos') : '', clips ? count(clips, 'sound clip', 'sound clips') : ''])
+    andList([
+      photos ? count(photos, kind === 'director' ? 'style frame' : 'photo', kind === 'director' ? 'style frames' : 'photos') : '',
+      clips ? count(clips, kind === 'director' ? 'style video' : 'sound clip', kind === 'director' ? 'style videos' : 'sound clips') : ''
+    ])
   const effects: string[] = []
   if (usedImages || usedAudio) {
     effects.push(
@@ -394,6 +446,7 @@ async function planAsset(input: DeleteInput, id: string): Promise<Planned> {
       : `The folder${folder} is moved to ${TRASH}`
   )
   if (wearers.length) effects.push(`${andList(wearers)} ${wearers.length === 1 ? 'has' : 'have'} it as default outfit – that is removed`)
+  if (kind === 'director') effects.push(...directedEffects(id))
   const label = `${theOf(asset.kind)} ${q(asset.name)}`
   return planned(
     input,
@@ -427,7 +480,9 @@ async function planAsset(input: DeleteInput, id: string): Promise<Planned> {
                 // Ids, not paths: "Tidy up" may move the files without changing what is removed.
                 imageRows(id).map((f) => f.id),
                 audioRows(id).map((f) => f.id),
-                rows("SELECT id FROM assets WHERE default_outfit_id = ? ORDER BY id", id)
+                rows("SELECT id FROM assets WHERE default_outfit_id = ? ORDER BY id", id),
+                // What it directs: those fall back to none.
+                directedEffects(id)
               ]
             : 'gone'
         )

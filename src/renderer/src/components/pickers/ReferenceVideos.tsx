@@ -56,8 +56,30 @@ export async function videoFilesAsCandidates(paths: string[]): Promise<{ candida
   }
 }
 
+/** How a row of videos speaks: a form's reference videos (@VideoN), or a director's style videos. */
+export interface VideoRowWording {
+  title: string
+  /** The badge on a tile that is sent ("@Video2", "Style 2"); 1-based. */
+  badge: (n: number) => string
+  addTitle: string
+  /** Under the tiles once there are some. */
+  hint: string
+  /** Under the empty row: what the videos are for (the limits follow). */
+  empty: string
+}
+
+/** A form's reference videos. */
+export const REFERENCE_VIDEO_WORDING: VideoRowWording = {
+  title: 'Reference videos',
+  badge: (n) => `@Video${n}`,
+  addTitle: 'Add a video whose motion, camera or style the clip follows',
+  hint: 'Hover a video to play the part that is sent – click it to choose the part. Refer to it as @Video1 … in the prompt.',
+  empty: 'A video as a reference for the motion, the camera or the style'
+}
 
 interface Props {
+  /** How the row speaks; a form's reference videos when left out. */
+  wording?: VideoRowWording
   /** The form's reference videos, in @VideoN order (also the ones that aren't sent). */
   videos: FormVideo[]
   /** The model family's limits; undefined when the model takes no reference videos. */
@@ -89,6 +111,7 @@ const smallButton =
  * exported films or a file (picked or dropped). Under the tiles: the family's limits, live.
  */
 export default function ReferenceVideos({
+  wording = REFERENCE_VIDEO_WORDING,
   videos,
   limits,
   onAdd,
@@ -117,7 +140,7 @@ export default function ReferenceVideos({
     describeMove: (from, to) => {
       const name = videoLabel(videos[from])
       return limits && to < limits.maxVideos
-        ? `${name} moved to place ${to + 1} and is now @Video${to + 1}.`
+        ? `${name} moved to place ${to + 1} and is now ${wording.badge(to + 1)}.`
         : `${name} moved to place ${to + 1} and isn’t sent with this model.`
     }
   })
@@ -177,14 +200,14 @@ export default function ReferenceVideos({
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="text-muted">Reference videos</span>
+        <span className="text-muted">{wording.title}</span>
         {limits && (
           <button
             ref={addButton}
             onClick={() => setMenuOpen((o) => !o)}
             disabled={full}
             className={`${smallButton} ${menuOpen ? 'bg-raised text-text' : ''}`}
-            title={full ? `${limits.family} takes at most ${videoCount(max)}` : 'Add a video whose motion, camera or style the clip follows'}
+            title={full ? `${limits.family} takes at most ${videoCount(max)}` : wording.addTitle}
           >
             ＋ Video
           </button>
@@ -216,7 +239,7 @@ export default function ReferenceVideos({
 
       <div
         role="list"
-        aria-label={`Reference videos${reorder.enabled ? shortcut(' – drag or press ⌥← / ⌥→ on a video to change the order') : ''}`}
+        aria-label={`${wording.title}${reorder.enabled ? shortcut(' – drag or press ⌥← / ⌥→ on a video to change the order') : ''}`}
         onDragOver={onDragOver}
         onDragLeave={(e) => {
           reorder.onDragLeave(e)
@@ -247,7 +270,7 @@ export default function ReferenceVideos({
               aria-haspopup="dialog"
               aria-expanded={editing === key}
               aria-label={
-                `${isSent ? `@Video${at + 1}` : 'Not sent'}: ${label}, ${formatPosition(v.start)}–${formatPosition(v.start + v.length)}. ` +
+                `${isSent ? wording.badge(at + 1) : 'Not sent'}: ${label}, ${formatPosition(v.start)}–${formatPosition(v.start + v.length)}. ` +
                 `Enter chooses the part that is sent${reorder.enabled ? shortcut(', ⌥← and ⌥→ move it.') : '.'}`
               }
               onMouseEnter={() => setHovered(key)}
@@ -292,7 +315,7 @@ export default function ReferenceVideos({
               </div>
               {isSent ? (
                 <span className={`absolute left-1 top-1 rounded px-1 text-[10px] ${renamed ? 'bg-text text-bg' : `bg-black/70 ${VIDEO_TONE.text}`}`}>
-                  @Video{at + 1}
+                  {wording.badge(at + 1)}
                 </span>
               ) : (
                 <span className="absolute left-1 top-1 rounded bg-black/80 px-1 text-[9px] leading-[14px] text-accent">not sent</span>
@@ -330,7 +353,7 @@ export default function ReferenceVideos({
       {videos.length > 0 && limits && (
         <div className="mt-1.5 flex items-start gap-3 text-[11px] text-muted">
           <span className="min-w-0 flex-1">
-            Hover a video to play the part that is sent – click it to choose the part. Refer to it as @Video1 … in the prompt.
+            {wording.hint}
           </span>
           <span
             className={`shrink-0 tabular-nums ${problems.count || problems.total ? 'text-accent' : ''}`}
@@ -345,7 +368,7 @@ export default function ReferenceVideos({
       )}
       {!videos.length && limits && (
         <p className="mt-1.5 text-[11px] leading-snug text-muted">
-          A video as a reference for the motion, the camera or the style – {limits.family} takes up to{' '}
+          {wording.empty} – {limits.family} takes up to{' '}
           {videoCount(limits.maxVideos)}, {perVideoText(limits)}, {limits.maxTotalSeconds} s together. Video seconds raise
           the price.
         </p>
@@ -366,6 +389,7 @@ export default function ReferenceVideos({
 
       <WindowEditor
         anchorRef={editAnchor}
+        badge={edited ? wording.badge(edited.index) : ''}
         video={edited}
         limits={limits}
         onClose={() => setEditing(undefined)}
@@ -397,12 +421,15 @@ export default function ReferenceVideos({
  */
 function WindowEditor({
   anchorRef,
+  badge,
   video,
   limits,
   onClose,
   onChange
 }: {
   anchorRef: RefObject<HTMLElement | null>
+  /** "@Video2", "Style 2". */
+  badge: string
   video: FormVideo | undefined
   limits: ReferenceVideoLimits | undefined
   onClose: () => void
@@ -433,7 +460,7 @@ function WindowEditor({
     body = (
       <div className="p-3">
         <p className="mb-2 flex items-baseline gap-2 text-[12px]">
-          <span className={`shrink-0 font-medium ${VIDEO_TONE.text}`}>@Video{video.index}</span>
+          <span className={`shrink-0 font-medium ${VIDEO_TONE.text}`}>{badge}</span>
           <span className="min-w-0 flex-1 truncate">{videoLabel(video)}</span>
         </p>
         <div className="relative mb-2.5 aspect-video overflow-hidden rounded-md bg-black">

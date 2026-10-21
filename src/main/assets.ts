@@ -3,8 +3,15 @@ import { existsSync } from 'node:fs'
 import { readdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { shell } from 'electron'
+import { directorPreset, sanitizeDirection } from '@shared/direction'
 import { pathKey } from '@shared/generation-filter'
-import { DEFAULT_AUDIO_CLIP_SECONDS, MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
+import {
+  DEFAULT_AUDIO_CLIP_SECONDS,
+  MAX_AUDIO_CLIP_SECONDS,
+  MIN_AUDIO_CLIP_SECONDS,
+  MIN_VIDEO_CLIP_SECONDS,
+  referenceVideoWindow
+} from '@shared/models'
 import type {
   Asset,
   AssetAudio,
@@ -13,7 +20,9 @@ import type {
   AssetInput,
   AssetKind,
   DescribedAsset,
-  GenerationParams
+  Direction,
+  GenerationParams,
+  ReferenceVideo
 } from '@shared/types'
 import { addUnseen, getDb, isStoredPathRecorded, rewriteStoredPrefix } from './db'
 import { probeAudio } from './ffmpeg'
@@ -32,6 +41,7 @@ import {
   tmpDir,
   uniqueName
 } from './paths'
+import { videoDuration } from './reference-videos'
 import { copyInto, fileErrorReason, placeFile, serialized } from './references'
 
 // Assets: characters (Karaktärer), environments (Miljöer), products (Produkter), outfits (Kläder) and poses
@@ -42,8 +52,13 @@ import { copyInto, fileErrorReason, placeFile, serialized } from './references'
 // folder reads well in Finder. The database is the source of truth; the folder follows renames and deletes. A
 // character may have a default outfit (assets.default_outfit_id, cleared by the FK when the outfit goes). A photo or
 // clip an agent added records which agent (and the host a fetched file came from) in its `origin` column.
+// Directors (Regissörer) are assets too, but never references: a director's photos are its style frames, and its
+// way of making a film (assets.direction, schema 14) holds its style videos, copied into its folder like the photos
+// (stored relative, so renames and "Tidy up" carry them along with every other stored path).
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp'])
+/** The video formats a director's style videos may be (the import dialog's). */
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.mkv'])
 /** The audio formats an asset accepts (also the file dialog's filter). */
 export const AUDIO_FILE_TYPES: readonly string[] = ['mp3', 'wav', 'm4a', 'aac', 'aiff', 'aif', 'flac', 'ogg']
 const AUDIO_EXTENSIONS = new Set(AUDIO_FILE_TYPES.map((type) => `.${type}`))
@@ -70,7 +85,8 @@ const THE: Record<AssetKind, string> = {
   environment: 'The environment',
   product: 'The product',
   outfit: 'The outfit',
-  pose: 'The pose'
+  pose: 'The pose',
+  director: 'The director'
 }
 
 let notifyChange: () => void = () => {}
@@ -104,7 +120,7 @@ function assetTask<T>(task: () => Promise<T>): Promise<T> {
 /** Why the library can't be switched or tidied right now, or undefined when no asset work runs. */
 export function assetWorkBusy(): string | undefined {
   return assetTasks > 0
-    ? 'Images or audio for a character, environment, product, outfit or pose are being saved right now.'
+    ? 'Images, audio or videos for a character, environment, product, outfit, pose or director are being saved right now.'
     : undefined
 }
 
@@ -117,6 +133,8 @@ interface AssetRow {
   folder: string | null
   /** Characters only: an asset of kind 'outfit'. */
   default_outfit_id: string | null
+  /** Directors only: JSON Direction, style video paths in stored form (schema 14); NULL for every other kind. */
+  direction?: string | null
   created_at: number
   updated_at: number
 }
@@ -574,7 +592,34 @@ function assetFromRow(r: AssetRow, images: AssetImage[], audio: AssetAudio[]): A
     updatedAt: r.updated_at
   }
   if (r.kind === 'character' && r.default_outfit_id) asset.defaultOutfitId = r.default_outfit_id
+  if (r.kind === 'director') asset.direction = parseDirection(r.direction)
   return asset
+}
+
+// ── Directors' directions ────────────────────────────────────────────────────
+
+/** A director's direction as stored (assets.direction), style video paths absolute; {} when there is none. */
+function parseDirection(json: string | null | undefined): Direction {
+  if (typeof json !== 'string' || !json) return {}
+  try {
+    const direction = sanitizeDirection(JSON.parse(json))
+    if (direction.videos) direction.videos = direction.videos.map((v) => ({ ...v, path: fromStoredPath(v.path) }))
+    return direction
+  } catch {
+    return {}
+  }
+}
+
+/** The stored form of a direction: sanitized, style video paths relative inside the library; NULL when empty. */
+function serializeDirection(direction: Direction): string | null {
+  const clean = sanitizeDirection(direction)
+  if (clean.videos) clean.videos = clean.videos.map((v) => ({ ...v, path: toStoredPath(v.path) }))
+  return Object.keys(clean).length ? JSON.stringify(clean) : null
+}
+
+/** The style video paths of a stored direction (absolute). */
+function styleVideoPaths(json: string | null | undefined): string[] {
+  return (parseDirection(json).videos ?? []).map((v) => v.path)
 }
 
 /** A row of a kind this version knows; anything else (written by a newer Studio) is left alone. */
@@ -698,7 +743,8 @@ export function describedAssetsFor(
   if (!wanted.size) return []
   const db = getDb()
   // Descriptions are saved trimmed; the check in SQL only spares reading the files of assets the legend can't name.
-  const legendIds = `SELECT id FROM assets WHERE trim(description) != '' OR kind IN ('character', 'outfit')`
+  // A director's photos are its style frames, never a reference the legend describes (prompt-compose.ts).
+  const legendIds = `SELECT id FROM assets WHERE kind != 'director' AND (trim(description) != '' OR kind IN ('character', 'outfit'))`
   const rows = (db.prepare(`SELECT * FROM assets WHERE id IN (${legendIds})`).all() as AssetRow[]).filter((r) =>
     isAssetKind(r.kind)
   )
@@ -735,20 +781,24 @@ async function createAsset(
   kind: AssetKind,
   name: string,
   description: string,
-  defaultOutfitId: string | null
+  defaultOutfitId: string | null,
+  direction?: Direction
 ): Promise<Asset> {
   const id = randomUUID()
   const now = Date.now()
   const folder = freeFolderName(kind, name)
   const dir = assetsDir(kind, folder)
+  // A director's style videos are copied in before its row exists: a file that can't be read refuses the whole save.
+  const prepared = kind === 'director' && direction ? await prepareDirection(dir, {}, direction) : undefined
   try {
     getDb()
       .prepare(
-        `INSERT INTO assets (id, kind, name, description, folder, default_outfit_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO assets (id, kind, name, description, folder, default_outfit_id, direction, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(id, kind, name, description, folder, defaultOutfitId, now, now)
+      .run(id, kind, name, description, folder, defaultOutfitId, prepared?.json ?? null, now, now)
   } catch (err) {
+    await discardFiles(prepared?.copies ?? [])
     await removeIfEmpty(dir)
     throw err
   }
@@ -757,28 +807,158 @@ async function createAsset(
   return getAsset(id)
 }
 
+/** Removes files copied for a save that didn't go through. */
+async function discardFiles(paths: readonly string[]): Promise<void> {
+  await Promise.all(paths.map((p) => rm(p, { force: true }).catch(() => {})))
+}
+
+/** "@Video"-free, short name of a video file for messages. */
+const fileName = (path: string): string => basename(path)
+
+/**
+ * A style video's window fitted to its file (`duration` seconds): the start inside the file, the length the one asked
+ * for (default 5 s) within 2–15 s – what Seedance 2.0, the stricter family, takes per video – and the rest of the file.
+ */
+function fitStyleWindow(video: ReferenceVideo, duration: number): { start: number; length: number } {
+  const total = Number.isFinite(duration) && duration > 0 ? duration : 0
+  const wanted = referenceVideoWindow({ path: video.path, ...(video.length !== undefined ? { length: video.length } : {}) })
+  const length = Math.min(Math.max(wanted.length, MIN_VIDEO_CLIP_SECONDS), MAX_STYLE_VIDEO_SECONDS, total)
+  const start = Math.min(Math.max(video.start ?? 0, 0), Math.max(0, total - length))
+  return { start: toMs(start), length: toMs(length) }
+}
+
+/** The longest window a style video keeps: Seedance 2.0's per-video limit, so it fits both families. */
+const MAX_STYLE_VIDEO_SECONDS = 15
+
+/**
+ * A style video file measured before it is copied or kept: refused when it is no video Studio can read, or shorter
+ * than the 2 s Venice takes.
+ */
+async function styleVideoDuration(path: string): Promise<number> {
+  if (!VIDEO_EXTENSIONS.has(extname(path).toLowerCase())) {
+    throw new Error(`${fileName(path)} is not a video. Choose an MP4, MOV, M4V, WebM or MKV file.`)
+  }
+  let duration: number
+  try {
+    duration = await videoDuration(path)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code
+    throw new Error(
+      code === 'ENOENT'
+        ? `${fileName(path)} no longer exists.`
+        : `Could not read the video ${fileName(path)}: ${reasonText(err)}.`
+    )
+  }
+  if (!(duration >= MIN_VIDEO_CLIP_SECONDS - 0.005)) {
+    throw new Error(`${fileName(path)} is shorter than ${MIN_VIDEO_CLIP_SECONDS} seconds. Choose a longer video.`)
+  }
+  return duration
+}
+
+/**
+ * A direction as it is saved for a director whose folder is `dir`: sanitized, every style video outside the folder
+ * measured and copied in (under its own name), each window fitted to its file; videos already in the folder keep their
+ * file (their window is fitted again when the file can be read). `before` is the direction saved so far: the style
+ * videos it had that the new one leaves out are `removed` (absolute), for the caller to keep or trash once saved.
+ * `copies` are the files copied, for the caller to discard if the save fails.
+ */
+async function prepareDirection(
+  dir: string,
+  before: Direction,
+  input: unknown
+): Promise<{ json: string | null; copies: string[]; removed: string[] }> {
+  const next = sanitizeDirection(input)
+  const copies: string[] = []
+  const videos: ReferenceVideo[] = []
+  try {
+    for (const video of next.videos ?? []) {
+      const inFolder = dirname(video.path) === dir || pathKey(dirname(video.path)) === pathKey(dir)
+      if (inFolder) {
+        // Its own file: kept as it is when it can't be measured (moved away in Finder), so the rest still saves.
+        const duration = await styleVideoDuration(video.path).catch(() => undefined)
+        videos.push(duration === undefined ? video : { path: video.path, ...fitStyleWindow(video, duration) })
+        continue
+      }
+      const duration = await styleVideoDuration(video.path)
+      const ext = extname(video.path)
+      let dest: string
+      try {
+        dest = await copyInto(video.path, dir, safeName(basename(video.path, ext), { fallback: 'Video' }), ext.toLowerCase())
+      } catch (err) {
+        throw new Error(`Could not copy ${fileName(video.path)}: ${fileErrorReason(err)}.`)
+      }
+      copies.push(dest)
+      videos.push({ path: dest, ...fitStyleWindow(video, duration) })
+    }
+  } catch (err) {
+    await discardFiles(copies)
+    throw err
+  }
+  const kept = new Set(videos.map((v) => pathKey(v.path)))
+  const removed = (before.videos ?? []).map((v) => v.path).filter((p) => !kept.has(pathKey(p)))
+  const direction: Direction = { ...next }
+  if (videos.length) direction.videos = videos
+  else delete direction.videos
+  return { json: serializeDirection(direction), copies, removed }
+}
+
+/**
+ * Style videos a director no longer has: a file generations or clips still send is kept for them (keepUsedFile, moved
+ * to Referensbilder); any other goes to the Trash. Call once the director's row no longer records them. True when a
+ * file was kept (stored paths moved).
+ */
+async function releaseStyleVideos(paths: readonly string[]): Promise<boolean> {
+  let kept = false
+  for (const path of paths) {
+    if (await keepUsedFile(path, 'Video')) kept = true
+    else await trashFile(path)
+  }
+  return kept
+}
+
 async function save(input: AssetInput): Promise<Asset> {
   const name = text(input?.name).trim()
   const description = text(input?.description).trim()
   if (!input?.id) {
     const kind = requireKind(input?.kind)
     if (!name) throw new Error(`${THE[kind]} needs a name.`)
-    return createAsset(kind, name, description, defaultOutfitFor(kind, input.defaultOutfitId))
+    refuseDirection(kind, input.direction)
+    return createAsset(kind, name, description, defaultOutfitFor(kind, input.defaultOutfitId), input.direction)
   }
 
   // The kind is fixed once created; the one sent along only names what is missing.
   const row = requireAssetRow(input.id, input.kind)
   if (!name) throw new Error(`${THE[row.kind]} needs a name.`)
+  refuseDirection(row.kind, input.direction)
   // Checked before anything moves on disk, so a refused outfit leaves the folder as it was.
   const outfitId =
     input.defaultOutfitId === undefined ? row.default_outfit_id : defaultOutfitFor(row.kind, input.defaultOutfitId)
   const hadFolder = isPlainName(row.folder)
   let folder = await ensureFolder(row)
+  // A director's direction: its new style videos copied in first (a file that can't be read refuses the save).
+  const before = row.direction ?? null
+  const prepared =
+    row.kind === 'director' && input.direction !== undefined
+      ? await prepareDirection(assetsDir(row.kind, folder), parseDirection(before), input.direction)
+      : undefined
+  const directionChanged = !!prepared && prepared.json !== before
   // Autosave sends the same values repeatedly (debounce + blur); don't bump or broadcast for those.
-  if (row.name === name && row.description === description && row.default_outfit_id === outfitId) {
+  if (row.name === name && row.description === description && row.default_outfit_id === outfitId && !directionChanged) {
     // ...unless the images of a character from before folders just moved into its new folder.
     if (!hadFolder) notifyChange()
     return getAsset(row.id)
+  }
+  if (prepared && directionChanged) {
+    // Written before a rename, which then carries the style videos' stored paths along with the folder.
+    try {
+      getDb()
+        .prepare('UPDATE assets SET direction = ?, updated_at = ? WHERE id = ?')
+        .run(prepared.json, Date.now(), row.id)
+    } catch (err) {
+      await discardFiles(prepared.copies)
+      throw err
+    }
+    if (await releaseStyleVideos(prepared.removed)) notifyFilesMoved()
   }
   if (row.name !== name) folder = await renameFolder(row, folder, name)
   getDb()
@@ -794,14 +974,19 @@ async function remove(id: unknown): Promise<void> {
   if (!row) return
   const images = imageRows(row.id)
   const audio = audioRows(row.id)
+  const videos = row.kind === 'director' ? styleVideoPaths(row.direction) : []
   const db = getDb()
   // Image and audio rows go with it (ON DELETE CASCADE); characters wearing a deleted outfit by default lose
   // that default (ON DELETE SET NULL). Those characters changed too: their updatedAt says so, so a view holding
-  // an older copy of one takes the list's version (without the outfit) as the newer.
+  // an older copy of one takes the list's version (without the outfit) as the newer. Sequences and storyboards a
+  // deleted director directed have none from now on, and so do clips that chose it (their director becomes null:
+  // "None", not the sequence's).
+  let undirected = 0
   db.transaction(() => {
     if (row.kind === 'outfit') {
       db.prepare('UPDATE assets SET updated_at = ? WHERE default_outfit_id = ?').run(Date.now(), row.id)
     }
+    if (row.kind === 'director') undirected = forgetDirector(row.id)
     db.prepare('DELETE FROM assets WHERE id = ?').run(row.id)
   })()
   const dir = isPlainName(row.folder) ? join(assetsDir(row.kind), row.folder) : undefined
@@ -810,7 +995,8 @@ async function remove(id: unknown): Promise<void> {
   let kept = false
   const files = [
     ...images.map((r) => ({ file_path: r.file_path, fallback: 'Referensbild' })),
-    ...audio.map((r) => ({ file_path: r.file_path, fallback: 'Ljud' }))
+    ...audio.map((r) => ({ file_path: r.file_path, fallback: 'Ljud' })),
+    ...videos.map((path) => ({ file_path: toStoredPath(path), fallback: 'Video' }))
   ]
   for (const file of files) {
     const path = fromStoredPath(file.file_path)
@@ -818,8 +1004,85 @@ async function remove(id: unknown): Promise<void> {
     else if (!dir || dirname(path) !== dir) await trashFile(path)
   }
   if (dir) await trashAssetFolder(dir, files)
-  if (kept) notifyFilesMoved()
+  // The sequences' views reread: their director (or a clip's) is gone.
+  if (kept || undirected) notifyFilesMoved()
   notifyChange()
+}
+
+/**
+ * Takes a director out of everything that names it (inside the caller's transaction): sequences' and storyboards'
+ * defaults lose their `director`, and clips that chose it get null (none). Generations keep the id they were made with
+ * (what was sent). Returns how many sequences, storyboards and clips changed.
+ */
+function forgetDirector(id: string): number {
+  const db = getDb()
+  const sequences = db
+    .prepare(
+      `UPDATE sequences SET defaults = json_remove(defaults, '$.director')
+       WHERE json_valid(defaults) AND json_extract(defaults, '$.director') = ?`
+    )
+    .run(id).changes
+  const clips = db
+    .prepare(
+      `UPDATE segments SET params = json_set(params, '$.director', json('null'))
+       WHERE json_valid(params) AND json_extract(params, '$.director') = ?`
+    )
+    .run(id).changes
+  return sequences + clips
+}
+
+/** Only directors have a direction; one given for another kind (not empty) is refused rather than dropped. */
+function refuseDirection(kind: AssetKind, direction: unknown): void {
+  if (kind === 'director' || direction === undefined || direction === null) return
+  if (typeof direction === 'object' && !Object.keys(direction as object).length) return
+  throw new Error('Only directors have a direction (editing, look, camera …).')
+}
+
+// ── Directors ────────────────────────────────────────────────────────────────
+
+/** A director's name not taken by another director: "Noir", else "Noir (2)" … */
+function freeDirectorName(name: string): string {
+  const taken = new Set(
+    (getDb().prepare("SELECT name FROM assets WHERE kind = 'director'").pluck().all() as string[]).map((n) =>
+      n.normalize('NFC').toLocaleLowerCase('en')
+    )
+  )
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? name : `${name} (${n})`
+    if (!taken.has(candidate.normalize('NFC').toLocaleLowerCase('en'))) return candidate
+  }
+}
+
+async function copyPreset(presetId: unknown): Promise<Asset> {
+  const preset = directorPreset(presetId)
+  if (!preset) throw new Error('There is no such ready-made director.')
+  return createAsset('director', freeDirectorName(preset.name), preset.description, null, preset.direction)
+}
+
+async function addVideos(assetId: unknown, paths: unknown): Promise<Asset> {
+  const row = requireAssetRow(assetId)
+  if (row.kind !== 'director') throw new Error('Only directors have style videos.')
+  const sources = [
+    ...new Set((Array.isArray(paths) ? paths : []).filter((p): p is string => typeof p === 'string' && p !== ''))
+  ]
+  if (!sources.length) return getAsset(row.id)
+  const dir = assetsDir(row.kind, await ensureFolder(row))
+  const before = parseDirection(row.direction)
+  const prepared = await prepareDirection(dir, before, {
+    ...before,
+    videos: [...(before.videos ?? []), ...sources.map((path) => ({ path }))]
+  })
+  try {
+    const changed = getDb()
+      .prepare('UPDATE assets SET direction = ?, updated_at = ? WHERE id = ?')
+      .run(prepared.json, Date.now(), row.id).changes
+    if (!changed) throw new Error(`${THE[row.kind]} no longer exists.`)
+  } catch (err) {
+    await discardFiles(prepared.copies)
+    throw err
+  }
+  notifyChange()
+  return getAsset(row.id)
 }
 
 async function addImages(assetId: unknown, paths: unknown, from?: unknown): Promise<Asset> {
@@ -1167,6 +1430,27 @@ export function saveAsset(input: AssetInput): Promise<Asset> {
 /** Deletes the asset and moves its folder to the Trash. */
 export function deleteAsset(id: string): Promise<void> {
   return assetTask(() => remove(id))
+}
+
+/** A ready-made director (shared/directors.ts) copied into the library as a director of its own, named after it. */
+export function copyDirectorPreset(presetId: string): Promise<Asset> {
+  return assetTask(() => copyPreset(presetId))
+}
+
+/**
+ * Copies video files into a director's folder and appends them to its style videos, each with a window of 2–15 s
+ * (5 s unless the file is shorter): refused, with the file's name and the reason, when one isn't a video Studio can
+ * read or is shorter than 2 s; nothing is added then. Directors only.
+ */
+export function addDirectorVideos(assetId: string, paths: string[]): Promise<Asset> {
+  return assetTask(() => addVideos(assetId, paths))
+}
+
+/** The director with this id from the library (kind 'director'); undefined for none. Needs an open library. */
+export function findDirectorAsset(id: string): Asset | undefined {
+  if (typeof id !== 'string' || !/^[\w-]+$/.test(id)) return undefined
+  const row = findAssetRow(id)
+  return row?.kind === 'director' ? assetFromRow(row, groupImages(imageRows(id)).get(id) ?? [], []) : undefined
 }
 
 /**

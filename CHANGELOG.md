@@ -10,6 +10,21 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **Directors**: a new kind in the library (*Directors*, folder `Regissörer/`) – a way of making a film that every
+  prompt it directs carries: *editing* (with the shot length a sequence aims for and whether shots cut or flow on),
+  *look*, *camera*, *light*, *framing*, *rhythm*, *performance*, *sound* (only for clips with sound) and *avoid* (added
+  to the negative prompt), with **style frames** (its photos: the look to match, never their people or places) and
+  **style videos** (camera movement to follow, on Seedance 2.x), and the model, aspect ratio and resolution it brings.
+  Eight ready-made directors to start from (Documentary, Music video, Noir, Commercial, Dreamy, Action, Vintage film,
+  Minimal) – *Use a copy* to make one your own. Choose one in Generate (under Model), for a whole sequence or music
+  video (the *Director* chip next to *Cast*: new clips get its shot length and cut or flow; a clip can follow it,
+  choose another or none) and for a storyboard (its transitions, and *Create image…* takes its look, light and
+  framing). When a clip is sent, the director is appended after the References legend as a *Direction* section (in the
+  prompt language), within the model's prompt limit (parts left out from the end, with a note), and the editor shows
+  that section live. Schema 14 (`assets.direction`). Agents: `list_directors`, `copy_director_preset`,
+  `add_director_videos`, `direction` on `create_asset` / `update_asset`, `director` on `set_form`, `validate_prompt`,
+  `add_segment`, `update_segment`, `update_sequence` and `update_storyboard`; the answers show the section. 99 tools in
+  all (38 read, 51 write, 10 ask for approval).
 - **Reference videos**: in Generate and a sequence clip, *Reference videos* (under Reference images, with Seedance 2.x
   reference-to-video models) takes up to 3 videos on Seedance 2.0 (2–15 s each, 15 s in all) or 10 on Seedance 2.5
   (2–30 s each, 30 s in all) – from Media, a take, an exported film or a file (pick or drop; a video dropped on the

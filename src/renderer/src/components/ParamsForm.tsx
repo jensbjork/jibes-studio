@@ -9,6 +9,7 @@ import {
   type RefObject,
   type SetStateAction
 } from 'react'
+import { directorDefaults, effectiveDirectorId, resolveDirector, withDirection } from '@shared/direction'
 import {
   DEFAULT_MODEL,
   KINDS,
@@ -38,6 +39,7 @@ import {
   type AssetKind,
   type GenerationParams,
   type ReferenceAudio,
+  type ReferenceKind,
   type ReferenceVideo,
   type SavedPrompt,
   type VideoModel
@@ -96,6 +98,8 @@ import {
   type VideoCandidate
 } from './pickers/videoRefs'
 import type { ClipWindow } from './assets/audioUtils'
+import DirectorField from './directors/DirectorField'
+import { StyleFramesFromDirector, StyleVideosFromDirector } from './directors/FromDirector'
 import DescriptionsBox from './prompt/DescriptionsBox'
 import { assetIdsInForm, descriptionsView, withAssetDescription, withDescriptionsIncluded } from './prompt/descriptions'
 import NegativePromptIssues, { negativePromptIssues } from './prompt/NegativePromptIssues'
@@ -155,19 +159,25 @@ interface Props {
     onNoSong: () => void
     onChooseSinger: () => void
   }
+  /**
+   * A sequence clip (or a storyboard transition): what it follows unless it chooses a director of its own
+   * (params.director; null for none) – "the sequence" and that sequence's director. Left out in Generate, where a
+   * form has no director unless one is chosen.
+   */
+  followDirector?: { what: string; directorId?: string }
 }
 
 /**
  * The open popover: the prompt library, a start/end image picker, the reference picker on a kind's tab, or the
  * audio picker.
  */
-type Picker = 'library' | 'start' | 'end' | 'audio' | `references:${AssetKind}`
+type Picker = 'library' | 'start' | 'end' | 'audio' | `references:${ReferenceKind}`
 
 /**
  * The kinds a start or end image can be picked from, in the order the picker falls back through when the image
  * isn't a library photo: environments make good opening frames, and a product's packshot can open or close a clip.
  */
-const SINGLE_IMAGE_KINDS: readonly AssetKind[] = ['environment', 'character', 'product', 'outfit', 'pose']
+const SINGLE_IMAGE_KINDS: readonly ReferenceKind[] = ['environment', 'character', 'product', 'outfit', 'pose']
 
 /** "characters, environments, products, outfits and poses": the kinds above in the app's order, for the button titles. */
 const SINGLE_IMAGE_KINDS_TEXT = englishList(
@@ -296,7 +306,8 @@ export default function ParamsForm({
   navigate,
   sequenceId,
   durationFixed,
-  song
+  song,
+  followDirector
 }: Props) {
   const model = models.find((m) => m.id === params.model)
   const kind = kindOfModelId(params.model)
@@ -316,7 +327,7 @@ export default function ParamsForm({
   const outfitButton = useRef<HTMLButtonElement>(null)
   const poseButton = useRef<HTMLButtonElement>(null)
   const audioButton = useRef<HTMLButtonElement>(null)
-  const kindButtons: Record<AssetKind, RefObject<HTMLButtonElement | null>> = {
+  const kindButtons: Record<ReferenceKind, RefObject<HTMLButtonElement | null>> = {
     character: characterButton,
     environment: environmentButton,
     product: productButton,
@@ -324,7 +335,7 @@ export default function ParamsForm({
     pose: poseButton
   }
   const referenceKind = picker?.startsWith('references:')
-    ? (picker.slice('references:'.length) as AssetKind)
+    ? (picker.slice('references:'.length) as ReferenceKind)
     : undefined
 
   const modelsByKind = useMemo(
@@ -758,18 +769,47 @@ export default function ParamsForm({
   const promptLimit = model?.promptCharacterLimit
   // A song clip's legend and checks are those of what it sends (its window of the song as @Audio1).
   const sendAs = song?.sendAs
-  const sent = useMemo(() => (sendAs ? sendAs(params) : params), [params, sendAs])
-  const descriptions = useMemo(
-    () => descriptionsView(sent, assets, language, promptLimit),
-    [sent, assets, language, promptLimit]
+  // The director directing the form – its own, else the sequence's – as main resolves it: its `avoid`, style frames
+  // and videos go into what is sent, and its Direction section after the legend (direction.ts withDirection).
+  const directorId = effectiveDirectorId(params.director, followDirector?.directorId)
+  const director = useMemo(() => resolveDirector(directorId, assets), [directorId, assets])
+  const sent = useMemo(
+    () => withDirection(sendAs ? sendAs(params) : params, director, { continuationFrame: framed }),
+    [params, sendAs, director, framed]
   )
+  const descriptions = useMemo(
+    () => descriptionsView(sent, assets, language, promptLimit, director),
+    [sent, assets, language, promptLimit, director]
+  )
+  const openDirector = navigate
+    ? (id: string) => {
+        closePicker()
+        navigate('directors', { type: 'open-asset', assetId: id })
+      }
+    : undefined
+
+  /**
+   * "Director": its own (an id), none (null in a clip, left out in Generate) or the sequence's (left out in a clip).
+   * Choosing a director applies its defaults – model, aspect ratio, resolution – where the models allowed here offer
+   * them (directorDefaults, as a sequence's and a storyboard's do).
+   */
+  const chooseDirector = (value: string | null | undefined) => {
+    const chosen = typeof value === 'string' ? resolveDirector(value, assets) : undefined
+    const usable = models.filter((m) => !m.offline && kinds.includes(m.kind as Kind))
+    setParams((p) => {
+      const next: GenerationParams = { ...p }
+      if (value === undefined) delete next.director
+      else next.director = value
+      return chosen ? { ...next, ...directorDefaults(next, chosen.direction, usable) } : next
+    })
+  }
   const includeDescriptions = (on: boolean) => setParams((p) => withDescriptionsIncluded(p, on))
   const toggleDescription = (assetId: string, on: boolean) =>
     setParams((p) => withAssetDescription(p, assetId, on, assetIdsInForm(p, assets)))
 
   /** The tab a single-image picker opens on: the current image's kind, else the first kind with photos. */
-  const singleImageKind = (path: string | undefined): AssetKind =>
-    (path ? byPath.get(path)?.kind : undefined) ??
+  const singleImageKind = (path: string | undefined): ReferenceKind =>
+    SINGLE_IMAGE_KINDS.find((k) => !!path && byPath.get(path)?.kind === k) ??
     SINGLE_IMAGE_KINDS.find((k) => assets.some((a) => a.kind === k && a.images.length)) ??
     'environment'
 
@@ -936,6 +976,14 @@ export default function ParamsForm({
         )}
       </label>
 
+      <DirectorField
+        value={params.director}
+        follow={followDirector}
+        assets={assets}
+        onChange={chooseDirector}
+        onOpen={openDirector}
+      />
+
       {kind === 'image-to-video' && (
         <>
           {startImageNote ? (
@@ -1084,6 +1132,13 @@ export default function ParamsForm({
           />
           {refNote && <p className="mt-1 text-[11px] text-accent">{refNote}</p>}
           {framed && <p className="mt-1.5 text-[11px] leading-snug text-muted">{continuationFrame}</p>}
+          {director && (
+            <StyleFramesFromDirector
+              sent={sent}
+              director={director}
+              onOpen={openDirector && (() => openDirector(director.id))}
+            />
+          )}
         </div>
       )}
 
@@ -1102,6 +1157,13 @@ export default function ParamsForm({
               note={videoNote}
               onNote={setVideoNote}
             />
+            {director && videoLimits && (
+              <StyleVideosFromDirector
+                sent={sent}
+                director={director}
+                onOpen={openDirector && (() => openDirector(director.id))}
+              />
+            )}
             {!videoLimits && videos.length > 0 && (
               <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-accent">
                 <span>{model?.name ?? 'The model'} doesn’t take reference videos – the videos aren’t sent.</span>
@@ -1322,6 +1384,7 @@ export default function ParamsForm({
           onInclude={includeDescriptions}
           onToggle={toggleDescription}
           onOpenAsset={openAsset}
+          onOpenDirector={director && openDirector ? () => openDirector(director.id) : undefined}
         />
       </div>
 
@@ -1331,6 +1394,9 @@ export default function ParamsForm({
           {!negativeOpen && negativeHasError && <span className="ml-1.5 text-[11px] text-accent">(has errors)</span>}
           {!negativeOpen && !negativeHasError && params.negativePrompt && (
             <span className="ml-1.5 text-[11px]">(filled in)</span>
+          )}
+          {!negativeOpen && director?.direction.avoid && (
+            <span className="ml-1.5 text-[11px]">+ {director.name}’s</span>
           )}
         </summary>
         <div className="mt-2">
@@ -1349,6 +1415,12 @@ export default function ParamsForm({
             invalid={negativeHasError}
           />
         </div>
+        {director?.direction.avoid && (
+          <p className="mt-1 text-[11px] leading-snug text-muted">
+            <span className="text-text/80">{director.name} adds:</span> {director.direction.avoid} – after yours,
+            without repeating a phrase.
+          </p>
+        )}
         <NegativePromptIssues
           id={negativeIssuesId}
           value={params.negativePrompt ?? ''}

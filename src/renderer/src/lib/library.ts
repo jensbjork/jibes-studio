@@ -19,7 +19,8 @@ export const SELECTED_ASSET_KEYS: Record<AssetKind, string> = {
   environment: 'environments:selected',
   product: 'products:selected',
   outfit: 'outfits:selected',
-  pose: 'poses:selected'
+  pose: 'poses:selected',
+  director: 'directors:selected'
 }
 
 function trimSlash(path: string): string {

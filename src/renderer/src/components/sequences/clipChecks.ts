@@ -3,7 +3,7 @@ import { kindOfModelId, supportsEndImage } from '@shared/models'
 import { songClipProblem, withSong } from '@shared/song-send'
 import type { GenerationParams, Sequence, VideoModel } from '@shared/types'
 import { missingInput, unavailableModel } from '../ParamsForm'
-import { continuationOf, continues, effectiveParams, readyTake } from './sequenceUtils'
+import { continuationOf, continues, effectiveParams, readyTake, withClipDirector } from './sequenceUtils'
 
 /**
  * A sequence clip with an end image of its own that its image-to-video model can't take: main refuses to generate
@@ -23,8 +23,8 @@ export function ownEndImageRefused(params: GenerationParams, endFromNext: boolea
  * for a button), or undefined: the words main's clipProblem uses. A clip that continues from the previous one
  * is checked the way it is sent – in reference mode against the references it carries with the previous clip's last
  * frame after them, exactly against none – and any other clip like a generation (missingInput); a song clip with its
- * window of the song as its reference audio (withSong). `params`: the editor's draft for the clip (default: the stored
- * params).
+ * window of the song as its reference audio (withSong), a directed one with its director's references (withDirection).
+ * `params`: the editor's draft for the clip (default: the stored params).
  */
 export function sendInputProblem(
   sequence: Sequence,
@@ -35,7 +35,11 @@ export function sendInputProblem(
   if (!s || !params) return undefined
   const segment = { ...s, params }
   const plan = continues(segment, index) ? continuationOf(segment, index, sequence) : undefined
-  if (!plan) return missingInput(params.song ? withSong(params, sequence.song) : params, false)
+  if (!plan) {
+    // As it is sent: with its window of the song, and its director's style frames and videos (which count as references).
+    const own = params.song ? withSong(params, sequence.song) : params
+    return missingInput(withClipDirector(own, params.director, sequence), false)
+  }
   if (!params.prompt.trim()) return 'Write a prompt'
   return continuationProblem(effectiveParams(segment, index, sequence), plan)?.replace(/\.\s*$/, '')
 }

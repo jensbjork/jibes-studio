@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import type { Asset, AssetKind, Still } from '@shared/types'
+import type { Asset, AssetKind, ReferenceKind, Still } from '@shared/types'
 import { fileName } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import AssetPicker from '../pickers/AssetPicker'
@@ -19,7 +19,7 @@ const smallButton =
   'whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-text disabled:pointer-events-none disabled:opacity-40'
 
 /** Tab order of the library picker: who is in the picture comes first. */
-const FIRST_KIND: AssetKind = 'character'
+const FIRST_KIND: ReferenceKind = 'character'
 
 /** Whose stills the picker offers: a sequence's, a storyboard's, or (undefined) every saved picture. */
 export type StillsOwner = 'sequence' | 'storyboard'

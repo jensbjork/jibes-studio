@@ -17,6 +17,7 @@ import {
   type TokenEntry
 } from '../studio'
 import { registerDeleteTools } from './delete'
+import { registerDirectorTools } from './directors'
 import { registerEditorTools } from './editor'
 import { registerEditorPaidTools } from './editor-paid'
 import { registerFormTools } from './form'
@@ -183,12 +184,13 @@ async function promptContext(ctx: ToolContext, segmentId: string | undefined, tr
 }
 
 /**
- * Everything a session offers: the tools, the write_video_prompt prompt and the studio://guide resource. 96 tools:
- * 37 that only read, 49 that change the library or the form (free), and 10 that only ask the user – the 9 paid
+ * Everything a session offers: the tools, the write_video_prompt prompt and the studio://guide resource. 99 tools:
+ * 38 that only read, 51 that change the library or the form (free), and 10 that only ask the user – the 9 paid
  * requests and request_delete. No tool removes anything or spends money on its own.
  */
 export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
   registerLibraryTools(server, ctx)
+  registerDirectorTools(server, ctx)
   registerUploadTools(server, ctx)
   registerFormTools(server, ctx)
   registerSequenceTools(server, ctx)

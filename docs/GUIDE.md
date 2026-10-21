@@ -6,7 +6,7 @@ Everything Studio does, in detail. For a short introduction and how to install i
 A desktop video studio for [Venice.ai](https://venice.ai)'s video models. Studio lets you generate short clips from
 text, a start image or a set of reference photos (and voices), keep a library of **characters**, **environments**,
 **products**, **outfits** and **poses** with their reference photos — and what the characters and places sound
-like — and save the prompts that work. Clips are chained into longer films that continue seamlessly from one clip's last frame into
+like —, **directors** that give every clip they direct the same way of being made, and save the prompts that work. Clips are chained into longer films that continue seamlessly from one clip's last frame into
 the next, and a clip in the middle that didn't turn out can be redone so it fits exactly between its neighbours. A
 film can also start as a **storyboard**: one picture for every milestone — made with Venice's image models or taken
 from what you already have — with the clips between the pictures generated for you. Your **own footage** can be
@@ -58,6 +58,12 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   packshots and a description (brand, model, colours, what the packaging says); in the form a character can hold it
   (*Held by*). A **pose** is a photo or sketch of how people stand relative to each other, applied to the characters
   in the shot.
+- **Directors**: a way of making a film, reused wherever you choose it — how it is cut, its look, the camera, the
+  light, the framing, the rhythm, the acting and the sound, what it never does, style frames and style videos, and
+  the model and format it prefers. Eight ready-made ones (Documentary, Music video, Noir, Commercial, Dreamy, Action,
+  Vintage film, Minimal) plus your own; choose one in Generate, for a whole sequence or music video (a clip can
+  choose another, or none) or for a storyboard, and Studio adds its *Direction* to every prompt it directs (see
+  [Directors](#directors)).
 - **Prompt library** with titles, tags, favourites, a negative prompt and usage counts, and **Learnings**:
   short insights about what works, recorded by you or your agents, with the clips they are based on.
 - **Sequences:** films made of clips. Each clip has its own prompt, references, voices and settings,
@@ -120,19 +126,19 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   (Generate, each sequence, storyboard and edit) and by who asked (you, or the agent whose request you approved).
   An optional daily and monthly budget: anything paid that would take the spending past one asks first (*Send
   anyway* / *Cancel*), and an agent's request shows the same warning in its approval dialog.
-- **The same list on the left** in Characters, Environments, Products, Outfits, Poses, Sequences, Storyboards and
-  the Editor: *＋ New …* at the top, a search field (⌘F) that looks in the names — and in the descriptions of the
+- **The same list on the left** in Characters, Environments, Products, Outfits, Poses, Directors, Sequences,
+  Storyboards and the Editor: *＋ New …* at the top, a search field (⌘F) that looks in the names — and in the descriptions of the
   library kinds and where a film came from in the Editor —, ↑ / ↓ to move between the rows and Enter to open one. **✕ on a row**
   (on hover or keyboard focus) asks in the row itself — *Delete “Anna”?*, one line on what goes and what stays,
   *Delete* / *Cancel* — and shows there what went wrong if it couldn't; the open one gives way to the row below (in
   the Editor, to the overview).
 - **A grouped sidebar that folds away:** *Create* (Generate, Sequences, Storyboards, Editor) and *Library*
-  (Media, the five kinds and Prompts), one icon set, two slim status rows at the bottom — *Activity* and the agent
+  (Media, the five kinds, Directors and Prompts), one icon set, two slim status rows at the bottom — *Activity* and the agent
   connection — above *Settings*, and a 72 px icon rail (⌃⌘S, or the button by the wordmark) that gives the
   views more room.
 - **⌘K — search everywhere:** from any view, also while typing in a field (or with the search button by the
-  wordmark), one field finds the views and Settings' sections, actions such as *New sequence* or *New character*, and
-  the library: assets by name and description, saved prompts (Enter puts one in Generate's form), sequences and their
+  wordmark), one field finds the views and Settings' sections, actions such as *New sequence*, *New character* or
+  *New director*, and the library: assets and directors (the ready-made ones too) by name and description, saved prompts (Enter puts one in Generate's form), sequences and their
   clips' notes, storyboards' boards and transitions, edits, clips (newest first), images by prompt and exported films.
   Case and accents don't matter and each word matches the start of a word; ↑ / ↓ and Enter (or a click) open the
   result where Studio always shows it, Esc closes. It is for you only: agents search with their own list tools.
@@ -246,6 +252,7 @@ every file the library knows about back where it belongs.
 ├── Produkter/<Name>/                       Products: packshots of the item + Beskrivning.txt
 ├── Kläder/<Name>/                          Outfits: photos of the garments + Beskrivning.txt
 ├── Poser/<Name>/                           Poses: photos or sketches of the positions + Beskrivning.txt
+├── Regissörer/<Name>/                      Your own directors: style frames, style videos + Beskrivning.txt
 ├── Referensbilder/<YYYY-MM-DD>/            Start, end and reference images and reference audio picked from
 │                                           outside the library, copied here when a generation is submitted;
 │                                           stills that belong to no sequence (any more)
@@ -441,6 +448,70 @@ prompts must not contain tokens (and get no legend: they send no references). Th
 [`src/shared/prompt-compose.ts`](../src/shared/prompt-compose.ts) and tokens are renumbered by
 [`src/shared/prompt-remap.ts`](../src/shared/prompt-remap.ts), both shared by the window, the main process and the
 agent tools.
+
+## Directors
+
+A **director** is a way of making a film that you choose once and Studio writes into every prompt it directs, so a
+whole film — or every clip you make in Generate — is cut, lit and shot the same way without repeating it in each
+prompt. It lives in the library (*Directors*, after Poses in the sidebar), in the same list as the other kinds:
+**Ready-made** directors at the bottom, your own above them under *Yours*.
+
+- **Ready-made** directors (Documentary, Music video, Noir, Commercial, Dreamy, Action, Vintage film, Minimal) can
+  direct as they are, but not be changed: **Use a copy** makes one of your own from one, to change and give style
+  frames and videos.
+- **Your own** (*＋ New* in the list, or ⌘K → *New director*) has a name, a line about what it is good for and a field
+  for each part, saved as you type: **Editing** (pace, cuts, long takes), **Look** (grade, contrast, grain,
+  palette), **Camera**, **Light**, **Framing** (shot sizes and their order), **Rhythm** (tempo, slow motion),
+  **Performance** (how the actors play), **Sound** (music, ambience, silence) and **Avoid** (what it never does).
+  Where the building blocks have phrases for a part, a chip beside it (*＋ Camera*, *＋ Light*, *＋ Style* …) puts one
+  in. Short, concrete phrases work best — what the camera does and what the light is, not how good the film is.
+- **In a sequence:** the **shot length** it aims for (2–15 s: new clips get the nearest duration the model offers,
+  and a song's clips are cut near it) and what happens **between shots** — *Cut* (new clips start fresh), *Flow*
+  (new clips continue from the previous clip's last frame) or *Sequence's own*. Only new clips get them; clips you
+  already have aren't changed.
+- **Style frames** are its pictures (dropped or added like a character's photos, first one the cover): stills whose
+  grade, light and texture the clips should match — never their people, places or objects. **Style videos** (from a
+  file, Media, a take or an exported film, copied into the director's folder, each with the part that is sent, 2–15
+  s) give the camera movement to follow.
+- **Defaults:** a model, an aspect ratio and a resolution that choosing the director sets, each only where the model
+  offers it.
+- Beside the fields, **Added to the prompt** shows the *Direction* section exactly as a clip gets it, in the prompt
+  language, and what it adds to the negative prompt.
+
+**Where you choose one.**
+
+- **Generate:** *Director* under *Model* (none by default). Choosing one applies its defaults. *Added to the prompt*
+  lists its lines after the descriptions of the references, and its style frames and videos are shown under the
+  reference images and videos as *from the director* — they come after your own (`@Image4`, `@Video2` …) and can
+  only be changed in the director. *Generate with the director* in Directors opens Generate directed by it.
+- **Sequences and music videos:** the **Director** chip in the header (beside *Cast* and *Song*) directs every clip.
+  Choosing one sets the sequence's defaults for new clips; existing clips keep their settings. A clip's *Directed by*
+  is *Follow the sequence* by default, or another director, or *None*; a clapperboard on the clip's card marks a clip
+  that doesn't follow the sequence.
+- **Storyboards:** the chip in the header directs every transition (the transition's editor says by whom), and
+  **Create image…** for a board says which look the picture gets.
+
+**What is sent.** After the prompt and its *References* list comes the director's section, one line per part it
+writes (in Swedish with the Swedish prompt language: *Regi*, *Klippning* …; the texts are sent as written):
+
+```
+Direction (Noir):
+- Editing: slow, deliberate cuts with lingering holds; cut on a look or a sound
+- Look: high-contrast black and white, deep inky shadows, fine film grain
+- Camera: slow dolly moves, low angles, a slight Dutch tilt for tension
+- Style frames (@Image4, @Image5): match their look – grade, light, texture – never their people, places or objects.
+- @Video2: follow its camera movement only – not its people or places.
+```
+
+*Sound* is only sent with a clip made with sound. *Avoid* joins the negative prompt after the clip's own, without
+repeating a phrase. Style frames go only in reference mode, after the clip's own pictures and only as many as the
+model still takes (never with a clip that starts on the previous clip's last frame); style videos only to Seedance 2.x
+reference models, within their count and seconds — what isn't sent is said under *Added to the prompt*. When the
+model's prompt limit is tight, your prompt and the references come first, and parts of the direction are left out
+from the end. A take records the director it was made with; *Use again* fills the form with the clip's own references
+and the director, which adds its own again. **Create image…** pictures get only the look, light and framing as plain
+words after the prompt, and the *Avoid* in the negative prompt. Deleting a director leaves the sequences, storyboards
+and clips it directed without one.
 
 ## Sequences
 

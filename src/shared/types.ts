@@ -92,6 +92,13 @@ export interface GenerationParams {
    * words. A take keeps the window it was made for, so moving a boundary later can still place it (TakeSongSync).
    */
   song?: SongWindow
+  /**
+   * The director (Direction): an asset id of kind 'director' or a ready-made one (DIRECTOR_PRESET_PREFIX). null: no
+   * director, even where the sequence or storyboard has one; left out: the sequence's or storyboard's (none in
+   * Generate). Studio's own: at send time it becomes the prompt's Direction section, the negative prompt's `avoid`
+   * and the style references, all of which the take's sent prompt and params record.
+   */
+  director?: string | null
 }
 
 /** What a song clip hears of the song: the separated vocals (for lip sync), the whole mix (mood, rhythm) or nothing. */
@@ -438,6 +445,8 @@ export type LibraryFolderTarget =
   | 'ownClips'
   /** Redigeringar; with an id, that edit's own folder. */
   | 'edits'
+  /** Regissörer; with an id, that director's own folder. */
+  | 'directors'
 
 export interface FfmpegStatus {
   ok: boolean
@@ -507,10 +516,15 @@ export interface SpendingSummary {
  * item to show in the film (Produkter/), e.g. a package, a bottle or a gadget. outfit: what a character wears (Kläder/).
  * pose: how people stand and where, relative to each other (Poser/). Each is a name, a description and reference
  * photos in a folder of their own; characters and environments can also have audio clips (a voice, a soundscape).
+ * director: a way of making a film – editing, look, camera, light … (Asset.direction) – with style frames as its photos
+ * and style videos (Regissörer/); never a reference of its own: it directs a clip, a sequence or a storyboard.
  */
-export type AssetKind = 'character' | 'environment' | 'product' | 'outfit' | 'pose'
+export type AssetKind = 'character' | 'environment' | 'product' | 'outfit' | 'pose' | 'director'
 
-/** Every kind, in the order the UI lists them (picker tabs, chips, the feed's filter); nothing stored depends on it. */
+/**
+ * The kinds a prompt refers to (@ImageN), in the order the UI lists them (picker tabs, chips, the feed's filter);
+ * nothing stored depends on it. Directors aren't among them: see LIBRARY_KINDS.
+ */
 export const ASSET_KINDS = [
   'character',
   'environment',
@@ -518,6 +532,81 @@ export const ASSET_KINDS = [
   'outfit',
   'pose'
 ] as const satisfies readonly AssetKind[]
+
+/** The kinds that are references in a prompt (ASSET_KINDS' members). */
+export type ReferenceKind = (typeof ASSET_KINDS)[number]
+
+/** Every kind the library holds, in the sidebar's order: the reference kinds, then directors. */
+export const LIBRARY_KINDS = [...ASSET_KINDS, 'director'] as const satisfies readonly AssetKind[]
+
+// ── Directors: a way of making a film, appended to the prompts it directs ───
+
+/** The parts of a direction that go into a prompt, in the order the Direction section lists them. */
+export const DIRECTION_PARTS = [
+  'editing',
+  'look',
+  'camera',
+  'light',
+  'framing',
+  'rhythm',
+  'performance',
+  'sound'
+] as const
+export type DirectionPart = (typeof DIRECTION_PARTS)[number]
+
+/**
+ * A director's way of making a film (Asset.direction for kind 'director', or a ready-made one). When it directs a
+ * clip, the parts that are written are appended to the prompt as a Direction section (shared/prompt-compose.ts, in the
+ * prompt language), `avoid` joins the negative prompt, and its style frames (the asset's photos) and style videos are
+ * sent as references the section explains (look only / camera movement only). Every field is optional.
+ */
+export interface Direction {
+  /** Editing: pace, shot length, cuts (hard, match, jump), long takes, transitions. */
+  editing?: string
+  /** The average shot length (seconds) a sequence or a song aims for when this director leads it (2–15). */
+  shotSeconds?: number
+  /**
+   * Between a sequence's shots: 'cut' – hard cuts (new clips don't continue from the previous clip's last frame);
+   * 'flow' – each shot runs on from the last (new clips continue from it). Left out: the sequence's own default.
+   */
+  continuity?: 'cut' | 'flow'
+  /** Look: grade, contrast, grain, film stock, era, palette. */
+  look?: string
+  /** Camera: movement (handheld, Steadicam, locked off, dolly), lenses, angles, composition. */
+  camera?: string
+  /** Light: high or low key, practicals, neon, daylight, hard or soft. */
+  light?: string
+  /** Framing: the shot sizes it favours and their order (wide → medium → close-up), symmetry, headroom. */
+  framing?: string
+  /** Rhythm and motion: tempo, slow motion, speed ramps, stillness. */
+  rhythm?: string
+  /** Performance: how the actors play – naturalistic and subtle, or stylised. */
+  performance?: string
+  /** Sound and music: silence, ambience, score, diegetic sound. Sent only with a clip that has sound. */
+  sound?: string
+  /** What the director never does ("shaky zooms, lens flares"): added to the negative prompt. */
+  avoid?: string
+  /**
+   * Style videos: camera movement or motion to follow (sent as reference videos to models that take them, Seedance
+   * 2.x reference-to-video). Absolute over IPC; stored relative, in the director's folder.
+   */
+  videos?: ReferenceVideo[]
+  /** What choosing the director sets in the form, a sequence's or a storyboard's defaults (only the ones given). */
+  defaults?: { model?: string; aspectRatio?: string; resolution?: string }
+}
+
+/** The prefix of a ready-made director's id ("preset:documentary"): not in the library, never stored as an asset. */
+export const DIRECTOR_PRESET_PREFIX = 'preset:'
+
+/** A ready-made director (shared/directors.ts): copied into the library to be changed. */
+export interface DirectorPreset {
+  /** DIRECTOR_PRESET_PREFIX + a slug. */
+  id: string
+  name: string
+  /** One line: what it is good for. */
+  description: string
+  direction: Direction
+}
 
 /** Who added a photo or a sound clip when it wasn't the user (set only from an agent's call). */
 export interface AssetFileOrigin {
@@ -572,6 +661,8 @@ export interface Asset {
   audio: AssetAudio[]
   /** Characters only: the outfit (an asset of kind 'outfit') the character wears unless told otherwise. */
   defaultOutfitId?: string
+  /** Directors only: the way it makes a film (its photos are its style frames). */
+  direction?: Direction
   createdAt: number
   updatedAt: number
 }
@@ -588,6 +679,11 @@ export interface AssetInput {
    * when updating.
    */
   defaultOutfitId?: string | null
+  /**
+   * Directors only: the whole direction (omitted keeps the current one when updating). Style videos given as paths
+   * outside the director's folder are copied in (see addDirectorVideos); ones left out are taken off.
+   */
+  direction?: Direction
 }
 
 // ── Composed prompts: asset descriptions appended as a References legend ────
@@ -675,6 +771,47 @@ export interface ComposedPrompt {
    * like `entries`. Not descriptions: appended with "Include descriptions" off too, and never shortened.
    */
   videos?: { token: string; line: string }[]
+  /**
+   * The director directing the generation (GenerationParams.director, ComposeExtras.director): its Direction section,
+   * appended after the References legend and included in `legend` (shared/direction.ts composeDirection). Also when
+   * nothing is appended (a blank prompt), like `entries`. Style videos are explained here, not in `videos`.
+   */
+  direction?: ComposedDirection
+}
+
+/** One line of a Direction section: a part of the direction, the style frames' line or a style video's. */
+export interface DirectionLine {
+  part: DirectionPart | 'styleFrames' | 'styleVideo'
+  /** The line as the section writes it, without "- " ("Look: high-contrast black and white …"). */
+  text: string
+  /** The style lines' @ImageN / @VideoN tokens. */
+  tokens?: string[]
+  /** In the section as sent: false for a part left out to fit the model's prompt limit, or when nothing is appended. */
+  sent: boolean
+}
+
+/** A director's Direction section as composePrompt appends it (shared/direction.ts composeDirection). */
+export interface ComposedDirection {
+  /** GenerationParams.director: an asset id or a ready-made one. */
+  directorId: string
+  /** The name as the heading writes it ("Direction (Noir):"). */
+  name: string
+  /**
+   * "\n\nDirection (Noir):\n- Editing: …\n- Style frames (@Image7): …" as appended; '' when nothing is: a blank prompt,
+   * a director with nothing written for this generation, or not even its heading and style lines fit the limit.
+   */
+  section: string
+  /** Every line the director has for this generation, in order: the parts written (DIRECTION_PARTS), then the style lines. */
+  lines: DirectionLine[]
+  /** Parts left out to fit the model's prompt limit, from the end (sound first). */
+  droppedParts: DirectionPart[]
+  /** The style frames' tokens among the reference images sent ("@Image7"), and the style videos' ("@Video2"). */
+  styleFrames: string[]
+  styleVideos: string[]
+  /** What of the director isn't sent and why (the limit, the mode, the model, a clip without sound), for the UI and agents. */
+  notes: string[]
+  /** Nothing appended although the prompt isn't blank: not even the heading and the style lines fit the limit. */
+  dropped: boolean
 }
 
 // ── Prompt library ───────────────────────────────────────────────────────────
@@ -759,6 +896,11 @@ export interface Sequence {
    * them, and the clips whose own references are exactly these follow it when it changes. Empty when none is chosen.
    */
   cast: SequenceCast
+  /**
+   * The director of the whole sequence (an asset id or a ready-made one): every clip that doesn't choose its own
+   * (GenerationParams.director) is directed by it. Stored in the defaults JSON (key `director`). Absent: none.
+   */
+  director?: string
   /**
    * The song the sequence is cut to ("New sequence from a song…"): every clip has its place in it (Segment.params.song),
    * the clips cover it end to end, and the preview and the export play it over the whole film instead of the clips'
@@ -1047,6 +1189,8 @@ export interface Storyboard {
   boards: StoryboardBoard[]
   /** boards.length − 1 of them (none for fewer than two boards), in order. */
   transitions: StoryboardTransition[]
+  /** The director of the storyboard's transitions and the pictures made for its boards (as Sequence.director). */
+  director?: string
   /** "Generate missing" is sending the missing transitions to Venice. */
   running: boolean
   /** Why the last "Generate missing" stopped ("Transition 2: …"); cleared when a new run starts. */
@@ -2248,6 +2392,12 @@ export interface AgentSetFormArgs {
    * null: no choices, every outfit worn by its default.
    */
   outfit_wearers?: Record<string, string | null> | null
+  /**
+   * GenerationParams.director: a director's id (main checked that it exists), or null for none. Choosing one applies
+   * its defaults as the form's picker does (direction.ts directorDefaults: model, aspect ratio, resolution, each only
+   * when offered) unless model, aspect_ratio or resolution are given in the same call.
+   */
+  director?: string | null
 }
 
 /** set_references: photo paths (main resolved the agent's asset ids), in order. */
@@ -2283,8 +2433,8 @@ export interface AgentReorderReferencesArgs {
   videos?: string[]
 }
 
-/** The library views of the five asset kinds (the renderer's View ids). */
-export type AssetViewId = 'characters' | 'environments' | 'products' | 'outfits' | 'poses'
+/** The library views of the asset kinds (the renderer's View ids): the five reference kinds and the directors. */
+export type AssetViewId = 'characters' | 'environments' | 'products' | 'outfits' | 'poses' | 'directors'
 
 /** The views an agent can open. */
 export type AgentOpenView = 'generate' | 'media' | 'sequences' | 'storyboards' | 'editor' | 'prompts' | AssetViewId
@@ -2435,6 +2585,13 @@ export interface StudioApi {
   listAssets(kind?: AssetKind): Promise<Asset[]>
   /** Creates (no id) or updates an asset. Rejects with a message (empty name, unknown outfit…). */
   saveAsset(input: AssetInput): Promise<Asset>
+  /** A ready-made director copied into the library as a director of its own (to change), named after it. */
+  copyDirectorPreset(presetId: string): Promise<Asset>
+  /**
+   * Copies video files into a director's folder and adds them to its style videos (each with a window that fits the
+   * Seedance 2.x limits); refused for files that aren't videos or can't be read, with the reason.
+   */
+  addDirectorVideos(assetId: string, paths: string[]): Promise<Asset>
   /** Moves its folder to the Trash; characters wearing a deleted outfit by default lose that default. */
   deleteAsset(id: string): Promise<void>
   /** Copies the files into the asset's folder (JPG, PNG and WebP only), after the images it has. */
@@ -2481,6 +2638,8 @@ export interface StudioApi {
       exportHeight?: number | null
       cast?: SequenceCast
       castSwap?: SequenceCastSwap
+      /** The sequence's director (an asset id or a ready-made one); null: none. Its defaults apply as when chosen. */
+      director?: string | null
     }
   ): Promise<Sequence>
   /**
@@ -2572,7 +2731,10 @@ export interface StudioApi {
   /** Creates it with its folder (Storyboards/<namn>/) and two empty boards. Aspect ratio default 16:9. */
   createStoryboard(name: string, aspectRatio?: string): Promise<Storyboard>
   /** A new name renames its folder; a new aspect ratio applies to its transitions and new board images. */
-  updateStoryboard(id: string, patch: { name?: string; aspectRatio?: string }): Promise<Storyboard>
+  updateStoryboard(
+    id: string,
+    patch: { name?: string; aspectRatio?: string; director?: string | null }
+  ): Promise<Storyboard>
   /** Its takes become ordinary generations; stills still in use are kept in Referensbilder; exports stay. */
   deleteStoryboard(id: string): Promise<void>
   /**

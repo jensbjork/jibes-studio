@@ -8,6 +8,7 @@ export type View =
   | 'products'
   | 'outfits'
   | 'poses'
+  | 'directors'
   | 'prompts'
   | 'sequences'
   | 'storyboards'
@@ -28,11 +29,14 @@ export type Intent = (
    */
   | { type: 'use-asset'; assetId: string }
   /**
-   * Library views (Characters, Environments, Products, Outfits, Poses): select that asset; audioId scrolls to the clip
-   * in Voice, jobId to a voice design that failed.
+   * Library views (Characters, Environments, Products, Outfits, Poses, Directors): select that asset; audioId scrolls to
+   * the clip in Voice, jobId to a voice design that failed. In Directors the id may be a ready-made director's
+   * ("preset:…").
    */
   | { type: 'open-asset'; assetId: string; audioId?: string; jobId?: string }
   | { type: 'use-prompt'; promptId: string }
+  /** Generate view: direct the form with that director (an asset id or a ready-made one's), with its defaults. */
+  | { type: 'use-director'; directorId: string }
   /** Sequences view: open that sequence, on the given clip (else the newest one); generationId focuses that take. */
   | { type: 'open-sequence'; sequenceId: string; segmentId?: string; generationId?: string }
   /** Sequences view: "New sequence from a song…" – pick an audio file, then the song's dialog. */

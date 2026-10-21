@@ -27,6 +27,7 @@ import {
   supportsEndImage,
   supportsReferenceVideos
 } from '@shared/models'
+import { continuesByDefault, effectiveDirectorId, shotDuration, withDirection } from '@shared/direction'
 import { generationTitle } from '@shared/generation-label'
 import { resolveOutfitWearers } from '@shared/outfits'
 import { explainedReferences } from '@shared/prompt-compose'
@@ -65,6 +66,7 @@ import type {
   WorkSummary
 } from '@shared/types'
 import * as db from '../../db'
+import { libraryDirector } from '../../directors'
 import { FILE_MANAGER, THIS_COMPUTER } from '../../platform'
 import * as store from '../../sequence-store'
 import { composeTakePrompt, withoutReferenceTokens } from '../../sequences'
@@ -94,6 +96,7 @@ import {
   type Swapped
 } from '../swap'
 import { isStoryboardId, sequenceKind, storyboardNotSequence } from '../storyboard-rows'
+import { clipDirectorInfo, clipDirectorInput, directorInput, directorRef, withClipDirector } from './directors'
 import {
   AssetIndex,
   StillIndex,
@@ -229,7 +232,13 @@ export function assertNotRunning(sequence: Sequence): void {
  * the sequence service's takeParams does.
  */
 export function asSent(sequence: Sequence, index: number): GenerationParams {
-  return withSong(sendParams(sequence.segments, index), sequence.song)
+  const sung = withSong(sendParams(sequence.segments, index), sequence.song)
+  // Directed by its own director, else the sequence's (none for null), as takeParams sends it.
+  const director = libraryDirector(effectiveDirectorId(sequence.segments[index]?.params.director, sequence.director))
+  if (!director) return sung
+  return withDirection(sung, director, {
+    continuationFrame: continuationPlan(sequence.segments, index)?.mode === 'references'
+  })
 }
 
 /** How the clip continues from the previous clip (continuation.ts), or undefined when it doesn't. */
@@ -354,6 +363,8 @@ export function clipInfo(
     // clip that follows it names that clip.
     follows_cast: cast.state === 'follows',
     ...(cast.state === 'carries' ? { carries_cast_from_clip: cast.fromClip } : {}),
+    // Who directs it: its own director, the sequence's, or none (director_choice).
+    ...clipDirectorInfo(segment.params.director, sequence.director),
     continue_from_previous: continuing,
     ...(plan ? continuationInfo(plan, assets) : {}),
     end_from_next: ending,
@@ -580,6 +591,8 @@ export function sequenceInfo(sequence: Sequence, assets: AssetIndex, stills: Sti
     export_height: sequence.exportHeight ?? null,
     defaults: defaultsInfo(sequence),
     cast: castInfo(sequence, assets),
+    // Directs every clip that doesn't choose its own (update_sequence director).
+    director: directorRef(sequence.director),
     ...(sequence.song ? { song: songInfo(sequence.song) } : {}),
     generate_all_running: sequence.running,
     ...(sequence.runError ? { last_run_error: readableRunError(sequence.runError) } : {}),
@@ -1325,7 +1338,8 @@ const clipFields = {
     .optional()
     .describe("End on the next clip's first frame (image-to-video with a model that takes an end image). Same as end_image: \"next\"."),
   start_image: slotInput.describe(`The clip's start image (first frame): "previous" (the previous clip's last frame),${SLOT_HELP}`),
-  end_image: slotInput.describe(`The clip's end image (last frame): "next" (the next clip's first frame),${SLOT_HELP}`)
+  end_image: slotInput.describe(`The clip's end image (last frame): "next" (the next clip's first frame),${SLOT_HELP}`),
+  director: clipDirectorInput
 }
 
 /**
@@ -1550,16 +1564,19 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       const base: GenerationParams = previous
         ? { ...previous.params, prompt: '', startImage: undefined, endImage: undefined }
         : { ...DEFAULT_PARAMS, ...sequence.defaults, prompt: '' }
-      // A new clip continues by default unless it is given what a shot of its own needs.
+      // A new clip continues by default unless it is given what a shot of its own needs – or the sequence's director
+      // cuts between shots (continuity "cut").
       const ownStart = input.start_image !== undefined && input.start_image !== 'previous'
       const ownShot = !!input.references?.length || ownStart
+      const direction = libraryDirector(sequence.director)?.direction
+      const cuts = continuesByDefault(direction) === false
       const slots = slotState(
         input,
         { continuing: false, ending: false, mode: 'references', params: base },
         { first: !previous, last: afterIndex === sequence.segments.length - 1 },
         assets,
         stills,
-        !!previous && !ownShot && input.continue_from_previous === undefined
+        !!previous && !ownShot && input.continue_from_previous === undefined && !cuts
       )
       // A new shot without references of its own starts with the sequence's cast (a continuation carries the
       // references of the clip it continues from instead; a clip with pictures takes none).
@@ -1602,6 +1619,13 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         result.notes.unshift(
           "The clip starts with the sequence's cast as its references (cast in get_sequence) and follows it: it changes when the cast changes, until its references are changed by hand."
         )
+      }
+      result.params = withClipDirector(result.params, raw.director)
+      // The sequence's director's shot length, as near as the model offers (a song's clips follow their places).
+      if (raw.duration === undefined && direction?.shotSeconds !== undefined && !sequence.song) {
+        const model = usableModels(await loadModels()).find((m) => m.id === result.params.model)
+        const duration = shotDuration(direction.shotSeconds, model?.durations ?? [])
+        if (duration) result.params = { ...result.params, duration }
       }
 
       const before = new Set(sequence.segments.map((s) => s.id))
@@ -1715,6 +1739,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       const result = touchesClip
         ? await clipParams(segment.params, input, slots, assets, clipNumber, { sequence, index, insert: false })
         : undefined
+      if (result) result.params = withClipDirector(result.params, raw.director)
       const songPlace = song ? songChoice(sequence, index, song, result?.params, assets) : undefined
       // The new params are built on the clip as it was read; whatever the user saved meanwhile would be written
       // over without a word. Compared right before the write (nothing can come in between). Notes and the
@@ -1885,12 +1910,19 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           .optional()
           .describe(
             "null takes the song off a sequence cut to a song (create_sequence_from_song): its clips keep their prompts, takes and settings but no longer have places in it, and the song's files stay in the sequence's folder."
+          ),
+        director: z
+          .string()
+          .nullable()
+          .optional()
+          .describe(
+            "The director of the whole sequence (list_directors), or null for none: every clip that doesn't choose its own (update_segment director) is directed by it – its Direction section after the legend, its avoid in the negative prompt, its style frames and videos – and its defaults (model, aspect ratio, resolution) become the sequence's; its continuity decides whether new clips continue ('flow') or cut ('cut'), its shot_seconds their length. Existing clips keep their settings."
           )
       },
       annotations: { ...WRITE, idempotentHint: true },
       summary: () => 'changed a sequence'
     },
-    async ({ sequence_id, name, defaults, export_height, cast, swap_cast_asset, song }) => {
+    async ({ sequence_id, name, defaults, export_height, cast, swap_cast_asset, song, director }) => {
       const sequence = await loadSequence(sequence_id)
       if (
         name === undefined &&
@@ -1898,10 +1930,15 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         export_height === undefined &&
         cast === undefined &&
         swap_cast_asset === undefined &&
-        song === undefined
+        song === undefined &&
+        director === undefined
       ) {
-        throw new Error('Give name, defaults, export_height, cast, swap_cast_asset or song – otherwise there is nothing to change.')
+        throw new Error(
+          'Give name, defaults, export_height, cast, swap_cast_asset, song or director – otherwise there is nothing to change.'
+        )
       }
+      const chosenDirector = directorInput(director)
+      if (chosenDirector !== undefined && chosenDirector !== (sequence.director ?? null)) assertNotRunning(sequence)
       if (song === null && !sequence.song) throw new Error('The sequence has no song to take off.')
       if (cast && swap_cast_asset) throw new Error('Give either cast (the whole cast) or swap_cast_asset – not both.')
       const castChange = !!cast || !!swap_cast_asset
@@ -1945,7 +1982,8 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         ...(nextCast ? { cast: nextCast } : {}),
         ...(swap_cast_asset
           ? { castSwap: { fromAssetId: swap_cast_asset.from_asset_id.trim(), toAssetId: swap_cast_asset.to_asset_id.trim() } }
-          : {})
+          : {}),
+        ...(chosenDirector !== undefined ? { director: chosenDirector } : {})
       })
       // The clips whose settings the cast change rewrote (they followed the cast).
       const before = new Map(sequence.segments.map((s) => [s.id, store.serializeParams(s.params)]))
@@ -1957,7 +1995,8 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
         defaults ? 'the defaults' : undefined,
         export_height !== undefined ? 'the export format' : undefined,
         castChange ? 'the cast' : undefined,
-        song === null ? 'the song (taken off)' : undefined
+        song === null ? 'the song (taken off)' : undefined,
+        chosenDirector !== undefined ? 'the director' : undefined
       ].filter((w): w is string => !!w)
       const said = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what[what.length - 1]}` : what[0]
       return {
@@ -1966,6 +2005,13 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
           name: updated.name,
           defaults: defaultsInfo(updated),
           export_height: updated.exportHeight ?? null,
+          director: directorRef(updated.director),
+          ...(chosenDirector !== undefined
+            ? {
+                director_note:
+                  "Existing clips keep their settings; every clip that doesn't choose its own director is directed by the sequence's from its next take on (get_sequence: composed_prompt, direction)."
+              }
+            : {}),
           ...(castChange
             ? {
                 cast: castInfo(updated, assets),

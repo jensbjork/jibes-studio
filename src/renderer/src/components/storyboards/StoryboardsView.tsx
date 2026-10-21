@@ -320,6 +320,13 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     })
   }
 
+  /** The storyboard's director (null: none): pending edits first; a refusal goes back to the Director panel. */
+  const changeDirector = async (director: string | null): Promise<void> => {
+    if (!storyboardId) return
+    await flushAll()
+    await store.mutate(() => window.studio.updateStoryboard(storyboardId, { director }))
+  }
+
   const setAspectRatio = (aspectRatio: string) => {
     if (!storyboardId) return
     store.update((s) => ({ ...s, aspectRatio }))
@@ -820,6 +827,8 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               onDelete={() => void deleteStoryboard(storyboard.id)}
               onEditExport={(exportId) => navigate('editor', { type: 'open-editor', exportId })}
               onError={(text) => setNotice({ text, storyboardId: storyboard.id })}
+              onDirectorChange={changeDirector}
+              onOpenDirector={(id) => navigate('directors', id ? { type: 'open-asset', assetId: id } : undefined)}
             />
             {banners}
             <div ref={area} className="relative flex min-h-0 flex-1">
@@ -890,6 +899,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
                     onEditTake={(take) => navigate('editor', { type: 'open-editor', generationId: take.id })}
                     onError={(text) => setNotice({ text, storyboardId: storyboard.id })}
                     onClose={() => setEditorId(undefined)}
+                    onOpenDirector={(id) => navigate('directors', { type: 'open-asset', assetId: id })}
                   />
                 </section>
               )}
