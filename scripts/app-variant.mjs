@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Builds a variant of JIBES Studio for this Mac: a separately named app ("JIBES Studio Test") with its own settings,
 // its own suggested library (~/Movies/JIBES Studio Test) and its own place in the Dock, that runs beside JIBES
-// JIBES Studio.app and Studio Dev and never updates itself from GitHub (src/main/variant.ts).
+// Studio.app and Studio Dev and never updates itself from GitHub (src/main/variant.ts).
 //
 //   node scripts/app-variant.mjs Test            builds dist/test/mac-arm64/JIBES Studio Test.app  (app:test)
 //   node scripts/app-variant.mjs Test --install  … and puts it in /Applications  (app:install:test)
