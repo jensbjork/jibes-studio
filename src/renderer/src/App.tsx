@@ -52,7 +52,7 @@ export default function App() {
 
   // "Studio Dev" (npm run dev) and a variant ("Studio Test") have their own settings and library; mark them
   // everywhere, including the window title shown in Mission Control and the Window menu, so neither can be mistaken
-  // for Studio.app.
+  // for JIBES Studio.app.
   const [devProfile, setDevProfile] = useState(false)
   const [variant, setVariant] = useState<string>()
   useEffect(() => {

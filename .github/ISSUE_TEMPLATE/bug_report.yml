@@ -17,7 +17,7 @@ body:
     id: version
     attributes:
       label: Studio version
-      description: In Finder, select Studio.app and choose File → Get Info. When running from source, give the commit (`git rev-parse --short HEAD`).
+      description: In Finder, select JIBES Studio.app and choose File → Get Info. When running from source, give the commit (`git rev-parse --short HEAD`).
       placeholder: 0.1.0
     validations:
       required: true
@@ -27,7 +27,7 @@ body:
     attributes:
       label: How do you run Studio?
       options:
-        - Studio.app (built with npm run app)
+        - JIBES Studio.app (built with npm run app)
         - From source with npm run dev (Studio Dev profile)
         - From source with npm run dev:real
     validations:
@@ -91,7 +91,7 @@ body:
     id: logs
     attributes:
       label: Logs
-      description: Terminal output from npm run dev, or messages from Console.app for Studio.app. Redact API keys, tokens and personal paths before pasting.
+      description: Terminal output from npm run dev, or messages from Console.app for JIBES Studio.app. Redact API keys, tokens and personal paths before pasting.
       render: shell
 
   - type: input

@@ -149,7 +149,7 @@ function Group({ title, items, view, collapsed, onSelect }: GroupProps) {
 interface Props {
   view: View
   onChange: (v: View) => void
-  /** Shows a "Dev" badge so the development version can't be mistaken for Studio.app. */
+  /** Shows a "Dev" badge so the development version can't be mistaken for JIBES Studio.app. */
   devProfile?: boolean
   /** Shows the variant's badge ("Test") for Studio Test, likewise. */
   variant?: string

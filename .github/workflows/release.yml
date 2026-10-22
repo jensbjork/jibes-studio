@@ -1,8 +1,8 @@
 name: Release
 
-# Pushing a version tag (v0.3.0) builds Studio on GitHub's runners and publishes one release with four files:
-#   Studio-mac-arm64.zip (what install.sh downloads) and Studio-mac-arm64.dmg (for a download by hand) – Apple Silicon
-#   Studio-win-x64-setup.exe (the installer) and Studio-win-x64.zip (portable) – 64-bit Windows
+# Pushing a version tag (v0.3.0) builds JIBES Studio on GitHub's runners and publishes one release with four files:
+#   JIBES-Studio-mac-arm64.zip (what install.sh downloads) and JIBES-Studio-mac-arm64.dmg (for a download by hand) – Apple Silicon
+#   JIBES-Studio-win-x64-setup.exe (the installer) and JIBES-Studio-win-x64.zip (portable) – 64-bit Windows
 # and SHA256SUMS.txt, their SHA-256 checksums. Studio updates itself from the newest release (src/main/updates.ts):
 # the Mac zip or the Windows installer, checked against GitHub's digest of the file or, without one, SHA256SUMS.txt.
 # The Windows build is started and checked first (scripts/smoke-test.mjs); nothing is published unless both builds pass.
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   mac:
-    name: Build Studio.app
+    name: Build JIBES Studio.app
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -66,20 +66,20 @@ jobs:
 
       # electron-builder only warns about a missing extraResources folder; Settings' Add to Claude Desktop needs it.
       - name: Check the Claude Desktop extension is in the app
-        run: test -f dist/mac-arm64/Studio.app/Contents/Resources/mcpb/server/index.js
+        run: test -f "dist/mac-arm64/JIBES Studio.app/Contents/Resources/mcpb/server/index.js"
 
       - name: Upload the build
         uses: actions/upload-artifact@v4
         with:
-          name: Studio-mac-arm64
+          name: JIBES-Studio-mac-arm64
           path: |
-            dist/Studio-mac-arm64.zip
-            dist/Studio-mac-arm64.dmg
+            dist/JIBES-Studio-mac-arm64.zip
+            dist/JIBES-Studio-mac-arm64.dmg
           if-no-files-found: error
           retention-days: 14
 
   windows:
-    name: Build Studio for Windows
+    name: Build JIBES Studio for Windows
     runs-on: windows-latest
     timeout-minutes: 40
     defaults:
@@ -131,10 +131,10 @@ jobs:
       - name: Check the Claude Desktop extension is in the app
         run: test -f dist/win-unpacked/resources/mcpb/server/index.js
 
-      # Starts dist/win-unpacked/Studio.exe with a throwaway profile and checks over the DevTools protocol that the
+      # Starts dist/win-unpacked/JIBES Studio.exe with a throwaway profile and checks over the DevTools protocol that the
       # window shows Studio, that the bundled ffmpeg reports its version, that a new library opens and Settings renders.
       - name: Smoke test
-        run: node scripts/smoke-test.mjs dist/win-unpacked/Studio.exe --bundled-ffmpeg --screenshot dist/smoke-test-windows.png
+        run: node scripts/smoke-test.mjs "dist/win-unpacked/JIBES Studio.exe" --bundled-ffmpeg --screenshot dist/smoke-test-windows.png
 
       - name: Upload the smoke test's screenshot
         if: always()
@@ -148,10 +148,10 @@ jobs:
       - name: Upload the build
         uses: actions/upload-artifact@v4
         with:
-          name: Studio-win-x64
+          name: JIBES-Studio-win-x64
           path: |
-            dist/Studio-win-x64-setup.exe
-            dist/Studio-win-x64.zip
+            dist/JIBES-Studio-win-x64-setup.exe
+            dist/JIBES-Studio-win-x64.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -167,7 +167,7 @@ jobs:
       - name: Download the builds
         uses: actions/download-artifact@v4
         with:
-          pattern: Studio-*
+          pattern: JIBES-Studio-*
           merge-multiple: true
           path: dist
 
@@ -176,7 +176,7 @@ jobs:
       - name: Write the checksums
         working-directory: dist
         run: |
-          sha256sum Studio-mac-arm64.zip Studio-mac-arm64.dmg Studio-win-x64-setup.exe Studio-win-x64.zip > SHA256SUMS.txt
+          sha256sum JIBES-Studio-mac-arm64.zip JIBES-Studio-mac-arm64.dmg JIBES-Studio-win-x64-setup.exe JIBES-Studio-win-x64.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Publish the release
@@ -185,8 +185,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            dist/Studio-mac-arm64.zip dist/Studio-mac-arm64.dmg \
-            dist/Studio-win-x64-setup.exe dist/Studio-win-x64.zip \
+            dist/JIBES-Studio-mac-arm64.zip dist/JIBES-Studio-mac-arm64.dmg \
+            dist/JIBES-Studio-win-x64-setup.exe dist/JIBES-Studio-win-x64.zip \
             dist/SHA256SUMS.txt \
-            --title "Studio $GITHUB_REF_NAME" \
+            --title "JIBES Studio $GITHUB_REF_NAME" \
             --generate-notes

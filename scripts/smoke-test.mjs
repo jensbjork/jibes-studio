@@ -6,7 +6,7 @@
 //
 //   node scripts/smoke-test.mjs [app] [--bundled-ffmpeg] [--port 9360] [--screenshot file.png]
 //
-// app: the built program; by default dist/win-unpacked/Studio.exe on Windows, dist/mac-arm64/Studio.app on a Mac.
+// app: the built program; by default dist/win-unpacked/JIBES Studio.exe on Windows, dist/mac-arm64/JIBES Studio.app on a Mac.
 // --bundled-ffmpeg: ffmpeg must be the one that comes with the app (its resources/ffmpeg), not one on the system.
 // --screenshot: saves what the window shows at the end, also when a check failed.
 //
@@ -16,7 +16,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -31,14 +31,15 @@ const port = Number(option('--port') ?? 9360)
 const screenshot = option('--screenshot')
 
 function defaultApp() {
-  if (process.platform === 'win32') return join(root, 'dist', 'win-unpacked', 'Studio.exe')
-  if (process.platform === 'darwin') return join(root, 'dist', 'mac-arm64', 'Studio.app')
+  if (process.platform === 'win32') return join(root, 'dist', 'win-unpacked', 'JIBES Studio.exe')
+  if (process.platform === 'darwin') return join(root, 'dist', 'mac-arm64', 'JIBES Studio.app')
   return join(root, 'dist', 'linux-unpacked', 'studio')
 }
 
 /** The executable inside a macOS .app bundle; anything else is run as it is. */
 function executableOf(app) {
-  return app.endsWith('.app') ? join(app, 'Contents', 'MacOS', 'Studio') : app
+  // A Mac app's program is named after the bundle (JIBES Studio.app/Contents/MacOS/JIBES Studio).
+  return app.endsWith('.app') ? join(app, 'Contents', 'MacOS', basename(app, '.app')) : app
 }
 
 const appPath = resolve(positional[0] ?? defaultApp())
@@ -147,7 +148,7 @@ try {
   // 1. The window is Studio's, with its API.
   await waitFor('the window to load', `return document.readyState === 'complete' && !!window.studio`)
   const title = await evaluate('return document.title')
-  check(title === 'Studio', `The window's title is "${title}", not "Studio".`)
+  check(title === 'JIBES Studio', `The window's title is "${title}", not "JIBES Studio".`)
   const platform = await evaluate('return window.studio.platform')
   check(platform === process.platform, `window.studio.platform is "${platform}" on ${process.platform}.`)
   log(`the window shows Studio (platform ${platform}).`)

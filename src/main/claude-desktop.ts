@@ -10,7 +10,7 @@ import type { AgentService } from './agent'
 import { isAgentCall } from './agent/local-ipc'
 import { LOOPBACK } from './agent/network'
 import { IS_MAC, THIS_COMPUTER } from './platform'
-import { VARIANT } from './variant'
+import { PUBLIC_NAME, VARIANT } from './variant'
 
 // Studio in Claude Desktop: Claude Desktop installs local MCP servers as Desktop Extensions (.mcpb, a zip with a
 // manifest.json – https://github.com/modelcontextprotocol/mcpb, manifest version 0.3). Studio's extension is a small
@@ -21,8 +21,8 @@ import { VARIANT } from './variant'
 // tailnet. Only the window can do this; agents never can.
 
 const USER_ONLY = 'Only you can do this in Studio.'
-/** The file Claude Desktop is given, and the name a saved one gets ("Studio Test.mcpb" for a variant). */
-const FILE_NAME = VARIANT ? `Studio ${VARIANT}.mcpb` : 'Studio.mcpb'
+/** The file Claude Desktop is given, and the name a saved one gets ("JIBES Studio Test.mcpb" for a variant). */
+const FILE_NAME = `${PUBLIC_NAME}.mcpb`
 /** A file handed to Claude Desktop holds the token: it is deleted this long after, or when Studio quits. */
 const TEMP_LIFETIME_MS = 15 * 60_000
 const TEMP_PREFIX = 'studio-claude-'

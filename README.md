@@ -7,18 +7,18 @@ Make films with [Venice.ai](https://venice.ai)'s video models, on your Mac or Wi
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jensbjork/studio/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jensbjork/jibes-studio/main/install.sh | bash
 ```
 
 Needs a Mac with Apple Silicon (macOS 13+) and a [Venice API key](https://venice.ai/settings/api). The script
-installs ffmpeg with Homebrew if it's missing, puts Studio in Applications and opens it.
+installs ffmpeg with Homebrew if it's missing, puts JIBES Studio in Applications and opens it.
 
-Rather download it yourself? Get `Studio-mac-arm64.dmg` from
-[Releases](https://github.com/jensbjork/studio/releases/latest). The app isn't notarized, so the first time macOS
+Rather download it yourself? Get `JIBES-Studio-mac-arm64.dmg` from
+[Releases](https://github.com/jensbjork/jibes-studio/releases/latest). The app isn't notarized, so the first time macOS
 stops it: open **System Settings → Privacy & Security** and click **Open Anyway**.
 
-**Windows** (10 or 11, 64-bit): download `Studio-win-x64-setup.exe` from the same Releases page and run it, or
-unzip `Studio-win-x64.zip` anywhere. ffmpeg comes with it. The app isn't signed, so SmartScreen warns the first
+**Windows** (10 or 11, 64-bit): download `JIBES-Studio-win-x64-setup.exe` from the same Releases page and run it, or
+unzip `JIBES-Studio-win-x64.zip` anywhere. ffmpeg comes with it. The app isn't signed, so SmartScreen warns the first
 time: click **More info → Run anyway**.
 
 Studio tells you when a new version is out and updates itself when you choose **Update now**.

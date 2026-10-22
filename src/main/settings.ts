@@ -9,7 +9,7 @@ import { VARIANT } from './variant'
 
 /** Where the agent connection (MCP server) listens unless the user picks another port. */
 export const DEFAULT_AGENT_PORT = 8770
-/** Studio Dev's, one up, so it can listen at the same time as Studio.app or Studio Test. */
+/** Studio Dev's, one up, so it can listen at the same time as JIBES Studio.app or Studio Test. */
 export const DEV_AGENT_PORT = DEFAULT_AGENT_PORT + 1
 
 /** The agent connection: off by default; the token is what agents authenticate with. */
@@ -105,9 +105,13 @@ export function restoreLibraryLocation(location: LibraryLocation): void {
   save(s)
 }
 
-/** Proposed base folder for a first run: ~/Movies/Studio. */
+/**
+ * Proposed base folder for a first run, after the program's name: ~/Movies/JIBES Studio (JIBES Studio Dev, JIBES Studio
+ * Test). Libraries made before keep their folders (~/Movies/Studio …): the settings say where they are.
+ */
 export function suggestedLibraryRoot(): string {
-  return join(app.getPath('videos'), app.getName())
+  const name = ['JIBES Studio', VARIANT, isDevProfile() ? 'Dev' : ''].filter(Boolean).join(' ')
+  return join(app.getPath('videos'), name)
 }
 
 /** Running as "Studio Dev" (npm run dev), with its own settings and library. */
@@ -143,7 +147,8 @@ export function isDevelopmentBuild(): boolean {
 /** Where a phase-2 library would be: its old setting if one was ever written, else ~/Movies/Studio. */
 export function legacyLibraryDir(): string {
   const old = load().libraryDir
-  return typeof old === 'string' && isAbsolute(old) ? resolve(old) : suggestedLibraryRoot()
+  // Phase 2 had no choice of folder: ~/Movies/<the app's name inside>, Studio (Studio Dev).
+  return typeof old === 'string' && isAbsolute(old) ? resolve(old) : join(app.getPath('videos'), app.getName())
 }
 
 export function getApiKey(): string | null {

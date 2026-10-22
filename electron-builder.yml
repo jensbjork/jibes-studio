@@ -1,5 +1,7 @@
 appId: se.jensbjork.studio
-productName: Studio
+# The program's name: JIBES Studio.app, JIBES Studio.exe, the installer and the Dock. Inside, it keeps the name Studio
+# (src/main/index.ts), so its settings folder and Keychain entry are the ones it always had.
+productName: JIBES Studio
 copyright: Copyright © 2026 Jens Björk
 directories:
   buildResources: build
@@ -16,7 +18,7 @@ electronLanguages:
 asarUnpack:
   - '**/*.node'
 mac:
-  # `npm run app` builds the app folder only (dist/mac-arm64/Studio.app); the release workflow asks for zip and dmg.
+  # `npm run app` builds the app folder only (dist/mac-arm64/JIBES Studio.app); the release workflow asks for zip and dmg.
   target:
     - target: dir
       arch: arm64
@@ -32,9 +34,9 @@ mac:
     # address and the token when the user adds Studio to Claude Desktop (src/main/claude-desktop.ts).
     - from: build/mcpb
       to: mcpb
-  # Fixed names, so https://github.com/<owner>/studio/releases/latest/download/Studio-mac-arm64.zip always points at
-  # the newest release (install.sh downloads it).
-  artifactName: ${productName}-mac-${arch}.${ext}
+  # Fixed names without spaces, so …/releases/latest/download/JIBES-Studio-mac-arm64.zip always points at the newest
+  # release (install.sh downloads it).
+  artifactName: JIBES-Studio-mac-${arch}.${ext}
   icon: build/icon.icns
   category: public.app-category.video
   darkModeSupport: true
@@ -44,23 +46,23 @@ mac:
   hardenedRuntime: false
   gatekeeperAssess: false
   extendInfo:
-    NSDocumentsFolderUsageDescription: Studio keeps your library of videos, characters and sequences in the folder you choose.
-    NSDesktopFolderUsageDescription: Studio needs access to images and folders you choose on the Desktop.
-    NSDownloadsFolderUsageDescription: Studio needs access to images you choose in Downloads.
-    NSRemovableVolumesUsageDescription: Studio can keep its library on an external drive.
-    NSNetworkVolumesUsageDescription: Studio can keep its library on a network drive.
-# The disk image's volume name: the public name (the app inside stays Studio.app).
+    NSDocumentsFolderUsageDescription: JIBES Studio keeps your library of videos, characters and sequences in the folder you choose.
+    NSDesktopFolderUsageDescription: JIBES Studio needs access to images and folders you choose on the Desktop.
+    NSDownloadsFolderUsageDescription: JIBES Studio needs access to images you choose in Downloads.
+    NSRemovableVolumesUsageDescription: JIBES Studio can keep its library on an external drive.
+    NSNetworkVolumesUsageDescription: JIBES Studio can keep its library on a network drive.
+# The disk image's volume name.
 dmg:
   title: JIBES Studio
 win:
-  # x64 only: an installer (Studio-win-x64-setup.exe) and a portable zip (Studio-win-x64.zip), unsigned (SmartScreen
+  # x64 only: an installer (JIBES-Studio-win-x64-setup.exe) and a portable zip (JIBES-Studio-win-x64.zip), unsigned (SmartScreen
   # asks once, see the README). Fixed names, like the Mac files, so …/releases/latest/download/<name> always works.
   target:
     - target: nsis
       arch: x64
     - target: zip
       arch: x64
-  artifactName: ${productName}-win-${arch}.${ext}
+  artifactName: JIBES-Studio-win-${arch}.${ext}
   # electron-builder turns the 1024 × 1024 PNG into a multi-size .ico for the program, the installer and shortcuts.
   icon: build/icon.png
   files:
@@ -83,7 +85,7 @@ win:
     - from: build/mcpb
       to: mcpb
 nsis:
-  artifactName: ${productName}-win-${arch}-setup.${ext}
+  artifactName: JIBES-Studio-win-${arch}-setup.${ext}
   # The assisted installer, per user by default (no administrator needed, installed under %LOCALAPPDATA%\Programs),
   # where the folder can be chosen.
   oneClick: false
@@ -91,9 +93,6 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
-  # The public name (JIBES Studio); the program, its folders and the files keep the short name Studio.
-  shortcutName: JIBES Studio
-  uninstallDisplayName: JIBES Studio
   # English only, like the app.
   multiLanguageInstaller: false
   # Settings stay when Studio is uninstalled (the library lives in its own folder and is never touched).

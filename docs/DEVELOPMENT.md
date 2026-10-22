@@ -56,7 +56,7 @@ differs):
 | Script | What it does |
 | --- | --- |
 | `npm run dev` | Builds the native helper if needed, then the electron-vite dev server with watch (`-w`), as **Studio Dev** (`STUDIO_DEV_PROFILE=1`). The renderer hot-reloads; main and preload changes rebuild and restart Electron. |
-| `npm run dev:real` | The same, with the real **Studio** profile. Quit Studio.app first. |
+| `npm run dev:real` | The same, with the real **Studio** profile. Quit JIBES Studio.app first. |
 | `npm run build` | Builds the native helper if needed, then main, preload and renderer into `out/`. |
 | `npm run build:helpers` | Builds the voice separation helper into `build/bin/` (see [Native helper](#native-helper)) and the Claude Desktop extension's parts into `build/mcpb/` (see [Claude Desktop extension](#claude-desktop-extension)). |
 | `npm start` | Runs the built `out/` with electron-vite preview — **with the real profile**, like `dev:real`. |
@@ -65,7 +65,7 @@ differs):
 | `npm run app` | Builds the native helper, then builds and packages `dist/mac-arm64/Studio.app` with electron-builder. |
 | `npm run app:install` | `npm run app`, then replaces `/Applications/Studio.app` with the new build. |
 | `npm run app:test` | Builds **Studio Test**, a variant with its own name, settings and library, into `dist/test/mac-arm64/` (`scripts/app-variant.mjs Test`). See [Profiles](#profiles). |
-| `npm run app:install:test` | `npm run app:test`, then replaces `/Applications/Studio Test.app` with the new build. |
+| `npm run app:install:test` | `npm run app:test`, then replaces `/Applications/JIBES Studio Test.app` with the new build. |
 | `npm run screenshots` | Takes the README's screenshots into `docs/images/` from the built `out/` (run `npm run build` first), with a fresh, empty profile and library in a temporary folder. See [Screenshots](#screenshots). |
 
 Because the dev app reloads on every save, keep the code compiling while you work: a broken save restarts a
@@ -76,27 +76,32 @@ broken main process.
 A *profile* is Electron's `userData` folder (settings, API key, agent token, which base folder to open) plus the
 suggested location of the library. Each library carries its own database inside its base folder.
 
-| Run | Name | Settings | Suggested library |
+| Run | Name inside | Settings | Suggested library |
 | --- | --- | --- | --- |
-| Studio.app, `npm run dev:real`, `npm start` | Studio | `~/Library/Application Support/Studio/` | `~/Movies/Studio` |
-| `npm run dev` | Studio Dev | `~/Library/Application Support/Studio Dev/` | `~/Movies/Studio Dev` |
-| Studio Test (`npm run app:install:test`) | Studio Test | `~/Library/Application Support/Studio Test/` | `~/Movies/Studio Test` |
-| `STUDIO_PROFILE_DIR=<dir> npm run dev` | Studio Dev | `<dir>/userData/` | `<dir>/Movies/Studio Dev` |
+| JIBES Studio.app, `npm run dev:real`, `npm start` | Studio | `~/Library/Application Support/Studio/` | `~/Movies/JIBES Studio` |
+| `npm run dev` | Studio Dev | `~/Library/Application Support/Studio Dev/` | `~/Movies/JIBES Studio Dev` |
+| JIBES Studio Test.app (`npm run app:install:test`) | Studio Test | `~/Library/Application Support/Studio Test/` | `~/Movies/JIBES Studio Test` |
+| `STUDIO_PROFILE_DIR=<dir> npm run dev` | Studio Dev | `<dir>/userData/` | `<dir>/Movies/JIBES Studio Dev` |
+
+The program is called JIBES Studio (electron-builder's `productName`: the bundle, the Dock, the installer), but main
+sets the name **inside** before anything else (`src/main/index.ts`): the settings folder and the Keychain entry
+("Studio Safe Storage", which encrypts the API key and the agent token) are named after it, so they stay what they
+were. Libraries made before the suggestion changed stay where they are (`~/Movies/Studio` …): the settings say where.
 
 - **Studio Dev** shows a yellow *Dev* badge under the wordmark and the window title "JIBES Studio Dev". It shares
-  nothing with Studio.app, so both can run at the same time.
+  nothing with JIBES Studio.app, so both can run at the same time.
 - **Studio Test** is a *variant* (`scripts/app-variant.mjs`, `src/main/variant.ts`): a separately built app with
-  its own name, settings, library, place in the Dock and a pink *Test* badge – for a build of your own beside the installed app. It runs beside Studio.app and Studio Dev and never updates itself from
+  its own name, settings, library, place in the Dock and a pink *Test* badge – for a build of your own beside the installed app. It runs beside JIBES Studio.app and Studio Dev and never updates itself from
   GitHub (a release would replace it with Studio); `npm run app:install:test` rebuilds it from your checkout. macOS
   keeps each app's encryption key apart, so its Venice API key and agent token are its own. Another name works the
   same way: `node scripts/app-variant.mjs <Name> --install` (a capital letter, then letters and digits).
 - **The single-instance lock is per profile.** A second launch of the same profile only brings the running one to
-  the front (two instances would poll and download the same paid jobs). That is why `dev:real` needs Studio.app to
+  the front (two instances would poll and download the same paid jobs). That is why `dev:real` needs JIBES Studio.app to
   be closed.
 - **`dev:real` migrates the real library.** A build refuses a library whose database is newer than it knows
   (it says the library was saved by a newer version of Studio), but 0.1.0 predates that check and opens it anyway, then
   loses track of voices when it renames or deletes an asset. After running a branch with a new migration under
-  `dev:real`, rebuild Studio.app (`npm run app:install`) before opening it again.
+  `dev:real`, rebuild JIBES Studio.app (`npm run app:install`) before opening it again.
 - **`STUDIO_PROFILE_DIR`** gives a throwaway profile: settings and the suggested library live under that folder.
   Use it for anything you want to delete afterwards, e.g. `STUDIO_PROFILE_DIR=/tmp/studio-test npm run dev`.
 - Studio and Studio Test default to agent port 8770, Studio Dev to 8771, so the development copy can listen
@@ -198,7 +203,7 @@ With the clips in place you can make Studio believe they are finished generation
 throwaway library, **with Studio quit** (the database is in WAL mode and the app holds it open):
 
 ```bash
-LIB="/tmp/studio-test/Movies/Studio Dev"            # the throwaway base folder
+LIB="/tmp/studio-test/Movies/JIBES Studio Dev"            # the throwaway base folder
 mkdir -p "$LIB/Generations/2026-01-01"
 cp /tmp/studio-clips/clip1.mp4 "$LIB/Generations/2026-01-01/12.00 Test clip.mp4"
 sqlite3 "$LIB/.studio/studio.db" <<'SQL'
@@ -531,7 +536,7 @@ npx @anthropic-ai/mcpb validate build/mcpb
 `npm run app` runs `electron-vite build` and then electron-builder with `electron-builder.yml`:
 
 - **Target:** a plain `.app` folder for `arm64` (`dist/mac-arm64/Studio.app`). The release workflow asks for a ZIP
-  and a DMG instead (`--mac zip dmg`), named `Studio-mac-arm64.zip` / `.dmg` (`mac.artifactName`), so
+  and a DMG instead (`--mac zip dmg`), named `JIBES-Studio-mac-arm64.zip` / `.dmg` (`mac.artifactName`), so
   `releases/latest/download/Studio-mac-arm64.zip` always points at the newest release.
 - **Signing:** ad hoc (`identity: '-'`), without hardened runtime or notarization. Apple Silicon refuses to run
   unsigned code, and ad-hoc signing is enough for the Mac that built the app. Distributing builds to other Macs
@@ -563,7 +568,7 @@ npx electron-builder --win nsis zip --x64 --publish never -c.npmRebuild=false
 node scripts/smoke-test.mjs dist/win-unpacked/Studio.exe --bundled-ffmpeg
 ```
 
-- **Targets:** `Studio-win-x64-setup.exe` (NSIS, `nsis.artifactName`) and `Studio-win-x64.zip` (portable), x64
+- **Targets:** `JIBES-Studio-win-x64-setup.exe` (NSIS, `nsis.artifactName`) and `JIBES-Studio-win-x64.zip` (portable), x64
   only; `--dir` gives just `dist/win-unpacked/`.
 - **Installer:** the assisted NSIS installer, per user by default (no administrator rights; installed under
   `%LOCALAPPDATA%\Programs\Studio`), where the folder can be changed; Start menu and desktop shortcuts; English only.
@@ -607,9 +612,9 @@ Releases are built on GitHub, not on a laptop (`.github/workflows/release.yml`):
 
 3. The workflow builds both platforms side by side, each checking that the tag matches `package.json` and
    typechecking first:
-   - `mac` (an Apple Silicon runner): builds the native helper and packages `Studio-mac-arm64.zip` and `.dmg`;
-   - `windows` (a Windows runner): fetches and checks the pinned ffmpeg, packages `Studio-win-x64-setup.exe` and
-     `Studio-win-x64.zip`, and runs the smoke test on `dist/win-unpacked/Studio.exe` (its screenshot is kept as the
+   - `mac` (an Apple Silicon runner): builds the native helper and packages `JIBES-Studio-mac-arm64.zip` and `.dmg`;
+   - `windows` (a Windows runner): fetches and checks the pinned ffmpeg, packages `JIBES-Studio-win-x64-setup.exe` and
+     `JIBES-Studio-win-x64.zip`, and runs the smoke test on `dist/win-unpacked/Studio.exe` (its screenshot is kept as the
      `smoke-test-windows` artifact, also when it fails);
    - `publish` (tags only, once both have passed) writes `SHA256SUMS.txt` (the four files' SHA-256) and creates the
      GitHub release `v0.2.0` with all five files and generated notes.
@@ -629,7 +634,7 @@ STUDIO_ZIP=dist/Studio-mac-arm64.zip STUDIO_APPS_DIR=/tmp/apps STUDIO_NO_OPEN=1 
 It only quits a running Studio when that is the copy it replaces.
 
 Installed copies find the release by themselves (the daily check, or *Check for Updates…*) and install
-`Studio-mac-arm64.zip` or `Studio-win-x64-setup.exe` after checking it against GitHub's digest of the file or
+`JIBES-Studio-mac-arm64.zip` or `JIBES-Studio-win-x64-setup.exe` after checking it against GitHub's digest of the file or
 `SHA256SUMS.txt` (see [ARCHITECTURE.md](ARCHITECTURE.md#updates)); the release's tag must be the version in
 `package.json`, and the files must keep their names. A development build never checks. To try the update UI without
 GitHub, point a build at a stand-in for its API with `STUDIO_UPDATE_TEST_SERVER=http://127.0.0.1:<port>` (loopback

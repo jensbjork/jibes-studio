@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Installs (or updates) Studio on this Mac:
+# Installs (or updates) JIBES Studio on this Mac:
 #
-#   curl -fsSL https://raw.githubusercontent.com/jensbjork/studio/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/jensbjork/jibes-studio/main/install.sh | bash
 #
 # 1. checks that this is a Mac with Apple Silicon and macOS 13 or later,
 # 2. installs ffmpeg with Homebrew if it is missing (Studio needs it for frames, sequences and export),
-# 3. downloads the latest Studio-mac-arm64.zip from GitHub Releases and puts Studio.app in /Applications
-#    (or ~/Applications when /Applications isn't writable), replacing an older Studio,
+# 3. downloads the latest JIBES-Studio-mac-arm64.zip from GitHub Releases and puts JIBES Studio.app in /Applications
+#    (or ~/Applications when /Applications isn't writable), replacing an older one – also one from before the
+#    program had that name (Studio.app),
 # 4. opens it.
 #
 # Downloaded with curl, the app carries no quarantine flag, so macOS opens it without the "can't be verified" stop.
@@ -17,13 +18,18 @@
 
 set -euo pipefail
 
-REPO="${STUDIO_REPO:-jensbjork/studio}"
+REPO="${STUDIO_REPO:-jensbjork/jibes-studio}"
 VERSION="${STUDIO_VERSION:-latest}"
-ASSET="Studio-mac-arm64.zip"
+ASSET="JIBES-Studio-mac-arm64.zip"
+APP="JIBES Studio.app"
+# The names from before the program was called JIBES Studio: a release that old (v0.2.0) has only these, and an
+# install of it is replaced as well.
+OLD_ASSET="Studio-mac-arm64.zip"
+OLD_APP="Studio.app"
 
 say() { printf '\033[1m==>\033[0m %s\n' "$1"; }
 fail() {
-  printf '\033[31mStudio could not be installed:\033[0m %s\n' "$1" >&2
+  printf '\033[31mJIBES Studio could not be installed:\033[0m %s\n' "$1" >&2
   exit 1
 }
 
@@ -44,12 +50,14 @@ else
   printf '      Install Homebrew (https://brew.sh), then run: brew install ffmpeg\n'
 fi
 
-# ── 3. Studio.app ─────────────────────────────────────────────────────────────
-if [ "$VERSION" = "latest" ]; then
-  url="https://github.com/$REPO/releases/latest/download/$ASSET"
-else
-  url="https://github.com/$REPO/releases/download/$VERSION/$ASSET"
-fi
+# ── 3. JIBES Studio.app ───────────────────────────────────────────────────────
+release_url() {
+  if [ "$VERSION" = "latest" ]; then
+    echo "https://github.com/$REPO/releases/latest/download/$1"
+  else
+    echo "https://github.com/$REPO/releases/download/$VERSION/$1"
+  fi
+}
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -57,11 +65,19 @@ trap 'rm -rf "$tmp"' EXIT
 if [ -n "${STUDIO_ZIP:-}" ]; then
   cp "$STUDIO_ZIP" "$tmp/$ASSET"
 else
-  say "Downloading Studio ($VERSION)…"
+  say "Downloading JIBES Studio ($VERSION)…"
+  if ! curl -fsL --head "$(release_url "$ASSET")" -o /dev/null; then
+    # A release from before the name: its file and app keep the old names.
+    ASSET="$OLD_ASSET"
+  fi
+  url="$(release_url "$ASSET")"
   curl -fL --progress-bar "$url" -o "$tmp/$ASSET" || fail "the download failed ($url)."
 fi
 ditto -x -k "$tmp/$ASSET" "$tmp/app" || fail "the download couldn't be unpacked."
-[ -d "$tmp/app/Studio.app" ] || fail "the download didn't contain Studio.app."
+if [ ! -d "$tmp/app/$APP" ]; then
+  [ -d "$tmp/app/$OLD_APP" ] || fail "the download didn't contain $APP."
+  APP="$OLD_APP"
+fi
 
 target="${STUDIO_APPS_DIR:-/Applications}"
 if [ ! -w "$target" ]; then
@@ -69,31 +85,33 @@ if [ ! -w "$target" ]; then
   mkdir -p "$target"
 fi
 
-# The Studio being replaced is asked to quit first, if it is running (another copy elsewhere is left alone).
+# The copy being replaced (either name) is asked to quit first, if it is running (another copy elsewhere is left alone).
 running_here() {
   local pid
-  for pid in $(pgrep -x Studio || true); do
-    case "$(ps -o command= -p "$pid")" in "$target/Studio.app/"*) return 0 ;; esac
+  for pid in $(pgrep -f "/Contents/MacOS/" || true); do
+    case "$(ps -o command= -p "$pid")" in "$target/JIBES Studio.app/"* | "$target/$OLD_APP/"*) return 0 ;; esac
   done
   return 1
 }
 if running_here; then
-  say "Quitting Studio…"
-  osascript -e "quit app \"$target/Studio.app\"" >/dev/null 2>&1 || true
+  say "Quitting JIBES Studio…"
+  for app in "JIBES Studio.app" "$OLD_APP"; do
+    [ -d "$target/$app" ] && osascript -e "quit app \"$target/$app\"" >/dev/null 2>&1 || true
+  done
   for _ in 1 2 3 4 5 6 7 8 9 10; do running_here || break; sleep 1; done
-  if running_here; then fail "Studio is still running. Quit it and run the command again."; fi
+  if running_here; then fail "JIBES Studio is still running. Quit it and run the command again."; fi
 fi
 
-say "Installing Studio.app in $target…"
-rm -rf "$target/Studio.app"
-ditto "$tmp/app/Studio.app" "$target/Studio.app"
+say "Installing $APP in $target…"
+rm -rf "${target:?}/JIBES Studio.app" "${target:?}/$OLD_APP"
+ditto "$tmp/app/$APP" "$target/$APP"
 # In case the zip was fetched some other way: nothing here should be held back by Gatekeeper.
-xattr -dr com.apple.quarantine "$target/Studio.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$target/$APP" 2>/dev/null || true
 
 # ── 4. Open ───────────────────────────────────────────────────────────────────
 if [ -n "${STUDIO_NO_OPEN:-}" ]; then
-  say "Done: $target/Studio.app"
+  say "Done: $target/$APP"
 else
-  say "Done. Opening Studio."
-  open "$target/Studio.app"
+  say "Done. Opening JIBES Studio."
+  open "$target/$APP"
 fi

@@ -66,16 +66,22 @@ import { sendOptionsOf, sendVariants } from './variants'
 import { separationStatus } from './voice-separation'
 import { registerWorkIpc, WorkStatus } from './work'
 
+// The program is "JIBES Studio" (electron-builder's productName), but inside it keeps the name Studio it had: its
+// settings folder, its Keychain entry ("Studio Safe Storage", which encrypts the API key and the agent token – macOS
+// names it after the app's name) and its single-instance lock, so an installed copy needs nothing set up again.
+app.setName('Studio')
+app.setPath('userData', join(app.getPath('appData'), 'Studio'))
+
 // `npm run dev` runs as "Studio Dev": its own settings (API key, chosen base folder) and suggested base folder
-// (~/Movies/Studio Dev), so what we try out while developing never touches the library Studio.app uses — and both
-// can run at the same time. `npm run dev:real` leaves this unset and runs against the real profile.
+// (~/Movies/JIBES Studio Dev), so what we try out while developing never touches the library JIBES Studio.app uses —
+// and both can run at the same time. `npm run dev:real` leaves this unset and runs against the real profile.
 if (process.env.STUDIO_DEV_PROFILE) {
   app.setName('Studio Dev')
   app.setPath('userData', join(app.getPath('appData'), 'Studio Dev'))
 }
 
-// A variant ("Studio Test", variant.ts) has its own name, settings and suggested base folder (~/Movies/Studio
-// Test), and runs beside Studio.app and Studio Dev.
+// A variant ("Studio Test", variant.ts) has its own name, settings and suggested base folder (~/Movies/JIBES Studio
+// Test), and runs beside JIBES Studio.app and Studio Dev.
 if (VARIANT) {
   app.setName(`Studio ${VARIANT}`)
   app.setPath('userData', join(app.getPath('appData'), `Studio ${VARIANT}`))
@@ -95,7 +101,7 @@ declare const __STUDIO_APP_ID__: string
 // installer gives the shortcut. Studio Dev gets its own, so the two never share a button.
 if (IS_WINDOWS) app.setAppUserModelId(process.env.STUDIO_DEV_PROFILE ? `${__STUDIO_APP_ID__}.dev` : __STUDIO_APP_ID__)
 
-// Studio.app and `npm run dev` share settings and the library. Two instances would both poll and download the
+// JIBES Studio.app and `npm run dev` share settings and the library. Two instances would both poll and download the
 // same paid Venice jobs, so a second launch only brings the running one to the front.
 const isPrimaryInstance = app.requestSingleInstanceLock()
 if (!isPrimaryInstance) app.quit()

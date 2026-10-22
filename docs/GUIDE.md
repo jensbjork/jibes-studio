@@ -212,8 +212,8 @@ npm run dev
 `npm run dev` first builds the voice separation helper into `build/bin/` (skipped in a fraction of a second when it
 is up to date, and with a note when the Swift compiler isn't installed), then starts **Studio Dev**, the development
 profile: its own settings
-(`~/Library/Application Support/Studio Dev/`), its own suggested base folder (`~/Movies/Studio Dev`) and a yellow
-**Dev** badge in the sidebar. It never touches the library the installed Studio.app uses, and both can run at the
+(`~/Library/Application Support/Studio Dev/`), its own suggested base folder (`~/Movies/JIBES Studio Dev`) and a yellow
+**Dev** badge in the sidebar. It never touches the library the installed JIBES Studio.app uses, and both can run at the
 same time. The first launch asks you to choose a base folder; then add your Venice API key under **Settings**.
 
 Other ways to run it (see [docs/DEVELOPMENT.md](DEVELOPMENT.md)):
@@ -221,10 +221,10 @@ Other ways to run it (see [docs/DEVELOPMENT.md](DEVELOPMENT.md)):
 | Command | Profile |
 | --- | --- |
 | `npm run dev` | Studio Dev — separate settings and library |
-| `npm run dev:real` | The real Studio profile (quit Studio.app first; only one can run) |
+| `npm run dev:real` | The real Studio profile (quit JIBES Studio.app first; only one can run) |
 | `STUDIO_PROFILE_DIR=/tmp/studio-test npm run dev` | A throwaway profile under that folder |
 
-## Building Studio.app
+## Building JIBES Studio.app
 
 ```bash
 npm run app           # builds dist/mac-arm64/Studio.app
@@ -233,17 +233,17 @@ npm run app:install   # builds it and copies it to /Applications (replacing an e
 
 The voice separation helper is built first and bundled into the app (without the Swift compiler the app is built
 without it, and runs without voice separation). The app is signed ad hoc (no Apple Developer ID, no notarization),
-which is enough to run it on the Mac that built it. Studio.app uses the real profile
+which is enough to run it on the Mac that built it. JIBES Studio.app uses the real profile
 (`~/Library/Application Support/Studio/`). The icon is drawn in `build/icon.svg`.
 
-A second copy, **Studio Test**, runs beside Studio.app with its own settings and library:
+A second copy, **Studio Test**, runs beside JIBES Studio.app with its own settings and library:
 
 ```bash
-npm run app:install:test   # builds "Studio Test.app" and copies it to /Applications
+npm run app:install:test   # builds "JIBES Studio Test.app" and copies it to /Applications
 ```
 
 It has its own settings (`~/Library/Application Support/Studio Test/`), its own suggested base folder
-(`~/Movies/Studio Test`), its own Venice API key and a pink **Test** badge, and runs beside Studio.app and
+(`~/Movies/JIBES Studio Test`), its own Venice API key and a pink **Test** badge, and runs beside JIBES Studio.app and
 Studio Dev. It never updates itself from GitHub – run the command again to bring it up to date.
 
 ## Updates
@@ -257,7 +257,7 @@ opens its page on GitHub, and **Later** hides that version until a newer one com
   version goes to the Trash. It must be allowed to write there: if it isn't – another user's copy, a read-only disk, or
   Studio opened straight from Downloads, which macOS runs from a temporary place – the notice says so and offers the
   release page instead. Running the install command from the README again also updates it.
-- **On Windows** Studio downloads the installer (`Studio-win-x64-setup.exe`), closes and runs it without questions;
+- **On Windows** Studio downloads the installer (`JIBES-Studio-win-x64-setup.exe`), closes and runs it without questions;
   it updates Studio where it is installed and opens it again. The portable zip can't update itself: download the new
   zip from the release page.
 - **Checked before it is installed.** The download must match the SHA-256 checksum GitHub records for the file (or the
@@ -279,7 +279,7 @@ accepted Venice consents, the agent connection's port and the daily update check
 checked). The Venice API key and the agent token are stored
 encrypted with Electron `safeStorage` (macOS Keychain).
 
-**The library** lives in a base folder you choose on first launch (suggested: `~/Movies/Studio`). It can be switched
+**The library** lives in a base folder you choose on first launch (suggested: `~/Movies/JIBES Studio`). It can be switched
 or moved under **Settings → Library**, and **Tidy up** puts
 every file the library knows about back where it belongs.
 

@@ -73,7 +73,7 @@ platform check, so the Mac build behaves exactly as it always has; `src/main/pla
 | A new agent request | The Dock icon bounces once | The taskbar button flashes until Studio is in front |
 | App identity | The bundle id | `app.setAppUserModelId` with `electron-builder.yml`'s `appId`, as the installer's shortcuts (Studio Dev: `<appId>.dev`; a variant: `<appId>.test`) |
 | Voice separation | AUSoundIsolation through the Swift helper (macOS 13+) | Off, with the reason in *Settings → Tools* |
-| Updates | `Studio-mac-arm64.zip`: the app bundle replaced in place, then reopened ([Updates](#updates)); *Check for Updates…* in the app menu | `Studio-win-x64-setup.exe` run silently over the installed copy; the portable zip can't update itself; *Settings → About Studio* only (the menu is hidden) |
+| Updates | `JIBES-Studio-mac-arm64.zip`: the app bundle replaced in place, then reopened ([Updates](#updates)); *Check for Updates…* in the app menu | `JIBES-Studio-win-x64-setup.exe` run silently over the installed copy; the portable zip can't update itself; *Settings → About Studio* only (the menu is hidden) |
 | HEIC from agents | Converted to JPEG with `sips` | Refused with a reason; formats are said as JPG, PNG or WebP |
 | Library export & import | `/usr/bin/zip`, `unzip`, `ditto` | Not available yet: both refuse with a reason (`ARCHIVE_UNAVAILABLE`) |
 | Own clips on the same disk | APFS clones (from `mount`'s file system type) | Always copied |
@@ -1391,10 +1391,10 @@ Update now ─▶ busy? ─▶ check again ─▶ download (github.com ─302─
   build or the error) or *Check for updates* in Settings. A release is used only if its tag is a version and it is no
   draft or pre-release; its files only if they are the repository's own `releases/download/` URLs on github.com; its
   page only on github.com. The newer release last found is sent again to a window that (re)loads (a library switch
-  reloads it). The asset is `Studio-mac-<arch>.zip` or `Studio-win-<arch>-setup.exe` (electron-builder's names);
+  reloads it). The asset is `JIBES-Studio-mac-<arch>.zip` or `JIBES-Studio-win-<arch>-setup.exe` (electron-builder's names);
   `installBlocked` says why this copy can't install it: no file for this computer, an app bundle Studio can't write
   (its folder or itself; a read-only disk), macOS' App Translocation (opened straight from Downloads), the portable
-  Windows zip (no `Uninstall Studio.exe` next to `Studio.exe`). The window then offers the release page instead.
+  Windows zip (no `Uninstall JIBES Studio.exe` next to `JIBES Studio.exe`). The window then offers the release page instead.
 - **Install** (`updates:install`, refused for agents) is refused while `libraryBusyReason()` gives a reason or a library
   archive (export or import) runs – asked first and again right before the swap or the installer –, one at a time, and
   re-checks the release. It downloads with manual redirects, each hop https on github.com or `*.githubusercontent.com`,

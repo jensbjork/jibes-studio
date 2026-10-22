@@ -8,7 +8,7 @@
 // Installing (updates:install, only from the window) downloads this computer's file of the release over https – from
 // github.com and GitHub's asset host, nothing else –, checks its SHA-256 against the digest GitHub's API gives for the
 // file (or, without one, the release's SHA256SUMS.txt), and then:
-//   macOS – unpacks the zip with ditto next to the app (same volume), checks that it holds a Studio.app with the same
+//   macOS – unpacks the zip with ditto next to the app (same volume), checks that it holds one app with the same
 //           bundle id, the release's version (newer than this one), an intact signature and a macOS this Mac has, swaps
 //           the bundles (this one aside, the new one into its place, this one to the Trash), starts a small helper that
 //           opens the new Studio once this one has quit, and quits;
@@ -48,8 +48,8 @@ export const CHECKSUMS_NAME = 'SHA256SUMS.txt'
 const MAC_WORK_PREFIX = '.Studio-update-'
 /** The same in the temp folder on Windows (the installer is run from there). */
 const WIN_WORK_PREFIX = 'Studio-update-'
-/** electron-builder's NSIS uninstaller, next to Studio.exe in an installed copy (never in the portable zip). */
-const WIN_UNINSTALLER = 'Uninstall Studio.exe'
+/** electron-builder's NSIS uninstaller, next to JIBES Studio.exe in an installed copy (never in the portable zip). */
+const WIN_UNINSTALLER = 'Uninstall JIBES Studio.exe'
 
 const DAY_MS = 24 * 60 * 60_000
 /** The daily check waits this long after start, so it never slows Studio's start down. */
@@ -242,10 +242,13 @@ function trimNotes(notes: string): string {
   return `${(line > MAX_NOTES / 2 ? cut.slice(0, line) : cut).trimEnd()}\n…`
 }
 
-/** The release file this computer installs: Studio-mac-arm64.zip, Studio-win-x64-setup.exe (electron-builder's names). */
+/**
+ * The release file this computer installs: JIBES-Studio-mac-arm64.zip, JIBES-Studio-win-x64-setup.exe
+ * (electron-builder.yml's artifact names).
+ */
 export function assetNameFor(platform: string, arch: string): string | undefined {
-  if (platform === 'darwin') return `Studio-mac-${arch}.zip`
-  if (platform === 'win32') return `Studio-win-${arch}-setup.exe`
+  if (platform === 'darwin') return `JIBES-Studio-mac-${arch}.zip`
+  if (platform === 'win32') return `JIBES-Studio-win-${arch}-setup.exe`
   return undefined
 }
 
@@ -445,7 +448,7 @@ export async function expectedSha256(release: Release, asset: ReleaseAsset, sour
 
 // ── This copy of Studio ──────────────────────────────────────────────────────
 
-/** The running Studio.app (macOS), from its executable; undefined when it isn't in an app bundle. */
+/** The running app bundle (macOS: JIBES Studio.app), from its executable; undefined when it isn't in one. */
 function macBundle(): string | undefined {
   const bundle = resolve(app.getPath('exe'), '..', '..', '..')
   return bundle.endsWith('.app') ? bundle : undefined
@@ -547,7 +550,7 @@ async function verifySignature(bundle: string): Promise<void> {
 export interface MacInstall {
   /** The verified zip of the release. */
   zip: string
-  /** The running Studio.app, which is replaced. */
+  /** The running app bundle, which is replaced (it keeps its name and place). */
   bundle: string
   /** An empty folder next to it (same volume): the new app is unpacked there and the old one put aside there. */
   workDir: string
@@ -942,7 +945,7 @@ export function startUpdateChecks(): void {
 }
 
 /**
- * What an update leaves: on macOS the work folders next to the app (an old Studio.app goes to the Trash, the rest is
+ * What an update leaves: on macOS the work folders next to the app (an old JIBES Studio.app goes to the Trash, the rest is
  * removed), on Windows the installer's folder in the temp folder. Only in an installed (packaged) Studio.
  */
 async function cleanUpAfterUpdate(): Promise<void> {

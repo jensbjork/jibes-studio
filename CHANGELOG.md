@@ -77,9 +77,12 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
-- The public name is now **JIBES Studio** – in the window, the menu, Settings, the Claude Desktop extension,
-  the installer's shortcuts, the disk image and the docs. The app itself, its folders, settings and release files keep
-  the short name Studio, so nothing has to be set up again and install.sh and updates go on working.
+- The program is now **JIBES Studio**: JIBES Studio.app (JIBES Studio.exe on Windows) in the window, the menu,
+  Settings, the Dock, the installer and the disk image, the release files `JIBES-Studio-mac-arm64.zip` / `.dmg`,
+  `JIBES-Studio-win-x64-setup.exe` / `.zip`, the Claude Desktop extension and the docs, and the repository is
+  github.com/jensbjork/jibes-studio (the old address forwards). Inside it keeps the name Studio, so its settings, the
+  Keychain entry with the API key and the agent token, and every library stay as they are – nothing has to be set up
+  again. install.sh replaces an earlier Studio.app, and new libraries are suggested in `~/Movies/JIBES Studio`.
 - **English folder names.** A library's folders are now called Characters, Environments, Products, Outfits, Poses,
   Directors, Reference images, Generations, Sequences (with Takes/ and Audio/), Storyboards (Transitions/, Images/),
   Own clips and Edits (Takes/, Audio/, Inputs/), and `.studio` holds thumbnails, frames, stems, edit-jobs and timeline.

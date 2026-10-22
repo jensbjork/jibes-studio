@@ -30,8 +30,8 @@ export const DOCK = isMac ? 'the Dock' : 'the taskbar'
 export const COMPUTER = isMac ? 'Mac' : isWindows ? 'PC' : 'computer'
 /** "this Mac" / "this PC": "free, on this Mac". */
 export const THIS_COMPUTER = `this ${COMPUTER}`
-/** "Studio.app" / "the installed Studio": what the development version is kept apart from. */
-export const INSTALLED_APP = isMac ? 'Studio.app' : 'the installed Studio'
+/** "JIBES Studio.app" / "the installed JIBES Studio": what the development version is kept apart from. */
+export const INSTALLED_APP = isMac ? 'JIBES Studio.app' : 'the installed JIBES Studio'
 /**
  * Why the library can't be exported or imported as a zip here: main packs and unpacks it with macOS' own tools
  * (library-archive.ts) and refuses elsewhere with this same sentence. Undefined on a Mac.

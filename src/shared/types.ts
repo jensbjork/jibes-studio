@@ -355,7 +355,7 @@ export interface UpdateInfo {
   /** The release's notes (Markdown), trimmed. */
   notes?: string
   publishedAt?: string
-  /** The file this computer would install (Studio-mac-arm64.zip, Studio-win-x64-setup.exe), when the release has it. */
+  /** The file this computer would install (JIBES-Studio-mac-arm64.zip, JIBES-Studio-win-x64-setup.exe), when the release has it. */
   asset?: { name: string; size: number }
   /**
    * Why Studio can't update itself here (a development build, a copy it can't replace, no file for this computer):
@@ -390,11 +390,11 @@ export interface Settings {
   hasApiKey: boolean
   /** The current base folder (grundmapp), or '' while no library is open. */
   libraryDir: string
-  /** Running as "Studio Dev" (npm run dev) with its own settings and library, separate from Studio.app. */
+  /** Running as "Studio Dev" (npm run dev) with its own settings and library, separate from JIBES Studio.app. */
   devProfile: boolean
   /**
    * The variant this build is ("Test" for Studio Test, `npm run app:install:test`): its own name, settings and
-   * library, separate from Studio.app. Absent for Studio itself.
+   * library, separate from JIBES Studio.app. Absent for Studio itself.
    */
   variant?: string
   /** Look for a newer Studio on GitHub once a day when Studio starts (default on; never in Studio Dev). */
@@ -437,7 +437,7 @@ export interface LibraryStatus {
   state: LibraryState
   /** The configured base folder (also when it is missing). */
   root?: string
-  /** Proposed base folder for a first run (~/Movies/Studio). */
+  /** Proposed base folder for a first run (~/Movies/JIBES Studio). */
   suggested: string
   /**
    * A library from before the base folder could be chosen, which 'move' takes along. Only while not ready.

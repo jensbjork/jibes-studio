@@ -43,7 +43,7 @@ targets – isn't available, and HEIC pictures are refused.
 
 1. Open **Settings → Agent connection**.
 2. Switch on **Allow agents to connect**. It is **off by default**, and the setting is
-   per profile: Studio.app, Studio Test and Studio Dev each have their own switch, port (8770; Studio Dev 8771)
+   per profile: JIBES Studio.app, Studio Test and Studio Dev each have their own switch, port (8770; Studio Dev 8771)
    and token.
 3. The status line shows where Studio listens. The agent row at the bottom of the sidebar reads *Agent connected*
    when an agent is connected (a client that only calls itself "mcp" is shown as *The agent*; its technical name is in
@@ -865,7 +865,7 @@ adapter hides it from Studio). Make sure Tailscale is running and connected, the
 Studio also re-checks every 30 seconds. Until then only agents on the same computer can connect.
 
 **The port is in use.** Studio reports that the port is used by another program. Choose another port in
-Agent connection and update your agents' URLs. Note that Studio.app and Studio Dev both default to 8770, so give one
+Agent connection and update your agents' URLs. Note that JIBES Studio.app and Studio Dev both default to 8770, so give one
 of them another port if both have the connection switched on. To see what holds the port:
 `lsof -nP -iTCP:8770 -sTCP:LISTEN` (on Windows: `netstat -ano | findstr :8770`).
 

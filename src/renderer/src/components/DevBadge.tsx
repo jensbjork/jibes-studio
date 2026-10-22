@@ -1,6 +1,6 @@
 import { INSTALLED_APP } from '../lib/platform'
 
-/** Marks the development version ("Studio Dev") so it can't be mistaken for Studio.app. */
+/** Marks the development version ("Studio Dev") so it can't be mistaken for JIBES Studio.app. */
 export default function DevBadge() {
   return (
     <span
@@ -12,7 +12,7 @@ export default function DevBadge() {
   )
 }
 
-/** Marks a variant ("Test" for Studio Test) so it can't be mistaken for Studio.app either. */
+/** Marks a variant ("Test" for Studio Test) so it can't be mistaken for JIBES Studio.app either. */
 export function VariantBadge({ name }: { name: string }) {
   return (
     <span
