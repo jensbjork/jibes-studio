@@ -200,7 +200,7 @@ function sequenceFolderOf(segmentId: string): { folder: string; kind: string } |
   return row?.folder ? { folder: row.folder, kind: row.kind } : undefined
 }
 
-/** The folder of an edit (Redigeringar/<folder>), if the edit still exists and has a usable folder name. */
+/** The folder of an edit (Edits/<folder>), if the edit still exists and has a usable folder name. */
 function editFolderOf(editId: string): string | undefined {
   const row = db.getDb().prepare('SELECT folder FROM edits WHERE id = ?').get(editId) as
     | { folder: string | null }
@@ -226,13 +226,13 @@ function titleBase(g: LocatedGeneration): string {
 
 /**
  * Where a generation's video belongs and what it is called (without its extension), by the file home rule:
- * - an import with an edit (an export cloned in as an edit's v1) and an edit version: Redigeringar/<edit>/<title>;
- * - any other import: Egna klipp/<day it was imported>/<title>, also when it is a take of a sequence clip (an
- *   import with a working copy is "<title> (arbetskopia)", its untouched original sits next to it as "<title>");
- * - an AI take made in the Editor: Redigeringar/<edit>/Tagningar/"<YYYY-MM-DD HH.MM> <prompt>";
- * - anything else (and a version whose edit is gone): a take goes into its sequence's Tagningar folder (a storyboard
- *   transition's into the storyboard's Övergångar) as "<YYYY-MM-DD HH.MM> <name>", anything else into
- *   Genereringar/<day>/ as "<HH.MM> <name>", where the name is the prompt, or the title of a row without one.
+ * - an import with an edit (an export cloned in as an edit's v1) and an edit version: Edits/<edit>/<title>;
+ * - any other import: Own clips/<day it was imported>/<title>, also when it is a take of a sequence clip (an
+ *   import with a working copy is "<title> (working copy)", its untouched original sits next to it as "<title>");
+ * - an AI take made in the Editor: Edits/<edit>/Takes/"<YYYY-MM-DD HH.MM> <prompt>";
+ * - anything else (and a version whose edit is gone): a take goes into its sequence's Takes folder (a storyboard
+ *   transition's into the storyboard's Transitions) as "<YYYY-MM-DD HH.MM> <name>", anything else into
+ *   Generations/<day>/ as "<HH.MM> <name>", where the name is the prompt, or the title of a row without one.
  * Times are when the generation was submitted (or imported). Pure: nothing is created (videoLocation creates the
  * folder). The single source of truth for where files go: the job manager, sequence moves, "Tidy up" and the edit
  * service all ask it.
@@ -249,7 +249,7 @@ export function videoHome(g: LocatedGeneration): { dir: string; base: string } {
     const base = titleBase(g)
     return {
       dir: join(root, FOLDERS.ownClips, dayStamp(created)),
-      base: g.originalPath ? `${base} (arbetskopia)` : base
+      base: g.originalPath ? `${base} (working copy)` : base
     }
   }
   if (editFolder && source === 'generated') {
@@ -280,7 +280,7 @@ export function videoLocation(g: LocatedGeneration): { dir: string; base: string
 
 /**
  * Where an import's untouched original belongs when it has a working copy: next to the working copy, named after
- * the title (the working copy is "<title> (arbetskopia)"). Undefined for rows without an original. Pure.
+ * the title (the working copy is "<title> (working copy)"). Undefined for rows without an original. Pure.
  */
 export function originalHome(g: LocatedGeneration): { dir: string; base: string } | undefined {
   if (!g.originalPath) return undefined
@@ -335,7 +335,7 @@ export interface SubmitOptions {
   /** Makes the generation a take of this sequence segment. */
   segmentId?: string
   /**
-   * Makes the generation an AI take of this edit (the Editor): its video goes into the edit's Tagningar folder. An
+   * Makes the generation an AI take of this edit (the Editor): its video goes into the edit's Takes folder. An
    * edit deleted while the job was queued leaves an ordinary generation, as for a segment.
    */
   editId?: string
@@ -555,7 +555,7 @@ export class JobManager extends EventEmitter<JobEvents> {
         ? { prompt: given }
         : composeSubmission(params, { characterLimit: limit, ...(frame ? { continuationFrame: frame } : {}) })
     checkComposed(params, composed)
-    // Outside images, audio and reference videos are copied into Referensbilder first, so the stored params point at
+    // Outside images, audio and reference videos are copied into Reference images first, so the stored params point at
     // the copies.
     params = await importExternalReferences(params)
     const body = await buildRequestBody({ ...params, prompt: composed.prompt })

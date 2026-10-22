@@ -22,7 +22,7 @@ interface Props {
   stills?: Still[]
   onClose: () => void
   /**
-   * Offers "Delete" (two steps). Main refuses, or moves the file to Referensbilder instead of the Trash, when a
+   * Offers "Delete" (two steps). Main refuses, or moves the file to Reference images instead of the Trash, when a
    * clip or a board still uses the image; its message is shown here.
    */
   deletable?: boolean
@@ -152,7 +152,7 @@ export default function StillViewer({
               question="Delete the image?"
               onConfirm={() => void remove(current)}
               disabled={deleting}
-              title={`Moves the image to ${TRASH} (to “Referensbilder” if a clip or a board uses it)`}
+              title={`Moves the image to ${TRASH} (to “Reference images” if a clip or a board uses it)`}
               className={`${button} hover:text-accent`}
             >
               Delete

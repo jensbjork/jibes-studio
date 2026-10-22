@@ -10,7 +10,7 @@ import { Check, GainSlider, PlanNotes, TimeAt } from './ui'
 
 // "Add sound…" / "Replace the original…": a sound from the library (a character's voice, a place's
 // soundscape), from this edit's earlier sounds (paid results are reused for free), or from a file (copied into the
-// edit's Ljud/ folder), laid on the film as a layer. Free.
+// edit's Audio/ folder), laid on the film as a layer. Free.
 
 type SourceTab = 'library' | 'edit'
 

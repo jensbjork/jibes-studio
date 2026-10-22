@@ -1,6 +1,6 @@
 // The Editor: one finished film changed into versions. An edit starts from any finished generation (a feed clip, a
 // take, the user's own film) used where it is, or from an exported film cloned into the edit's folder; every change
-// is a new version (a completed generations row with source 'edit') in Redigeringar/<name>/, so the original is
+// is a new version (a completed generations row with source 'edit') in Edits/<name>/, so the original is
 // never touched. This module owns the edits:*, audio:* and voices:* IPC; the operations themselves (plans, renders,
 // paid jobs) are in edit-ops.ts, persistence in edit-store.ts, the layered sound in edit-mix.ts.
 
@@ -41,6 +41,7 @@ import { toPublic, videoLocation } from './jobs'
 import {
   APP_DATA,
   appDataDir,
+  EDIT_FOLDERS,
   editDir,
   FOLDERS,
   folderRecordedInDb,
@@ -63,9 +64,9 @@ import { separationStatus } from './voice-separation'
 
 export const USER_ONLY = 'Only you can do this in Studio.'
 const UNNAMED = 'Untitled edit'
-/** The folder-name fallback for a name that leaves nothing: it names folders on disk, so it stays as it was. */
-const UNNAMED_FOLDER = 'Namnlös redigering'
-/** The timeline cache (.studio/tidslinje): filmstrips and waveforms beyond this go, least recently used first. */
+/** The folder-name fallback for a name that leaves nothing (an edit's folder keeps the name it got). */
+const UNNAMED_FOLDER = 'Untitled edit'
+/** The timeline cache (.studio/timeline): filmstrips and waveforms beyond this go, least recently used first. */
 const TIMELINE_CACHE_BYTES = 512 * 1024 ** 2
 const SHORT_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
 
@@ -77,7 +78,7 @@ export interface EditDeps extends OpsDeps {
    */
   generationDeleted?: (id: string) => void
   /**
-   * Stored paths were rewritten (files an edit's folder held moved to Referensbilder when the edit was deleted): open
+   * Stored paths were rewritten (files an edit's folder held moved to Reference images when the edit was deleted): open
    * sequences and the feed read them again. index.ts routes it like any other rewrite.
    */
   pathsRewritten?: () => void
@@ -279,7 +280,7 @@ class EditService {
 
   // ── Creating, renaming, deleting ─────────────────────────────────────────
 
-  /** A folder name under Redigeringar/ that no other edit uses, isn't on disk and no row records paths under. */
+  /** A folder name under Edits/ that no other edit uses, isn't on disk and no row records paths under. */
   private freeFolder(name: string, own?: { id: string; folder: string | null }): string {
     const parent = join(libraryRoot(), FOLDERS.edits)
     const base = safeName(name, { fallback: UNNAMED_FOLDER })
@@ -477,7 +478,7 @@ class EditService {
   /**
    * Files in a folder about to be trashed that rows still record (an AI take's start image a sequence clip was seeded
    * from, a version whose move out failed earlier): moved out first – a generation's video to its home, anything else
-   * to Referensbilder/<day>/ – with every recorded path following. False when one couldn't be moved: the folder then
+   * to Reference images/<day>/ – with every recorded path following. False when one couldn't be moved: the folder then
    * stays, rather than taking a file something still uses into the trash.
    */
   private async rescueRecorded(dir: string): Promise<{ ok: boolean; rewritten: boolean }> {
@@ -522,7 +523,7 @@ class EditService {
     return { ok, rewritten }
   }
 
-  /** An AI take's inputs in the edit's Underlag/ move to Referensbilder/<day>/, its params following. */
+  /** An AI take's inputs in the edit's Inputs/ move to Reference images/<day>/, its params following. */
   private async releaseInputs(take: db.StoredGeneration, inputsDir: string): Promise<void> {
     const p = take.params
     const paths = [p.startImage, p.endImage, p.sourceVideo, ...referenceVideosOf(p).map((v) => v.path)].filter(
@@ -555,7 +556,7 @@ class EditService {
       const keep = own.filter((v) => store.usedBy(v.id).length > 0 || store.editsStartedFrom(v.id, edit.id).length > 0)
       const keepIds = new Set(keep.map((v) => v.id))
       const trash = own.filter((v) => !keepIds.has(v.id))
-      const inputs = edit.folder ? join(libraryRoot(), FOLDERS.edits, edit.folder, 'Underlag') : undefined
+      const inputs = edit.folder ? join(libraryRoot(), FOLDERS.edits, edit.folder, EDIT_FOLDERS.inputs) : undefined
 
       for (const v of keep) await this.moveOutOfEdit(v.id)
       for (const t of takes) {
@@ -593,7 +594,7 @@ class EditService {
       }
       for (const v of trash) this.removed(v.id)
       for (const g of [...keep, ...takes]) this.changed(db.getGeneration(g.id))
-      // Clips whose keyframes moved to Referensbilder (and generations whose params did) are read again.
+      // Clips whose keyframes moved to Reference images (and generations whose params did) are read again.
       if (rewritten) this.pathsRewritten()
       this.notify(edit.id)
     })
@@ -833,7 +834,7 @@ class EditService {
     }
   }
 
-  /** Filmstrip, waveform and scene cuts of a file, cached in .studio/tidslinje by its identity. */
+  /** Filmstrip, waveform and scene cuts of a file, cached in .studio/timeline by its identity. */
   private async timelineCache(path: string, hasAudio: boolean, duration: number): Promise<TimelineCache> {
     const s = await stat(path)
     // The "2": waveforms are placed by time over the film since this was added; older entries are made again.
@@ -1084,7 +1085,7 @@ interface TimelineCache {
   scenes: number[]
 }
 
-/** Keeps .studio/tidslinje under TIMELINE_CACHE_BYTES, least recently used films first out. Never throws. */
+/** Keeps .studio/timeline under TIMELINE_CACHE_BYTES, least recently used films first out. Never throws. */
 async function pruneTimelineCache(cap = TIMELINE_CACHE_BYTES): Promise<void> {
   try {
     const root = appDataDir(APP_DATA.timeline)

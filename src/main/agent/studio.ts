@@ -476,7 +476,7 @@ export interface PictureReferenceItem {
 
 /**
  * A reference video (@VideoN), already resolved to its file and window: a generation's or an export's film, or an
- * upload copied into Referensbilder (sources.ts resolvePictureReferences).
+ * upload copied into Reference images (sources.ts resolvePictureReferences).
  */
 export interface VideoReferenceItem {
   video: ReferenceVideo

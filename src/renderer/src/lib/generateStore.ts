@@ -1,5 +1,6 @@
 import { useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
-import { DEFAULT_PARAMS, sanitizeReferenceAudios, sanitizeReferenceVideos } from '@shared/models'
+import { englishPath } from '@shared/folder-names'
+import { DEFAULT_PARAMS, referenceVideosOf, sanitizeReferenceAudios, sanitizeReferenceVideos } from '@shared/models'
 import { sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import type { Asset, AssetAudio, GenerationParams } from '@shared/types'
@@ -115,6 +116,33 @@ function rememberAudioIds(ids: Record<string, string>): void {
   } catch {
     // Storage unavailable; following moved clips is only a convenience.
   }
+}
+
+/**
+ * Points the form's pictures, clips and videos inside a library from before English folder names (schema 15) at the
+ * folders' English names, which main gave them when it opened the library; paths elsewhere, and ones already in
+ * English, stay. Called with the open library's folder; cheap and idempotent.
+ */
+export function followEnglishFolders(root: string): void {
+  if (frozen || !root) return
+  const p = getGenerateParams()
+  let changed = false
+  const map = <T extends string | undefined>(path: T): T => {
+    if (!path) return path
+    const next = englishPath(path, root)
+    if (next !== path) changed = true
+    return next as T
+  }
+  const next: GenerationParams = {
+    ...p,
+    startImage: map(p.startImage),
+    endImage: map(p.endImage),
+    referenceImages: p.referenceImages?.map((r) => map(r)),
+    ...(p.referenceAudios ? { referenceAudios: p.referenceAudios.map((a) => ({ ...a, path: map(a.path) })) } : {}),
+    ...(p.referenceVideos ? { referenceVideos: referenceVideosOf(p).map((v) => ({ ...v, path: map(v.path) })) } : {}),
+    ...(p.sourceVideo ? { sourceVideo: map(p.sourceVideo) } : {})
+  }
+  if (changed) setGenerateParams((now) => (now === p ? next : now))
 }
 
 /**

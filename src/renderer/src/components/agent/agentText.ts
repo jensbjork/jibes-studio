@@ -169,8 +169,8 @@ export function approvalTitle(a: ApprovalRequest, sequenceName?: string): string
       if (board) return `The image for board ${board.boardNumber}${inSequence}`
       const target = a.image?.assignTo
       if (target) return `A ${slotName(target.slot)} for clip ${target.clipNumber}${inSequence}`
-      // Without a sequence or storyboard the picture is a still of none, in Referensbilder.
-      if (!a.sequenceId) return 'An image for “Referensbilder”'
+      // Without a sequence or storyboard the picture is a still of none, in Reference images.
+      if (!a.sequenceId) return 'An image for “Reference images”'
       const named = sequenceName ? ` “${sequenceName}”` : ''
       return storyboard ? `An image for the storyboard${named}` : `An image for the sequence${named}`
     }
@@ -321,7 +321,7 @@ export function approvalOutcome(a: ApprovalRequest): string {
       if (target) {
         return `Approved – the image was created, saved and became the ${slotName(target.slot)} of clip ${target.clipNumber}.`
       }
-      if (!a.sequenceId) return 'Approved – the image was created and saved in “Referensbilder”.'
+      if (!a.sequenceId) return 'Approved – the image was created and saved in “Reference images”.'
       return a.sequenceKind === 'storyboard'
         ? 'Approved – the image was created and saved among the storyboard’s images.'
         : 'Approved – the image was created and saved among the sequence’s images.'

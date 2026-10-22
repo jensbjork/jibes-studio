@@ -175,7 +175,7 @@ function fileIdentity(path: string | undefined): string {
 /**
  * Whether a library file of an asset (its stored path) is used by anything but the asset row that holds it: as a
  * start, end or reference picture or a reference sound of a generation, a clip or a still, or as a board's picture.
- * Such a file is kept in "Referensbilder" when its photo or sound clip goes (assets.ts keepUsedFile). The params are
+ * Such a file is kept in "Reference images" when its photo or sound clip goes (assets.ts keepUsedFile). The params are
  * JSON, so the path is matched as a whole JSON string (quotes included), letter case ignored like the disk.
  */
 function usedOutsideAsset(stored: string): boolean {
@@ -435,7 +435,7 @@ async function planAsset(input: DeleteInput, id: string): Promise<Planned> {
   const effects: string[] = []
   if (usedImages || usedAudio) {
     effects.push(
-      `${files(usedImages, usedAudio)} ${usedImages + usedAudio === 1 ? 'is' : 'are'} used by clips and kept in “Referensbilder”`
+      `${files(usedImages, usedAudio)} ${usedImages + usedAudio === 1 ? 'is' : 'are'} used by clips and kept in “Reference images”`
     )
   }
   const trashed = images.length + audio.length - usedImages - usedAudio
@@ -507,7 +507,7 @@ async function planAssetFile(input: DeleteInput, id: string, audio: boolean): Pr
   const kind = kindOf(file.kind)
   const effects = [
     used
-      ? `The ${audio ? 'sound clip' : 'photo'} is used by clips and kept in “Referensbilder”`
+      ? `The ${audio ? 'sound clip' : 'photo'} is used by clips and kept in “Reference images”`
       : `The file is moved to ${TRASH}`
   ]
   if (number === 1 && siblings.length > 1) {
@@ -705,7 +705,7 @@ async function planSequence(input: DeleteInput, id: string, r: Reader): Promise<
   if (takes) effects.push(takesToMedia(takes))
   if (stills) {
     effects.push(
-      `${count(stills, 'still image', 'still images')} ${stills === 1 ? 'is' : 'are'} moved to ${TRASH} – whatever is used elsewhere is kept in “Referensbilder”`
+      `${count(stills, 'still image', 'still images')} ${stills === 1 ? 'is' : 'are'} moved to ${TRASH} – whatever is used elsewhere is kept in “Reference images”`
     )
   }
   if (exported) effects.push(exported === 1 ? 'The exported film stays' : 'The exported films stay')
@@ -838,7 +838,7 @@ async function planStoryboard(input: DeleteInput, id: string, r: Reader): Promis
   if (takes) effects.push(takesToMedia(takes))
   if (stills) {
     effects.push(
-      `${count(stills, 'image', 'images')} ${stills === 1 ? 'is' : 'are'} moved to ${TRASH} – whatever is used elsewhere is kept in “Referensbilder”`
+      `${count(stills, 'image', 'images')} ${stills === 1 ? 'is' : 'are'} moved to ${TRASH} – whatever is used elsewhere is kept in “Reference images”`
     )
   }
   if (exported) effects.push(exported === 1 ? 'The exported film stays' : 'The exported films stay')
@@ -1169,8 +1169,8 @@ async function planStill(input: DeleteInput, id: string): Promise<Planned> {
   const effects = used
     ? [
         uses.length
-          ? `It is used by ${andList(uses)} and kept in “Referensbilder”`
-          : 'It is used elsewhere and kept in “Referensbilder”',
+          ? `It is used by ${andList(uses)} and kept in “Reference images”`
+          : 'It is used elsewhere and kept in “Reference images”',
         ...(boards.length ? [boards.length === 1 ? 'The board keeps the picture' : 'The boards keep the picture'] : [])
       ]
     : [`The file is moved to ${TRASH}`]
@@ -1593,7 +1593,7 @@ export function registerDeleteTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Request removing things (needs approval)',
       description:
-        `Asks the user to approve removing things from Studio – you can't delete anything yourself. Put every item in one request (1–50): {asset_id}, {asset_image_id} (a photo), {asset_audio_id} (a sound clip), {prompt_id}, {learning_id} and {review_id} (your own or another agent's – never the user's own review, nor a learning the user wrote, edited or pinned), {sequence_id}, {segment_id} (a sequence clip; a storyboard's transitions go with their boards), {storyboard_id}, {board_id}, {board_move: {board_id, to_board_number}} (a move that would drop a transition with a prompt or takes – move_board refuses those; one per storyboard per request), {generation_id} (a video and its file), {take: {generation_id, segment_id}} (takes a video off a clip or transition; the video stays), {still_id}, {edit_id}, {version_id} and {prune_versions_of: edit_id} (the Editor's \"Clean up versions\"). Studio plans every item first: what it is, what else changes (photos kept in \"Referensbilder\" for the clips that use them, takes that become ordinary generations, transitions lost with their prompts, a clip left without its selected take …) and what goes to ${TRASH}. An item another one removes anyway (a photo of an asset you also remove, a clip of a removed sequence) is folded into it. If any item can't be removed now, the whole call fails with every reason and nothing is asked. dry_run: true answers the plan without asking. Otherwise returns {approval_id, status: \"pending\", items}: the user sees the list in Studio and approves all or nothing. Poll get_approval every 15–30 seconds; each item ends deleted, gone (already removed) or failed. If anything in the request changes before the user answers, it lapses – ask again. Free. Prefer leaving a bad take unselected to deleting it.`,
+        `Asks the user to approve removing things from Studio – you can't delete anything yourself. Put every item in one request (1–50): {asset_id}, {asset_image_id} (a photo), {asset_audio_id} (a sound clip), {prompt_id}, {learning_id} and {review_id} (your own or another agent's – never the user's own review, nor a learning the user wrote, edited or pinned), {sequence_id}, {segment_id} (a sequence clip; a storyboard's transitions go with their boards), {storyboard_id}, {board_id}, {board_move: {board_id, to_board_number}} (a move that would drop a transition with a prompt or takes – move_board refuses those; one per storyboard per request), {generation_id} (a video and its file), {take: {generation_id, segment_id}} (takes a video off a clip or transition; the video stays), {still_id}, {edit_id}, {version_id} and {prune_versions_of: edit_id} (the Editor's \"Clean up versions\"). Studio plans every item first: what it is, what else changes (photos kept in \"Reference images\" for the clips that use them, takes that become ordinary generations, transitions lost with their prompts, a clip left without its selected take …) and what goes to ${TRASH}. An item another one removes anyway (a photo of an asset you also remove, a clip of a removed sequence) is folded into it. If any item can't be removed now, the whole call fails with every reason and nothing is asked. dry_run: true answers the plan without asking. Otherwise returns {approval_id, status: \"pending\", items}: the user sees the list in Studio and approves all or nothing. Poll get_approval every 15–30 seconds; each item ends deleted, gone (already removed) or failed. If anything in the request changes before the user answers, it lapses – ask again. Free. Prefer leaving a bad take unselected to deleting it.`,
       input: {
         items: z.array(deleteItem).min(1).max(MAX_ITEMS),
         note: z.string().max(500).optional().describe('Shown to the user in the approval dialog: why.'),

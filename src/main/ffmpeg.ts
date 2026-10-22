@@ -2634,7 +2634,7 @@ const WAVEFORM_BLOCK = WAVEFORM_RATE / 100
 
 /**
  * The sound's peak level (0–1 of full scale) in each of `buckets` equal stretches of the file, for the timeline's
- * Ljud lane; all zeros when the file has no sound ffmpeg can decode. With `duration` (the film's length, which the
+ * Audio lane; all zeros when the file has no sound ffmpeg can decode. With `duration` (the film's length, which the
  * lane is drawn across) each stretch is that much time of the film: sound that ends early leaves the last buckets
  * at 0, and sound running past the picture is left out, so a peak is drawn where it is heard.
  */

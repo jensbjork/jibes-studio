@@ -1,12 +1,12 @@
 // The base folder (grundmapp): opening it at startup, switching to another folder or moving the library
 // there, converting a phase-2 library (~/Movies/Studio with studio.db, generations/, thumbs/, …) to the
 // new layout, and "Tidy up", which puts every file the library knows about in its proper folder:
-// characters, environments, products, outfits, poses and directors (assets) in Karaktärer/, Miljöer/, Produkter/,
-// Kläder/, Poser/ and Regissörer/, one folder each holding the asset's photos and audio clips (a director's style
+// characters, environments, products, outfits, poses and directors (assets) in Characters/, Environments/, Products/,
+// Outfits/, Poses/ and Directors/, one folder each holding the asset's photos and audio clips (a director's style
 // frames and style videos); a sequence's takes, stills and exports in its
-// folder in Sekvenser/ (Tagningar/, Storyboard/ and the folder itself), and a storyboard's in its folder in
-// Storyboards/ (Övergångar/, Bilder/ and the folder itself); the user's own films in Egna klipp/<day>/, and an edit's
-// versions, AI takes and audio in its folder in Redigeringar/ (the folder itself, Tagningar/ and Ljud/). Where a
+// folder in Sequences/ (Takes/, Storyboard/ and the folder itself), and a storyboard's in its folder in
+// Storyboards/ (Transitions/, Images/ and the folder itself); the user's own films in Own clips/<day>/, and an edit's
+// versions, AI takes and audio in its folder in Edits/ (the folder itself, Takes/ and Audio/). Where a
 // generation's file belongs is decided by its row (the file home rule, jobs.videoHome).
 
 import { randomUUID } from 'node:crypto'
@@ -38,6 +38,7 @@ import type {
 } from '@shared/types'
 import * as db from './db'
 import { removeLeftoverPartialFiles } from './ffmpeg'
+import { renameFoldersToEnglish, TOP_FOLDER_NAMES } from './folder-names'
 import { originalHome, videoHome } from './jobs'
 import { assetFolderPath } from './library'
 import {
@@ -59,6 +60,7 @@ import {
   isRootLost,
   KIND_FOLDERS,
   LEGACY_FOLDERS,
+  legacyFoldersIn,
   LIBRARY_OPERATION_RUNNING,
   libraryRoot,
   moveFileInto,
@@ -85,16 +87,16 @@ import {
 /** Phase-2 folders, directly in the library folder next to studio.db. */
 const LEGACY = LEGACY_FOLDERS
 
-/** Phase-2 exports belonged to no recorded sequence; they get a folder of their own under Sekvenser. */
-const LEGACY_EXPORTS_FOLDER = 'Äldre exporter'
+/** Phase-2 exports belonged to no recorded sequence; they get a folder of their own under Sequences. */
+const LEGACY_EXPORTS_FOLDER = 'Older exports'
 /** Present while a phase-2 library is being converted; a conversion that was cut short resumes on next open. */
 const MIGRATION_MARKER = 'legacy-migration.json'
-const DESCRIPTION_FILE = 'Beskrivning.txt'
+const DESCRIPTION_FILE = 'Description.txt'
 /** Folder-name fallbacks for names that leave nothing (as assets, sequence-store and edits name them): data on disk. */
-const UNNAMED_ASSET = 'Namnlös'
-const UNNAMED_SEQUENCE = 'Namnlös sekvens'
-const UNNAMED_STORYBOARD = 'Namnlös storyboard'
-const UNNAMED_EDIT = 'Namnlös redigering'
+const UNNAMED_ASSET = 'Untitled'
+const UNNAMED_SEQUENCE = 'Untitled sequence'
+const UNNAMED_STORYBOARD = 'Untitled storyboard'
+const UNNAMED_EDIT = 'Untitled edit'
 /** Finder's own files don't make a folder "non-empty". */
 const IGNORABLE = new Set(['.DS_Store', '.localized'])
 const DAY_FOLDER = /^\d{4}-\d{2}-\d{2}$/
@@ -413,7 +415,7 @@ function libraryHasContent(dir: string): boolean {
     // Can't tell: better to offer moving it than to leave something behind unnoticed.
     return true
   }
-  return [...Object.values(LEGACY), ...VISIBLE_FOLDERS].some((name) => containsFiles(join(dir, name), 4))
+  return [...legacyFoldersIn(dir), ...VISIBLE_FOLDERS].some((name) => containsFiles(join(dir, name), 4))
 }
 
 /** What 'move' takes along: the open library, or (while none is open) the legacy one. */
@@ -526,7 +528,7 @@ function activate(root: string, create: boolean): void {
 
 /** Why a folder without a database isn't opened as a library (it is never silently made an empty one). */
 function missingDatabaseMessage(root: string): string {
-  return LIBRARY_FOLDERS.some((name) => isOccupied(join(root, name)))
+  return [...LIBRARY_FOLDERS, ...Object.keys(TOP_FOLDER_NAMES)].some((name) => isOccupied(join(root, name)))
     ? `The library database (${FOLDERS.appData}/${DB_FILE_NAME}) is missing from the folder, so Studio doesn't know ` +
         'what the files in it belong to. Was it deleted, or was the library moved? Choose the folder where the library is now.'
     : `The folder holds no Studio library. Was the library moved or renamed in ${FILE_MANAGER}? Choose the folder ` +
@@ -534,37 +536,38 @@ function missingDatabaseMessage(root: string): string {
 }
 
 /**
- * The folders later versions added next to Karaktärer and Sekvenser, with the schema version from which a library
+ * The folders later versions added next to Characters and Sequences, with the schema version from which a library
  * owns each one, and what this version keeps in it.
  */
-const ADDED_FOLDERS: readonly { name: string; since: number; what: string }[] = [
-  { name: FOLDERS.environments, since: db.ASSETS_SCHEMA_VERSION, what: 'environments' },
-  { name: FOLDERS.outfits, since: db.ASSETS_SCHEMA_VERSION, what: 'outfits' },
-  { name: FOLDERS.poses, since: db.POSES_SCHEMA_VERSION, what: 'poses' },
-  { name: FOLDERS.storyboards, since: db.STORYBOARDS_SCHEMA_VERSION, what: 'storyboards' },
-  { name: FOLDERS.ownClips, since: db.EDITS_SCHEMA_VERSION, what: 'own clips' },
-  { name: FOLDERS.edits, since: db.EDITS_SCHEMA_VERSION, what: 'edits' },
-  { name: FOLDERS.products, since: db.PRODUCTS_SCHEMA_VERSION, what: 'products' },
-  { name: FOLDERS.directors, since: db.DIRECTORS_SCHEMA_VERSION, what: 'directors' }
+const ADDED_FOLDERS: readonly { name: string; swedish: string; since: number; what: string }[] = [
+  { name: FOLDERS.environments, swedish: 'Miljöer', since: db.ASSETS_SCHEMA_VERSION, what: 'environments' },
+  { name: FOLDERS.outfits, swedish: 'Kläder', since: db.ASSETS_SCHEMA_VERSION, what: 'outfits' },
+  { name: FOLDERS.poses, swedish: 'Poser', since: db.POSES_SCHEMA_VERSION, what: 'poses' },
+  { name: FOLDERS.storyboards, swedish: 'Storyboards', since: db.STORYBOARDS_SCHEMA_VERSION, what: 'storyboards' },
+  { name: FOLDERS.ownClips, swedish: 'Egna klipp', since: db.EDITS_SCHEMA_VERSION, what: 'own clips' },
+  { name: FOLDERS.edits, swedish: 'Redigeringar', since: db.EDITS_SCHEMA_VERSION, what: 'edits' },
+  { name: FOLDERS.products, swedish: 'Produkter', since: db.PRODUCTS_SCHEMA_VERSION, what: 'products' },
+  { name: FOLDERS.directors, swedish: 'Regissörer', since: db.DIRECTORS_SCHEMA_VERSION, what: 'directors' }
 ]
 
 /**
  * A library from before one of those folders whose base folder already holds a folder of the user's own by
- * that name, e.g. Miljöer, Kläder, Poser, Storyboards, Egna klipp, Redigeringar, Produkter or Regissörer (the setup screen
+ * that name, e.g. Environments, Outfits, Poses, Storyboards, Own clips, Edits, Products or Directors (the setup screen
  * promised that files already there are left alone): opening it would make it the library's – its paths stored
  * relative, "Move" taking it along, submits using its files in place instead of copying them into
- * Referensbilder. Refused, before anything changes, until they have renamed it.
+ * Reference images. Refused, before anything changes, until they have renamed it.
  */
 function refuseOwnAssetFolders(root: string): void {
-  const occupied = ADDED_FOLDERS.filter((f) => isOccupied(join(root, f.name)))
-  if (!occupied.length) return
   const version = db.schemaVersion(dbFile(root))
-  const own = occupied.filter((f) => version < f.since)
+  // Before English folder names (schema 15) the library's folders – and so the user's own in the way – had Swedish ones.
+  const nameOf = (f: (typeof ADDED_FOLDERS)[number]): string =>
+    version < db.ENGLISH_FOLDERS_SCHEMA_VERSION ? f.swedish : f.name
+  const own = ADDED_FOLDERS.filter((f) => version < f.since && isOccupied(join(root, nameOf(f))))
   if (!own.length) return
   const one = own.length === 1
   const where = one ? 'a folder with that name' : 'folders with those names'
   throw new Error(
-    `The library folder already contains ${quotedList(own.map((f) => f.name))} with files of your own. This version ` +
+    `The library folder already contains ${quotedList(own.map(nameOf))} with files of your own. This version ` +
       `of Studio keeps ${andList(own.map((f) => f.what))} in ${where}, so rename ${one ? 'the folder' : 'the folders'} ` +
       `in ${FILE_MANAGER} and try again.`
   )
@@ -589,9 +592,9 @@ function clearTmp(root: string): void {
 
 /**
  * Half-written exports (written next to the finished film), posters, frames and stills left by a crash or a
- * force quit. Takes are never written in place (they arrive through .studio/tmp), so Tagningar is left alone.
- * Imports write their working copies next to the original in Egna klipp/<day>/, and the edit service renders
- * versions, audio and proxies in place in Redigeringar/<edit>/ (and its Ljud/ and Underlag/), so those are
+ * force quit. Takes are never written in place (they arrive through .studio/tmp), so Takes is left alone.
+ * Imports write their working copies next to the original in Own clips/<day>/, and the edit service renders
+ * versions, audio and proxies in place in Edits/<edit>/ (and its Audio/ and Inputs/), so those are
  * scanned too, as are the stem and timeline caches.
  */
 function removePartials(root: string): void {
@@ -600,7 +603,7 @@ function removePartials(root: string): void {
     join(root, FOLDERS.appData, APP_DATA.frames),
     join(root, FOLDERS.appData, APP_DATA.stems),
     join(root, FOLDERS.appData, APP_DATA.timeline),
-    ...Object.values(LEGACY).map((name) => join(root, name))
+    ...legacyFoldersIn(root).map((name) => join(root, name))
   ]
   const ownClips = join(root, FOLDERS.ownClips)
   for (const name of listEntries(ownClips) ?? []) {
@@ -616,7 +619,7 @@ function removePartials(root: string): void {
       if (isDir(join(dir, sub))) dirs.push(join(dir, sub))
     }
   }
-  // Sequences' and storyboards' folders hold their exports, and their Storyboard/ and Bilder/ their stills.
+  // Sequences' and storyboards' folders hold their exports, and their Storyboard/ and Images/ their stills.
   for (const layout of Object.values(KIND_FOLDERS)) {
     const parent = join(root, layout.parent)
     for (const name of listEntries(parent) ?? []) {
@@ -650,6 +653,10 @@ async function openLibraryAt(root: string, create = false): Promise<ReorganizeRe
   // A newer Studio's library is refused before this build touches the folder (openDb refuses it too).
   if (!create && db.isNewerSchema(db.schemaVersion(dbFile(root)))) throw new Error(db.NEWER_LIBRARY_MESSAGE)
   if (!create) refuseOwnAssetFolders(root)
+  // A library from before English folder names (schema 15): its folders are renamed in place first – before
+  // ensureStructure would make empty English ones beside them – and its stored paths follow when the database is
+  // opened (db.ts). Refused, before anything changes, when a folder with an English name holds files of its own.
+  if (!create && db.schemaVersion(dbFile(root)) < db.ENGLISH_FOLDERS_SCHEMA_VERSION) renameFoldersToEnglish(root)
   ensureStructure(root)
   // On Windows a leading dot doesn't hide .studio (the database and caches) from File Explorer: an attribute does.
   hideFolderOnWindows(join(root, FOLDERS.appData))
@@ -1184,7 +1191,7 @@ function rebaseLegacyPaths(root: string): void {
   })
 }
 
-/** Name of the folder under Sekvenser for phase-2 exports, avoiding a sequence's own folder. */
+/** Name of the folder under Sequences for phase-2 exports, avoiding a sequence's own folder. */
 function legacyExportsFolder(): string {
   const taken = new Set(
     (
@@ -1351,8 +1358,8 @@ async function relocate(
 }
 
 /**
- * What owns a folder: an asset (in the folder of its kind: Karaktärer, Miljöer, Produkter, Kläder, Poser or Regissörer), a
- * sequence (in Sekvenser), a storyboard (in Storyboards) or an edit (in Redigeringar). Folder names only have to be
+ * What owns a folder: an asset (in the folder of its kind: Characters, Environments, Products, Outfits, Poses or Directors), a
+ * sequence (in Sequences), a storyboard (in Storyboards) or an edit (in Edits). Folder names only have to be
  * unique among owners that share a parent folder.
  */
 type FolderOwner =
@@ -1574,11 +1581,11 @@ function styleVideoPathsOf(id: string): string[] {
 }
 
 /**
- * Every file of the generations to its home by the file home rule (jobs.videoHome): Venice's takes into Tagningar
- * (a transition's into its storyboard's Övergångar) or back to Genereringar when free; the user's own clips into
- * Egna klipp/<day>/ (the untouched original next to its working copy), even when they are takes; edit versions
- * and AI takes made in the Editor into the edit's folder (and its Tagningar). Imports and versions are never named
- * after an empty prompt or moved into Tagningar. Then posters; `only` limits it to some ids.
+ * Every file of the generations to its home by the file home rule (jobs.videoHome): Venice's takes into Takes
+ * (a transition's into its storyboard's Transitions) or back to Generations when free; the user's own clips into
+ * Own clips/<day>/ (the untouched original next to its working copy), even when they are takes; edit versions
+ * and AI takes made in the Editor into the edit's folder (and its Takes). Imports and versions are never named
+ * after an empty prompt or moved into Takes. Then posters; `only` limits it to some ids.
  */
 async function tidyGenerations(report: ReorganizeReport, only?: Set<string>): Promise<void> {
   const conn = db.getDb()
@@ -1636,7 +1643,7 @@ async function tidyGenerations(report: ReorganizeReport, only?: Set<string>): Pr
 }
 
 /**
- * Each edit's audio (converted voices, spoken lines, music, effects, added files, rendered beds) into its Ljud/
+ * Each edit's audio (converted voices, spoken lines, music, effects, added files, rendered beds) into its Audio/
  * folder, keeping their names; `editId` limits it to one edit's.
  */
 async function tidyEditMedia(report: ReorganizeReport, editId?: string): Promise<void> {
@@ -1706,7 +1713,7 @@ async function tidyExports(report: ReorganizeReport, sequenceId?: string): Promi
 }
 
 /**
- * Stills into their sequence's Storyboard/ (their storyboard's Bilder/), or Referensbilder/<the day they were made>/
+ * Stills into their sequence's Storyboard/ (their storyboard's Images/), or Reference images/<the day they were made>/
  * when they belong to neither (any more); `sequenceId` limits it to one sequence's. They keep their names:
  * generations, clips and boards that use one as a start, end, reference or board image follow it.
  */
@@ -1817,9 +1824,13 @@ async function removeEmptyFolders(root: string): Promise<void> {
       if (DAY_FOLDER.test(name)) await removeIfEmpty(join(dir, name))
     }
   }
-  const legacyCharacters = join(root, LEGACY.characters)
-  for (const name of listEntries(legacyCharacters) ?? []) await removeIfEmpty(join(legacyCharacters, name))
-  for (const name of Object.values(LEGACY)) await removeIfEmpty(join(root, name))
+  // Phase-2 folders only where they are folders of their own: on a case-insensitive disk "characters" is Characters.
+  const legacy = legacyFoldersIn(root)
+  if (legacy.includes(LEGACY.characters)) {
+    const legacyCharacters = join(root, LEGACY.characters)
+    for (const name of listEntries(legacyCharacters) ?? []) await removeIfEmpty(join(legacyCharacters, name))
+  }
+  for (const name of legacy) await removeIfEmpty(join(root, name))
 }
 
 /**
@@ -1869,7 +1880,7 @@ async function sequenceFolderPath(id: string, kind: SequenceKind): Promise<strin
   const parent = join(libraryRoot(), KIND_FOLDERS[kind].parent)
   const folder = row.folder
   if (isPlainName(folder)) return join(parent, folder)
-  // Takes and exports moving under a running job or export would end up in the wrong place: open Sekvenser.
+  // Takes and exports moving under a running job or export would end up in the wrong place: open Sequences.
   if (operation || deps.busy()) return parent
   const report = newReport()
   const assigned = await exclusive(() => tidySequence(id, report))
@@ -1913,8 +1924,8 @@ function isAssetId(id: string): boolean {
 }
 
 /**
- * An edit's folder (Redigeringar/<folder>); one without a folder gets one now, unless something is running (its
- * files would move under a job), in which case Redigeringar opens.
+ * An edit's folder (Edits/<folder>); one without a folder gets one now, unless something is running (its
+ * files would move under a job), in which case Edits opens.
  */
 async function editFolderPath(id: string): Promise<string> {
   const row = db.getDb().prepare('SELECT id, name, folder FROM edits WHERE id = ?').get(id) as EntityRow | undefined

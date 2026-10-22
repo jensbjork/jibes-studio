@@ -42,7 +42,7 @@ const GROUP_ORDER = [
 ]
 
 const TRASH_NOTE =
-  `The files go to ${TRASH} – whatever is used elsewhere is kept in “Referensbilder”. It can’t be undone in Studio.`
+  `The files go to ${TRASH} – whatever is used elsewhere is kept in “Reference images”. It can’t be undone in Studio.`
 
 /** How often the open dialog checks the request again. */
 const CHECK_MS = 2000

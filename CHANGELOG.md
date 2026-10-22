@@ -80,6 +80,14 @@ breaking changes; they are called out under **Changed** or **Removed**.
 - The public name is now **JIBES Studio** – in the window, the menu, Settings, the Claude Desktop extension,
   the installer's shortcuts, the disk image and the docs. The app itself, its folders, settings and release files keep
   the short name Studio, so nothing has to be set up again and install.sh and updates go on working.
+- **English folder names.** A library's folders are now called Characters, Environments, Products, Outfits, Poses,
+  Directors, Reference images, Generations, Sequences (with Takes/ and Audio/), Storyboards (Transitions/, Images/),
+  Own clips and Edits (Takes/, Audio/, Inputs/), and `.studio` holds thumbnails, frames, stems, edit-jobs and timeline.
+  A library from an earlier version is renamed in place the first time this version opens it (schema 15): folders are
+  only renamed – no file is copied or removed – every path the library stores follows, and a rename cut off halfway
+  finishes the next time it is opened. A folder of your own with one of the English names stops it before anything
+  changes, and says which. Descriptions are mirrored in Description.txt; new working copies, separated vocals and
+  untitled items get English names (files that exist keep theirs). Earlier versions don't open a renamed library.
 - Studio Dev's agent connection defaults to port 8771, so it can listen beside Studio.app or Studio Test (8770).
 - The *Dev* badge has a row of its own under the wordmark, clear of the search button.
 

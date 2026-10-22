@@ -199,7 +199,7 @@ export function originOf(ctx: ToolContext, files: readonly { host?: string }[]):
   return { agent: ctx.clientName().slice(0, 60), ...(host ? { host } : {}) }
 }
 
-/** An upload (or a URL) made a still: owned by a sequence or storyboard, or – without one – in "Referensbilder". */
+/** An upload (or a URL) made a still: owned by a sequence or storyboard, or – without one – in "Reference images". */
 export async function importAsStill(ctx: ToolContext, source: FileSource, ownerId?: string): Promise<Still> {
   const [file] = await stageFiles(ctx, 'image', [source])
   return callService<Still>('stills:import', file.path, ownerId)
@@ -238,7 +238,7 @@ async function videoFile(ctx: ToolContext, video: VideoReferenceInput['video'], 
     return path
   }
   const [file] = await stageFiles(ctx, 'video', [{ upload_id: video.upload_id }])
-  // Copied into Referensbilder/<today>/, so the form or clip never points into the scratch folder (cleared at open).
+  // Copied into Reference images/<today>/, so the form or clip never points into the scratch folder (cleared at open).
   return importUploads ? importReferenceFile(file.path, 'video', file.fileName) : file.path
 }
 
@@ -276,9 +276,9 @@ export async function resolveVideoReference(
 
 /**
  * The references with loose pictures and videos resolved to files: a still's picture; an upload made a still in
- * "Referensbilder" first (`importUploads`), so the form or clip never points into the scratch folder – or, for a check
+ * "Reference images" first (`importUploads`), so the form or clip never points into the scratch folder – or, for a check
  * that changes nothing (validate_prompt), the upload's own file; a reference video's film with its window measured (a
- * video upload copied into "Referensbilder" likewise).
+ * video upload copied into "Reference images" likewise).
  */
 export async function resolvePictureReferences(
   ctx: ToolContext,

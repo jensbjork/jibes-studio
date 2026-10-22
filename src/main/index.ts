@@ -118,7 +118,7 @@ const jobs = new JobManager(venice, () => loadVideoModels())
 let modelCache: { at: number; models: VideoModel[] } | undefined
 /** Exports and "generate all" runs (of sequences and storyboards); set once their handlers are registered. */
 let sequencesBusy: () => string | undefined = () => undefined
-/** Imports of own clips (Egna klipp); set once their handlers are registered. */
+/** Imports of own clips; set once their handlers are registered. */
 let importsService: { isBusy(): string | undefined; stop(): void; service: ImportService } | undefined
 /** The Editor: edits, versions and their paid jobs; set once its handlers are registered. */
 let editsService: EditServiceHandle | undefined
@@ -530,7 +530,7 @@ function registerIpc(): void {
     notify: (sequenceId: string) => broadcastSequenceChange(sequenceId),
     workChanged: () => work?.touch('structure')
   })
-  // Own clips: films copied into Egna klipp and added to the feed, a sequence or a clip.
+  // Own clips: films copied into Own clips and added to the feed, a sequence or a clip.
   importsService = registerImportIpc({
     sequences,
     progress: (p: ImportProgress) => broadcast('import:progress', p),
@@ -549,7 +549,7 @@ function registerIpc(): void {
     generationChanged,
     // A version or an export clone the service removed: every list drops it, as after generations:delete.
     generationDeleted: (id: string) => broadcast('generation:delete', id),
-    // A deleted edit's files that clips still used moved to Referensbilder: sequences and the feed read them again.
+    // A deleted edit's files that clips still used moved to Reference images: sequences and the feed read them again.
     pathsRewritten: () => {
       broadcastAllSequences()
       broadcastRewrittenGenerations()
@@ -559,7 +559,7 @@ function registerIpc(): void {
     libraryChanged: () => broadcast('library:change')
   })
   // Images and stills for storyboards. A deleted still that clips or generations still use is kept in
-  // Referensbilder, which rewrites their paths: views showing them refetch.
+  // Reference images, which rewrites their paths: views showing them refetch.
   registerStillsIpc(
     (sequenceId) => broadcast('stills:change', sequenceId),
     () => {

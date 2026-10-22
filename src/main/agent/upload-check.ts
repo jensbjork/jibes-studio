@@ -339,7 +339,7 @@ export async function checkUpload(kind: UploadKind, path: string, sniffed: Sniff
   }
   const [inspected] = await inspectVideoFiles([path])
   if (!inspected?.ok) {
-    // The import's refusal names the staged file ("<namn>.mp4: …"); the reason is what matters.
+    // The import's refusal names the staged file ("<name>.mp4: …"); the reason is what matters.
     throw new Error(inspected?.error?.replace(/^[^:]*:\s*/, '') || notOfKind('video'))
   }
   return {

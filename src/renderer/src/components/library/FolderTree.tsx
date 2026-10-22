@@ -16,69 +16,75 @@ interface Entry {
 const ENTRIES: Entry[] = [
   {
     target: 'characters',
-    name: 'Karaktärer',
+    name: 'Characters',
     explanation: 'One folder per character with its reference photos, voice clips and description.',
-    example: () => 'Anna/photo.jpg, Anna/voice.mp3, Anna/Beskrivning.txt'
+    example: () => 'Anna/photo.jpg, Anna/voice.mp3, Anna/Description.txt'
   },
   {
     target: 'environments',
-    name: 'Miljöer',
+    name: 'Environments',
     explanation: 'One folder per environment with its reference images, sound clips and description.',
     example: () => 'Kitchen/evening.jpg, Kitchen/murmur.wav'
   },
   {
     target: 'products',
-    name: 'Produkter',
+    name: 'Products',
     explanation: 'One folder per product with its product images and description.',
     example: () => 'Coffee tin/front.jpg'
   },
   {
     target: 'outfits',
-    name: 'Kläder',
+    name: 'Outfits',
     explanation: 'One folder per outfit with its images and description.',
     example: () => 'Red dress/front.jpg'
   },
   {
     target: 'poses',
-    name: 'Poser',
+    name: 'Poses',
     explanation: 'One folder per pose with photos or sketches of the positions and its description.',
-    example: () => 'Hug/sketch.png, Hug/Beskrivning.txt'
+    example: () => 'Hug/sketch.png, Hug/Description.txt'
+  },
+  {
+    target: 'directors',
+    name: 'Directors',
+    explanation: 'One folder per director with its style frames, style videos and description.',
+    example: () => 'Noir/frame.jpg, Noir/rain.mp4'
   },
   {
     target: 'references',
-    name: 'Referensbilder',
+    name: 'Reference images',
     explanation: 'Start, end and reference images from elsewhere on your computer, copied here by day.',
     example: (day) => `${day}/start image.png`
   },
   {
     target: 'generations',
-    name: 'Genereringar',
+    name: 'Generations',
     explanation: 'Every video you generate, sorted by day and named after its prompt.',
     example: (day, time) => `${day}/${time} A cat on a roof.mp4`
   },
   {
     target: 'ownClips',
-    name: 'Egna klipp',
+    name: 'Own clips',
     explanation: 'Your own films that you imported, by day. When a working copy is needed, the original sits next to it.',
     example: (day) => `${day}/Holiday.mov`
   },
   {
     target: 'sequences',
-    name: 'Sekvenser',
+    name: 'Sequences',
     explanation: 'One folder per sequence with its takes and the finished, exported films.',
-    example: () => 'My film/Tagningar/ and finished films'
+    example: () => 'My film/Takes/ and finished films'
   },
   {
     target: 'storyboards',
     name: 'Storyboards',
     explanation: 'One folder per storyboard with its images, the clips between them and the finished, exported films.',
-    example: () => 'My storyboard/Bilder/, Övergångar/ and finished films'
+    example: () => 'My storyboard/Images/, Transitions/ and finished films'
   },
   {
     target: 'edits',
-    name: 'Redigeringar',
+    name: 'Edits',
     explanation: 'One folder per edit with its versions, new sound and the AI takes. The original is left untouched.',
-    example: () => 'My film/My film v2 – Cut 0:02–0:04.mp4, Ljud/, Tagningar/'
+    example: () => 'My film/My film v2 – Cut 0:02–0:04.mp4, Audio/, Takes/'
   }
 ]
 

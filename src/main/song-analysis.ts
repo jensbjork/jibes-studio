@@ -1,5 +1,5 @@
 // What a sequence's song looks like to Studio (songOverview, the suggested cut points, a clip's default part): its
-// waveform, its beat and bars, and where its vocals are sung. Free and local; cached in .studio/tidslinje by the files'
+// waveform, its beat and bars, and where its vocals are sung. Free and local; cached in .studio/timeline by the files'
 // identity, so a song is analysed once (again after its vocals are separated).
 //
 // - Peaks: ffmpeg.waveform of the song and of the vocals.

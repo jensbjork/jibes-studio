@@ -261,7 +261,7 @@ export function registerDirectorTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Add style videos to a director',
       description:
-        "Adds style videos to one of the user's directors: films whose camera movement (only that – never their people or places) the director's generations follow, sent as reference videos to Seedance 2.x reference-to-video after the clip's own (as many as the model family still takes). videos (1–4): {video: {generation_id} | {export_id} | {upload_id} (a ready video upload, begin_upload kind \"video\"), start?, length?} – the window of the film that is sent (default the first 5 s; Studio keeps it 2–15 s). Copied into the director's folder (Regissörer/<name>/). Only the user removes a style video (in the director's editor in Studio). Returns the director.",
+        "Adds style videos to one of the user's directors: films whose camera movement (only that – never their people or places) the director's generations follow, sent as reference videos to Seedance 2.x reference-to-video after the clip's own (as many as the model family still takes). videos (1–4): {video: {generation_id} | {export_id} | {upload_id} (a ready video upload, begin_upload kind \"video\"), start?, length?} – the window of the film that is sent (default the first 5 s; Studio keeps it 2–15 s). Copied into the director's folder (Directors/<name>/). Only the user removes a style video (in the director's editor in Studio). Returns the director.",
       input: {
         director_id: z.string().describe("One of the library's directors (an asset of kind \"director\")."),
         videos: z.array(videoReferenceItem).min(1).max(4)

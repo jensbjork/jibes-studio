@@ -219,7 +219,7 @@ export const assetReferenceItem = z.object({
 
 /**
  * A reference video (@VideoN, Seedance 2.x reference-to-video): a finished generation's film (a take, a clip from the
- * feed, an own clip, a version), an exported film or a ready video upload (copied into "Referensbilder" first), and
+ * feed, an own clip, a version), an exported film or a ready video upload (copied into "Reference images" first), and
  * the window of it that is sent. A reference only: its action, camera movement and style – never footage to edit.
  */
 export const videoReferenceItem = z
@@ -244,7 +244,7 @@ export const videoReferenceItem = z
 
 /**
  * A reference: an asset's photos (and audio), one loose picture – a still, or an uploaded picture (made a still in
- * "Referensbilder" first, so the form or clip never points into the scratch folder) – or a reference video. A loose
+ * "Reference images" first, so the form or clip never points into the scratch folder) – or a reference video. A loose
  * picture has no description, so nothing is appended to the prompt for it.
  */
 export const referenceItem = z.union([

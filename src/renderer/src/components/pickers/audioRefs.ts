@@ -133,8 +133,8 @@ export function audioRole(kind: AssetKind | undefined): string {
   return kind === 'character' ? 'voice' : kind === 'environment' ? 'soundscape' : 'sound'
 }
 
-/** A sequence's song or its vocals (kept in the sequence's Ljud/ folder; the library's folder names are Swedish). */
-const SONG_FILE = isWindows ? /[\\/]Sekvenser[\\/][^\\/]+[\\/]Ljud[\\/][^\\/]+$/ : /\/Sekvenser\/[^/]+\/Ljud\/[^/]+$/
+/** A sequence's song or its vocals (kept in the sequence's Audio/ folder). */
+const SONG_FILE = isWindows ? /[\\/]Sequences[\\/][^\\/]+[\\/]Audio[\\/][^\\/]+$/ : /\/Sequences\/[^/]+\/Audio\/[^/]+$/
 
 /**
  * What a clip is, in two parts: "Anna" and "voice" ("voice 2" when it has several), "Song" and its file (a sequence's

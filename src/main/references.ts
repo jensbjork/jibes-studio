@@ -1,5 +1,5 @@
 // Reference material: start/end/reference images, reference audio clips and reference videos picked from outside the
-// library are copied into Referensbilder/<day>/ when a generation is submitted (a video cloned on the library's
+// library are copied into Reference images/<day>/ when a generation is submitted (a video cloned on the library's
 // volume), so the generation (and its "use again") keeps working after the originals are moved or deleted, and the
 // user finds the material next to the output.
 // Also the file-placement helpers the other media modules share: everything that lands in a visible folder
@@ -248,7 +248,7 @@ async function importFile(src: string, dir: string, material: Material, keptAs?:
 }
 
 /**
- * An outside file copied into Referensbilder/<today>/ (an identical one already there is reused): an agent's uploaded
+ * An outside file copied into Reference images/<today>/ (an identical one already there is reused): an agent's uploaded
  * reference video, so the form or clip never points into the scratch folder, which is cleared at every library open.
  * `name` is the name the file is kept under (its own when left out). Resolves with the library copy.
  */
@@ -282,8 +282,8 @@ const importing = serialized()
 
 /**
  * Copies every start/end/reference image, reference audio clip and source/reference video that lies outside the
- * library into Referensbilder/<today>/ (keeping its original name, made unique) and returns params pointing at the
- * copies (each audio clip and reference video keeps its window). An edit's proxies are made in its Underlag/ folder,
+ * library into Reference images/<today>/ (keeping its original name, made unique) and returns params pointing at the
+ * copies (each audio clip and reference video keeps its window). An edit's proxies are made in its Inputs/ folder,
  * so of videos in practice only reference videos (Generate, a sequence clip) are ever copied: the whole file, so the
  * window can still be moved on "Use again". Files already in the library (photos and voice clips of assets, earlier
  * references, continuation frames) are left as they are, and a file whose exact content is already in today's

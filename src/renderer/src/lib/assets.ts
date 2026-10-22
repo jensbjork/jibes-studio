@@ -249,7 +249,7 @@ export const ASSET_VIEW: Record<AssetKind, View> = {
   director: 'directors'
 }
 
-/** The library folder that holds each kind (on disk: Karaktärer, Miljöer, Produkter, Kläder, Poser, Regissörer). */
+/** The library folder that holds each kind (on disk: Characters, Environments, Products, Outfits, Poses, Directors). */
 export const ASSET_FOLDER: Record<AssetKind, LibraryFolderTarget> = {
   character: 'characters',
   environment: 'environments',

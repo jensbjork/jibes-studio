@@ -24,6 +24,7 @@ import WorkStillViewer from './components/work/WorkStillViewer'
 import { startAgentFeed } from './lib/agent'
 import { useAgentBridge } from './lib/agentBridge'
 import { assetKindOfView } from './lib/assets'
+import { followEnglishFolders } from './lib/generateStore'
 import { ipcErrorMessage } from './lib/hooks'
 import type { Intent, Navigate, View } from './lib/navigation'
 import { isMac } from './lib/platform'
@@ -140,6 +141,11 @@ function Workspace() {
     // A setting changed elsewhere (safe mode in the image dialog) must not leave Settings showing the old one.
     return window.studio.onSettingsChange(() => void refreshSettings())
   }, [])
+
+  // A library from before English folder names had its folders renamed when main opened it: the form follows.
+  useEffect(() => {
+    if (settings?.libraryDir) followEnglishFolders(settings.libraryDir)
+  }, [settings?.libraryDir])
 
   // Without a key nothing works, so send first-time users straight to settings.
   useEffect(() => {

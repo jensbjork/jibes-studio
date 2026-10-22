@@ -67,8 +67,8 @@ export interface CreateImageDialogProps {
   open: boolean
   /**
    * The sequence or storyboard the image is for: it is saved with its stills (a sequence's Storyboard folder, a
-   * storyboard's Bilder folder), gets its aspect ratio by default, and its stills are offered as references.
-   * Without one it goes to Referensbilder.
+   * storyboard's Images folder), gets its aspect ratio by default, and its stills are offered as references.
+   * Without one it goes to Reference images.
    */
   sequenceId?: string
   /** Prefills the prompt (e.g. the board's note, the clip's notes or prompt); @ImageN tokens are taken out. */
@@ -528,14 +528,14 @@ function CreateImageDialogBody({
         ? `Saved among the images of the storyboard${quoted(ownerName)}.`
         : sequenceId
           ? `Saved among the images of ${ownerName ? `“${ownerName}”` : 'the sequence'}.`
-          : 'Saved in “Referensbilder”.'
+          : 'Saved in “Reference images”.'
   const whereItGoes = boardId
     ? 'goes on the board'
     : isStoryboard
       ? "ends up among the storyboard's images"
       : sequenceId
         ? "ends up among the sequence's images"
-        : 'ends up in “Referensbilder”'
+        : 'ends up in “Reference images”'
   const aspectNote =
     model && options.aspectRatio && options.aspectRatio !== ownerAspect && sequenceId && owner
       ? isStoryboard

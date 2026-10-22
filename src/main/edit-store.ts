@@ -42,7 +42,7 @@ export type OriginKind = 'generation' | 'export' | 'import'
 export interface EditRow {
   id: string
   name: string
-  /** Folder name under Redigeringar/. */
+  /** Folder name under Edits/. */
   folder: string | null
   origin_kind: OriginKind
   origin_generation_id: string | null
@@ -111,7 +111,7 @@ export function editsWithCurrent(generationId: string): EditRow[] {
   return conn().prepare('SELECT * FROM edits WHERE current_generation_id = ?').all(generationId) as EditRow[]
 }
 
-/** Folder names in use under Redigeringar/ (compared the way the disk does by the caller). */
+/** Folder names in use under Edits/ (compared the way the disk does by the caller). */
 export function editFolders(): { id: string; folder: string }[] {
   return conn().prepare('SELECT id, folder FROM edits WHERE folder IS NOT NULL').all() as {
     id: string
@@ -260,7 +260,7 @@ export function originOf(edit: EditRow): EditOrigin {
   return { kind: g.source === 'import' ? 'import' : 'generation', generationId: g.id }
 }
 
-// ── Edit media (Ljud/) ───────────────────────────────────────────────────────
+// ── Edit media (Audio/) ───────────────────────────────────────────────────────
 
 export type MediaKind = 'voice' | 'speech' | 'music' | 'effect' | 'audio' | 'bake'
 

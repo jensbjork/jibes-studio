@@ -1,8 +1,8 @@
 // Sequences: ordered segments whose selected takes are cut together into one longer video.
-// Each sequence has a folder in Sekvenser/ named after it: its takes live in Tagningar/ inside it, its stills
+// Each sequence has a folder in Sequences/ named after it: its takes live in Takes/ inside it, its stills
 // (its keyframes) in Storyboard/ and its exports next to those, so the folder is what the user sees of the sequence
 // in Finder. A storyboard (storyboards.ts) is a row of kind 'storyboard' that this service also runs: its
-// transitions are segments, generated, taken, kept in folders (Storyboards/<name>/Övergångar/ and Bilder/) and
+// transitions are segments, generated, taken, kept in folders (Storyboards/<name>/Transitions/ and Images/) and
 // exported here, but the Sequences handlers refuse it.
 
 import { randomUUID } from 'node:crypto'
@@ -939,7 +939,7 @@ export class SequenceService {
   private fileTasks = 0
   /** Sequence name at which renaming the sequence's folder last failed, by sequence id. */
   private readonly folderSyncFailed = new Map<string, string>()
-  /** Song work reading or writing a sequence's Ljud/ right now (holdSongFolder), by sequence id: how many. */
+  /** Song work reading or writing a sequence's Audio/ right now (holdSongFolder), by sequence id: how many. */
   private readonly songHolds = new Map<string, number>()
 
   private sql(): ReturnType<typeof db.getDb> {
@@ -1011,14 +1011,14 @@ export class SequenceService {
     return store.loadSequence(id, { running: run?.running ?? false, error: run?.error })
   }
 
-  /** Creates the sequence together with its folder, Sekvenser/<name>/Tagningar. */
+  /** Creates the sequence together with its folder, Sequences/<name>/Takes. */
   async create(name: string): Promise<Sequence> {
     return this.get(await this.createRow(name))
   }
 
   /**
-   * Writes a new sequence or storyboard row together with its folder (Sekvenser/<name>/Tagningar, or
-   * Storyboards/<name>/Övergångar) and announces it; resolves its id. `inTransaction` runs in the same transaction
+   * Writes a new sequence or storyboard row together with its folder (Sequences/<name>/Takes, or
+   * Storyboards/<name>/Transitions) and announces it; resolves its id. `inTransaction` runs in the same transaction
    * as the insert (a storyboard's first boards and transitions), so nobody ever sees it half made.
    */
   async createRow(
@@ -1129,10 +1129,10 @@ export class SequenceService {
   }
 
   /**
-   * Deletes the sequence. Its takes become ordinary generations and their videos go back to Genereringar/;
+   * Deletes the sequence. Its takes become ordinary generations and their videos go back to Generations/;
    * exports are finished films, so they and the folder holding them stay. Its stills go to the Trash, except
    * those that generations or clips elsewhere still use (the released takes were made from them, say): they
-   * move to Referensbilder/ and stay listed among all stills. Only empty folders are removed.
+   * move to Reference images/ and stay listed among all stills. Only empty folders are removed.
    */
   async delete(id: string): Promise<void> {
     if (!store.getSequenceRow(id)) return
@@ -1160,14 +1160,14 @@ export class SequenceService {
     })
     this.announceGenerations(freed)
     this.deps.notify(id)
-    // Stills that other sequences' clips use moved to Referensbilder, and those clips' paths with them.
+    // Stills that other sequences' clips use moved to Reference images, and those clips' paths with them.
     if (moved) this.announceRewrites()
     // Its stills are gone, or listed without a sequence now.
     this.deps.stillsChanged?.(undefined)
   }
 
   /**
-   * Stored paths were rewritten below a folder other rows may point into (a still kept in Referensbilder, a sequence
+   * Stored paths were rewritten below a folder other rows may point into (a still kept in Reference images, a sequence
    * folder renamed): every sequence refetches, since a clip editor open on another sequence would otherwise save
    * the old path back with its next edit; generations and stills whose paths changed are sent again too.
    */
@@ -1179,7 +1179,7 @@ export class SequenceService {
 
   /**
    * The stills of a deleted sequence: one that a generation, a clip or another still still uses moves to
-   * Referensbilder/<today>/ (every row using it follows); the rest go to the Trash with their rows (deleted outright
+   * Reference images/<today>/ (every row using it follows); the rest go to the Trash with their rows (deleted outright
    * on a volume without one, as stills' own delete does). Best effort per still: what can't be moved stays where
    * it is, with its row (so "Tidy up" finds it). Resolves whether any still was moved (stored paths rewritten).
    * Only in withFiles.
@@ -1224,7 +1224,7 @@ export class SequenceService {
   }
 
   /**
-   * Moves a still that is still used into Referensbilder/<today>/ and points every row at the new place. Resolves
+   * Moves a still that is still used into Reference images/<today>/ and points every row at the new place. Resolves
    * whether it moved.
    */
   private async keepStill(path: string): Promise<boolean> {
@@ -1467,7 +1467,7 @@ export class SequenceService {
    * Makes a finished generation a take of the clip, selected when `select` is set (with the trims a newly selected
    * take keeps, see store.seamTrims): an own film imported into the clip ("Add take from file…"), a version
    * sent from the Editor ("As a new take of clip N"). A generation that belongs to no clip is adopted (its file moves
-   * into the sequence's Tagningar, unless it has a home of its own: an import stays in Egna klipp, a version in its
+   * into the sequence's Takes, unless it has a home of its own: an import stays in Own clips, a version in its
    * edit's folder). One that is already another clip's take is copied, with a file of its own (an APFS clone), as
    * "Convert to sequence" copies a storyboard's takes, so either clip can drop or delete it without the other losing
    * it. One that is this clip's take already is only selected. Sequence clips only: a storyboard's transitions take
@@ -1511,7 +1511,7 @@ export class SequenceService {
   /**
    * Takes a take off a clip without deleting it: the take list's "Delete" on a film the Editor keeps (a version sent
    * as a take, an edit's original). The clip forgets it (as its take and as its selection); the row and its file stay
-   * where the Editor has them (the file of one kept in its own home never moved into Tagningar, see adopt).
+   * where the Editor has them (the file of one kept in its own home never moved into Takes, see adopt).
    */
   async releaseTake(segmentId: string, generationId: string, caller: Caller = {}): Promise<Sequence> {
     // A sequence clip or a storyboard transition (whose take list offers the same "Remove").
@@ -1706,7 +1706,7 @@ export class SequenceService {
     return this.changed(row.sequence_id)
   }
 
-  /** Deletes the segment; its takes become ordinary generations and their videos go back to Genereringar/. */
+  /** Deletes the segment; its takes become ordinary generations and their videos go back to Generations/. */
   /**
    * `onlyIfUntouched`: left alone (the sequence is returned as it is) unless nothing has been put in the clip – checked
    * in the file queue, right before the delete, so a clip filled while an import ran (the empty Klipp 1 it replaces)
@@ -1758,7 +1758,7 @@ export class SequenceService {
   // ── Songs (main/song.ts keeps the song's files, analysis and lyrics; the rules of its clips are here) ──────────
 
   /**
-   * Song work (main/song.ts) reads or writes the sequence's Ljud/ folder by path until the returned function is
+   * Song work (main/song.ts) reads or writes the sequence's Audio/ folder by path until the returned function is
    * called: the folder isn't renamed meanwhile (folderBusy), and a rename put off is tried again after.
    */
   holdSongFolder(sequenceId: string): () => void {
@@ -1775,7 +1775,7 @@ export class SequenceService {
   }
 
   /**
-   * Copies an audio file (or, with `move`, moves it) into the sequence's Ljud/ folder under `name`, or a free name
+   * Copies an audio file (or, with `move`, moves it) into the sequence's Audio/ folder under `name`, or a free name
    * like it ("Song (2).wav"), giving the sequence a folder first if it has none; resolves the new path. In the file
    * queue, so the folder isn't being renamed meanwhile.
    */
@@ -1786,7 +1786,7 @@ export class SequenceService {
       if (!row || !folder) throw new Error('The sequence no longer exists.')
       const dir = ensureLibraryDir(store.songFolderPath(folder))
       const ext = extname(name).toLowerCase()
-      const base = safeName(basename(name, extname(name)), { fallback: 'Sång' })
+      const base = safeName(basename(name, extname(name)), { fallback: 'Song' })
       const pick = (): string => join(dir, store.availableFileName(dir, base, ext))
       return opts.move ? moveToFreeName(from, pick) : this.copyToFreeName(from, pick)
     })
@@ -1868,7 +1868,7 @@ export class SequenceService {
 
   /**
    * Takes the song off the sequence: its clips lose their places (their takes keep the ones they were made for) and
-   * keep everything else, and the song's files stay where they are, in the sequence's Ljud/ folder (they are the
+   * keep everything else, and the song's files stay where they are, in the sequence's Audio/ folder (they are the
    * user's).
    */
   removeSong(sequenceId: string, caller: Caller = {}): Sequence {
@@ -2447,7 +2447,7 @@ export class SequenceService {
   }
 
   /**
-   * Pictures and audio clips from outside the library were copied into Referensbilder when the take was
+   * Pictures and audio clips from outside the library were copied into Reference images when the take was
    * submitted. The segment uses those copies from now on (each clip keeping the window the segment chose), so
    * it keeps working when the originals are moved or deleted.
    * Best effort: the take is already paid for, so nothing here may fail the submit.
@@ -2656,7 +2656,7 @@ export class SequenceService {
 
   /**
    * Takes whose segments were just deleted (a storyboard's transitions between boards no longer adjacent): their
-   * videos go back to Genereringar/ like the takes of a deleted clip, and the feed hears about them. Never rejects.
+   * videos go back to Generations/ like the takes of a deleted clip, and the feed hears about them. Never rejects.
    */
   async freeTakes(ids: readonly string[]): Promise<void> {
     if (!ids.length) return
@@ -2698,7 +2698,7 @@ export class SequenceService {
    * count it twice). It keeps what the generation is (source, title, recipe; an import's untouched original, which
    * the two rows then share) but not that it belongs to an edit (editId, parentId): it would otherwise show up as
    * another version in the Editor. Its file goes where the home rule puts it (jobs.videoLocation): an import's copy
-   * next to the import in Egna klipp, any other into the sequence's Tagningar. `inTransaction` runs with the insert.
+   * next to the import in Own clips, any other into the sequence's Takes. `inTransaction` runs with the insert.
    * Only inside withFiles.
    */
   private async copyGeneration(
@@ -2801,7 +2801,7 @@ export class SequenceService {
   }
 
   /**
-   * Moves a take's video into its sequence's Tagningar/ (a transition's into its storyboard's Övergångar/), giving a
+   * Moves a take's video into its sequence's Takes/ (a transition's into its storyboard's Transitions/), giving a
    * sequence from before folders one. A file with a home of its own (an import, anything of an edit; see
    * store.keepsOwnHome) stays where it is: it is a take all the same.
    */
@@ -2817,7 +2817,7 @@ export class SequenceService {
   }
 
   /**
-   * Moves a video that lies in Sekvenser/ (or Storyboards/) back to Genereringar/<day>/, or, for a file with a home
+   * Moves a video that lies in Sequences/ (or Storyboards/) back to Generations/<day>/, or, for a file with a home
    * of its own (store.keepsOwnHome), to that home (jobs.videoLocation). If the folder it left belongs to no
    * sequence (storyboard) any more (deleted meanwhile), that folder is removed once empty.
    */
@@ -2834,7 +2834,7 @@ export class SequenceService {
     return moved
   }
 
-  /** Moves the videos of takes that are about to be freed (segment or sequence deleted) out of Sekvenser/. */
+  /** Moves the videos of takes that are about to be freed (segment or sequence deleted) out of Sequences/. */
   private async releaseTakes(ids: string[]): Promise<void> {
     for (const id of ids) {
       try {
@@ -2858,8 +2858,8 @@ export class SequenceService {
   }
 
   /**
-   * Where a video has to go when it isn't where its take status says: 'out' of Sekvenser/ for a generation
-   * that is no take, 'in' to its sequence's Tagningar/ for a take. Undefined when it is fine where it is
+   * Where a video has to go when it isn't where its take status says: 'out' of Sequences/ for a generation
+   * that is no take, 'in' to its sequence's Takes/ for a take. Undefined when it is fine where it is
    * (a sequence from before folders gets one from "Tidy up" or its next rename, not from here).
    */
   private misplaced(g: Pick<Generation, 'filePath' | 'segmentId' | 'source' | 'editId'>): 'in' | 'out' | undefined {
@@ -2909,7 +2909,7 @@ export class SequenceService {
 
   /**
    * Something is about to write into or read from the folder by path: a take being submitted or rendered
-   * (its video is placed into Tagningar/ by the folder name looked up when it is saved), or an export
+   * (its video is placed into Takes/ by the folder name looked up when it is saved), or an export
    * (ffmpeg opens the takes by path).
    */
   private folderBusy(sequenceId: string): boolean {

@@ -1475,7 +1475,7 @@ export class EditOps {
 
   // ── Picture operations ───────────────────────────────────────────────────
 
-  /** A frame of the base (free, cached in .studio/bildrutor). */
+  /** A frame of the base (free, cached in .studio/frames). */
   private frame(
     base: db.StoredGeneration & { filePath: string },
     kind: 'before' | 'after' | 'last',
@@ -1941,7 +1941,7 @@ export class EditOps {
     return this.renders(async () => {
       const ctrl = new AbortController()
       this.controllers.add(ctrl)
-      const work = join(tmpDir(), `redigering-${randomUUID()}`)
+      const work = join(tmpDir(), `edit-${randomUUID()}`)
       try {
         await libraryOperationSettled()
         await mkdir(work, { recursive: true })
@@ -2001,7 +2001,7 @@ export class EditOps {
 
   /**
    * The base's mix, ready to build on: when one of its sources is gone (a library clip removed, an edit deleted),
-   * the base's own sound is copied into Ljud/ as a bed and used instead, so the edit keeps working.
+   * the base's own sound is copied into Audio/ as a bed and used instead, so the edit keeps working.
    */
   private async usableMix(
     edit: store.EditRow,
@@ -2025,7 +2025,7 @@ export class EditOps {
     }
   }
 
-  /** Copies (or moves, from scratch) a file into the edit's Ljud/ and records it as edit media. */
+  /** Copies (or moves, from scratch) a file into the edit's Audio/ and records it as edit media. */
   async addMediaFile(
     edit: store.EditRow,
     file: string,
@@ -2044,7 +2044,7 @@ export class EditOps {
     await libraryOperationSettled()
     const dir = editDir(fresh.folder, 'audio')
     const ext = extname(file).toLowerCase() || '.wav'
-    const base = safeName(fileLabel(m.label), { max: 80, fallback: 'Ljud' })
+    const base = safeName(fileLabel(m.label), { max: 80, fallback: 'Audio' })
     let path: string
     if (move) path = await placeFile(file, dir, base, ext)
     else {
@@ -2361,7 +2361,7 @@ export class EditOps {
     return mixes.defaultMixFromMedia(media.id)
   }
 
-  /** The edit media an add-audio op plays: one of the edit's own, or a library clip copied into Ljud/ (free). */
+  /** The edit media an add-audio op plays: one of the edit's own, or a library clip copied into Audio/ (free). */
   private async mediaForSource(
     edit: store.EditRow,
     source: { mediaId: string } | { assetAudioId: string }

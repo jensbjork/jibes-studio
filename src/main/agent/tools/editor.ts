@@ -705,7 +705,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     'rename_edit',
     {
       title: 'Rename edit',
-      description: "Renames an edit; its folder under Redigeringar and its versions' titles follow.",
+      description: "Renames an edit; its folder under Edits and its versions' titles follow.",
       input: { edit_id: editIdInput, name: z.string().min(1).max(120) },
       annotations: { ...WRITE, idempotentHint: true },
       summary: ({ name }) => `renamed an edit to ${q(name)}`

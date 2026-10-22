@@ -31,7 +31,7 @@ import { plainImagePrompt } from './imageModels'
 export interface FramePickerDialogProps {
   open: boolean
   /**
-   * The sequence or storyboard the frame is saved with (it becomes one of its stills); none: Referensbilder.
+   * The sequence or storyboard the frame is saved with (it becomes one of its stills); none: Reference images.
    * Without `anyGeneration` it is also where the takes come from (a sequence's clips).
    */
   sequenceId?: string

@@ -1,3 +1,4 @@
+import { TOP_FOLDER_NAMES } from '@shared/folder-names'
 import { referenceVideosOf } from '@shared/models'
 import type { Asset, AssetKind, GenerationParams, LibraryMode } from '@shared/types'
 import { PATH_SEPARATOR, isWindows } from './platform'
@@ -54,7 +55,7 @@ export function isAbsolutePath(path: string): boolean {
   return isWindows ? /^(?:[A-Za-z]:[\\/]|\\\\)/.test(path) : path.startsWith('/')
 }
 
-/** A file's name, the last part of its path ("/…/Genereringar/a.mp4" → "a.mp4"). */
+/** A file's name, the last part of its path ("/…/Generations/a.mp4" → "a.mp4"). */
 export function fileName(path: string): string {
   return path.split(PATH_SEPARATOR).pop() ?? path
 }
@@ -156,7 +157,7 @@ export function followAssetImages<T extends Partial<GenerationParams>>(
 }
 
 /**
- * Pictures, audio clips and reference videos from outside the library are copied into Referensbilder when a
+ * Pictures, audio clips and reference videos from outside the library are copied into Reference images when a
  * generation is submitted (`sent` is what was submitted, `stored` what the generation recorded). Returns `current`
  * using those copies instead of the originals, so the form keeps working when the originals are moved or deleted;
  * undefined when nothing was copied. Audio clips and videos keep their windows.
@@ -190,7 +191,7 @@ export function withImportedCopies<T extends Partial<GenerationParams>>(
       a?.path && copies.has(a.path) ? { ...a, path: copies.get(a.path)! } : a
     )
   }
-  // Reference videos from outside the library are copied into "Referensbilder" too; each keeps its window.
+  // Reference videos from outside the library are copied into "Reference images" too; each keeps its window.
   const videos = referenceVideosOf(current)
   if (videos.some((v) => copies.has(v.path))) {
     changed = true
@@ -225,25 +226,30 @@ function legacyImageId(path: string, m: SwitchMemory): string | undefined {
   return LEGACY_CHARACTER_IMAGE.exec(path.slice(trimSlash(m.oldRoot).length + 1))?.[1]
 }
 
-/** The library's own folders in the base folder: only these move with it (main's paths.FOLDERS). */
+/**
+ * The library's own folders in the base folder: only these move with it (main's paths.FOLDERS), and – in a library
+ * from before English folder names that has not been opened since – their Swedish names (shared/folder-names.ts).
+ */
 const LIBRARY_FOLDERS = new Set([
-  'Karaktärer',
-  'Miljöer',
-  'Produkter',
-  'Kläder',
-  'Poser',
-  'Referensbilder',
-  'Genereringar',
-  'Sekvenser',
+  'Characters',
+  'Environments',
+  'Products',
+  'Outfits',
+  'Poses',
+  'Directors',
+  'Reference images',
+  'Generations',
+  'Sequences',
   'Storyboards',
-  'Egna klipp',
-  'Redigeringar',
-  '.studio'
+  'Own clips',
+  'Edits',
+  '.studio',
+  ...Object.keys(TOP_FOLDER_NAMES)
 ])
 /** An earlier Studio version's folders, reorganized into the ones above when such a library is adopted. */
 const LEGACY_FOLDERS = new Set(['characters', 'generations', 'thumbs', 'exports', 'frames'])
 
-/** The top-level folder of path inside root ("Karaktärer" for <root>/Karaktärer/Anna/a.jpg). */
+/** The top-level folder of path inside root ("Characters" for <root>/Characters/Anna/a.jpg). */
 function topFolder(path: string, root: string): string {
   return path.slice(trimSlash(root).length + 1).split(PATH_SEPARATOR)[0].normalize('NFC')
 }
@@ -307,7 +313,7 @@ export function rememberAfterSwitch(
           return path ? [{ ...a, path }] : []
         })
       }
-      // Reference videos (takes, own clips, films, copies in "Referensbilder") likewise, each with its window.
+      // Reference videos (takes, own clips, films, copies in "Reference images") likewise, each with its window.
       if (snapshot.referenceVideos) {
         next.referenceVideos = referenceVideosOf(snapshot).flatMap((v) => {
           const path = remapPath(v.path, m)

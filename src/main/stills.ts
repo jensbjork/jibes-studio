@@ -1,9 +1,9 @@
 // Stills: the pictures storyboards and keyframes are built from — images generated with Venice's image models
 // ("Skapa bild…"), pictures the user dropped onto a board or a slot, and frames saved from takes. Each still is a row
-// in `stills` and a file of its own: in its sequence's folder (Sekvenser/<sequence>/Storyboard/), its storyboard's
-// (Storyboards/<storyboard>/Bilder/) or, without either, in Referensbilder/<day>/. Clips and boards use a still by
+// in `stills` and a file of its own: in its sequence's folder (Sequences/<sequence>/Storyboard/), its storyboard's
+// (Storyboards/<storyboard>/Images/) or, without either, in Reference images/<day>/. Clips and boards use a still by
 // its path, like any other picture, so a still that clips, boards or generations still use is never trashed:
-// deleting it moves the file to Referensbilder and the rows that use it follow.
+// deleting it moves the file to Reference images and the rows that use it follow.
 
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, createReadStream, existsSync } from 'node:fs'
@@ -97,7 +97,7 @@ interface StoredStillParams {
 }
 
 let notifyChange: (sequenceId?: string) => void = () => {}
-/** Files the rows of other tables point at moved (a used still kept in Referensbilder when deleted). */
+/** Files the rows of other tables point at moved (a used still kept in Reference images when deleted). */
 let notifyFilesMoved: () => void = () => {}
 
 // ── Busy ─────────────────────────────────────────────────────────────────────
@@ -412,15 +412,15 @@ type RecordStill = (path: string, sequenceId: string | undefined) => void
 
 /**
  * Moves a finished picture from the scratch folder to where its still belongs, and records it in the same
- * tick as the last look at where that is: Sekvenser/<sequence>/Storyboard/ for a sequence's still,
- * Storyboards/<storyboard>/Bilder/ for a storyboard's.
+ * tick as the last look at where that is: Sequences/<sequence>/Storyboard/ for a sequence's still,
+ * Storyboards/<storyboard>/Images/ for a storyboard's.
  *
  * A sequence's folder can be renamed at any moment (its name changed): sequences.ts moves the folder on disk
  * and then rewrites every stored path below it in one transaction. So the picture is linked into the folder
  * without ever creating that folder (a folder renamed away just now is not brought back under its old name), and
  * the row is written once the file is seen where the database says the folder is: before the rewrite (which
  * then rewrites the row too) or after it (the file moved with the folder). Without a sequence, for a sequence
- * that has no folder yet, or one deleted meanwhile, the picture goes to Referensbilder/<day>/.
+ * that has no folder yet, or one deleted meanwhile, the picture goes to Reference images/<day>/.
  */
 async function placeStill(
   tmp: string,
@@ -485,7 +485,7 @@ async function settle(
   for (let step = 0; step < SETTLE_STEPS; step++) {
     const now = sequenceFolder(sequenceId)
     if (now === undefined) {
-      // The sequence was deleted meanwhile: the picture becomes a still of no sequence, in Referensbilder.
+      // The sequence was deleted meanwhile: the picture becomes a still of no sequence, in Reference images.
       if (!existsSync(dest)) break
       const path = await placeFile(dest, referencesDayDir(new Date()), base, ext)
       record(path, undefined)
@@ -509,7 +509,7 @@ async function settle(
 
 /**
  * Places a finished picture for a new still (see placeStill) and records it. A picture that can't go to its
- * sequence's folder is saved in Referensbilder instead (it may have been paid for), and only when even that
+ * sequence's folder is saved in Reference images instead (it may have been paid for), and only when even that
  * fails does this reject.
  */
 async function saveNewStill(
@@ -526,7 +526,7 @@ async function saveNewStill(
     await placeStill(tmp, fields.sequenceId, base, ext, record)
   } catch (err) {
     if (still || !fields.sequenceId || !existsSync(tmp)) throw err
-    console.warn('Could not place a still in its sequence folder; keeping it in Referensbilder:', err)
+    console.warn('Could not place a still in its sequence folder; keeping it in Reference images:', err)
     const owner = fields.sequenceId
     await placeStill(tmp, undefined, base, ext, (path) =>
       record(path, sequenceFolder(owner) === undefined ? undefined : owner)
@@ -554,7 +554,7 @@ async function trashFile(path: string): Promise<void> {
 
 /**
  * A deleted still's file that generations, clips or other stills still use (as a start, end or reference
- * image) is kept: it moves to Referensbilder/<today>/ (unless it is in Referensbilder already) and every row
+ * image) is kept: it moves to Reference images/<today>/ (unless it is in Reference images already) and every row
  * that uses it follows, so "Use again" and the clips keep their picture. Call once the still's row is gone,
  * so only other rows count. 'moved' when the rows were rewritten, 'kept' when it stays where it is, false
  * when nothing uses it.
@@ -587,7 +587,7 @@ async function keepUsedFile(path: string): Promise<'moved' | 'kept' | false> {
 }
 
 /**
- * Removes a sequence's Storyboard folder, a storyboard's Bilder folder (or a Referensbilder day) that a delete has
+ * Removes a sequence's Storyboard folder, a storyboard's Images folder (or a Reference images day) that a delete has
  * just emptied.
  */
 async function removeFolderIfEmptied(dir: string): Promise<void> {
@@ -814,9 +814,9 @@ export async function quoteStill(input: unknown): Promise<number | undefined> {
 
 /**
  * Generates a still with Venice (paid; the window confirms with the price, an agent's request needs the user's
- * approval) and saves it as a still of its sequence: Sekvenser/<sequence>/Storyboard/<HH.MM> <prompt>.png (a
- * storyboard's in Storyboards/<storyboard>/Bilder/), or Referensbilder/<day>/ without one. Reference pictures from
- * outside the library are copied into Referensbilder first, so "Create again" keeps working when the originals go.
+ * approval) and saves it as a still of its sequence: Sequences/<sequence>/Storyboard/<HH.MM> <prompt>.png (a
+ * storyboard's in Storyboards/<storyboard>/Images/), or Reference images/<day>/ without one. Reference pictures from
+ * outside the library are copied into Reference images first, so "Create again" keeps working when the originals go.
  */
 export async function generateStill(input: unknown, opts?: unknown): Promise<Still> {
   // readStillParams keeps the fields a still is made with only; the dialog's key and the picture's place are read here.
@@ -1092,7 +1092,7 @@ async function findUploadDuplicate(src: string, sequenceId: string | undefined):
 
 /**
  * Copies a picture file into the library as a still ('upload') of the sequence or storyboard — the 'file' source of
- * a keyframe slot or a board, a picture dropped onto one — under its own name in its Storyboard (Bilder) folder.
+ * a keyframe slot or a board, a picture dropped onto one — under its own name in its Storyboard (Images) folder.
  * A still's own file gives that still, and the same picture dropped again into the same sequence gives the
  * still it became the first time.
  */
@@ -1138,7 +1138,7 @@ export async function importStillFile(src: unknown, sequenceId?: unknown): Promi
 
 /**
  * Deletes the still. Its file goes to the Trash, unless clips, generations or other stills still use it: then it
- * is kept in Referensbilder and those rows follow it there.
+ * is kept in Reference images and those rows follow it there.
  */
 export async function deleteStill(id: unknown): Promise<void> {
   const stillId = safeId(id)
@@ -1162,7 +1162,7 @@ export async function deleteStill(id: unknown): Promise<void> {
 /**
  * The image and still handlers ('images:*', 'stills:*'). `changed` fires with the
  * sequence id (undefined for a still without one) after every still that is added or deleted; `filesMoved`
- * after a deleted still's file was kept in Referensbilder, which rewrote the paths clips and generations use.
+ * after a deleted still's file was kept in Reference images, which rewrote the paths clips and generations use.
  * 'stills:get' and 'stills:import' aren't part of StudioApi; agents use them.
  */
 export function registerStillsIpc(
@@ -1182,7 +1182,7 @@ export function registerStillsIpc(
     saveFrameAsStill(generationId, time, sequenceId)
   )
   // Not part of StudioApi: an agent's picture (an upload, or a file the library records) made a still of a sequence or
-  // storyboard, or of none (Referensbilder). The window's drops go through a slot or a board instead.
+  // storyboard, or of none (Reference images). The window's drops go through a slot or a board instead.
   ipcMain.handle('stills:import', (e, path: unknown, sequenceId?: unknown) => {
     assertAgentFiles(e, [path])
     return importStillFile(path, sequenceId)

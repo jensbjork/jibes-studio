@@ -86,7 +86,7 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 - **Your own clips** (*Own clips*): bring your own video files into the library — *Import own clips…* in
   Media's *Videos*, adding a clip or a take from a file in a sequence, or a drop on a sequence's timeline — and use
   them like any clip: AI clips continue from their last frame, end on their first, or redo a clip between them.
-  Files are copied into `Egna klipp/<day>/` as an APFS clone where the disk allows (no extra space); a phone or camera film that can't be used as it is (HDR, 10-bit, 4K, a variable frame
+  Files are copied into `Own clips/<day>/` as an APFS clone where the disk allows (no extra space); a phone or camera film that can't be used as it is (HDR, 10-bit, 4K, a variable frame
   rate, rotation, ProRes, spatial audio, non-square pixels, sound and picture starting apart) gets an H.264 SDR
   working copy next to the untouched original. A film already imported is reused. Agents can import video files
   they upload the same way.
@@ -283,51 +283,57 @@ encrypted with Electron `safeStorage` (macOS Keychain).
 or moved under **Settings → Library**, and **Tidy up** puts
 every file the library knows about back where it belongs.
 
+The folders have English names. A library made by an earlier version, with Swedish folder names (`Karaktärer`,
+`Sekvenser` …), is renamed the first time this version opens it: the folders are only renamed in place – nothing is
+copied or removed – and everything Studio remembers about the files follows. If a folder of your own already has one
+of the English names, Studio says which and changes nothing until you have moved it. An earlier version can't open the
+library afterwards.
+
 ```
 <base folder>/
-├── Karaktärer/<Name>/                      Characters: reference photos and voice clips (original file names)
-│                                           + Beskrivning.txt
-├── Miljöer/<Name>/                         Environments: photos of the place, soundscape clips + Beskrivning.txt
-├── Produkter/<Name>/                       Products: packshots of the item + Beskrivning.txt
-├── Kläder/<Name>/                          Outfits: photos of the garments + Beskrivning.txt
-├── Poser/<Name>/                           Poses: photos or sketches of the positions + Beskrivning.txt
-├── Regissörer/<Name>/                      Your own directors: style frames, style videos + Beskrivning.txt
-├── Referensbilder/<YYYY-MM-DD>/            Start, end and reference images and reference audio picked from
+├── Characters/<Name>/                      Characters: reference photos and voice clips (original file names)
+│                                           + Description.txt
+├── Environments/<Name>/                    Environments: photos of the place, soundscape clips + Description.txt
+├── Products/<Name>/                        Products: packshots of the item + Description.txt
+├── Outfits/<Name>/                         Outfits: photos of the garments + Description.txt
+├── Poses/<Name>/                           Poses: photos or sketches of the positions + Description.txt
+├── Directors/<Name>/                       Your own directors: style frames, style videos + Description.txt
+├── Reference images/<YYYY-MM-DD>/          Start, end and reference images and reference audio picked from
 │                                           outside the library, copied here when a generation is submitted;
 │                                           stills that belong to no sequence (any more)
-├── Genereringar/<YYYY-MM-DD>/<HH.MM> <prompt>.mp4
+├── Generations/<YYYY-MM-DD>/<HH.MM> <prompt>.mp4
 │                                           Generated videos that don't belong to a sequence
-├── Sekvenser/<Sequence name>/
-│   ├── Tagningar/<YYYY-MM-DD HH.MM> <prompt>.mp4
+├── Sequences/<Sequence name>/
+│                                           ├── Takes/<YYYY-MM-DD HH.MM> <prompt>.mp4
 │   │                                       Takes of the sequence's clips
 │   ├── Storyboard/                         Stills used as the clips' start and end images (keyframes):
 │   │                                       pictures made for a clip, frames saved from takes
-│   └── <Sequence name> <YYYY-MM-DD HH.MM>.mp4
+│                                           └── <Sequence name> <YYYY-MM-DD HH.MM>.mp4
 │                                           Exported films
 ├── Storyboards/<Storyboard name>/
-│   ├── Övergångar/<YYYY-MM-DD HH.MM> <prompt>.mp4
+│                                           ├── Transitions/<YYYY-MM-DD HH.MM> <prompt>.mp4
 │   │                                       Takes of the transitions between the boards
-│   ├── Bilder/                             The boards' pictures: made with Create image (<HH.MM> <prompt>.png),
+│   ├── Images/                             The boards' pictures: made with Create image (<HH.MM> <prompt>.png),
 │   │                                       uploaded or dropped files, frames saved from clips
-│   └── <Storyboard name> <YYYY-MM-DD HH.MM>.mp4
+│                                           └── <Storyboard name> <YYYY-MM-DD HH.MM>.mp4
 │                                           Exported films
-├── Egna klipp/<YYYY-MM-DD>/<file name>     Your own imported films (an APFS clone of the file where possible);
-│                                           "<name> (arbetskopia).mp4" next to the original when a working copy
+├── Own clips/<YYYY-MM-DD>/<file name>      Your own imported films (an APFS clone of the file where possible);
+│                                           "<name> (working copy).mp4" next to the original when a working copy
 │                                           was needed
-├── Redigeringar/<Edit name>/               One folder per edit in the Editor:
+├── Edits/<Edit name>/                      One folder per edit in the Editor:
 │   ├── <Edit name> v2 – <change>.mp4       its versions (v1 is the film it started from, used where it is;
 │   │                                       an exported film is copied in as v1)
-│   ├── Tagningar/                          AI takes made for picture operations
-│   ├── Ljud/                               spoken lines, converted voices, music, effects and added sound
-│   └── Underlag/                           the frames and short proxies that were sent to Venice
+│   ├── Takes/                              AI takes made for picture operations
+│   ├── Audio/                              spoken lines, converted voices, music, effects and added sound
+│   └── Inputs/                             the frames and short proxies that were sent to Venice
 └── .studio/                                Hidden app data:
     ├── studio.db                           the SQLite database
     ├── requested-by.json                   which agent asked for each paid item you approved (Spending)
-    ├── miniatyrer/                         poster frames (thumbnails)
-    ├── bildrutor/                          extracted frames used to continue clips or end on the next one
-    ├── stammar/                            separated voice and background stems (a cache, at most 4 GB)
-    ├── redigering/                         paid edit jobs' downloaded parts while they are put together
-    ├── tidslinje/                          the Editor's filmstrips and waveforms (a cache)
+    ├── thumbnails/                         poster frames (thumbnails)
+    ├── frames/                             extracted frames used to continue clips or end on the next one
+    ├── stems/                              separated voice and background stems (a cache, at most 4 GB)
+    ├── edit-jobs/                          paid edit jobs' downloaded parts while they are put together
+    ├── timeline/                           the Editor's filmstrips and waveforms (a cache)
     └── tmp/                                scratch files, cleared when the library is opened (agents' uploads
                                             wait in tmp/agent-uploads/ until a tool copies them in)
 ```
@@ -663,7 +669,7 @@ and it lives in its own view, **Storyboards** — storyboards never show up in S
   board) to make one with **Create image…**, to take any photo of a character, place, product, outfit or pose from
   the library (used where it is), to reuse a picture made or added for this storyboard before (one can also be opened
   full size, where it can be used or deleted), to upload one (or drop a file on the board; it is copied into the
-  storyboard's `Bilder/`) or to take a frame of a clip (scrub any finished clip in the library and save the frame;
+  storyboard's `Images/`) or to take a frame of a clip (scrub any finished clip in the library and save the frame;
   needs ffmpeg). A picture whose shape differs from the storyboard's format is marked as another format: the clips
   to and from it get the picture's shape. A board may stay empty while you plan.
 - **Boards are reordered** by dragging them or with ⌥← / ⌥→, added with **+** before, between or after them (several
@@ -697,7 +703,7 @@ one is the base picture the model edits) — with model, format (the storyboard'
 to choose, the price on the button and a button to try again. A switch to use the previous board's picture as a
 reference (on by default when the previous board has a picture) puts that picture first among the references, so place, light and
 people carry over from one milestone to the next. The finished picture goes onto the board, and every result is
-kept in the storyboard's `Bilder/` folder. **Safe mode for images** (Settings → Generation → Images, on by
+kept in the storyboard's `Images/` folder. **Safe mode for images** (Settings → Generation → Images, on by
 default, also switchable in the dialog) lets Venice blur adult content.
 
 ## Connecting your own agent

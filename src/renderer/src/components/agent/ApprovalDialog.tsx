@@ -1295,7 +1295,7 @@ function MadeStill({ stillId, sequenceId, inStoryboard }: { stillId: string; seq
           ? inStoryboard
             ? 'The image is saved among the storyboard’s images.'
             : 'The image is saved among the sequence’s images.'
-          : 'The image is saved in “Referensbilder”.'}
+          : 'The image is saved in “Reference images”.'}
       </p>
     )
   }
@@ -1371,7 +1371,7 @@ function ImageSummary({
 }: {
   image: ApprovalImageRequest
   sequenceName?: string
-  /** The picture is saved with a sequence or storyboard (else among the stills of none, in Referensbilder). */
+  /** The picture is saved with a sequence or storyboard (else among the stills of none, in Reference images). */
   hasSequence: boolean
   /** It is saved with a storyboard. */
   inStoryboard: boolean
@@ -1445,7 +1445,7 @@ function ImageSummary({
                 ? inStoryboard
                   ? `The image is saved among the storyboard’s images${where}.`
                   : `The image is saved among the sequence’s images${where}.`
-                : 'The image belongs to no sequence or storyboard and is saved in “Referensbilder”, among all images.',
+                : 'The image belongs to no sequence or storyboard and is saved in “Reference images”, among all images.',
           safeMode === undefined
             ? undefined
             : safeMode

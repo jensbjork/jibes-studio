@@ -388,7 +388,7 @@ export function stableJson(value: unknown): string {
 /**
  * A take's list as the clip's: the pictures (or clips) the take had that the clip no longer has by that path are
  * paired, in order, with the clip's own that the take didn't have – an outside file the take sent as its copy in
- * "Referensbilder", a picture swapped since – so their tokens keep their place as before. The rest are matched by
+ * "Reference images", a picture swapped since – so their tokens keep their place as before. The rest are matched by
  * path; one left over has left the clip.
  */
 function takeListAsClips(take: readonly string[], clip: readonly string[]): string[] {

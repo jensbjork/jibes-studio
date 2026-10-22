@@ -165,7 +165,7 @@ function videoMime(path: string): string {
 
 /**
  * A video file as a data URL, as is: the caller has made it small enough (a proxy or a stand-in). Only files in
- * the library (an edit's Underlag/, a stand-in in .studio/tmp, a copy a submit made in Referensbilder) are ever
+ * the library (an edit's Inputs/, a stand-in in .studio/tmp, a copy a submit made in Reference images) are ever
  * read, so params that name some other file on disk can't send it anywhere.
  */
 async function videoToDataUrl(path: string): Promise<string> {

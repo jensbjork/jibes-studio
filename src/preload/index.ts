@@ -187,7 +187,7 @@ const api: StudioApi = {
   onAgentCommand: (cb) => on<AgentCommand>('agent:command', cb),
   replyAgentCommand: (id, reply) => ipcRenderer.send('agent:reply', id, reply),
 
-  // Own clips (Egna klipp)
+  // Own clips
   pickVideos: (multiple) => ipcRenderer.invoke('file:pickVideos', multiple),
   inspectVideoFiles: (paths) => ipcRenderer.invoke('imports:inspect', paths),
   importVideoFiles: (paths, target) => ipcRenderer.invoke('imports:import', paths, target),

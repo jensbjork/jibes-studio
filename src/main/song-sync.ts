@@ -246,7 +246,7 @@ let queue: Promise<unknown> = Promise.resolve()
  */
 function measure(deps: Deps, generationId: string): Promise<string | undefined> {
   const run = queue.then(async () => {
-    // The take's file may be on its way into the sequence's Tagningar.
+    // The take's file may be on its way into the sequence's Takes.
     await deps.sequences.whenFilesSettled()
     const take = db.getGeneration(generationId)
     const row = take?.segmentId ? store.getSegmentRow(take.segmentId) : undefined

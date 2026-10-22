@@ -1,5 +1,5 @@
 // The sound of an edit's versions as layers, not mixdowns. A version records how its sound was built (AudioMix in
-// its recipe): a bed (v1's own sound or a rendered "bake" in Ljud/, optionally split into a voice and a background
+// its recipe): a bed (v1's own sound or a rendered "bake" in Audio/, optionally split into a voice and a background
 // stem), gain envelopes on each, and layers of edit media (new lines, converted voices, music, effects, added
 // files) placed on the film's time line. Every audio operation copies the base's mix, changes it and renders it
 // again from the sources, so a later volume change or a removed music layer never stacks on an earlier mixdown and
@@ -20,7 +20,7 @@ import { separateStems } from './voice-separation'
 export const GAIN_FADE = 0.02
 /** Lowering the original sound where the voice is replaced: the original under a replaced voice. */
 export const DUCK_DB = -18
-/** Stem cache size (.studio/stammar): the least recently used stems go first above it. */
+/** Stem cache size (.studio/stems): the least recently used stems go first above it. */
 export const STEM_CACHE_BYTES = 4 * 1024 ** 3
 
 export const MISSING_SOURCE_NOTE = "The audio layers could not be rebuilt; the version's sound is used as it is."
@@ -247,7 +247,7 @@ async function stemKey(path: string): Promise<string> {
 
 /**
  * The voice and background stems of a recording (free, local; the AUSoundIsolation helper), cached in
- * .studio/stammar so a plan, the render after it and later operations on the same bed separate it only once.
+ * .studio/stems so a plan, the render after it and later operations on the same bed separate it only once.
  */
 export async function stemsOf(
   path: string,

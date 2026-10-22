@@ -1077,7 +1077,7 @@ function savesFrame(slots: SlotState): boolean {
 
 /**
  * A clip's input with what agents send resolved first: slot pictures from uploads or URLs as staged files, and
- * loose reference pictures (stills, uploads made stills in "Referensbilder") as files – so a clip never points into
+ * loose reference pictures (stills, uploads made stills in "Reference images") as files – so a clip never points into
  * the scratch folder.
  */
 async function resolvedClipInput<

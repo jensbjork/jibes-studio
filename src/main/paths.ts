@@ -2,7 +2,7 @@
 // the folders and the database in step. Paths stored in the database are relative to the base folder
 // whenever they point inside it, so the whole library can be moved by moving its folders.
 
-import { constants, lstatSync, mkdirSync, realpathSync, statSync } from 'node:fs'
+import { constants, lstatSync, mkdirSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { copyFile, cp, lstat, mkdir, readdir, rename, rm, rmdir, stat, utimes } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -12,24 +12,27 @@ import type { AssetKind, GenerationParams, SequenceKind } from '@shared/types'
 import * as db from './db'
 import { FILE_MANAGER, IS_WINDOWS } from './platform'
 
-/** The folders the user sees in Finder, plus the hidden app data folder. */
+/**
+ * The folders the user sees in Finder, plus the hidden app data folder. English since schema 15; a library from before
+ * has its Swedish names renamed to these when it is opened (folder-names.ts, which writes them out too).
+ */
 export const FOLDERS = {
-  characters: 'Karaktärer',
-  environments: 'Miljöer',
+  characters: 'Characters',
+  environments: 'Environments',
   /** Products: one folder per product with its photos (packshots) and description. */
-  products: 'Produkter',
-  outfits: 'Kläder',
-  poses: 'Poser',
+  products: 'Products',
+  outfits: 'Outfits',
+  poses: 'Poses',
   /** Directors: one folder per director with its style frames, style videos and description. */
-  directors: 'Regissörer',
-  references: 'Referensbilder',
-  generations: 'Genereringar',
-  sequences: 'Sekvenser',
+  directors: 'Directors',
+  references: 'Reference images',
+  generations: 'Generations',
+  sequences: 'Sequences',
   storyboards: 'Storyboards',
-  /** The user's own imported films, by import day (Egna klipp/<YYYY-MM-DD>/). */
-  ownClips: 'Egna klipp',
-  /** The Editor: one folder per edit, with its versions, AI takes (Tagningar/), audio (Ljud/) and inputs (Underlag/). */
-  edits: 'Redigeringar',
+  /** The user's own imported films, by import day (Own clips/<YYYY-MM-DD>/). */
+  ownClips: 'Own clips',
+  /** The Editor: one folder per edit, with its versions, AI takes (Takes/), audio (Audio/) and inputs (Inputs/). */
+  edits: 'Edits',
   appData: '.studio'
 } as const
 
@@ -58,39 +61,68 @@ export const LEGACY_FOLDERS = {
 } as const
 
 /**
- * Inside FOLDERS.appData. stammar: separated voice/background stems (an LRU cache). redigering: scratch of paid
- * edit jobs, one folder per job. tidslinje: the editor's filmstrip and waveform cache. Only tmp is cleared when a
- * library is opened.
+ * The phase-2 folders really in `root`: under exactly that name, and not one of today's folders. A case-insensitive
+ * disk (a Mac's, Windows') finds "Generations" and "Characters" (English since schema 15) for "generations" and
+ * "characters", which must never be taken for the old ones – exported twice, or emptied by Tidy up. A phase-2
+ * library's conversion finds its folders by itself.
+ */
+export function legacyFoldersIn(root: string): string[] {
+  let names: Set<string>
+  try {
+    names = new Set(readdirSync(root).map((n) => n.normalize('NFC')))
+  } catch {
+    return []
+  }
+  const identity = (path: string): string | undefined => {
+    try {
+      const s = statSync(path)
+      return `${s.dev}:${s.ino}`
+    } catch {
+      return undefined
+    }
+  }
+  const current = new Set(Object.values(FOLDERS).map((name) => identity(join(root, name))))
+  return Object.values(LEGACY_FOLDERS).filter((name) => {
+    if (!names.has(name)) return false
+    const id = identity(join(root, name))
+    return id !== undefined && !current.has(id)
+  })
+}
+
+/**
+ * Inside FOLDERS.appData. stems: separated voice/background stems (an LRU cache). edit-jobs: scratch of paid edit
+ * jobs, one folder per job. timeline: the editor's filmstrip and waveform cache. Only tmp is cleared when a library is
+ * opened.
  */
 export const APP_DATA = {
-  thumbs: 'miniatyrer',
-  frames: 'bildrutor',
+  thumbs: 'thumbnails',
+  frames: 'frames',
   tmp: 'tmp',
-  stems: 'stammar',
-  editJobs: 'redigering',
-  timeline: 'tidslinje'
+  stems: 'stems',
+  editJobs: 'edit-jobs',
+  timeline: 'timeline'
 } as const
 
 /** Inside a sequence folder. */
-export const TAKES_FOLDER = 'Tagningar'
+export const TAKES_FOLDER = 'Takes'
 
 /** Inside a sequence folder: the sequence's stills (keyframes generated, uploaded or saved from takes). */
 export const STORYBOARD_FOLDER = 'Storyboard'
 
 /** Inside a storyboard folder: the takes of its transitions. */
-export const TRANSITIONS_FOLDER = 'Övergångar'
+export const TRANSITIONS_FOLDER = 'Transitions'
 
 /** Inside a storyboard folder: its stills (board images generated, uploaded or saved from takes). */
-export const BOARD_IMAGES_FOLDER = 'Bilder'
+export const BOARD_IMAGES_FOLDER = 'Images'
 
-/** Inside an edit folder (Redigeringar/<name>/): the edit's subfolders. */
+/** Inside an edit folder (Edits/<name>/): the edit's subfolders. */
 export const EDIT_FOLDERS = {
   /** AI takes made for picture operations. */
-  takes: 'Tagningar',
+  takes: 'Takes',
   /** edit_media: converted voices, spoken lines, music, effects, added audio and rendered beds. */
-  audio: 'Ljud',
+  audio: 'Audio',
   /** What was sent to Venice: frames and proxies. */
-  inputs: 'Underlag'
+  inputs: 'Inputs'
 } as const
 
 /**
@@ -134,8 +166,8 @@ export function isLibraryReady(): boolean {
 }
 
 /**
- * A message with the folders of every local path in it left out – the file names stay: "…/Sekvenser/Sommar/
- * Tagningar/a.mp4: Invalid data" → "a.mp4: Invalid data". For ffmpeg's stderr and the like, before such a message is
+ * A message with the folders of every local path in it left out – the file names stay: "…/Sequences/Sommar/
+ * Takes/a.mp4: Invalid data" → "a.mp4: Invalid data". For ffmpeg's stderr and the like, before such a message is
  * stored or shown outside the window (an unseen row's error, an agent's answer): the library's place on disk and the
  * user's home folder are nobody else's business.
  */
@@ -273,7 +305,7 @@ function libraryRelative(abs: string): string | undefined {
   return rel && isLibraryRelative(rel) ? rel : undefined
 }
 
-/** Inside one of the library's own folders (Karaktärer, Miljöer, .studio, …), i.e. a file Studio manages. */
+/** Inside one of the library's own folders (Characters, Environments, .studio, …), i.e. a file Studio manages. */
 export function isInsideRoot(absPath: string): boolean {
   return libraryRelative(absPath) !== undefined
 }
@@ -353,7 +385,7 @@ export function safeName(
   const windows = (opts.platform ?? process.platform) === 'win32'
   const wanted = opts.max ?? 60
   const max = Math.max(2, Math.floor(windows ? Math.min(wanted, WINDOWS_MAX_NAME) : wanted))
-  const fallback = opts.fallback ?? 'Namnlös'
+  const fallback = opts.fallback ?? 'Untitled'
   let s = (typeof text === 'string' ? text : '')
     .normalize('NFC')
     .replace(/\p{Cc}/gu, ' ')
@@ -401,7 +433,7 @@ function entryExists(p: string): boolean {
  */
 export function uniqueName(dir: string, base: string, ext = ''): string {
   const suffix = ext && !ext.startsWith('.') ? `.${ext}` : ext
-  const trimmed = trimName(base.replace(/[/\\]/g, '-')) || 'Namnlös'
+  const trimmed = trimName(base.replace(/[/\\]/g, '-')) || 'Untitled'
   const stem = IS_WINDOWS ? avoidReservedName(trimmed) : trimmed
   for (let n = 1; ; n++) {
     const name = n === 1 ? `${stem}${suffix}` : `${stem} (${n})${suffix}`
@@ -473,40 +505,40 @@ function folderSegment(name: string): string {
   return name
 }
 
-/** Karaktärer, Miljöer, Produkter, Kläder, Poser or Regissörer by kind [/<folder>] */
+/** Characters, Environments, Products, Outfits, Poses or Directors by kind [/<folder>] */
 export function assetsDir(kind: AssetKind, folder?: string): string {
   if (!isAssetKind(kind)) throw new Error('Unknown kind of library item.')
   const base = join(libraryRoot(), ASSET_FOLDERS[kind])
   return ensureDir(folder === undefined ? base : join(base, folderSegment(folder)))
 }
 
-/** Referensbilder/<day> */
+/** Reference images/<day> */
 export function referencesDayDir(d: Date): string {
   return ensureDir(join(libraryRoot(), FOLDERS.references, dayStamp(d)))
 }
 
-/** Genereringar/<day> */
+/** Generations/<day> */
 export function generationsDayDir(d: Date): string {
   return ensureDir(join(libraryRoot(), FOLDERS.generations, dayStamp(d)))
 }
 
-/** Egna klipp/<day>: where an import made on that day is kept. */
+/** Own clips/<day>: where an import made on that day is kept. */
 export function ownClipsDayDir(d: Date): string {
   return ensureDir(join(libraryRoot(), FOLDERS.ownClips, dayStamp(d)))
 }
 
-/** Redigeringar/<folder>[/Tagningar|Ljud|Underlag]: an edit's folder or one of its subfolders. */
+/** Edits/<folder>[/Takes|Audio|Inputs]: an edit's folder or one of its subfolders. */
 export function editDir(folder: string, sub?: keyof typeof EDIT_FOLDERS): string {
   const base = join(libraryRoot(), FOLDERS.edits, folderSegment(folder))
   return ensureDir(sub ? join(base, EDIT_FOLDERS[sub]) : base)
 }
 
-/** Sekvenser/<folder>, or Storyboards/<folder> for a storyboard */
+/** Sequences/<folder>, or Storyboards/<folder> for a storyboard */
 export function sequenceDir(folder: string, kind: SequenceKind = 'sequence'): string {
   return ensureDir(join(libraryRoot(), KIND_FOLDERS[kind].parent, folderSegment(folder)))
 }
 
-/** Sekvenser/<folder>/Tagningar, or Storyboards/<folder>/Övergångar for a storyboard */
+/** Sequences/<folder>/Takes, or Storyboards/<folder>/Transitions for a storyboard */
 export function sequenceTakesDir(folder: string, kind: SequenceKind = 'sequence'): string {
   const layout = KIND_FOLDERS[kind]
   return ensureDir(join(libraryRoot(), layout.parent, folderSegment(folder), layout.takes))
@@ -545,17 +577,17 @@ export function agentUploadsPath(): string | undefined {
   return activeRoot ? join(activeRoot, FOLDERS.appData, APP_DATA.tmp, AGENT_UPLOADS_FOLDER) : undefined
 }
 
-/** .studio/stammar: the voice/background stem cache. */
+/** .studio/stems: the voice/background stem cache. */
 export function stemsDir(): string {
   return appDataDir(APP_DATA.stems)
 }
 
-/** .studio/redigering[/<jobId>]: scratch of a paid edit job (removed when the job is finished). */
+/** .studio/edit-jobs[/<jobId>]: scratch of a paid edit job (removed when the job is finished). */
 export function editJobDir(jobId?: string): string {
   return jobId === undefined ? appDataDir(APP_DATA.editJobs) : appDataDir(APP_DATA.editJobs, folderSegment(jobId))
 }
 
-/** .studio/tidslinje: the editor's filmstrip and waveform cache. */
+/** .studio/timeline: the editor's filmstrip and waveform cache. */
 export function timelineDir(): string {
   return appDataDir(APP_DATA.timeline)
 }
@@ -565,7 +597,7 @@ const DAY_FOLDER = new RegExp(
 )
 
 /**
- * Removes a Genereringar/<day>, Referensbilder/<day> or Egna klipp/<day> folder that a move or delete has just
+ * Removes a Generations/<day>, Reference images/<day> or Own clips/<day> folder that a move or delete has just
  * emptied (Finder's own files aside), so Finder doesn't fill up with empty days. Anything else is left alone;
  * never throws.
  */

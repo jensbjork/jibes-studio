@@ -51,14 +51,14 @@ export const MIN_REMAINING_SECONDS = 0.2
 export const UNTITLED_SEQUENCE = 'Untitled sequence'
 export const UNTITLED_STORYBOARD = 'Untitled storyboard'
 /** Folder-name fallbacks for a name that leaves nothing: they name folders on disk, so they stay as they were. */
-const UNTITLED_SEQUENCE_FOLDER = 'Namnlös sekvens'
-const UNTITLED_STORYBOARD_FOLDER = 'Namnlös storyboard'
+const UNTITLED_SEQUENCE_FOLDER = 'Untitled sequence'
+const UNTITLED_STORYBOARD_FOLDER = 'Untitled storyboard'
 
 export interface SequenceRow {
   id: string
   name: string
   defaults: string
-  /** Name of the folder in Sekvenser/ (Storyboards/ for a storyboard); null for rows from before folders existed. */
+  /** Name of the folder in Sequences/ (Storyboards/ for a storyboard); null for rows from before folders existed. */
   folder: string | null
   /** 'sequence' or 'storyboard' (see kindOf). */
   kind: string
@@ -819,7 +819,7 @@ export function sequenceOfSegment(segmentId: string): SequenceRow | undefined {
     .get(segmentId) as SequenceRow | undefined
 }
 
-/** Some take of the sequence is still rendering or being saved (its video may be on its way into Tagningar/). */
+/** Some take of the sequence is still rendering or being saved (its video may be on its way into Takes/). */
 export function hasPendingTakes(sequenceId: string): boolean {
   return !!conn()
     .prepare(
@@ -869,30 +869,30 @@ export function setExportHeight(sequenceId: string, height: number | null): void
   conn().prepare('UPDATE sequences SET export_height = ? WHERE id = ?').run(height, sequenceId)
 }
 
-/** Sekvenser/, or Storyboards/ for storyboards (not created here). */
+/** Sequences/, or Storyboards/ for storyboards (not created here). */
 export function sequencesRoot(kind: SequenceKind = 'sequence'): string {
   return join(libraryRoot(), KIND_FOLDERS[kind].parent)
 }
 
-/** Sekvenser/<folder> (Storyboards/<folder>) without creating it (paths.sequenceDir creates it). */
+/** Sequences/<folder> (Storyboards/<folder>) without creating it (paths.sequenceDir creates it). */
 export function folderPath(folder: string, kind: SequenceKind = 'sequence'): string {
   return join(sequencesRoot(kind), folder)
 }
 
-/** Sekvenser/<folder>/Tagningar (Storyboards/<folder>/Övergångar) without creating it (see paths.sequenceTakesDir). */
+/** Sequences/<folder>/Takes (Storyboards/<folder>/Transitions) without creating it (see paths.sequenceTakesDir). */
 export function takesPath(folder: string, kind: SequenceKind = 'sequence'): string {
   return join(folderPath(folder, kind), KIND_FOLDERS[kind].takes)
 }
 
 /** Inside a sequence folder: a song sequence's song and its separated vocals (main/song.ts). */
-export const SONG_FOLDER = 'Ljud'
+export const SONG_FOLDER = 'Audio'
 
-/** Sekvenser/<folder>/Ljud without creating it: where a song sequence keeps its song. */
+/** Sequences/<folder>/Audio without creating it: where a song sequence keeps its song. */
 export function songFolderPath(folder: string): string {
   return join(folderPath(folder, 'sequence'), SONG_FOLDER)
 }
 
-/** Sekvenser/<folder>/Storyboard (Storyboards/<folder>/Bilder) without creating it: where stills.ts puts stills. */
+/** Sequences/<folder>/Storyboard (Storyboards/<folder>/Images) without creating it: where stills.ts puts stills. */
 export function stillsPath(folder: string, kind: SequenceKind = 'sequence'): string {
   return join(folderPath(folder, kind), KIND_FOLDERS[kind].stills)
 }
@@ -923,7 +923,7 @@ export function isUnder(path: string, dir: string): boolean {
   return foldPath(path).startsWith(d.endsWith(sep) ? d : d + sep)
 }
 
-/** For a path below Sekvenser/ (or Storyboards/), the folder of the sequence (or storyboard) it is in. */
+/** For a path below Sequences/ (or Storyboards/), the folder of the sequence (or storyboard) it is in. */
 export function sequenceFolderOfPath(path: string): { folder: string; kind: SequenceKind } | undefined {
   for (const kind of ['sequence', 'storyboard'] as const) {
     const root = sequencesRoot(kind)
@@ -953,7 +953,7 @@ export function firstFreeName(base: string, ext: string, taken: (name: string) =
 }
 
 /**
- * A folder name in Sekvenser/ (Storyboards/) that is neither on disk nor recorded for a sequence (storyboard) whose
+ * A folder name in Sequences/ (Storyboards/) that is neither on disk nor recorded for a sequence (storyboard) whose
  * folder is gone.
  */
 export function availableFolderName(base: string, kind: SequenceKind = 'sequence'): string {
@@ -976,7 +976,7 @@ export function availableFileName(dir: string, base: string, ext: string): strin
 }
 
 /**
- * What a generation's file names say about it: its title (an import's file name, a version's "<redigering> v3"),
+ * What a generation's file names say about it: its title (an import's file name, a version's "<edit> v3"),
  * else its prompt's first line, so an own clip or a version is never named "Utan prompt".
  */
 function nameExcerpt(g: Pick<Generation, 'prompt' | 'title'>): string {
@@ -985,21 +985,21 @@ function nameExcerpt(g: Pick<Generation, 'prompt' | 'title'>): string {
   return promptExcerpt(g.title?.trim() ? g.title : g.prompt)
 }
 
-/** "<YYYY-MM-DD HH.MM> <prompt>": a take in Tagningar/, dated when it was submitted. */
+/** "<YYYY-MM-DD HH.MM> <prompt>": a take in Takes/, dated when it was submitted. */
 export function takeFileBase(g: Pick<Generation, 'createdAt' | 'prompt' | 'title'>): string {
   const created = new Date(g.createdAt)
   return `${dayStamp(created)} ${timeStamp(created)} ${nameExcerpt(g)}`
 }
 
-/** "<HH.MM> <prompt>": a generation in Genereringar/<day>/. */
+/** "<HH.MM> <prompt>": a generation in Generations/<day>/. */
 export function freeFileBase(g: Pick<Generation, 'createdAt' | 'prompt' | 'title'>): string {
   return `${timeStamp(new Date(g.createdAt))} ${nameExcerpt(g)}`
 }
 
 /**
  * The row's file has a home of its own that sequence moves never change (the home rule, jobs.videoLocation): an
- * import (Egna klipp/<day>/, or an edit's folder for an export cloned in as an edit's v1), and anything the Editor
- * made for an edit (Redigeringar/<name>/). Such a file is never moved into Tagningar nor renamed after a prompt.
+ * import (Own clips/<day>/, or an edit's folder for an export cloned in as an edit's v1), and anything the Editor
+ * made for an edit (Edits/<name>/). Such a file is never moved into Takes nor renamed after a prompt.
  * An orphaned version (its edit deleted) follows today's rule like a Venice generation.
  */
 export function keepsOwnHome(g: Partial<Pick<Generation, 'source' | 'editId'>>): boolean {
@@ -1047,7 +1047,7 @@ export async function removeDirIfEmpty(dir: string): Promise<boolean> {
 }
 
 /**
- * Removes a sequence folder's Tagningar/ and Storyboard/ (a storyboard's Övergångar/ and Bilder/) and then the folder
+ * Removes a sequence folder's Takes/ and Storyboard/ (a storyboard's Transitions/ and Images/) and then the folder
  * itself, each only when empty.
  */
 export async function removeFolderIfEmpty(folder: string, kind: SequenceKind = 'sequence'): Promise<void> {

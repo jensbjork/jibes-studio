@@ -2,7 +2,7 @@
 // transitions between them: the clip that goes from one board's image to the next one's (`image_url` →
 // `end_image_url`).
 // It is a workflow of its own next to Sequences, but underneath a storyboard is a row of `sequences` of kind
-// 'storyboard' whose segments are its transitions, so takes, folders (Storyboards/<name>/Övergångar/ and Bilder/),
+// 'storyboard' whose segments are its transitions, so takes, folders (Storyboards/<name>/Transitions/ and Images/),
 // approvals and the export are the sequence service's. What is its own lives here: the boards, keeping one
 // transition between every two adjacent boards (syncTransitions), the transitions' settings, "Generate missing"
 // (each transition is independent, so they are sent one after another without waiting for each to render), the
@@ -280,7 +280,7 @@ function refuseAgentLoss(lost: readonly LostTransition[], caller: Caller): void 
  * boards' images. Transitions between boards that are no longer adjacent (a board moved, deleted or put in between)
  * are deleted, and so are their rows' links to their takes: the ids of those takes are returned, for the caller to
  * free them with the usual rules once the transaction is done (SequenceService.freeTakes: their videos go back to
- * Genereringar; generations are never deleted). Called after every change to the boards.
+ * Generations; generations are never deleted). Called after every change to the boards.
  */
 export function syncTransitions(storyboardId: string): string[] {
   const sql = conn()
@@ -654,7 +654,7 @@ export class StoryboardService {
 
   // ── Storyboards ────────────────────────────────────────────────────────────
 
-  /** A new storyboard with its folder (Storyboards/<name>/Övergångar) and two empty boards, so one transition. */
+  /** A new storyboard with its folder (Storyboards/<name>/Transitions) and two empty boards, so one transition. */
   async create(name: unknown, aspectRatio?: unknown): Promise<Storyboard> {
     const aspect =
       aspectRatio === undefined || aspectRatio === null ? DEFAULT_STORYBOARD_ASPECT_RATIO : checkAspectRatio(aspectRatio)
@@ -733,8 +733,8 @@ export class StoryboardService {
   }
 
   /**
-   * Deletes the storyboard: its takes become ordinary generations (videos back to Genereringar), stills that
-   * generations, clips or other boards still use are kept in Referensbilder, the rest go to the Trash; exports stay.
+   * Deletes the storyboard: its takes become ordinary generations (videos back to Generations), stills that
+   * generations, clips or other boards still use are kept in Reference images, the rest go to the Trash; exports stay.
    */
   async delete(id: string): Promise<void> {
     const row = typeof id === 'string' ? store.getSequenceRow(id) : undefined
@@ -854,7 +854,7 @@ export class StoryboardService {
 
   /**
    * The picture for a board: a library photo or a still where it is, a file or a frame as a new still of the
-   * storyboard (in Storyboards/<name>/Bilder/). Plain errors.
+   * storyboard (in Storyboards/<name>/Images/). Plain errors.
    */
   private async resolveImage(storyboardId: string, source: BoardImageSource): Promise<ResolvedImage> {
     if (!source || typeof source !== 'object') throw new Error('Unknown kind of image.')
@@ -1226,7 +1226,7 @@ export class StoryboardService {
     )
   }
 
-  /** After a change to the boards: freed takes go back to Genereringar, and the views hear about it. */
+  /** After a change to the boards: freed takes go back to Generations, and the views hear about it. */
   private async settle(storyboardId: string, freed: readonly string[]): Promise<Storyboard> {
     this.changed(storyboardId)
     if (freed.length) {

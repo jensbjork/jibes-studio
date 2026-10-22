@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { isAbsolute } from 'node:path'
+import { dirname, isAbsolute } from 'node:path'
 import Database from 'better-sqlite3'
 import type {
   EditRecipe,
@@ -21,12 +21,19 @@ import {
   withoutLocalPaths
 } from './paths'
 import { referenceVideosOf } from '@shared/models'
+import { englishPath } from './folder-names'
 import { noteRequestedBy } from './requested-by'
 
 let db: Database.Database | undefined
 
+/**
+ * A migration: SQL, or – where stored data must change in ways SQL can't say – a function given the connection and the
+ * database file. Either runs in the migration's transaction.
+ */
+type Migration = string | ((conn: Database.Database, file: string) => void)
+
 // Each entry runs once, in order; append new migrations to the end.
-const migrations: string[] = [
+const migrations: Migration[] = [
   `CREATE TABLE generations (
     id TEXT PRIMARY KEY,
     created_at INTEGER NOT NULL,
@@ -122,7 +129,7 @@ const migrations: string[] = [
 
   // Phase 6: audio clips on assets (a character's voice, an environment's soundscape), the user's and agents'
   // reviews of generations, and the learnings agents distil from them. Poses are a new asset kind, which needs
-  // no schema change (assets.kind is free text) but owns the Poser folder from this version on.
+  // no schema change (assets.kind is free text) but owns the Poses folder from this version on.
   `CREATE TABLE asset_audio (
     id TEXT PRIMARY KEY,
     asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
@@ -161,7 +168,7 @@ const migrations: string[] = [
 
   // Phase 7: storyboards. A clip can take its end image from the next clip (end_from_next, mirroring
   // continue_from_previous) and has free-text notes; stills are the images of a sequence's storyboard
-  // (generated, uploaded or saved frames), kept in Sekvenser/<sequence>/Storyboard/. A still outlives its
+  // (generated, uploaded or saved frames), kept in Sequences/<sequence>/Storyboard/. A still outlives its
   // sequence (sequence_id set to NULL) when clips or generations elsewhere still use it.
   `ALTER TABLE segments ADD COLUMN end_from_next INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE segments ADD COLUMN notes TEXT NOT NULL DEFAULT '';
@@ -207,7 +214,7 @@ const migrations: string[] = [
   // Venice generation ('generated') from the user's own imported film ('import') and a version made in the Editor
   // ('edit'). Imports and versions are always inserted completed (never pending). An edit is one film being worked
   // on: its versions and AI takes point at it with edit_id, a version at its base with parent_id. edit_media holds
-  // an edit's paid or added audio (Redigeringar/<name>/Ljud/), media_jobs and media_job_steps the bookkeeping of
+  // an edit's paid or added audio (Edits/<name>/Audio/), media_jobs and media_job_steps the bookkeeping of
   // multi-step paid work, so a job interrupted by quitting can be fetched or resumed without sending anything twice.
   // original_path and edit_media.file_path are stored paths like every other; recipe, details, request and
   // segments are JSON with ids only, never paths. exports.cuts records where the clips meet in an exported film,
@@ -302,7 +309,7 @@ const migrations: string[] = [
   ALTER TABLE exports ADD COLUMN cuts TEXT;
   ALTER TABLE sequences ADD COLUMN export_height INTEGER;`,
 
-  // Phase 11. Products are a new asset kind (assets.kind = 'product', free text) that owns the Produkter folder from
+  // Phase 11. Products are a new asset kind (assets.kind = 'product', free text) that owns the Products folder from
   // this version on. unseen: finished work the user hasn't looked at yet (ids only, never paths); a row refers to at
   // most one item, so deleting the item removes the row with it, and an error-only row (a picture that wasn't made,
   // a failed export or run) names its owner in `context`. take_trims: the trims each take of a clip last had, so
@@ -375,43 +382,53 @@ const migrations: string[] = [
   ALTER TABLE segments ADD COLUMN continue_mode TEXT NOT NULL DEFAULT 'references'
     CHECK (continue_mode IN ('references', 'exact'));`,
 
-  // Phase 25. Directors are a new asset kind (assets.kind = 'director', free text) that owns the Regissörer folder
+  // Phase 25. Directors are a new asset kind (assets.kind = 'director', free text) that owns the Directors folder
   // from this version on. assets.direction: a director's way of making a film (JSON Direction: editing, look, camera …,
   // avoid, defaults, and its style videos with their windows, paths stored like every other – relative inside the
   // library); NULL for every other kind. Its photos are its style frames (asset_images). A sequence's or storyboard's
   // director is the key `director` of its defaults JSON, a clip's that of its params: no schema change.
-  `ALTER TABLE assets ADD COLUMN direction TEXT;`
+  `ALTER TABLE assets ADD COLUMN direction TEXT;`,
+
+  // English folder names (folder-names.ts). The folders themselves were renamed on disk before the database was
+  // opened (library-root.ts); here every stored path follows – the same columns and params a folder rename rewrites,
+  // relative paths and absolute ones inside the library (its base folder is the database's folder's parent).
+  (conn, file) => {
+    const root = dirname(dirname(file))
+    mapStoredPaths((stored) => englishPath(stored, root), undefined, undefined, conn)
+  }
 ]
 
 
 /**
- * The user_version from which a library has assets (the migration above): from then on the folders Miljöer and
- * Kläder in the base folder are the library's own folders.
+ * The user_version from which a library has assets (the migration above): from then on the folders Environments and
+ * Outfits in the base folder are the library's own folders.
  */
 export const ASSETS_SCHEMA_VERSION = 6
 
-/** The user_version from which a library has poses (and asset audio): from then on Poser is its own folder. */
+/** The user_version from which a library has poses (and asset audio): from then on Poses is its own folder. */
 export const POSES_SCHEMA_VERSION = 7
 
 /** The user_version from which a library has storyboards of their own: from then on Storyboards is its own folder. */
 export const STORYBOARDS_SCHEMA_VERSION = 10
 
 /**
- * The user_version from which a library has edits and own clips: from then on Egna klipp and Redigeringar are its
+ * The user_version from which a library has edits and own clips: from then on Own clips and Edits are its
  * own folders.
  */
 export const EDITS_SCHEMA_VERSION = 11
 
 /**
  * The user_version from which a library has products (and the unseen, take_trims and origin bookkeeping): from then
- * on Produkter is its own folder.
+ * on Products is its own folder.
  */
 export const PRODUCTS_SCHEMA_VERSION = 12
 
 /**
- * The user_version from which a library has directors (assets.direction): from then on Regissörer is its own folder.
+ * The user_version from which a library has directors (assets.direction): from then on Directors is its own folder.
  */
 export const DIRECTORS_SCHEMA_VERSION = 14
+
+export { ENGLISH_FOLDERS_SCHEMA_VERSION } from './folder-names'
 
 /**
  * Why this build doesn't open a library whose database a newer Studio has migrated: it doesn't know the newer
@@ -464,8 +481,10 @@ export function openDb(file: string, opts: { create?: boolean } = {}): void {
     const version = conn.pragma('user_version', { simple: true }) as number
     if (isNewerSchema(version)) throw new Error(NEWER_LIBRARY_MESSAGE)
     for (let i = version; i < migrations.length; i++) {
+      const migration = migrations[i]
       conn.transaction(() => {
-        conn.exec(migrations[i])
+        if (typeof migration === 'string') conn.exec(migration)
+        else migration(conn, file)
         conn.pragma(`user_version = ${i + 1}`)
       })()
     }
@@ -1035,14 +1054,15 @@ function mapParamsJson(json: string, map: (stored: string) => string): string | 
  * Runs map over every stored path in the library database (generation files, originals, posters and params,
  * segment params, sequences' casts, directors' style videos, asset images and audio, edit media, stills and the reference images in their
  * params, storyboard board images, exports) in one transaction and writes back what changed. `contains`, when given, skips rows that can't hold a
- * matching path. `onGeneration` hears the id of every generation changed. Returns the number of rows changed.
+ * matching path. `onGeneration` hears the id of every generation changed. Returns the number of rows changed. `conn`
+ * is the open library's database unless a migration passes its own (the transaction then nests in the migration's).
  */
 export function mapStoredPaths(
   map: (stored: string) => string,
   contains?: string,
-  onGeneration?: (id: string) => void
+  onGeneration?: (id: string) => void,
+  conn: Database.Database = getDb()
 ): number {
-  const conn = getDb()
   const like = contains === undefined ? undefined : JSON.stringify(contains).slice(1, -1)
   const hit = (v: string | null): boolean => !!v && (like === undefined || v.includes(contains!) || v.includes(like))
   const mapPath = (v: string | null): string | null => (v ? map(v) : v)
@@ -1252,7 +1272,7 @@ export function followRewrites(params: GenerationParams, mark: number): Generati
       a && typeof a === 'object' && typeof a.path === 'string' ? { ...a, path: follow(a.path) ?? a.path } : a
     )
   }
-  // An edit's proxy in Underlag/ follows its folder when the edit is renamed while the take is being sent.
+  // An edit's proxy in Inputs/ follows its folder when the edit is renamed while the take is being sent.
   if (typeof params.sourceVideo === 'string') result.sourceVideo = follow(params.sourceVideo)
   if (Array.isArray(params.referenceVideos)) {
     result.referenceVideos = referenceVideosOf(params).map((v) => ({ ...v, path: follow(v.path) ?? v.path }))

@@ -33,7 +33,7 @@ export function movableLibrary(
   return undefined
 }
 
-/** "“Genereringar” and “Sekvenser”" (on-disk folder names, which stay as they are). */
+/** "“Generations” and “Sequences”" (on-disk folder names, which stay as they are). */
 function quotedList(names: string[]): string {
   const quoted = names.map((n) => `“${n}”`)
   return quoted.length === 1 ? quoted[0] : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`

@@ -15,7 +15,7 @@ import { NewChip } from '../work/StatusMark'
 import { CountLine, MediaToolbar, NoticeRow, SearchField } from './ui'
 
 // Images: every still in the library – made with an image model, uploaded, or a frame saved from a clip – newest
-// first, wherever it belongs: a sequence, a storyboard, or Referensbilder for one with no place. Opened in the
+// first, wherever it belongs: a sequence, a storyboard, or Reference images for one with no place. Opened in the
 // picture viewer, which steps through what the filters show.
 
 type SourceChoice = Still['source']
@@ -38,7 +38,7 @@ const SOURCE_OPTIONS: { id: SourceChoice; label: string; text: string }[] = [
 const PLACE_OPTIONS: { id: PlaceChoice; label: string; text: string }[] = [
   { id: 'sequence', label: 'Sequences', text: 'Images that belong to a sequence' },
   { id: 'storyboard', label: 'Storyboards', text: 'Images that belong to a storyboard' },
-  { id: 'loose', label: 'Loose images', text: 'Images in “Referensbilder”, with no sequence or storyboard' }
+  { id: 'loose', label: 'Loose images', text: 'Images in “Reference images”, with no sequence or storyboard' }
 ]
 
 /** Like the clip feed's: kept while Studio runs (switching views keeps them), never across a restart. */
@@ -54,7 +54,7 @@ interface Place {
   name: string
 }
 
-const LOOSE: Place = { kind: 'loose', name: 'Referensbilder' }
+const LOOSE: Place = { kind: 'loose', name: 'Reference images' }
 
 interface OpenRequest {
   stillId: string
@@ -356,5 +356,5 @@ const PictureTile = memo(function PictureTile({
 function placeTitle(place: Place): string {
   if (place.kind === 'sequence') return `In the sequence “${place.name}”`
   if (place.kind === 'storyboard') return `In the storyboard “${place.name}”`
-  return 'In “Referensbilder” – belongs to no sequence or storyboard'
+  return 'In “Reference images” – belongs to no sequence or storyboard'
 }

@@ -66,7 +66,7 @@ export interface GenerationParams {
    */
   outfitWearers?: Record<string, string | null>
   /**
-   * Video-to-video edit and upscale models: the source clip (an H.264 proxy ≤22 MB in the edit's Underlag/),
+   * Video-to-video edit and upscale models: the source clip (an H.264 proxy ≤22 MB in the edit's Inputs/),
    * sent as `video_url`. Absolute over IPC, stored relative like the images.
    */
   sourceVideo?: string
@@ -468,7 +468,7 @@ export interface FolderInspection {
   /** In iCloud Drive, Dropbox, Google Drive or OneDrive: SQLite databases can get corrupted there. */
   cloudSynced: boolean
   writable: boolean
-  /** Non-empty top-level folders that 'move' would collide with (e.g. "Karaktärer"). */
+  /** Non-empty top-level folders that 'move' would collide with (e.g. "Characters"). */
   conflicts: string[]
 }
 
@@ -498,9 +498,9 @@ export type LibraryFolderTarget =
   | 'storyboards'
   /** Own clips: the user's own imported films. */
   | 'ownClips'
-  /** Redigeringar; with an id, that edit's own folder. */
+  /** Edits; with an id, that edit's own folder. */
   | 'edits'
-  /** Regissörer; with an id, that director's own folder. */
+  /** Directors; with an id, that director's own folder. */
   | 'directors'
 
 export interface FfmpegStatus {
@@ -567,12 +567,12 @@ export interface SpendingSummary {
 // ── Assets: characters, environments, products, outfits, poses ───────────────
 
 /**
- * character: who is in the shot (folder Karaktärer/). environment: where it takes place (Miljöer/). product: a specific
- * item to show in the film (Produkter/), e.g. a package, a bottle or a gadget. outfit: what a character wears (Kläder/).
- * pose: how people stand and where, relative to each other (Poser/). Each is a name, a description and reference
+ * character: who is in the shot (folder Characters/). environment: where it takes place (Environments/). product: a specific
+ * item to show in the film (Products/), e.g. a package, a bottle or a gadget. outfit: what a character wears (Outfits/).
+ * pose: how people stand and where, relative to each other (Poses/). Each is a name, a description and reference
  * photos in a folder of their own; characters and environments can also have audio clips (a voice, a soundscape).
  * director: a way of making a film – editing, look, camera, light … (Asset.direction) – with style frames as its photos
- * and style videos (Regissörer/); never a reference of its own: it directs a clip, a sequence or a storyboard.
+ * and style videos (Directors/); never a reference of its own: it directs a clip, a sequence or a storyboard.
  */
 export type AssetKind = 'character' | 'environment' | 'product' | 'outfit' | 'pose' | 'director'
 
@@ -675,7 +675,7 @@ export interface AssetFileOrigin {
 
 export interface AssetImage {
   id: string
-  /** Absolute path to the copy stored in the library (e.g. Karaktärer/<name>/). */
+  /** Absolute path to the copy stored in the library (e.g. Characters/<name>/). */
   path: string
   /** An agent added it (undefined: the user did). */
   origin?: AssetFileOrigin
@@ -1006,13 +1006,13 @@ export type SequenceCastSwap = { fromAssetId: string; toAssetId: string }
  * `song`), so moves and "Tidy up" rewrite them like every other stored path.
  */
 export interface SequenceSong {
-  /** The song file, copied into the sequence's folder (Sekvenser/<name>/Ljud/). */
+  /** The song file, copied into the sequence's folder (Sequences/<name>/Audio/). */
   path: string
   /** The file's name as it was imported ("My song.wav"), for display. */
   name: string
   /** Seconds. */
   duration: number
-  /** The separated vocals (Ljud/<name> (sång).flac), what 'vocals' clips send; absent until separated or unavailable. */
+  /** The separated vocals (Audio/<name> (vocals).flac), what 'vocals' clips send; absent until separated or unavailable. */
   vocalsPath?: string
   /** The lyrics with the time of every word, once transcribed (and as corrected by hand). */
   lyrics?: SongLyrics
@@ -1303,8 +1303,8 @@ export interface ImageModel {
 /** What a still is generated from ("Create image…"). */
 export interface StillParams {
   /**
-   * The sequence (Sekvenser/<name>/Storyboard/) or storyboard (Storyboards/<name>/Bilder/) the still belongs to and
-   * is saved with; none: Referensbilder. A storyboard's aspect ratio is the still's default format.
+   * The sequence (Sequences/<name>/Storyboard/) or storyboard (Storyboards/<name>/Images/) the still belongs to and
+   * is saved with; none: Reference images. A storyboard's aspect ratio is the still's default format.
    */
   sequenceId?: string
   prompt: string
@@ -1331,7 +1331,7 @@ export interface StillParams {
 /** An image of a sequence or a storyboard: generated, uploaded, or a frame saved from a take. */
 export interface Still {
   id: string
-  /** The sequence or storyboard; undefined once it is deleted (the still then lives in Referensbilder). */
+  /** The sequence or storyboard; undefined once it is deleted (the still then lives in Reference images). */
   sequenceId?: string
   /** Absolute. */
   path: string
@@ -1707,7 +1707,7 @@ export interface AudioLayer {
   id: string
   kind: 'speech' | 'voice' | 'music' | 'effect' | 'audio'
   mediaId?: string
-  /** Kept only as a label: layers always play edit media (a library clip is copied into Ljud/ first). */
+  /** Kept only as a label: layers always play edit media (a library clip is copied into Audio/ first). */
   assetAudioId?: string
   label: string
   /** Seconds in the film where it starts. */
@@ -1838,7 +1838,7 @@ export interface EditJob {
   updatedAt: number
 }
 
-/** Paid or added audio of an edit (Redigeringar/<namn>/Ljud/). */
+/** Paid or added audio of an edit (Edits/<name>/Audio/). */
 export interface EditMedia {
   id: string
   kind: 'voice' | 'speech' | 'music' | 'effect' | 'audio' | 'bake'
@@ -2513,7 +2513,7 @@ export interface AgentOpenArgs {
   generationId?: string
   /** For 'media': the tab (none: the one an item is in, else the one it last showed). */
   tab?: MediaTab
-  /** For 'media': the picture to open in Bilder. */
+  /** For 'media': the picture to open in Images. */
   stillId?: string
   /** For 'media': the film to open in Films. */
   exportId?: string
@@ -2613,7 +2613,7 @@ export interface StudioApi {
    * A video file as a reference video (Generate, a sequence clip): its length, display size, whether it has sound, and
    * a poster – a JPEG of the frame at `at` seconds (default 0; at most 512 px wide, cached in .studio/tmp) – for a tile,
    * a window editor or the approval dialog. Free, nothing is copied: a file from outside the library is copied into
-   * Referensbilder/<day>/ only when a generation is sent. Rejects with a plain reason when the file is no video Studio
+   * Reference images/<day>/ only when a generation is sent. Rejects with a plain reason when the file is no video Studio
    * can read ("clip.txt: The file is not a video Studio can read …").
    */
   probeReferenceVideo(path: string, at?: number): Promise<ReferenceVideoInfo>
@@ -2686,7 +2686,7 @@ export interface StudioApi {
    * Characters and environments only. Rejects with a message (wrong format, shorter than 1 s, …).
    */
   addAssetAudio(assetId: string, paths: string[]): Promise<Asset>
-  /** Removes the clip (its copy goes to the Trash, or to Referensbilder when generations still use it). */
+  /** Removes the clip (its copy goes to the Trash, or to Reference images when generations still use it). */
   removeAssetAudio(audioId: string): Promise<Asset>
   /** Moves or resizes the reference window; clamped to 2–15 s inside the file. */
   updateAssetAudio(audioId: string, patch: { clipStart?: number; clipLength?: number }): Promise<Asset>
@@ -2810,14 +2810,14 @@ export interface StudioApi {
   /** Most recently changed first. */
   listStoryboards(): Promise<StoryboardSummary[]>
   getStoryboard(id: string): Promise<Storyboard>
-  /** Creates it with its folder (Storyboards/<namn>/) and two empty boards. Aspect ratio default 16:9. */
+  /** Creates it with its folder (Storyboards/<name>/) and two empty boards. Aspect ratio default 16:9. */
   createStoryboard(name: string, aspectRatio?: string): Promise<Storyboard>
   /** A new name renames its folder; a new aspect ratio applies to its transitions and new board images. */
   updateStoryboard(
     id: string,
     patch: { name?: string; aspectRatio?: string; director?: string | null }
   ): Promise<Storyboard>
-  /** Its takes become ordinary generations; stills still in use are kept in Referensbilder; exports stay. */
+  /** Its takes become ordinary generations; stills still in use are kept in Reference images; exports stay. */
   deleteStoryboard(id: string): Promise<void>
   /**
    * Adds a board (at the end, or after/before the given one), optionally with a note and an image. The
@@ -2844,7 +2844,7 @@ export interface StudioApi {
   generateStoryboard(storyboardId: string, opts?: Pick<GenerateOptions, 'confirmOverBudget'>): Promise<void>
   stopStoryboard(storyboardId: string): Promise<void>
   /**
-   * Renders the selected takes in order into Storyboards/<namn>/; resolves with the film's path. Progress comes
+   * Renders the selected takes in order into Storyboards/<name>/; resolves with the film's path. Progress comes
    * through onExportProgress with sequenceId = the storyboard's id.
    */
   exportStoryboard(storyboardId: string): Promise<string>
@@ -2865,7 +2865,7 @@ export interface StudioApi {
   generateStill(params: StillParams, opts?: Pick<GenerateOptions, 'confirmOverBudget'>): Promise<Still>
   /** The sequence's stills, or every still when sequenceId is omitted; newest first. */
   listStills(sequenceId?: string): Promise<Still[]>
-  /** Moves the still to the Trash (or to Referensbilder while clips or generations still use it). */
+  /** Moves the still to the Trash (or to Reference images while clips or generations still use it). */
   deleteStill(id: string): Promise<void>
   /** Saves the frame of a take at `time` seconds as a still (source 'frame'). Free. */
   saveFrameAsStill(generationId: string, time: number, sequenceId?: string): Promise<Still>
@@ -2934,7 +2934,7 @@ export interface StudioApi {
   /** Probes the files before importing (free; nothing is copied). */
   inspectVideoFiles(paths: string[]): Promise<VideoFileInfo[]>
   /**
-   * Copies the files into Egna klipp/<day>/ (an APFS clone when possible), makes working copies where needed and
+   * Copies the files into Own clips/<day>/ (an APFS clone when possible), makes working copies where needed and
    * adds them to the feed, a sequence (one new clip per file) or a clip (a selected take). User only.
    */
   importVideoFiles(paths: string[], target: ImportTarget): Promise<ImportResult>
@@ -2986,7 +2986,7 @@ export interface StudioApi {
   updateTranscript(generationId: string, patch: { segmentId: string; text: string }[]): Promise<Transcript>
   /** User only: a save dialog for the .srt; resolves with the path, or '' when cancelled. */
   saveSubtitles(generationId: string): Promise<string>
-  /** User only: copies audio files into the edit's Ljud/. */
+  /** User only: copies audio files into the edit's Audio/. */
   addEditAudio(editId: string, paths: string[]): Promise<EditMedia[]>
   sendEditToSequence(versionId: string, target: SendTarget): Promise<{ sequenceId: string; segmentId: string }>
   /** Venice's speech, music, effect, transcription and voice models (free; cached 10 minutes). */

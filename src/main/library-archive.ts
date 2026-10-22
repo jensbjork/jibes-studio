@@ -39,7 +39,7 @@ import {
   dayStamp,
   FOLDERS,
   isLibraryReady,
-  LEGACY_FOLDERS,
+  legacyFoldersIn,
   libraryOperationSettled,
   libraryRoot
 } from './paths'
@@ -362,7 +362,7 @@ interface ArchiveListing {
   unsafe: number
 }
 
-// "-rw-r--r--  3.0 unx    12345 bx stor 26-Oct-10 12:59 Karaktärer/Anna/a.png": type, size and name.
+// "-rw-r--r--  3.0 unx    12345 bx stor 26-Oct-10 12:59 Characters/Anna/a.png": type, size and name.
 const LISTING_ENTRY = /^([-dlbcps?])\S{9}\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+\S+ (.*)$/
 
 // "Zip file size: 1267530000 bytes, number of entries: 151": how many entries the zip says it has, folders included.
@@ -578,9 +578,12 @@ interface FileList {
   skipped: string[]
 }
 
-/** The library's own top-level folders: today's, and an earlier layout's that a conversion hasn't emptied yet. */
-function libraryFolders(): string[] {
-  return [...Object.values(FOLDERS), ...Object.values(LEGACY_FOLDERS)]
+/**
+ * The library's own top-level folders in `root`: today's, and an earlier layout's that a conversion hasn't emptied yet
+ * (only where they are folders of their own, legacyFoldersIn: never today's again under another spelling).
+ */
+function libraryFolders(root: string): string[] {
+  return [...Object.values(FOLDERS), ...legacyFoldersIn(root)]
 }
 
 function addFile(list: FileList, rel: string, size: number): void {
@@ -636,7 +639,7 @@ async function walk(j: Job, root: string, rel: string, list: FileList): Promise<
 /** Every file to pack, relative to the base folder (the database copy is added separately). */
 async function listLibraryFiles(j: Job, root: string, kept: readonly string[]): Promise<FileList> {
   const list: FileList = { names: [], files: 0, bytes: 0, skipped: [] }
-  for (const top of libraryFolders()) {
+  for (const top of libraryFolders(root)) {
     const s = await lstat(join(root, top)).catch(() => undefined)
     // A link or a file by the name of a library folder isn't the library's.
     if (s?.isDirectory()) await walk(j, root, top, list)
@@ -708,7 +711,7 @@ function leftOutNote(missing: string[], skipped: string[]): string | undefined {
 function exportTarget(path: string, root: string): string {
   let target = resolve(path).normalize('NFC')
   if (extname(target).toLowerCase() !== '.zip') target += '.zip'
-  if (libraryFolders().some((name) => isWithin(target, join(root, name)))) {
+  if (libraryFolders(root).some((name) => isWithin(target, join(root, name)))) {
     throw new Error('Save the zip file outside the library, for example in Downloads.')
   }
   if (!existsSync(dirname(target))) throw new Error(`The folder “${dirname(target)}” does not exist.`)
@@ -833,7 +836,7 @@ async function checkDestination(target: string): Promise<void> {
   // Elsewhere in the open library's base folder is fine (as for opening a library kept there); inside its own folders,
   // which a move carries along and a clean-up works in, it is not.
   const root = isLibraryReady() ? libraryRoot() : undefined
-  if (ins.isCurrent || (root && libraryFolders().some((name) => isWithin(target, join(root, name))))) {
+  if (ins.isCurrent || (root && libraryFolders(root).some((name) => isWithin(target, join(root, name))))) {
     throw new Error('Choose a place outside the library that is open now.')
   }
   if (ins.hasLibrary) throw new Error('The folder already holds a Studio library. Choose a new or empty folder.')

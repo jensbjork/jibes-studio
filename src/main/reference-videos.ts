@@ -17,7 +17,7 @@ import { extractFrames, makeReferenceVideoProxy, probe, REFERENCE_PROXY } from '
 import { appDataDir, APP_DATA } from './paths'
 
 /** Inside .studio/tmp: the proxies of reference video windows (see the top of this file). */
-export const REFERENCE_PROXY_FOLDER = 'referensvideor'
+export const REFERENCE_PROXY_FOLDER = 'reference-videos'
 /** The proxy cache is pruned (least recently used first) down to this. */
 const PROXY_CACHE_BYTES = 400 * 1024 ** 2
 

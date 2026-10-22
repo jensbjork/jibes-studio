@@ -44,15 +44,15 @@ import {
 import { videoDuration } from './reference-videos'
 import { copyInto, fileErrorReason, placeFile, serialized } from './references'
 
-// Assets: characters (Karaktärer), environments (Miljöer), products (Produkter), outfits (Kläder) and poses
-// (Poser) — each a name, a description and reference photos. Characters and environments can also have audio
+// Assets: characters, environments, products, outfits and poses (each in its folder: Characters, Environments …)
+// — each a name, a description and reference photos. Characters and environments can also have audio
 // clips: a voice ("Voice") or a soundscape ("Soundscape"), of which a window of 2–15 s is sent to Venice as
 // reference audio. Every asset has a folder <kind folder>/<name>/ with copies of its photos and audio (under their
-// original names) and Beskrivning.txt, so an asset keeps working when the originals are moved or deleted, and the
+// original names) and Description.txt, so an asset keeps working when the originals are moved or deleted, and the
 // folder reads well in Finder. The database is the source of truth; the folder follows renames and deletes. A
 // character may have a default outfit (assets.default_outfit_id, cleared by the FK when the outfit goes). A photo or
 // clip an agent added records which agent (and the host a fetched file came from) in its `origin` column.
-// Directors (Regissörer) are assets too, but never references: a director's photos are its style frames, and its
+// Directors are assets too, but never references: a director's photos are its style frames, and its
 // way of making a film (assets.direction, schema 14) holds its style videos, copied into its folder like the photos
 // (stored relative, so renames and "Tidy up" carry them along with every other stored path).
 
@@ -69,12 +69,12 @@ const AUDIO_KINDS: ReadonlySet<AssetKind> = new Set<AssetKind>(['character', 'en
  * accepted (the reference window picks the part that is sent); the library view points out ones over a minute.
  */
 const MIN_AUDIO_FILE_SECONDS = 1
-const DESCRIPTION_FILE = 'Beskrivning.txt'
+const DESCRIPTION_FILE = 'Description.txt'
 /**
  * Folder name for a name with nothing usable in it (e.g. "..."). The same for every kind, and the same as
  * "Tidy up" uses, so the two never disagree about which folder an asset should have.
  */
-const UNNAMED = 'Namnlös'
+const UNNAMED = 'Untitled'
 const GONE = 'It no longer exists in the library.'
 const AUDIO_GONE = 'The audio no longer exists.'
 const nameCollator = new Intl.Collator('en')
@@ -327,7 +327,7 @@ function freeFolderName(kind: AssetKind, name: string, own?: { id: string; folde
   }
 }
 
-/** Mirrors the description into Beskrivning.txt for Finder; removed when empty. Best effort. */
+/** Mirrors the description into Description.txt for Finder; removed when empty. Best effort. */
 async function writeDescription(dir: string, description: string): Promise<void> {
   const file = join(dir, DESCRIPTION_FILE)
   try {
@@ -481,7 +481,7 @@ async function renameNamedImages(assetId: string, dir: string, oldName: string, 
 
 /**
  * A photo or audio clip that generations or sequence clips still use (as start, end or reference image, or
- * as reference audio) isn't trashed with its asset: it moves to Referensbilder/<today>/, where submitted
+ * as reference audio) isn't trashed with its asset: it moves to Reference images/<today>/, where submitted
  * pictures from outside the library go, and those rows follow, so "Use again" and "Generate missing" keep the
  * file and the prompt's @ImageN / @AudioN numbers. Call once the file's asset row is gone, so only other rows
  * count. True when it was kept.
@@ -904,7 +904,7 @@ async function prepareDirection(
 
 /**
  * Style videos a director no longer has: a file generations or clips still send is kept for them (keepUsedFile, moved
- * to Referensbilder); any other goes to the Trash. Call once the director's row no longer records them. True when a
+ * to Reference images); any other goes to the Trash. Call once the director's row no longer records them. True when a
  * file was kept (stored paths moved).
  */
 async function releaseStyleVideos(paths: readonly string[]): Promise<boolean> {
@@ -995,7 +995,7 @@ async function remove(id: unknown): Promise<void> {
   let kept = false
   const files = [
     ...images.map((r) => ({ file_path: r.file_path, fallback: 'Referensbild' })),
-    ...audio.map((r) => ({ file_path: r.file_path, fallback: 'Ljud' })),
+    ...audio.map((r) => ({ file_path: r.file_path, fallback: 'Audio' })),
     ...videos.map((path) => ({ file_path: toStoredPath(path), fallback: 'Video' }))
   ]
   for (const file of files) {
@@ -1242,7 +1242,7 @@ async function addAudio(assetId: unknown, paths: unknown, from?: unknown): Promi
   for (const { src, duration } of probed) {
     const ext = extname(src)
     try {
-      const dest = await copyInto(src, dir, safeName(basename(src, ext), { fallback: 'Ljud' }), ext.toLowerCase())
+      const dest = await copyInto(src, dir, safeName(basename(src, ext), { fallback: 'Audio' }), ext.toLowerCase())
       copied.push({ id: randomUUID(), dest, duration })
     } catch (err) {
       await discardCopies()
@@ -1297,7 +1297,7 @@ async function removeAudio(audioId: unknown): Promise<Asset> {
   })()
   // A clip that generations or clips still send as reference audio is kept for them (see keepUsedFile).
   const path = fromStoredPath(row.file_path)
-  if (await keepUsedFile(path, 'Ljud')) notifyFilesMoved()
+  if (await keepUsedFile(path, 'Audio')) notifyFilesMoved()
   else await trashFile(path)
 
   notifyChange()
@@ -1366,7 +1366,7 @@ async function addGenerated(assetId: unknown, file: unknown, baseName: unknown):
   const ext = extname(file).toLowerCase() || '.mp3'
   let dest: string
   try {
-    dest = await copyInto(file, dir, safeName(text(baseName), { fallback: 'Ljud' }), ext)
+    dest = await copyInto(file, dir, safeName(text(baseName), { fallback: 'Audio' }), ext)
   } catch (err) {
     throw new Error(`Could not save the audio: ${fileErrorReason(err)}.`)
   }
@@ -1488,7 +1488,7 @@ export function addAssetAudio(
   return assetTask(() => addAudio(assetId, paths, origin))
 }
 
-/** Removes the clip: its copy goes to the Trash, or to Referensbilder/<today>/ while generations still use it. */
+/** Removes the clip: its copy goes to the Trash, or to Reference images/<today>/ while generations still use it. */
 export function removeAssetAudio(audioId: string): Promise<Asset> {
   return assetTask(() => removeAudio(audioId))
 }

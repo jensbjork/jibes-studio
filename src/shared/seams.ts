@@ -21,8 +21,8 @@ function fileName(path: string): string {
 }
 
 /**
- * A picture main extracted from a take: frames live in .studio/bildrutor/ (frames/ in libraries from before the
- * base folder could be chosen).
+ * A picture main extracted from a take: frames live in .studio/frames/ (.studio/bildrutor/ before English folder
+ * names, frames/ in libraries from before the base folder could be chosen).
  */
 export function isExtractedFrame(path: string | undefined): boolean {
   return !!path && /[/\\](frames|bildrutor)[/\\]/.test(path)

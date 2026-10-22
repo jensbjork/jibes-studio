@@ -1,7 +1,7 @@
-// Own clips ("Egna klipp"): the user's own video files, brought into the library so they can be used like any
+// Own clips ("Own clips"): the user's own video files, brought into the library so they can be used like any
 // generation: in the clip feed, as a clip (or a take of a clip) in a sequence that AI clips continue from, and as the
 // starting point of an edit in the Editor. An import is a `generations` row with source 'import', inserted completed
-// (never pending: nothing is generated) with no price, and a file of its own in Egna klipp/<day>/: an APFS clone of
+// (never pending: nothing is generated) with no price, and a file of its own in Own clips/<day>/: an APFS clone of
 // the original where the volume allows (instant, no extra space), else a copy. When the original can't be played or
 // continued from as it is (HDR, more than 8 bits, larger than 1080p, a variable frame rate, rotation metadata, ProRes
 // or another format Chromium can't play, a first audio track ffmpeg can't decode, pixels that aren't square, sound and
@@ -760,7 +760,7 @@ export class ImportService {
   }
 
   /**
-   * One file into Egna klipp/<today>/: clone or copy (hashing it on the way), a working copy when needed (or when
+   * One file into Own clips/<today>/: clone or copy (hashing it on the way), a working copy when needed (or when
    * cropping), a poster, the row. Everything is made in the library's scratch folder first and only moved into the
    * visible folder once complete, so Avbryt (or a crash) never leaves half a film in Finder: the scratch folder is
    * the app's own and is cleared when the library is opened. Resolves the row (an earlier import when reused).
@@ -807,7 +807,7 @@ export class ImportService {
     const ext = extname(name).toLowerCase() || '.mp4'
     const title = basename(name, extname(name)).trim() || 'Eget klipp'
     const scratchOriginal = join(tmpDir(), `import-${id}${ext}`)
-    const scratchWorking = join(tmpDir(), `import-${id}-arbetskopia.mp4`)
+    const scratchWorking = join(tmpDir(), `import-${id}-working-copy.mp4`)
     const poster = join(thumbsDir(), `${id}.jpg`)
     const placed: string[] = []
     let inserted = false
@@ -849,8 +849,8 @@ export class ImportService {
       })
       if (signal.aborted) throw abortError()
 
-      // Into Egna klipp/<today>/, by the home rule (the same names "Tidy up" would give them): with a working copy,
-      // the working copy is "<title> (arbetskopia).mp4" and the original "<title><ext>" beside it. The scratch path
+      // Into Own clips/<today>/, by the home rule (the same names "Tidy up" would give them): with a working copy,
+      // the working copy is "<title> (working copy).mp4" and the original "<title><ext>" beside it. The scratch path
       // only stands for "has an original" here; the row records where the original lands.
       const located = {
         createdAt: now,

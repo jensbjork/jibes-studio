@@ -1,4 +1,4 @@
-// Own clips (in the folder "Egna klipp") in the window: bringing the user's own video files into the library from a file dialog or a
+// Own clips (in the folder "Own clips") in the window: bringing the user's own video files into the library from a file dialog or a
 // drop (on the feed, a sequence's timeline, a clip's takes), what is said before (refusals, a large copy, a working
 // copy, a film of another shape than the sequence), and the import's progress while it runs. The import itself is
 // main's (imports.ts); this decides nothing main doesn't check again.

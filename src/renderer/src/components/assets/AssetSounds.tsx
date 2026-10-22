@@ -627,7 +627,7 @@ function ClipRow({
             question={`Remove ${copy.clipDefinite}?`}
             confirmLabel="Remove"
             onConfirm={onRemove}
-            title={`Remove ${copy.clipDefinite} – the file is moved to ${TRASH}, or to “Referensbilder” if generations have used it`}
+            title={`Remove ${copy.clipDefinite} – the file is moved to ${TRASH}, or to “Reference images” if generations have used it`}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-accent"
           >
             <span aria-hidden>✕</span>

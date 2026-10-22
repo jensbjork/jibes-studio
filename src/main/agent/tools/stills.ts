@@ -110,7 +110,7 @@ export function imageUses(owners: Pick<StillOwners, 'sequences' | 'storyboards'>
   return uses
 }
 
-/** The still's owner as the tools name it: its sequence or its storyboard, or none (the folder "Referensbilder"). */
+/** The still's owner as the tools name it: its sequence or its storyboard, or none (the folder "Reference images"). */
 function ownerInfo(sequenceId: string | undefined, owners: StillOwners): Record<string, unknown> {
   if (!sequenceId) return { sequence_id: null }
   const owner = owners.byId.get(sequenceId)
@@ -432,7 +432,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Import a picture as a still',
       description:
-        "Copies a picture you send into Studio as a still – of a sequence (sequence_id) or a storyboard (storyboard_id), or, with neither, among the loose reference pictures (the folder \"Referensbilder\") – to use as a board's picture, a clip's start or end image, a reference of a new picture (reference_still_ids) or a loose reference ({still_id}). source: {upload_id} (a ready image upload) or {url} (fetched like begin_upload({url}); waits at most 45 s). The same picture imported again into the same place gives the still it became the first time. Free. Returns the still and its picture.",
+        "Copies a picture you send into Studio as a still – of a sequence (sequence_id) or a storyboard (storyboard_id), or, with neither, among the loose reference pictures (the folder \"Reference images\") – to use as a board's picture, a clip's start or end image, a reference of a new picture (reference_still_ids) or a loose reference ({still_id}). source: {upload_id} (a ready image upload) or {url} (fetched like begin_upload({url}); waits at most 45 s). The same picture imported again into the same place gives the still it became the first time. Free. Returns the still and its picture.",
       input: {
         source: z.union([uploadSource, urlSource]),
         sequence_id: z.string().optional(),

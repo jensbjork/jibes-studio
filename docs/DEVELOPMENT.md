@@ -199,13 +199,13 @@ throwaway library, **with Studio quit** (the database is in WAL mode and the app
 
 ```bash
 LIB="/tmp/studio-test/Movies/Studio Dev"            # the throwaway base folder
-mkdir -p "$LIB/Genereringar/2026-01-01"
-cp /tmp/studio-clips/clip1.mp4 "$LIB/Genereringar/2026-01-01/12.00 Test clip.mp4"
+mkdir -p "$LIB/Generations/2026-01-01"
+cp /tmp/studio-clips/clip1.mp4 "$LIB/Generations/2026-01-01/12.00 Test clip.mp4"
 sqlite3 "$LIB/.studio/studio.db" <<'SQL'
 INSERT INTO generations (id, created_at, model, prompt, params, status, file_path, completed_at)
 VALUES ('fake-1', 1767268800000, 'seedance-2-5-text-to-video-basic', 'Test clip',
   '{"model":"seedance-2-5-text-to-video-basic","prompt":"Test clip","duration":"5s","resolution":"480p","aspectRatio":"16:9"}',
-  'completed', 'Genereringar/2026-01-01/12.00 Test clip.mp4', 1767268800000);
+  'completed', 'Generations/2026-01-01/12.00 Test clip.mp4', 1767268800000);
 SQL
 ```
 
@@ -219,7 +219,7 @@ SQL
 - Only insert `completed` (or `failed`) rows. A `queued`/`processing` row with a `queue_id` would make Studio poll
   Venice for it.
 - Rows without `source` are Venice generations (`generated`). A fake own clip is a completed row with
-  `source = 'import'`, empty `model` and `prompt`, a `title` and its file in `Egna klipp/<day>/`; its params need
+  `source = 'import'`, empty `model` and `prompt`, a `title` and its file in `Own clips/<day>/`; its params need
   only `{"model":"","prompt":"","duration":"5s","resolution":"480p","aspectRatio":"16:9"}`.
 
 ### Fake reviews and learnings
@@ -650,7 +650,8 @@ nothing and uses no API key; the temporary folder is removed afterwards. Run it 
 Migrations are the `migrations` array in `src/main/db.ts`; `PRAGMA user_version` counts how many have run. To
 change the schema:
 
-1. **Append** a new SQL string to the end of the array. Never edit, reorder or remove an existing entry — every
+1. **Append** a new SQL string (or, where SQL can't say it, a function given the connection – migration 15) to the
+   end of the array. Never edit, reorder or remove an existing entry — every
    existing library has already run them. Several statements in one entry are fine; each entry runs in its own
    transaction, together with the `user_version` bump.
 2. Write SQL that works on every earlier state reachable by the previous migrations (SQLite's `ALTER TABLE` is
@@ -679,7 +680,7 @@ change the schema:
 5. **Test on a copy.** Quit Studio (closing folds the WAL into `studio.db`), copy a library's folder into a
    throwaway profile (or copy just `.studio/studio.db` into a temp folder for a harness), and open the copy. Check
    that the migration runs once, that the app works afterwards, and that opening it again changes nothing.
-6. **A new top-level folder** (as `Produkter` in migration 12) gets a `*_SCHEMA_VERSION` constant in `db.ts` and an
+6. **A new top-level folder** (as `Products` in migration 12) gets a `*_SCHEMA_VERSION` constant in `db.ts` and an
    entry in `library-root.ts`'s `ADDED_FOLDERS` (and `VISIBLE_FOLDERS`), so an older library whose base folder already
    holds a folder of the user's own by that name is refused until it is renamed, instead of the user's files being
    taken over.
@@ -707,7 +708,7 @@ agents' kind words). Products showed what the compiler doesn't catch:
   summary's view of the kind (`work.ts`'s `assetView`, `WorkView`, `AssetViewId`) and the agent guide and tool
   descriptions (`guide.ts`, `tools/library.ts`, `tools/delete.ts`).
 
-A grep for an existing kind's plural (`Poser`, `poses`) finds them.
+A grep for an existing kind's plural (`Poses`, `poses`) finds them.
 
 ## Adding an IPC method
 

@@ -2,8 +2,8 @@
 // and its analysis. The rules of the song's clips (their places, adding, deleting) are the sequence service's
 // (sequences.ts); sending a song clip and measuring a take's singing are song-sync.ts's.
 //
-// - The song is copied into the sequence's folder (Sekvenser/<name>/Ljud/<file>), so it moves with it; the vocals are
-//   separated on this Mac (free, voice-separation.ts) into Ljud/<name> (sång).flac.
+// - The song is copied into the sequence's folder (Sequences/<name>/Audio/<file>), so it moves with it; the vocals are
+//   separated on this Mac (free, voice-separation.ts) into Audio/<name> (vocals).flac.
 // - The lyrics are transcribed (paid: Venice ASR with word times, priced first, the budget applies) from the vocals
 //   when there are any (cleaner), else the mix; each transcription is a media_jobs row (op 'transcribe', no edit, the
 //   sequence in its request) that Spending places on the sequence. A line corrected by hand keeps its timing.
@@ -57,7 +57,7 @@ const LYRICS_NEED_APPROVAL = 'Transcribing the lyrics is paid: ask for it with r
 
 /** The file name the vocals get next to the song, from the song's file. */
 export function vocalsFileName(songPath: string): string {
-  return `${basename(songPath, extname(songPath))} (sång).flac`
+  return `${basename(songPath, extname(songPath))} (vocals).flac`
 }
 
 /** What runs for a sequence's song right now (Activity, work.ts). */
@@ -319,7 +319,7 @@ export class SongService {
   private requireSongFile(sequenceId: string): SequenceSong {
     const song = this.requireSong(sequenceId)
     if (!existsSync(song.path)) {
-      throw new Error(`The song's file is missing: ${basename(song.path)}. Put it back in the sequence's folder (Ljud).`)
+      throw new Error(`The song's file is missing: ${basename(song.path)}. Put it back in the sequence's folder (Audio).`)
     }
     return song
   }
@@ -448,7 +448,7 @@ export class SongService {
 
   // ── Steps ──────────────────────────────────────────────────────────────────
 
-  /** Separates the song's vocals into Ljud/<name> (sång).flac (replacing vocals made before, which go to the Trash). */
+  /** Separates the song's vocals into Audio/<name> (vocals).flac (replacing vocals made before, which go to the Trash). */
   private async separateNow(sequenceId: string, report: (fraction: number) => void): Promise<void> {
     const song = this.requireSong(sequenceId)
     const release = this.deps.sequences.holdSongFolder(sequenceId)

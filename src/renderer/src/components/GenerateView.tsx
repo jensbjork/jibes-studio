@@ -195,7 +195,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
       // Over the budget, and the user said no: nothing was sent.
       if (!g) return
       feed.upsert(g)
-      // Outside pictures were copied into Referensbilder; the form uses the copies from now on.
+      // Outside pictures were copied into Reference images; the form uses the copies from now on.
       setParams((p) => withImportedCopies(p, params, g.params) ?? p)
     } catch (e) {
       const message = ipcErrorMessage(e)
@@ -324,7 +324,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
               )}
               <OpenFolderButton
                 target="generations"
-                title={`Open the folder “Genereringar” in ${FILE_MANAGER}`}
+                title={`Open the folder “Generations” in ${FILE_MANAGER}`}
                 onError={setFolderError}
                 compact
                 className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
