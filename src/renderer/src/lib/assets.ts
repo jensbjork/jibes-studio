@@ -304,7 +304,7 @@ export function originText(origin: AssetFileOrigin | undefined, now = Date.now()
       .replace(/\.(?=\s|$)/g, '')
     when = ` ${day} ${originClock.format(d)}`
   }
-  // "Added by the agent" for a generic MCP client name ("mcp"), "Added by OpenClaw" for a real one.
+  // "Added by the agent" for a generic MCP client name ("mcp"), "Added by Hermes" for a real one.
   const who = isGenericAgentName(origin.agent) ? 'the agent' : origin.agent.trim()
   return `Added by ${who}${when}${origin.host ? ` · from ${origin.host}` : ''}`
 }

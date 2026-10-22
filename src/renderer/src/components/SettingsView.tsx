@@ -109,7 +109,7 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
             <SettingsSection
               id={SECTION.agent}
               title="Agent connection"
-              description="Let your own AI agents, such as OpenClaw or Hermes Agent, work in Studio through MCP."
+              description="Let your own AI agents, such as Claude Code, Hermes Agent or OpenClaw, work in Studio through MCP."
             >
               <AgentSettingsSection />
             </SettingsSection>

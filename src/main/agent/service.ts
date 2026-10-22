@@ -11,6 +11,7 @@ import {
   setAgentPortSetting
 } from '../settings'
 import { flashTaskbar } from '../taskbar'
+import { PUBLIC_NAME } from '../variant'
 import { ActivityLog } from './activity'
 import { ApprovalStore } from './approvals'
 import { FormBridge } from './bridge'
@@ -309,7 +310,7 @@ export class AgentService {
 
   private createMcpServer(session: AgentSession): McpServer {
     const mcp = new McpServer(
-      { name: 'studio', title: 'JIBES Studio', version: app.getVersion() },
+      { name: 'studio', title: PUBLIC_NAME, version: app.getVersion() },
       { instructions: serverInstructions(getPromptLanguage()) }
     )
     registerAgentTools(mcp, {

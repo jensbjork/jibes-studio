@@ -26,7 +26,7 @@ function readVersions(userAgent: string): Versions {
 
 /** Settings → About Studio: the version, which profile this is, and updates. */
 export default function AboutSettings({ settings, onChanged }: { settings: Settings; onChanged: () => void }) {
-  const { devProfile } = settings
+  const { devProfile, variant } = settings
   const versions = useMemo(() => readVersions(navigator.userAgent), [])
   const engine = [
     versions.electron ? `Electron ${versions.electron}` : '',
@@ -39,12 +39,12 @@ export default function AboutSettings({ settings, onChanged }: { settings: Setti
     <>
       <div className="rounded-md border border-line bg-raised/40 px-3 py-2.5">
         <p className="select-text">
-          <span className="font-medium">JIBES Studio</span>
+          <span className="font-medium">JIBES Studio{variant && ` ${variant}`}</span>
           {versions.studio && <span className="tabular-nums"> {versions.studio}</span>}
           {devProfile && <span className="text-muted"> · development version (Studio Dev)</span>}
         </p>
         {engine && <p className="mt-0.5 text-[12px] text-muted select-text tabular-nums">{engine}</p>}
-        {devProfile && (
+        {(devProfile || variant) && (
           <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
             Has its own settings and its own library, separate from {INSTALLED_APP}.
           </p>
@@ -86,7 +86,12 @@ function UpdateSettings({ settings, onChanged }: { settings: Settings; onChanged
   if (settings.developmentBuild) {
     return (
       <SettingsItem title="Updates">
-        <p className="leading-relaxed text-muted">Development build – updates come from git.</p>
+        <p className="leading-relaxed text-muted">
+          {settings.variant
+            ? `Studio ${settings.variant} is built from the source – updates come from git, never from GitHub, ` +
+              'where a release would replace it with Studio.'
+            : 'Development build – updates come from git.'}
+        </p>
       </SettingsItem>
     )
   }

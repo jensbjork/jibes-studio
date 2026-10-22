@@ -1,6 +1,6 @@
 // Wording for the agent connection: the sidebar indicator, the activity drawer and the approval dialog.
 // An agent is named by agentDisplayName (shared/agent-name.ts): a generic MCP client name ("mcp", "mcp-remote")
-// reads "The agent", a real one ("OpenClaw") is kept. MCP is how the agent connects, not who it is.
+// reads "The agent", a real one ("Hermes") is kept. MCP is how the agent connects, not who it is.
 
 import { agentDisplayName, isGenericAgentName } from '@shared/agent-name'
 import type { AgentActivity, AgentClientInfo, AgentStatus, ApprovalRequest, SegmentImageSlot } from '@shared/types'
@@ -62,15 +62,15 @@ export function agentSummary(status: AgentStatus | undefined): AgentSummary {
   if (!names.length) {
     return { tone: 'waiting', label: 'Agent: on – waiting', detail: 'The connection is on and waiting for an agent.' }
   }
-  // The sidebar says what is there, an agent, whatever its client calls itself ("mcp", "OpenClaw"…); a real name is
+  // The sidebar says what is there, an agent, whatever its client calls itself ("mcp", "Hermes"…); a real name is
   // in the detail and the drawer, a generic one reads "an agent".
   const label = names.length === 1 ? 'Agent connected' : `${names.length} agents connected`
   return { tone: 'connected', label, detail: connectedDetail(names) }
 }
 
 /**
- * The drawer's line on who is connected: "OpenClaw is connected via MCP.", "An agent is connected via MCP.",
- * "OpenClaw and one more agent are connected via MCP."
+ * The drawer's line on who is connected: "Hermes is connected via MCP.", "An agent is connected via MCP.",
+ * "Hermes and one more agent are connected via MCP."
  */
 function connectedDetail(names: string[]): string {
   const named = names.filter((n) => !isGenericAgentName(n))
@@ -86,7 +86,7 @@ function connectedDetail(names: string[]): string {
   return `${englishList([...named, ...others])} ${verb} via MCP.`
 }
 
-/** "The agent is working", "OpenClaw is working": who is working right now. */
+/** "The agent is working", "Hermes is working": who is working right now. */
 export function workingLabel(a: AgentActivity): string {
   return `${agentDisplayName(a.client)} is working`
 }
@@ -123,7 +123,7 @@ export function formatTime(at: number): string {
 }
 
 /**
- * "The agent set the prompt", "OpenClaw set the prompt": the summary from main after the agent's name as the user
+ * "The agent set the prompt", "Hermes set the prompt": the summary from main after the agent's name as the user
  * knows it (never the MCP client's technical name, which is in the drawer's connection details).
  */
 export function activityText(a: AgentActivity): string {

@@ -392,11 +392,16 @@ export interface Settings {
   libraryDir: string
   /** Running as "Studio Dev" (npm run dev) with its own settings and library, separate from Studio.app. */
   devProfile: boolean
+  /**
+   * The variant this build is ("Test" for Studio Test, `npm run app:install:test`): its own name, settings and
+   * library, separate from Studio.app. Absent for Studio itself.
+   */
+  variant?: string
   /** Look for a newer Studio on GitHub once a day when Studio starts (default on; never in Studio Dev). */
   autoUpdateCheck: boolean
   /** When Studio last asked GitHub for its newest release (ISO), if it ever has (Settings → About Studio). */
   lastUpdateCheck?: string
-  /** A development build (Studio Dev, any unpackaged build): it never looks for updates – they come from git. */
+  /** A development build (Studio Dev, any unpackaged build, a variant): it never looks for updates (git updates it). */
   developmentBuild?: boolean
   /**
    * "Prompt language": the language video prompts are written in. Decides the words the prompt editor inserts
@@ -2101,7 +2106,7 @@ export const workKey = {
 
 // ── Agent connection (MCP server for the user's own agents) ──────────────────
 
-/** An MCP client (e.g. an OpenClaw or Hermes Agent agent, or Claude Desktop) with an open session. */
+/** An MCP client (e.g. Claude Desktop, Claude Code, Hermes Agent or OpenClaw) with an open session. */
 export interface AgentClientInfo {
   /** The name the client gave when it connected (its clientInfo), e.g. "My agent". */
   name: string

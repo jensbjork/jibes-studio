@@ -31,7 +31,9 @@
     "check": "npm run typecheck && npm run build",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "app": "node scripts/build-helpers.mjs && electron-vite build && NODE_OPTIONS=--experimental-require-module electron-builder --mac",
-    "app:install": "npm run app && rm -rf /Applications/Studio.app && cp -R dist/mac-arm64/Studio.app /Applications/ && echo \"Studio.app installed in /Applications\""
+    "app:install": "npm run app && rm -rf /Applications/Studio.app && cp -R dist/mac-arm64/Studio.app /Applications/ && echo \"Studio.app installed in /Applications\"",
+    "app:test": "node scripts/app-variant.mjs Test",
+    "app:install:test": "node scripts/app-variant.mjs Test --install"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "~1.32.1",

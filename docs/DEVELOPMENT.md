@@ -64,6 +64,8 @@ differs):
 | `npm run check` | `typecheck` + `build` — what CI runs, and what must pass before a pull request. |
 | `npm run app` | Builds the native helper, then builds and packages `dist/mac-arm64/Studio.app` with electron-builder. |
 | `npm run app:install` | `npm run app`, then replaces `/Applications/Studio.app` with the new build. |
+| `npm run app:test` | Builds **Studio Test**, a variant with its own name, settings and library, into `dist/test/mac-arm64/` (`scripts/app-variant.mjs Test`). See [Profiles](#profiles). |
+| `npm run app:install:test` | `npm run app:test`, then replaces `/Applications/Studio Test.app` with the new build. |
 | `npm run screenshots` | Takes the README's screenshots into `docs/images/` from the built `out/` (run `npm run build` first), with a fresh, empty profile and library in a temporary folder. See [Screenshots](#screenshots). |
 
 Because the dev app reloads on every save, keep the code compiling while you work: a broken save restarts a
@@ -78,10 +80,16 @@ suggested location of the library. Each library carries its own database inside 
 | --- | --- | --- | --- |
 | Studio.app, `npm run dev:real`, `npm start` | Studio | `~/Library/Application Support/Studio/` | `~/Movies/Studio` |
 | `npm run dev` | Studio Dev | `~/Library/Application Support/Studio Dev/` | `~/Movies/Studio Dev` |
+| Studio Test (`npm run app:install:test`) | Studio Test | `~/Library/Application Support/Studio Test/` | `~/Movies/Studio Test` |
 | `STUDIO_PROFILE_DIR=<dir> npm run dev` | Studio Dev | `<dir>/userData/` | `<dir>/Movies/Studio Dev` |
 
-- **Studio Dev** shows a yellow *Dev* badge and the window title "Studio Dev". It shares nothing with Studio.app,
-  so both can run at the same time.
+- **Studio Dev** shows a yellow *Dev* badge under the wordmark and the window title "JIBES Studio Dev". It shares
+  nothing with Studio.app, so both can run at the same time.
+- **Studio Test** is a *variant* (`scripts/app-variant.mjs`, `src/main/variant.ts`): a separately built app with
+  its own name, settings, library, place in the Dock and a pink *Test* badge – for a build of your own beside the installed app. It runs beside Studio.app and Studio Dev and never updates itself from
+  GitHub (a release would replace it with Studio); `npm run app:install:test` rebuilds it from your checkout. macOS
+  keeps each app's encryption key apart, so its Venice API key and agent token are its own. Another name works the
+  same way: `node scripts/app-variant.mjs <Name> --install` (a capital letter, then letters and digits).
 - **The single-instance lock is per profile.** A second launch of the same profile only brings the running one to
   the front (two instances would poll and download the same paid jobs). That is why `dev:real` needs Studio.app to
   be closed.
@@ -91,8 +99,8 @@ suggested location of the library. Each library carries its own database inside 
   `dev:real`, rebuild Studio.app (`npm run app:install`) before opening it again.
 - **`STUDIO_PROFILE_DIR`** gives a throwaway profile: settings and the suggested library live under that folder.
   Use it for anything you want to delete afterwards, e.g. `STUDIO_PROFILE_DIR=/tmp/studio-test npm run dev`.
-- Both Studio and Studio Dev default to agent port 8770. If both have the agent connection on, give one of them
-  another port.
+- Studio and Studio Test default to agent port 8770, Studio Dev to 8771, so the development copy can listen
+  beside either. If Studio and Studio Test both have the agent connection on, give one of them another port.
 
 On Windows the settings are in `%APPDATA%\Studio\` (`Studio Dev\`) and the suggested library is
 `Videos\Studio` (`Videos\Studio Dev`).

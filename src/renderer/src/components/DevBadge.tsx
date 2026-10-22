@@ -11,3 +11,15 @@ export default function DevBadge() {
     </span>
   )
 }
+
+/** Marks a variant ("Test" for Studio Test) so it can't be mistaken for Studio.app either. */
+export function VariantBadge({ name }: { name: string }) {
+  return (
+    <span
+      className="rounded bg-rose-400/15 px-1.5 py-0.5 text-[9px] tracking-[0.12em] text-rose-300"
+      title={`Studio ${name} – its own settings and library, separate from ${INSTALLED_APP}`}
+    >
+      {name}
+    </span>
+  )
+}

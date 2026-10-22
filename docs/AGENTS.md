@@ -1,7 +1,7 @@
 # Connecting your own agent (MCP)
 
 JIBES Studio (Studio for short) can run a [Model Context Protocol](https://modelcontextprotocol.io) server so that AI agents you run
-yourself — for example OpenClaw, Hermes Agent, Claude Desktop or Claude Code — can work in the app alongside you,
+yourself — for example Claude Desktop, Claude Code, Hermes Agent or OpenClaw — can work in the app alongside you,
 doing nearly everything you can. An agent can read the library, look at its photos and listen to its voices,
 create characters, environments, **products**, outfits and poses and give them photos and sound, write and save
 prompts, choose reference images and voice clips, fill in the Generate form, build sequences — notes per clip, start
@@ -43,11 +43,12 @@ targets – isn't available, and HEIC pictures are refused.
 
 1. Open **Settings → Agent connection**.
 2. Switch on **Allow agents to connect**. It is **off by default**, and the setting is
-   per profile: Studio Dev and Studio.app each have their own switch, port and token.
+   per profile: Studio.app, Studio Test and Studio Dev each have their own switch, port (8770; Studio Dev 8771)
+   and token.
 3. The status line shows where Studio listens. The agent row at the bottom of the sidebar reads *Agent connected*
    when an agent is connected (a client that only calls itself "mcp" is shown as *The agent*; its technical name is in
    the drawer). While the agent works — a tool call within the last 12 seconds — it reads *The agent is working* (or, with
-   the agent's own name, for example *OpenClaw is working*) with a pulsing dot and the latest step, and a small pill at the bottom
+   the agent's own name, for example *Claude Code is working*) with a pulsing dot and the latest step, and a small pill at the bottom
    of the window shows the same. Click either to open the activity drawer with every tool call and the pending
    requests.
 
@@ -84,8 +85,8 @@ dialog (otherwise it uses the name the MCP client reports, which may be generic)
 ## Client configuration
 
 Claude Desktop needs no configuration: Settings → Agent connection adds Studio to it in one click (see
-[Claude Desktop](#claude-desktop)). For OpenClaw and Hermes Agent the same section shows ready-made snippets with your
-address, and its copy buttons include the real token. The examples below use placeholders: replace `<token>` and the
+[Claude Desktop](#claude-desktop)). For Claude Code, Hermes Agent and OpenClaw the same section shows ready-made
+snippets with your address, and its copy buttons include the real token. The examples below use placeholders: replace `<token>` and the
 URL. Treat the token like a password and keep it out of files you commit or share.
 
 ### Claude Desktop
@@ -148,41 +149,6 @@ bridges to Studio the same way. In `~/Library/Application Support/Claude/claude_
 `mcp-remote` only allows plain `http://` for `localhost`/`127.0.0.1`; to reach Studio over Tailscale from another
 Mac, use the `100.x.y.z` or `.ts.net` URL and add `--allow-http`. Restart Claude Desktop after editing the file.
 
-### OpenClaw
-
-Merge into OpenClaw's configuration under `mcp.servers`:
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "studio": {
-        "url": "http://100.x.y.z:8770/mcp",
-        "transport": "streamable-http",
-        "headers": {
-          "Authorization": "Bearer <token>",
-          "X-Studio-Agent-Name": "OpenClaw"
-        }
-      }
-    }
-  }
-}
-```
-
-### Hermes Agent
-
-Hermes Agent connects over HTTP as well. Add the server to its configuration (YAML); check Hermes's documentation
-for the exact key, which may differ between versions:
-
-```yaml
-mcp_servers:
-  studio:
-    url: "http://100.x.y.z:8770/mcp"
-    headers:
-      Authorization: "Bearer <token>"
-      X-Studio-Agent-Name: "Hermes"
-```
-
 ### Claude Code
 
 Claude Code supports remote HTTP servers with headers directly:
@@ -204,6 +170,41 @@ Or in a project's `.mcp.json`, reading the token from the environment so it is n
       "headers": {
         "Authorization": "Bearer ${STUDIO_MCP_TOKEN}",
         "X-Studio-Agent-Name": "Claude Code"
+      }
+    }
+  }
+}
+```
+
+### Hermes Agent
+
+Hermes Agent connects over HTTP as well. Add the server to its configuration (YAML); check Hermes's documentation
+for the exact key, which may differ between versions:
+
+```yaml
+mcp_servers:
+  studio:
+    url: "http://100.x.y.z:8770/mcp"
+    headers:
+      Authorization: "Bearer <token>"
+      X-Studio-Agent-Name: "Hermes"
+```
+
+### OpenClaw
+
+Merge into OpenClaw's configuration under `mcp.servers`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "studio": {
+        "url": "http://100.x.y.z:8770/mcp",
+        "transport": "streamable-http",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Studio-Agent-Name": "OpenClaw"
+        }
       }
     }
   }

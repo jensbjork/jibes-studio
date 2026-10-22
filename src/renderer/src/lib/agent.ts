@@ -144,7 +144,7 @@ function notifyNewApproval(a: ApprovalRequest): void {
               : a.kind === 'delete'
                 ? 'wants to delete something'
                 : 'wants to generate'
-    // "The agent wants to generate" for a generic MCP client name, "OpenClaw wants to generate" for a real one.
+    // "The agent wants to generate" for a generic MCP client name, "Hermes wants to generate" for a real one.
     const note = new Notification(`${agentDisplayName(a.client)} ${what}`, {
       body: 'Open Studio to approve or decline.',
       silent: false

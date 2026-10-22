@@ -11,7 +11,7 @@ interface Props {
 
 /**
  * A small pill at the bottom of the window while an agent works: a pulsing dot, "The agent is working" (or the
- * agent's own name, "OpenClaw is working") and what it just did, with the step before it fading above. It fades out a few
+ * agent's own name, "Hermes is working") and what it just did, with the step before it fading above. It fades out a few
  * seconds after the agent goes quiet; a click opens the activity drawer.
  */
 export default function AgentPresence({ hidden, onOpen }: Props) {

@@ -68,6 +68,14 @@ function endpointsOf(status: AgentStatus): Endpoint[] {
  */
 const AGENT_NAME_HEADER = 'X-Studio-Agent-Name'
 
+/** One line, so it runs in any terminal (macOS' and Windows' continue lines differently). */
+function claudeCodeCommand(url: string, token: string): string {
+  return (
+    `claude mcp add --transport http studio ${url} ` +
+    `--header "Authorization: Bearer ${token}" --header "${AGENT_NAME_HEADER}: Claude Code"`
+  )
+}
+
 function openClawConfig(url: string, token: string): string {
   const server = {
     url,
@@ -88,12 +96,12 @@ function hermesConfig(url: string, token: string): string {
   ].join('\n')
 }
 
-type SnippetId = 'openclaw' | 'hermes'
+type SnippetId = 'claude-code' | 'hermes' | 'openclaw'
 
 /**
  * Settings → Agent connection (the section's heading and one-line description are SettingsView's): the MCP
- * server the user's own agents (e.g. OpenClaw, Hermes Agent) connect to. Off by default; reachable only from this
- * Mac and the tailnet, and only with the token shown here.
+ * server the user's own agents (e.g. Claude Code, Hermes Agent, OpenClaw) connect to. Off by default; reachable only
+ * from this Mac and the tailnet, and only with the token shown here.
  */
 export default function AgentSettingsSection() {
   const { status, statusError } = useAgentState()
@@ -103,7 +111,7 @@ export default function AgentSettingsSection() {
   const [revealed, setRevealed] = useState(false)
   const [tokenNotice, setTokenNotice] = useState<string>()
   const [endpointId, setEndpointId] = useState<EndpointId>()
-  const [snippet, setSnippet] = useState<SnippetId>('openclaw')
+  const [snippet, setSnippet] = useState<SnippetId>('claude-code')
   const switchLabel = useId()
 
   // Fresh status when Settings opens: Tailscale may have been started or stopped since.
@@ -267,8 +275,9 @@ export default function AgentSettingsSection() {
             <Segmented
               label="Agent"
               options={[
-                { id: 'openclaw', label: 'OpenClaw' },
-                { id: 'hermes', label: 'Hermes' }
+                { id: 'claude-code', label: 'Claude Code' },
+                { id: 'hermes', label: 'Hermes' },
+                { id: 'openclaw', label: 'OpenClaw' }
               ]}
               value={snippet}
               onChange={setSnippet}
@@ -283,13 +292,13 @@ export default function AgentSettingsSection() {
             )}
           </div>
 
-          {snippet === 'openclaw' ? (
+          {snippet === 'claude-code' ? (
             <Snippet
-              hint="Goes in OpenClaw’s configuration under mcp.servers. The name in X-Studio-Agent-Name is what Studio shows in the log and when the agent asks for permission."
-              text={openClawConfig(endpoint.url, shownToken)}
-              copy={withToken(openClawConfig)}
+              hint="Run it in a terminal. The name in X-Studio-Agent-Name is what Studio shows in the log and when the agent asks for permission."
+              text={claudeCodeCommand(endpoint.url, shownToken)}
+              copy={withToken(claudeCodeCommand)}
             />
-          ) : (
+          ) : snippet === 'hermes' ? (
             <Snippet
               hint={
                 'Hermes Agent also connects over HTTP. Where MCP servers are set can differ between versions – see ' +
@@ -297,6 +306,12 @@ export default function AgentSettingsSection() {
               }
               text={hermesConfig(endpoint.url, shownToken)}
               copy={withToken(hermesConfig)}
+            />
+          ) : (
+            <Snippet
+              hint="Goes in OpenClaw’s configuration under mcp.servers."
+              text={openClawConfig(endpoint.url, shownToken)}
+              copy={withToken(openClawConfig)}
             />
           )}
           <p className="mt-3 text-[12px] leading-relaxed text-muted">
@@ -313,7 +328,7 @@ export default function AgentSettingsSection() {
   )
 }
 
-/** A row of choices with a quiet label in front: "Agent: [OpenClaw] Hermes". */
+/** A row of choices with a quiet label in front: "Agent: [Claude Code] Hermes OpenClaw". */
 function Segmented<T extends string>({
   label,
   options,

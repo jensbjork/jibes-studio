@@ -5,9 +5,12 @@ import { app, safeStorage } from 'electron'
 import { normalizeBudget } from '@shared/budget'
 import type { BudgetSettings, PromptLanguage, Settings } from '@shared/types'
 import { isLibraryReady, libraryRoot } from './paths'
+import { VARIANT } from './variant'
 
 /** Where the agent connection (MCP server) listens unless the user picks another port. */
 export const DEFAULT_AGENT_PORT = 8770
+/** Studio Dev's, one up, so it can listen at the same time as Studio.app or Studio Test. */
+export const DEV_AGENT_PORT = DEFAULT_AGENT_PORT + 1
 
 /** The agent connection: off by default; the token is what agents authenticate with. */
 interface StoredAgentSettings {
@@ -129,12 +132,12 @@ export function updateTestServer(): URL | undefined {
 }
 
 /**
- * A development build – Studio Dev or any other unpackaged one (`npm run dev:real`) – never looks for updates: it is
- * updated from git. A test instance pointed at a stand-in for GitHub (updateTestServer) behaves as a release, except
- * that it never replaces itself (updates.ts).
+ * A development build – Studio Dev, any other unpackaged one (`npm run dev:real`) or a variant (variant.ts, where a
+ * release would replace it with Studio) – never looks for updates: it is updated from git. A test instance pointed at
+ * a stand-in for GitHub (updateTestServer) behaves as a release, except that it never replaces itself (updates.ts).
  */
 export function isDevelopmentBuild(): boolean {
-  return (!app.isPackaged || isDevProfile()) && !updateTestServer()
+  return (!app.isPackaged || isDevProfile() || !!VARIANT) && !updateTestServer()
 }
 
 /** Where a phase-2 library would be: its old setting if one was ever written, else ~/Movies/Studio. */
@@ -167,6 +170,7 @@ export function getSettings(): Settings {
     hasApiKey: !!s.apiKeyEncrypted,
     libraryDir: isLibraryReady() ? libraryRoot() : '',
     devProfile: isDevProfile(),
+    variant: VARIANT || undefined,
     autoUpdateCheck: s.autoUpdateCheck !== false,
     lastUpdateCheck: lastUpdateCheckOf(s)?.toISOString(),
     developmentBuild: isDevelopmentBuild(),
@@ -268,7 +272,8 @@ export function isValidAgentPort(port: unknown): port is number {
 export function getAgentSettings(): { enabled: boolean; port: number } {
   const agent = load().agent
   const port = agent?.port
-  return { enabled: agent?.enabled === true, port: isValidAgentPort(port) ? port : DEFAULT_AGENT_PORT }
+  const fallback = isDevProfile() ? DEV_AGENT_PORT : DEFAULT_AGENT_PORT
+  return { enabled: agent?.enabled === true, port: isValidAgentPort(port) ? port : fallback }
 }
 
 function updateAgent(patch: Partial<StoredAgentSettings>): void {

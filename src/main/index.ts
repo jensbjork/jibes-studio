@@ -59,6 +59,7 @@ import {
   setStillWorkListener,
   stillWorkBusy
 } from './stills'
+import { PUBLIC_NAME, VARIANT } from './variant'
 import { VeniceClient } from './venice'
 import { VeniceAudio } from './venice-audio'
 import { sendOptionsOf, sendVariants } from './variants'
@@ -73,6 +74,13 @@ if (process.env.STUDIO_DEV_PROFILE) {
   app.setPath('userData', join(app.getPath('appData'), 'Studio Dev'))
 }
 
+// A variant ("Studio Test", variant.ts) has its own name, settings and suggested base folder (~/Movies/Studio
+// Test), and runs beside Studio.app and Studio Dev.
+if (VARIANT) {
+  app.setName(`Studio ${VARIANT}`)
+  app.setPath('userData', join(app.getPath('appData'), `Studio ${VARIANT}`))
+}
+
 // For trying things out without touching the real profile: STUDIO_PROFILE_DIR=/tmp/x npm run dev keeps settings
 // (incl. the chosen base folder) and the default library location under that folder.
 if (process.env.STUDIO_PROFILE_DIR) {
@@ -80,7 +88,7 @@ if (process.env.STUDIO_PROFILE_DIR) {
   app.setPath('videos', join(process.env.STUDIO_PROFILE_DIR, 'Movies'))
 }
 
-/** electron-builder.yml's appId, put in at build time (electron.vite.config.ts). */
+/** electron-builder.yml's appId (".test" after it for Studio Test), put in by electron.vite.config.ts. */
 declare const __STUDIO_APP_ID__: string
 
 // Windows groups the taskbar button, notifications and the Start menu shortcut by this id: the appId, which the
@@ -621,12 +629,6 @@ function showWindow(): BrowserWindow {
   win.focus()
   return win
 }
-
-/**
- * The name people see (the menu's About, Hide and Quit, the About panel). The app, its folders and its files keep the
- * short name Studio, so settings, libraries, install.sh and updates go on working.
- */
-const PUBLIC_NAME = 'JIBES Studio'
 
 /**
  * macOS' menu: Electron's default one, with Check for Updates… under About JIBES Studio. Should building it fail, the

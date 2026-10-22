@@ -10,6 +10,7 @@ import type { AgentService } from './agent'
 import { isAgentCall } from './agent/local-ipc'
 import { LOOPBACK } from './agent/network'
 import { IS_MAC, THIS_COMPUTER } from './platform'
+import { VARIANT } from './variant'
 
 // Studio in Claude Desktop: Claude Desktop installs local MCP servers as Desktop Extensions (.mcpb, a zip with a
 // manifest.json – https://github.com/modelcontextprotocol/mcpb, manifest version 0.3). Studio's extension is a small
@@ -20,8 +21,8 @@ import { IS_MAC, THIS_COMPUTER } from './platform'
 // tailnet. Only the window can do this; agents never can.
 
 const USER_ONLY = 'Only you can do this in Studio.'
-/** The file Claude Desktop is given, and the name a saved one gets. */
-const FILE_NAME = 'Studio.mcpb'
+/** The file Claude Desktop is given, and the name a saved one gets ("Studio Test.mcpb" for a variant). */
+const FILE_NAME = VARIANT ? `Studio ${VARIANT}.mcpb` : 'Studio.mcpb'
 /** A file handed to Claude Desktop holds the token: it is deleted this long after, or when Studio quits. */
 const TEMP_LIFETIME_MS = 15 * 60_000
 const TEMP_PREFIX = 'studio-claude-'
@@ -88,15 +89,31 @@ interface UserConfigOption {
   default?: unknown
 }
 
-/** The manifest with `url` and `token` as the defaults of the extension's two settings. */
-export function personalizedManifest(template: unknown, url: string, token: string): Record<string, unknown> {
-  const manifest = structuredClone(template) as { user_config?: Record<string, UserConfigOption> }
+/**
+ * The manifest with `url` and `token` as the defaults of the extension's two settings. A variant's extension has its
+ * own name ("studio-test", "JIBES Studio Test"), so Claude Desktop can have it beside Studio's.
+ */
+export function personalizedManifest(
+  template: unknown,
+  url: string,
+  token: string,
+  variant = VARIANT
+): Record<string, unknown> {
+  const manifest = structuredClone(template) as {
+    name?: string
+    display_name?: string
+    user_config?: Record<string, UserConfigOption>
+  }
   const config = manifest.user_config
   if (!config?.studio_url || !config.studio_token) {
     throw new Error("The Claude Desktop extension in this copy of Studio is incomplete (its manifest has no settings).")
   }
   config.studio_url.default = url
   config.studio_token.default = token
+  if (variant) {
+    manifest.name = `studio-${variant.toLowerCase()}`
+    manifest.display_name = `JIBES Studio ${variant}`
+  }
   return manifest as Record<string, unknown>
 }
 

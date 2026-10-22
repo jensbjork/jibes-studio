@@ -4,7 +4,7 @@ import { ASSET_COPY, ASSET_VIEW, LIBRARY_KINDS } from '../lib/assets'
 import type { View } from '../lib/navigation'
 import { isMac, shortcut } from '../lib/platform'
 import { useRunning, useUnseen, useViewWork } from '../lib/work'
-import DevBadge from './DevBadge'
+import DevBadge, { VariantBadge } from './DevBadge'
 import AgentIndicator from './agent/AgentIndicator'
 import AssetIcon from './assets/AssetIcon'
 import { ScissorsIcon } from './editor/icons'
@@ -151,6 +151,8 @@ interface Props {
   onChange: (v: View) => void
   /** Shows a "Dev" badge so the development version can't be mistaken for Studio.app. */
   devProfile?: boolean
+  /** Shows the variant's badge ("Test") for Studio Test, likewise. */
+  variant?: string
   /** The icon rail instead of the full sidebar. */
   collapsed: boolean
   onToggleCollapsed: () => void
@@ -171,6 +173,7 @@ export default function Sidebar({
   view,
   onChange,
   devProfile = false,
+  variant,
   collapsed,
   onToggleCollapsed,
   panel,
@@ -180,6 +183,7 @@ export default function Sidebar({
   const toggleTip = useRailTooltip(collapsed, toggleLabel)
   const searchLabel = shortcut('Search (⌘K)')
   const searchTip = useRailTooltip(collapsed, searchLabel)
+  const badge = devProfile ? <DevBadge /> : variant ? <VariantBadge name={variant} /> : null
 
   return (
     <aside
@@ -196,7 +200,6 @@ export default function Sidebar({
           aria-hidden={collapsed}
         >
           JIBES Studio
-          {devProfile && <DevBadge />}
         </div>
         {/* Search (⌘K) and the toggle follow the moving edge while expanded and end side by side, centred under
             the traffic lights, in the rail. */}
@@ -226,10 +229,9 @@ export default function Sidebar({
         </button>
         {toggleTip.tooltip}
       </div>
-      {devProfile && collapsed && (
-        <div className="flex h-6 shrink-0 items-center justify-center">
-          <DevBadge />
-        </div>
+      {/* The badge gets a row of its own under the wordmark: beside it, it would run under search. */}
+      {badge && (
+        <div className={`flex h-6 shrink-0 items-center ${collapsed ? 'justify-center' : 'pl-4'}`}>{badge}</div>
       )}
 
       {/* Scrolls when the window is too short, so the bottom stack is never pushed out. */}

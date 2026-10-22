@@ -3,7 +3,7 @@ import type { ArchiveProgress, LibraryStatus } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { displayPath, folderName } from '../../lib/library'
 import { ARCHIVE_UNAVAILABLE, FILE_MANAGER } from '../../lib/platform'
-import DevBadge from '../DevBadge'
+import DevBadge, { VariantBadge } from '../DevBadge'
 import FolderDecision from './FolderDecision'
 import FolderTree from './FolderTree'
 import SwitchingOverlay from './SwitchingOverlay'
@@ -15,6 +15,8 @@ interface Props {
   onRetry: () => Promise<LibraryStatus | undefined>
   /** Running as "Studio Dev" with its own settings and library. */
   devProfile?: boolean
+  /** The variant this is ("Test"), with its own settings and library. */
+  variant?: string
 }
 
 const primary =
@@ -23,7 +25,7 @@ const secondary = 'rounded-md border border-line px-4 py-2 transition hover:bg-r
 const link = 'text-[12px] text-muted transition hover:text-text disabled:opacity-40'
 
 /** Full-window screen shown instead of the app until a reachable library folder is chosen. */
-export default function LibrarySetup({ status, onRetry, devProfile = false }: Props) {
+export default function LibrarySetup({ status, onRetry, devProfile = false, variant }: Props) {
   const choice = useFolderChoice()
   const switcher = useLibrarySwitch(status)
   const [retrying, setRetrying] = useState(false)
@@ -59,6 +61,7 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
         <div className="mx-auto max-w-xl px-8 pb-16 pt-4">
           <div className="mb-5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
             JIBES Studio
+            {variant && <VariantBadge name={variant} />}
             {devProfile && <DevBadge />}
           </div>
 

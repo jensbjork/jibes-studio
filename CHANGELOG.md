@@ -63,6 +63,12 @@ breaking changes; they are called out under **Changed** or **Removed**.
   SmartScreen asks once (*More info → Run anyway*). Every release is built on GitHub, and the Windows app is started
   and checked there before anything is published.
 
+- **Studio Test**: `npm run app:install:test` builds a second Mac app of your own, *Studio Test*, with its
+  own settings, library (suggested `~/Movies/Studio Test`), Venice API key and a pink *Test* badge, for a build of your own beside the installed app. It runs beside Studio.app and Studio Dev, never
+  updates itself from GitHub, and its Claude Desktop extension has its own name.
+- *Settings → Agent connection* has a ready-made Claude Code command (`claude mcp add …`), first and chosen by
+  default, beside the Hermes Agent and OpenClaw snippets.
+
 ### Fixed
 
 - With ffmpeg 8, Studio found none of ffmpeg's filters (ffmpeg 8 lists them differently), so an HDR clip couldn't be
@@ -74,6 +80,8 @@ breaking changes; they are called out under **Changed** or **Removed**.
 - The public name is now **JIBES Studio** – in the window, the menu, Settings, the Claude Desktop extension,
   the installer's shortcuts, the disk image and the docs. The app itself, its folders, settings and release files keep
   the short name Studio, so nothing has to be set up again and install.sh and updates go on working.
+- Studio Dev's agent connection defaults to port 8771, so it can listen beside Studio.app or Studio Test (8770).
+- The *Dev* badge has a row of its own under the wordmark, clear of the search button.
 
 ## [0.2.0] - 2026-10-19
 

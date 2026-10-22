@@ -236,6 +236,16 @@ without it, and runs without voice separation). The app is signed ad hoc (no App
 which is enough to run it on the Mac that built it. Studio.app uses the real profile
 (`~/Library/Application Support/Studio/`). The icon is drawn in `build/icon.svg`.
 
+A second copy, **Studio Test**, runs beside Studio.app with its own settings and library:
+
+```bash
+npm run app:install:test   # builds "Studio Test.app" and copies it to /Applications
+```
+
+It has its own settings (`~/Library/Application Support/Studio Test/`), its own suggested base folder
+(`~/Movies/Studio Test`), its own Venice API key and a pink **Test** badge, and runs beside Studio.app and
+Studio Dev. It never updates itself from GitHub – run the command again to bring it up to date.
+
 ## Updates
 
 Studio asks GitHub once a day, when it starts, whether a newer version is out – and whenever you ask: **Check for
@@ -258,8 +268,8 @@ opens its page on GitHub, and **Later** hides that version until a newer one com
   download only happens when you choose *Update now*, and nothing about you or your library goes with either. Turn the
   daily check off with **Check for updates automatically** under **Settings → About Studio**; Studio then only asks
   when you do.
-- **Studio Dev** and other development builds (`npm run dev`, `npm run dev:real`) never look for updates: they come
-  from git.
+- **Studio Dev**, **Studio Test** and other development builds (`npm run dev`, `npm run dev:real`) never look for
+  updates: they come from git.
 
 ## Where things are stored
 
@@ -692,7 +702,7 @@ default, also switchable in the dialog) lets Venice blur adult content.
 
 ## Connecting your own agent
 
-Studio can run an MCP server so agents such as OpenClaw, Hermes Agent, Claude Desktop or Claude Code can work in
+Studio can run an MCP server so agents such as Claude Desktop, Claude Code, Hermes Agent or OpenClaw can work in
 the app: read the library and see its photos (and hear its voices), choose references, write and validate prompts,
 fill in the Generate form, build sequences (also with your own clips), plan storyboards (boards, their pictures and
 the transitions' prompts), set a clip up to be redone between its neighbours, and edit films in the Editor.

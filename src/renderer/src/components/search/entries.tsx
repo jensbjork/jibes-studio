@@ -164,7 +164,7 @@ const SETTINGS_SECTIONS: Record<keyof typeof SETTINGS_SECTION, { title: string; 
   generation: { title: 'Generation', keywords: 'prompt language safe mode images descriptions' },
   library: { title: 'Library', keywords: 'folder base tidy up change move' },
   archive: { title: 'Export & import', keywords: 'zip backup archive library' },
-  agent: { title: 'Agent connection', keywords: 'mcp token openclaw hermes connect' },
+  agent: { title: 'Agent connection', keywords: 'mcp token claude code hermes openclaw connect' },
   tools: { title: 'Tools', keywords: 'ffmpeg voice separation' },
   about: { title: 'About JIBES Studio', keywords: 'version studio' }
 }

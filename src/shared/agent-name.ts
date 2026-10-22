@@ -1,6 +1,6 @@
 // What Studio calls a connected agent in UI text. MCP clients often report a technical name ("mcp",
 // "mcp-remote", "mcp-client") that says how the agent connects, not who it is: those read "The agent". A real name
-// (an X-Studio-Agent-Name header, or a client that names itself, like "OpenClaw") is kept.
+// (an X-Studio-Agent-Name header, or a client that names itself, like "Hermes") is kept.
 
 const GENERIC = /^(?:mcp|mcp[-_ ]?(?:client|remote|server|agent)|client|agent|unknown|unknown agent|okänd agent|node|python|curl)$/i
 

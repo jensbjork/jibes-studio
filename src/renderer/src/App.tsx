@@ -49,13 +49,16 @@ export default function App() {
     void refreshLibrary()
   }, [])
 
-  // "Studio Dev" (npm run dev) has its own settings and library; mark it everywhere, including the window title
-  // shown in Mission Control and the Window menu, so it can't be mistaken for Studio.app.
+  // "Studio Dev" (npm run dev) and a variant ("Studio Test") have their own settings and library; mark them
+  // everywhere, including the window title shown in Mission Control and the Window menu, so neither can be mistaken
+  // for Studio.app.
   const [devProfile, setDevProfile] = useState(false)
+  const [variant, setVariant] = useState<string>()
   useEffect(() => {
     void window.studio.getSettings().then((s) => {
       setDevProfile(s.devProfile)
-      document.title = s.devProfile ? 'JIBES Studio Dev' : 'JIBES Studio'
+      setVariant(s.variant)
+      document.title = ['JIBES Studio', s.variant, s.devProfile ? 'Dev' : ''].filter(Boolean).join(' ')
     })
   }, [])
 
@@ -93,7 +96,7 @@ export default function App() {
       ) : library.state === 'switching' ? (
         <SwitchingOverlay phase={{ kind: 'waiting' }} />
       ) : library.state !== 'ready' ? (
-        <LibrarySetup status={library} onRetry={refreshLibrary} devProfile={devProfile} />
+        <LibrarySetup status={library} onRetry={refreshLibrary} devProfile={devProfile} variant={variant} />
       ) : (
         <Workspace />
       )}
@@ -198,6 +201,7 @@ function Workspace() {
           navigate(v)
         }}
         devProfile={settings?.devProfile}
+        variant={settings?.variant}
         collapsed={collapsed}
         onToggleCollapsed={toggleCollapsed}
         panel={panel}

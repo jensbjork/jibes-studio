@@ -17,7 +17,7 @@ interface IndicatorState {
   waiting: number
   /** The agent's latest call while it works; undefined when it is quiet. */
   latest?: AgentActivity
-  /** In words: "Agent connected", "The agent is working", "OpenClaw is working". */
+  /** In words: "Agent connected", "The agent is working", "Hermes is working". */
   label: string
   /** In words: "2 requests waiting for your OK · Set the prompt"; '' when there is nothing to add. */
   status: string
