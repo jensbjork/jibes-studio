@@ -39,7 +39,7 @@ export default function AboutSettings({ settings, onChanged }: { settings: Setti
     <>
       <div className="rounded-md border border-line bg-raised/40 px-3 py-2.5">
         <p className="select-text">
-          <span className="font-medium">Studio</span>
+          <span className="font-medium">JIBES Studio</span>
           {versions.studio && <span className="tabular-nums"> {versions.studio}</span>}
           {devProfile && <span className="text-muted"> · development version (Studio Dev)</span>}
         </p>

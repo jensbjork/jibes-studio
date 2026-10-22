@@ -1,6 +1,6 @@
 # Code of Conduct
 
-Studio adopts the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
+JIBES Studio adopts the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
 as its code of conduct. Everyone who participates in the project — in issues, pull requests, discussions, reviews
 and any other project space — is expected to follow it.
 

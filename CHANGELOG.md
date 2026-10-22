@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Studio are documented in this file.
+All notable changes to JIBES Studio (Studio for short) are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the version is 0.x, minor versions may contain
@@ -68,6 +68,12 @@ breaking changes; they are called out under **Changed** or **Removed**.
 - With ffmpeg 8, Studio found none of ffmpeg's filters (ffmpeg 8 lists them differently), so an HDR clip couldn't be
   imported ("zscale is missing") and the Editor never used rubberband for time stretching. Both versions are read
   now; ffmpeg 7 behaves as before.
+
+### Changed
+
+- The public name is now **JIBES Studio** – in the window, the menu, Settings, the Claude Desktop extension,
+  the installer's shortcuts, the disk image and the docs. The app itself, its folders, settings and release files keep
+  the short name Studio, so nothing has to be set up again and install.sh and updates go on working.
 
 ## [0.2.0] - 2026-10-19
 

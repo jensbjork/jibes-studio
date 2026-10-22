@@ -55,7 +55,7 @@ export default function App() {
   useEffect(() => {
     void window.studio.getSettings().then((s) => {
       setDevProfile(s.devProfile)
-      document.title = s.devProfile ? 'Studio Dev' : 'Studio'
+      document.title = s.devProfile ? 'JIBES Studio Dev' : 'JIBES Studio'
     })
   }, [])
 

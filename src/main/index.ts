@@ -623,22 +623,29 @@ function showWindow(): BrowserWindow {
 }
 
 /**
- * macOS' menu: Electron's default one, with Check for Updates… under About Studio. Should building it fail, the
+ * The name people see (the menu's About, Hide and Quit, the About panel). The app, its folders and its files keep the
+ * short name Studio, so settings, libraries, install.sh and updates go on working.
+ */
+const PUBLIC_NAME = 'JIBES Studio'
+
+/**
+ * macOS' menu: Electron's default one, with Check for Updates… under About JIBES Studio. Should building it fail, the
  * default menu stays.
  */
 function setMacMenu(): void {
   try {
+    app.setAboutPanelOptions({ applicationName: PUBLIC_NAME })
     const appMenu: MenuItemConstructorOptions[] = [
-      { role: 'about' },
+      { role: 'about', label: `About ${PUBLIC_NAME}` },
       { label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() },
       { type: 'separator' },
       { role: 'services' },
       { type: 'separator' },
-      { role: 'hide' },
+      { role: 'hide', label: `Hide ${PUBLIC_NAME}` },
       { role: 'hideOthers' },
       { role: 'unhide' },
       { type: 'separator' },
-      { role: 'quit' }
+      { role: 'quit', label: `Quit ${PUBLIC_NAME}` }
     ]
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([

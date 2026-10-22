@@ -1,6 +1,6 @@
-# Studio – the full guide
+# JIBES Studio – the full guide
 
-Everything Studio does, in detail. For a short introduction and how to install it, see the [README](../README.md).
+Everything JIBES Studio (Studio for short) does, in detail. For a short introduction and how to install it, see the [README](../README.md).
 
 
 A desktop video studio for [Venice.ai](https://venice.ai)'s video models. Studio lets you generate short clips from

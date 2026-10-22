@@ -1,10 +1,10 @@
 {
   "manifest_version": "0.3",
   "name": "studio",
-  "display_name": "Studio",
+  "display_name": "JIBES Studio",
   "version": "0.0.0",
-  "description": "Work in Studio, your desktop video studio, from Claude. Anything that costs money or removes something waits for your approval in Studio.",
-  "long_description": "Connects Claude to Studio's agent connection, on this computer or on another one in your tailnet (Tailscale). Claude can then do nearly everything you can in Studio: read the library and look at its photos, create characters, environments, products, outfits and poses, write prompts, fill in the Generate form, build sequences and storyboards and edit films. It can never spend money or remove anything on its own: every generation, paid edit and removal is a request you approve in Studio.\n\nStudio must be running, with **Settings → Agent connection → Allow agents to connect** switched on. The address and the token come from Studio; if you change the token there, add Studio to Claude Desktop again.",
+  "description": "Work in JIBES Studio, your desktop video studio, from Claude. Anything that costs money or removes something waits for your approval in Studio.",
+  "long_description": "Connects Claude to JIBES Studio's agent connection, on this computer or on another one in your tailnet (Tailscale). Claude can then do nearly everything you can in Studio: read the library and look at its photos, create characters, environments, products, outfits and poses, write prompts, fill in the Generate form, build sequences and storyboards and edit films. It can never spend money or remove anything on its own: every generation, paid edit and removal is a request you approve in Studio.\n\nStudio must be running, with **Settings → Agent connection → Allow agents to connect** switched on. The address and the token come from Studio; if you change the token there, add Studio to Claude Desktop again.",
   "author": {
     "name": ""
   },

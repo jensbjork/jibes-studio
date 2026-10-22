@@ -49,6 +49,9 @@ mac:
     NSDownloadsFolderUsageDescription: Studio needs access to images you choose in Downloads.
     NSRemovableVolumesUsageDescription: Studio can keep its library on an external drive.
     NSNetworkVolumesUsageDescription: Studio can keep its library on a network drive.
+# The disk image's volume name: the public name (the app inside stays Studio.app).
+dmg:
+  title: JIBES Studio
 win:
   # x64 only: an installer (Studio-win-x64-setup.exe) and a portable zip (Studio-win-x64.zip), unsigned (SmartScreen
   # asks once, see the README). Fixed names, like the Mac files, so …/releases/latest/download/<name> always works.
@@ -88,7 +91,9 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
-  shortcutName: Studio
+  # The public name (JIBES Studio); the program, its folders and the files keep the short name Studio.
+  shortcutName: JIBES Studio
+  uninstallDisplayName: JIBES Studio
   # English only, like the app.
   multiLanguageInstaller: false
   # Settings stay when Studio is uninstalled (the library lives in its own folder and is never touched).

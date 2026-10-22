@@ -309,7 +309,7 @@ export class AgentService {
 
   private createMcpServer(session: AgentSession): McpServer {
     const mcp = new McpServer(
-      { name: 'studio', title: 'Studio', version: app.getVersion() },
+      { name: 'studio', title: 'JIBES Studio', version: app.getVersion() },
       { instructions: serverInstructions(getPromptLanguage()) }
     )
     registerAgentTools(mcp, {

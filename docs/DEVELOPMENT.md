@@ -1,6 +1,6 @@
 # Development
 
-How to run Studio from source, test changes without spending money, build the app and change the database or the
+How to run JIBES Studio (Studio for short) from source, test changes without spending money, build the app and change the database or the
 IPC surface safely. For how the code is organised, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 - [Setup](#setup)

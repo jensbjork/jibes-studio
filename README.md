@@ -1,8 +1,8 @@
-# Studio
+# JIBES Studio
 
 Make films with [Venice.ai](https://venice.ai)'s video models, on your Mac or Windows PC.
 
-![Studio](docs/images/generate.png)
+![JIBES Studio](docs/images/generate.png)
 
 ## Install
 

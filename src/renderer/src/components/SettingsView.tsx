@@ -40,7 +40,7 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
       { id: SECTION.archive, label: 'Export & import' },
       { id: SECTION.agent, label: 'Agent connection' },
       { id: SECTION.tools, label: 'Tools', attention: ffmpegMissing ? 'ffmpeg is missing' : undefined },
-      { id: SECTION.about, label: 'About Studio' }
+      { id: SECTION.about, label: 'About JIBES Studio' }
     ],
     [settings.hasApiKey, ffmpegMissing]
   )
@@ -124,7 +124,7 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
 
             <SettingsSection
               id={SECTION.about}
-              title="About Studio"
+              title="About JIBES Studio"
               description="The version you are running, and updates."
             >
               <AboutSettings settings={settings} onChanged={onChanged} />

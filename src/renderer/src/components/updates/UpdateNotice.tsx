@@ -65,7 +65,7 @@ function Answer({ info }: { info: UpdateInfo }) {
     const dev = !!info.installBlocked
     return (
       <>
-        <Heading onClose={closeUpdateNotice}>{dev ? 'Development build' : 'Studio is up to date'}</Heading>
+        <Heading onClose={closeUpdateNotice}>{dev ? 'Development build' : 'JIBES Studio is up to date'}</Heading>
         <p className="mt-1 leading-relaxed text-muted">
           {dev ? 'Updates come from git.' : `${info.current} is the newest version.`}
         </p>
@@ -75,7 +75,7 @@ function Answer({ info }: { info: UpdateInfo }) {
   const released = releaseDate(info.publishedAt)
   return (
     <>
-      <Heading dot>Studio {info.latest} is available</Heading>
+      <Heading dot>JIBES Studio {info.latest} is available</Heading>
       <p className="mt-1 leading-relaxed text-muted">
         You have {info.current}
         {released ? ` · released ${released}` : ''}.

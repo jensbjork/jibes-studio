@@ -195,7 +195,7 @@ export default function Sidebar({
           className={`flex h-full items-center gap-2 whitespace-nowrap pl-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted ${fade(collapsed)}`}
           aria-hidden={collapsed}
         >
-          Studio
+          JIBES Studio
           {devProfile && <DevBadge />}
         </div>
         {/* Search (⌘K) and the toggle follow the moving edge while expanded and end side by side, centred under

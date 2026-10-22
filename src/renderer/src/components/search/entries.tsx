@@ -166,7 +166,7 @@ const SETTINGS_SECTIONS: Record<keyof typeof SETTINGS_SECTION, { title: string; 
   archive: { title: 'Export & import', keywords: 'zip backup archive library' },
   agent: { title: 'Agent connection', keywords: 'mcp token openclaw hermes connect' },
   tools: { title: 'Tools', keywords: 'ffmpeg voice separation' },
-  about: { title: 'About Studio', keywords: 'version' }
+  about: { title: 'About JIBES Studio', keywords: 'version studio' }
 }
 
 /** The places (views, Media's tabs, Settings' sections, the two panels) and the actions ("New …"). */

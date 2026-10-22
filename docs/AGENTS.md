@@ -1,6 +1,6 @@
 # Connecting your own agent (MCP)
 
-Studio can run a [Model Context Protocol](https://modelcontextprotocol.io) server so that AI agents you run
+JIBES Studio (Studio for short) can run a [Model Context Protocol](https://modelcontextprotocol.io) server so that AI agents you run
 yourself — for example OpenClaw, Hermes Agent, Claude Desktop or Claude Code — can work in the app alongside you,
 doing nearly everything you can. An agent can read the library, look at its photos and listen to its voices,
 create characters, environments, **products**, outfits and poses and give them photos and sound, write and save

@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes how Studio is put together: its processes, the modules in each, the data model, how files are
+This document describes how JIBES Studio (Studio for short) is put together: its processes, the modules in each, the data model, how files are
 stored, how a generation travels from the form to a video on disk, how voices and sounds reach Venice, how sequences are
 exported, given keyframes and stills, and redone between their neighbours, how storyboards turn milestone pictures into
 the transitions between them, how the user's own films come in (*Own clips*), how the Editor turns a finished film into

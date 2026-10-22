@@ -1,6 +1,6 @@
-# Contributing to Studio
+# Contributing to JIBES Studio
 
-Thanks for your interest in Studio! This is an early, personal project that is now open source, so the process is
+Thanks for your interest in JIBES Studio! This is an early, personal project that is now open source, so the process is
 light — but a few conventions keep the history readable and the app safe for the people who use it with a paid
 API key.
 

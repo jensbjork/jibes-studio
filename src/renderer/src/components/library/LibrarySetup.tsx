@@ -58,7 +58,7 @@ export default function LibrarySetup({ status, onRetry, devProfile = false }: Pr
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-xl px-8 pb-16 pt-4">
           <div className="mb-5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-            Studio
+            JIBES Studio
             {devProfile && <DevBadge />}
           </div>
 
