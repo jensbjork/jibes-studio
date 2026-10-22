@@ -645,9 +645,10 @@ goes all the way, reopening with the same two variables.
 ## Screenshots
 
 `npm run screenshots` (after `npm run build`) starts the built app with `STUDIO_PROFILE_DIR` pointing at a new
-temporary folder, creates an empty library there, adds a little neutral structure (a sequence and a storyboard with
-short notes, no media), opens Generate, the `/` menu, Sequences, Storyboards and the Editor at 1440 × 900 (2× pixels)
-over the DevTools protocol and saves `docs/images/*.png`. It never reads your own settings or library, generates
+temporary folder, creates an empty library there, adds a little made-up structure (a sequence of text-to-video clips
+and a storyboard with short notes, both directed by the ready-made *Noir*; no media), fills in the Generate form as a
+user does, opens Generate, the `/` menu, Sequences, Storyboards and Directors at 1440 × 900 (2× pixels) over the
+DevTools protocol and saves `docs/images/*.png`. It never reads your own settings or library, generates
 nothing and uses no API key; the temporary folder is removed afterwards. Run it again when the UI changes.
 
 ## Database migrations

@@ -40,6 +40,8 @@ You pay Venice per generation; the price is shown before you generate.
   Their descriptions are added to the prompt for you.
 - **Sequences** – clips that continue from each other's last frame, exported as one film.
 - **Storyboards** – one picture per moment; the clips between them are generated.
+- **Directors** – a way of making a film (editing, look, camera, light, sound) that every prompt it directs carries.
+  Start from eight ready-made ones or make your own.
 - **Editor** – cut, clean up the sound, replace a voice, add music, redo a stretch with AI. Every change is a
   new version; the original is never touched.
 - **Agents** – connect your own AI agent over [MCP](https://modelcontextprotocol.io). It can do what you can;
@@ -50,8 +52,8 @@ Everything is stored as plain files in the folder you chose.
 | Sequences | Storyboards |
 | --- | --- |
 | ![Sequences](docs/images/sequences.png) | ![Storyboards](docs/images/storyboards.png) |
-| **Editor** | **Writing help** – type `/` for ready-made phrases |
-| ![Editor](docs/images/editor.png) | ![Building blocks](docs/images/prompt-blocks.png) |
+| **Directors** | **Writing help** – type `/` for ready-made phrases |
+| ![Directors](docs/images/directors.png) | ![Building blocks](docs/images/prompt-blocks.png) |
 
 ## More
 
