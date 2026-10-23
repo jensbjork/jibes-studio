@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { workKey, type Still } from '@shared/types'
+import { useViewerKeys } from '../../lib/dialogs'
+import { focusedWithKeyboard, refocused } from '../../lib/focusOrigin'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { fileName } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { useSeenWhenVisible } from '../../lib/work'
-import ConfirmButton from '../sequences/ConfirmButton'
+import ConfirmButton from '../ui/ConfirmButton'
+import ViewerNavButton from '../ui/ViewerNavButton'
 import {
   formatImagePrice,
   formatStillTime,
@@ -39,7 +42,10 @@ interface Props {
 const button =
   'rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-30 disabled:hover:bg-transparent'
 
-/** A still at full size with what it was made from: prompt, model, settings, references and price. */
+/**
+ * A still at full size with what it was made from: prompt, model, settings, references and price. Esc closes, ← →
+ * step (not with a modifier held, nor in a field); it takes the focus while open and gives it back when it closes.
+ */
 export default function StillViewer({
   still,
   stills,
@@ -77,22 +83,24 @@ export default function StillViewer({
   useEffect(() => setError(undefined), [currentId])
 
   const open = !!current
+  const goPrev = index > 0 ? () => step(list[index - 1].id) : undefined
+  const goNext = index >= 0 && index < list.length - 1 ? () => step(list[index + 1].id) : undefined
+  // Captured and stopped, so a dialog or view underneath doesn't act on the same key (and close too).
+  useViewerKeys({ onClose, onPrev: goPrev, onNext: goNext, enabled: open })
+
+  // The keys are the viewer's while it is open: the grid or dialog behind it no longer takes them.
+  const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      const field = e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')
-      if (e.key === 'Escape') onClose()
-      else if (field) return
-      else if (e.key === 'ArrowLeft' && index > 0) step(list[index - 1].id)
-      else if (e.key === 'ArrowRight' && index < list.length - 1) step(list[index + 1].id)
-      else return
-      // Captured and stopped here, so a dialog or view underneath doesn't act on the same key (and close too).
-      e.preventDefault()
-      e.stopPropagation()
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const byKeyboard = focusedWithKeyboard(before)
+    dialogRef.current?.focus({ preventScroll: true })
+    return () => {
+      // Only when the focus went down with the viewer: never taken from what the closing action focused.
+      const lost = !document.activeElement || document.activeElement === document.body
+      if (lost && before?.isConnected) refocused(before, byKeyboard)
     }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [open, index, list, onClose])
+  }, [open])
 
   const remove = async (s: Still) => {
     setDeleting(true)
@@ -117,10 +125,12 @@ export default function StillViewer({
   return createPortal(
     // no-drag: the overlay covers the views' title-bar drag regions.
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={stillSourceLabel(current)}
-      className="no-drag fixed inset-0 z-[60] flex flex-col bg-black/85 backdrop-blur-sm"
+      tabIndex={-1}
+      className="no-drag fixed inset-0 z-[60] flex flex-col bg-black/85 outline-none backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
@@ -130,35 +140,37 @@ export default function StillViewer({
         <StillImage key={current.id} still={current} markSeen={current.id !== heldId} />
         {list.length > 1 && (
           <>
-            <NavButton side="left" disabled={index <= 0} onClick={() => step(list[index - 1].id)} />
-            <NavButton
-              side="right"
-              disabled={index >= list.length - 1}
-              onClick={() => step(list[index + 1].id)}
-            />
+            <ViewerNavButton side="prev" label="Previous image" disabled={!goPrev} onClick={() => goPrev?.()} />
+            <ViewerNavButton side="next" label="Next image" disabled={!goNext} onClick={() => goNext?.()} />
           </>
         )}
       </div>
 
       <StillInfo still={current} position={list.length > 1 ? `${index + 1} of ${list.length}` : undefined}>
-        {error && <p className="max-w-md text-[12px] text-accent select-text">{error}</p>}
+        {error && (
+          <p role="alert" className="max-w-md text-[12px] text-danger select-text">
+            {error}
+          </p>
+        )}
         <div className="flex flex-wrap items-center justify-end gap-1">
           {actions?.(current)}
-          <button onClick={() => void window.studio.revealFile(current.path)} className={button}>
+          <button type="button" onClick={() => void window.studio.revealFile(current.path)} className={button}>
             Show in {FILE_MANAGER}
           </button>
           {deletable && (
             <ConfirmButton
               question="Delete the image?"
+              note={`The file goes to ${TRASH} (to “Reference images” if it is in use).`}
               onConfirm={() => void remove(current)}
               disabled={deleting}
               title={`Moves the image to ${TRASH} (to “Reference images” if a clip or a board uses it)`}
-              className={`${button} hover:text-accent`}
+              className={`${button} hover:text-danger`}
+              size="md"
             >
               Delete
             </ConfirmButton>
           )}
-          <button onClick={onClose} className={button}>
+          <button type="button" onClick={onClose} title="Close (Esc)" className={button}>
             Close
           </button>
         </div>
@@ -191,22 +203,6 @@ function StillImage({ still, markSeen }: { still: Still; markSeen: boolean }) {
       onError={() => setMissing(true)}
       className="max-h-full max-w-full rounded-md object-contain shadow-2xl"
     />
-  )
-}
-
-function NavButton({ side, disabled, onClick }: { side: 'left' | 'right'; disabled: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={side === 'left' ? 'Previous image' : 'Next image'}
-      title={side === 'left' ? 'Previous (←)' : 'Next (→)'}
-      className={`absolute top-1/2 -translate-y-1/2 rounded-full bg-black/50 px-3 py-2 text-lg leading-none text-white/80 transition hover:bg-black/80 hover:text-white disabled:opacity-0 ${
-        side === 'left' ? 'left-3' : 'right-3'
-      }`}
-    >
-      {side === 'left' ? '‹' : '›'}
-    </button>
   )
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { Sequence } from '@shared/types'
+import { useViewerKeys } from '../../../lib/dialogs'
 import { mediaUrl } from '../../../lib/media'
 import { isMac } from '../../../lib/platform'
 import { pauseOthers } from '../../feed/playback'
@@ -160,28 +161,16 @@ export default function SongPreview({ sequence, startSegmentId, onClose }: Props
     else goTo(Math.max(0, current - 1))
   }
 
-  const keys = useRef({ onClose, toggle, next, previous })
-  keys.current = { onClose, toggle, next, previous }
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const k = keys.current
-      if (e.key === 'Escape') k.onClose()
-      else if (e.key === ' ') k.toggle()
-      else if (e.key === 'ArrowRight') k.next()
-      else if (e.key === 'ArrowLeft') k.previous()
-      else return
-      e.preventDefault()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  // Esc, ← / → between clips and Space, before anything behind the preview sees them.
+  useViewerKeys({ onClose, onPrev: previous, onNext: next, onSpace: toggle })
 
   const shot = shots[current]
   const control =
     'flex h-9 w-9 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent'
 
+  // Inside PreviewPlayer's modal frame (portaled, aria-modal, with the focus).
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-black/95" role="dialog" aria-label="Preview">
+    <>
       <audio
         ref={setAudio}
         src={mediaUrl(song.path)}
@@ -259,7 +248,7 @@ export default function SongPreview({ sequence, startSegmentId, onClose }: Props
             onMouseDown={keepFocus}
             disabled={!audio}
             className={`${control} bg-white/10`}
-            title={playing ? 'Pause (space)' : 'Play (space)'}
+            title={playing ? 'Pause (Space)' : 'Play (Space)'}
           >
             {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
           </button>
@@ -282,7 +271,7 @@ export default function SongPreview({ sequence, startSegmentId, onClose }: Props
                 title={s.path ? `Play from clip ${s.number}` : `Play from clip ${s.number} (no finished take yet)`}
                 className={`h-7 min-w-7 rounded-md px-2 text-[12px] tabular-nums transition ${
                   i === current
-                    ? 'bg-accent text-white'
+                    ? 'bg-accent-fill text-white'
                     : s.path
                       ? 'bg-white/10 text-white/80 hover:bg-white/20'
                       : 'bg-white/5 text-white/35 hover:bg-white/10'
@@ -294,7 +283,7 @@ export default function SongPreview({ sequence, startSegmentId, onClose }: Props
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 

@@ -1,7 +1,11 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
+import { isSubmitKey } from '../../lib/platform'
+import { CloseIcon } from '../sequences/icons'
 import { addTags, fold, parseTags } from './prompt-utils'
 
 interface Props {
+  /** The text field's, for a label pointing at it. */
+  id?: string
   value: string[]
   onChange: (tags: string[]) => void
   /** Existing tags across the library, most used first. */
@@ -10,7 +14,7 @@ interface Props {
 }
 
 /** Tags as chips; typing a comma (or pasting a comma separated list) turns the text into chips. */
-export default function TagInput({ value, onChange, suggestions, onBlur }: Props) {
+export default function TagInput({ id, value, onChange, suggestions, onBlur }: Props) {
   const [text, setText] = useState('')
   const [focused, setFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -34,7 +38,8 @@ export default function TagInput({ value, onChange, suggestions, onBlur }: Props
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      e.preventDefault()
+      // ⌘↵ goes on to the form it is in (Generate with the prompt), with what was typed made a tag first.
+      if (!isSubmitKey(e)) e.preventDefault()
       add(parseTags(text))
       setText('')
     } else if (e.key === 'Backspace' && !text && value.length) {
@@ -67,14 +72,16 @@ export default function TagInput({ value, onChange, suggestions, onBlur }: Props
                 onChange(value.filter((t) => t !== tag))
               }}
               title={`Remove the tag ${tag}`}
-              className="flex h-4 w-4 items-center justify-center rounded text-[9px] text-muted hover:bg-bg hover:text-text"
+              aria-label={`Remove the tag ${tag}`}
+              className="flex h-4 w-4 items-center justify-center rounded text-muted hover:bg-bg hover:text-text"
             >
-              ✕
+              <CloseIcon size={8} />
             </button>
           </span>
         ))}
         <input
           ref={inputRef}
+          id={id}
           value={text}
           onChange={(e) => onInput(e.target.value)}
           onKeyDown={onKeyDown}
@@ -85,7 +92,7 @@ export default function TagInput({ value, onChange, suggestions, onBlur }: Props
             setFocused(false)
             onBlur?.()
           }}
-          placeholder={value.length ? 'Add…' : 'Tags, separated by commas'}
+          placeholder={value.length ? 'Add a tag…' : 'Tags, separated by commas'}
           className="min-w-24 flex-1 bg-transparent py-0.5 outline-none placeholder:text-muted/70"
         />
       </div>

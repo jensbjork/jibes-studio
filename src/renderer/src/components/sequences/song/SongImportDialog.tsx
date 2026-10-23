@@ -6,6 +6,9 @@ import { formatUsd, mediaUrl } from '../../../lib/media'
 import { THIS_COMPUTER, isMac } from '../../../lib/platform'
 import { pauseOthers } from '../../feed/playback'
 import Modal from '../../pickers/Modal'
+import { buttonClass } from '../../ui/button'
+import Disclosure from '../../ui/Disclosure'
+import Segmented from '../../ui/Segmented'
 import { PauseIcon, PlayIcon } from '../icons'
 import { fileName, formatFrameTime } from '../sequenceUtils'
 import { LyricsOptions, lyricsPrice, useLyricsModels } from './lyricsModels'
@@ -100,22 +103,14 @@ export default function SongImportDialog({ path, mode, onCancel, onSubmit }: Pro
       maxWidth={480}
       footer={
         <>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
-          >
+          <button type="button" onClick={onCancel} disabled={busy} className={buttonClass('ghost')}>
             Cancel
           </button>
-          <button
-            type="submit"
-            form={`${nameId}-form`}
-            disabled={busy}
-            className="flex items-center gap-2 rounded-md bg-accent px-3.5 py-1.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-          >
+          <button type="submit" form={`${nameId}-form`} disabled={busy} className={buttonClass('primary')}>
             {busy ? 'Starting…' : action}
-            {transcribing && priceText && <span className="text-white/80">· {priceText}</span>}
+            {transcribing && priceText && (
+              <span className="tabular-nums text-white/80 group-disabled:text-muted">· {priceText}</span>
+            )}
           </button>
         </>
       }
@@ -175,44 +170,30 @@ export default function SongImportDialog({ path, mode, onCancel, onSubmit }: Pro
           }
         >
           {canTranscribe && (
-            <details className="mt-2 text-[12px]">
-              <summary className="cursor-pointer select-none text-muted transition hover:text-text">More</summary>
-              <div className="mt-2">
-                <LyricsOptions
-                  lyrics={lyrics}
-                  model={model?.id}
-                  language={language}
-                  disabled={!transcribe || busy}
-                  onModel={setModelChoice}
-                  onLanguage={setLanguage}
-                />
-              </div>
-            </details>
+            <Disclosure summary="More" plain className="mt-2 text-[12px]">
+              <LyricsOptions
+                lyrics={lyrics}
+                model={model?.id}
+                language={language}
+                disabled={!transcribe || busy}
+                onModel={setModelChoice}
+                onLanguage={setLanguage}
+              />
+            </Disclosure>
           )}
         </Option>
 
         {splits ? (
           <fieldset>
             <legend className="mb-1.5 text-muted">Clips of about</legend>
-            <div role="radiogroup" aria-label="Clips of about" className="grid grid-cols-5 gap-1.5">
-              {CLIP_LENGTHS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  role="radio"
-                  aria-checked={target === s}
-                  onClick={() => setTarget(s)}
-                  disabled={busy}
-                  className={`rounded-md border px-1 py-1.5 text-[12px] tabular-nums transition ${
-                    target === s
-                      ? 'border-accent/70 bg-accent/10 text-text'
-                      : 'border-line text-muted hover:border-muted hover:text-text'
-                  }`}
-                >
-                  {s} s
-                </button>
-              ))}
-            </div>
+            <Segmented
+              value={target}
+              onChange={setTarget}
+              options={CLIP_LENGTHS.map((s) => ({ value: s, label: `${s} s`, disabled: busy }))}
+              ariaLabel="Clips of about"
+              fill
+              className="w-full tabular-nums"
+            />
             <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
               The song is split at its lines and phrases, on the beat. Move the boundaries in the song strip afterwards.
             </p>
@@ -241,7 +222,7 @@ export default function SongImportDialog({ path, mode, onCancel, onSubmit }: Pro
         )}
 
         {error && (
-          <p role="alert" className="select-text text-[12px] leading-relaxed text-accent">
+          <p role="alert" className="select-text text-[12px] leading-relaxed text-danger">
             {error}
           </p>
         )}

@@ -263,10 +263,10 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
         data: {
           default_text_to_image: text?.id ?? null,
           default_with_references: edit?.id ?? null,
-          // Read-only for agents: only the user switches it, in Settings → Generation → Images.
+          // Read-only for agents: only the user switches it, in Settings → Generation → Safe mode for images.
           safe_mode: safeMode,
           safe_mode_note: safeMode
-            ? '"Safe mode for images" is on: Venice blurs adult content in the pictures it makes. Only the user can switch it off (Settings → Generation → Images).'
+            ? '"Safe mode for images" is on: Venice blurs adult content in the pictures it makes. Only the user can switch it off (Settings → Generation → Safe mode for images).'
             : '"Safe mode for images" is off: Venice does not blur adult content.',
           models: models.map((m, i) => ({
             id: m.id,
@@ -457,7 +457,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: stillInfo(still, assets, stills, owners),
         images: image ? [{ label: `Still ${still.id}`, image }] : [],
-        summary: `imported an image as a still image${owner ? ` in ${q(owner.name)}` : ' (Loose images)'}`
+        summary: `imported an image as a still image in ${owner ? q(owner.name) : '“Reference images”'}`
       }
     }
   )

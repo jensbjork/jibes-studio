@@ -466,7 +466,8 @@ ws.addEventListener('message', (m) => {
 so only use it on a dev profile, and remember that `window.studio.generate`, `generateSegment`,
 `generateAllSegments` and `resolveApproval(id, true)` spend money (or, for a removal, delete things). For the main process, `--inspect [port]` opens
 the V8 inspector (attach from `chrome://inspect`). The renderer's DevTools are under *View → Toggle Developer
-Tools* (⌥⌘I).
+Tools* (⌥⌘I; Ctrl+Shift+I on Windows) – in a development build only, as is *View → Reload* (⌘R): a packaged Studio
+has neither.
 
 ## Typecheck and build
 
@@ -496,7 +497,7 @@ macOS's own AUSoundIsolation audio unit through a small Swift command-line helpe
   the flags and the compiler version) skips an up-to-date helper in a fraction of a second; `--force` rebuilds
   (`npm run build:helpers -- --force`);
 - without the Swift compiler, or off macOS, it prints a note and skips; `STUDIO_SKIP_HELPERS=1` skips it on purpose.
-  Studio then runs without voice separation: *Settings → Tools* says that it isn't built and to run
+  Studio then runs without voice separation: *Settings → About* says that it isn't built and to run
   `npm run build:helpers`, and the Editor offers only what works without stems.
 
 `src/main/voice-separation.ts` looks for the helper in `<app>/Contents/Resources/bin/` when packaged (electron-builder
@@ -595,7 +596,8 @@ node scripts/smoke-test.mjs dist/win-unpacked/Studio.exe --bundled-ffmpeg
   (default `dist/win-unpacked/Studio.exe` on Windows, `dist/mac-arm64/Studio.app` on a Mac) with a new temporary
   profile and a remote-debugging port, and checks over the DevTools protocol that the window shows Studio, that
   ffmpeg is found and reports its version (with `--bundled-ffmpeg`: the copy in the app's `resources/ffmpeg`),
-  that a new, empty library opens (the SQLite database is created) and that Settings renders with ffmpeg in it;
+  that a new, empty library opens (the SQLite database is created) and that Settings renders, with ffmpeg shown as
+  found under *About*;
   then it closes Studio and deletes the profile. It never reads your settings or library and uses no API key.
 
 ## Releasing

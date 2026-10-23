@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useId, useRef, type HTMLAttributes, type KeyboardEvent, type Ref } from 'react'
 import type { Asset, AssetKind, BoardImageSource, FinishedWork, Still, StoryboardBoard } from '@shared/types'
-import { shortcut } from '../../lib/platform'
-import ConfirmButton from '../sequences/ConfirmButton'
+import { reorderHint } from '../pickers/useReorder'
 import { CloseIcon } from '../sequences/icons'
 import { useDraft, useRegisterFlush, type FlushRegistry } from '../sequences/useDraft'
+import ConfirmButton from '../ui/ConfirmButton'
 import BoardImage from './BoardImage'
 import type { StoryboardStore } from './useStoryboard'
 
@@ -45,11 +45,14 @@ interface Props {
   onManage: (kind: AssetKind) => void
   onDelete: () => void
   onError: (message: string) => void
+  /** ← / → with the focus on the card (not in its note): the focus goes along the row, to the clip beside it. */
+  onArrow?: (dir: -1 | 1) => void
 }
 
 /**
  * One board: a milestone of the film as one large picture and a short note of what it shows. Dragged by its
- * picture or top line, or moved with ⌥← / ⌥→ while it (or something in it other than the note) has focus.
+ * picture or top line, or moved with ⌥← / ⌥→ while it (or something in it other than the note) has focus; ← / →
+ * go on to the clip beside it.
  */
 export default function BoardCard({
   board,
@@ -74,7 +77,8 @@ export default function BoardCard({
   onViewStill,
   onManage,
   onDelete,
-  onError
+  onError,
+  onArrow
 }: Props) {
   const { ref, draggable, onDragStart, onDragEnd, onKeyDown, ...rest } = item
   const width = Math.max(CARD_MIN_WIDTH, imageWidth)
@@ -94,9 +98,17 @@ export default function BoardCard({
     )
   }, [flash])
 
-  // ⌥← / ⌥→ move the board – except in the note, where they move the caret by a word as usual.
+  // ← / → go along the row and ⌥← / ⌥→ move the board – except in the note, where they move the caret as usual, and
+  // in the picture's menu or the remove question (React passes their keys up here, portaled or not).
   const onCardKeyDown = (e: KeyboardEvent<HTMLElement>) => {
-    if ((e.target as HTMLElement).closest('textarea, input, select')) return
+    const target = e.target as HTMLElement
+    if (!e.currentTarget.contains(target) || target.closest('textarea, input, select, [data-confirm]')) return
+    const plain = !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey
+    if (plain && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      e.preventDefault()
+      onArrow?.(e.key === 'ArrowLeft' ? -1 : 1)
+      return
+    }
     onKeyDown?.(e)
   }
 
@@ -126,10 +138,7 @@ export default function BoardCard({
         className={`flex flex-col items-center ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
       >
         <div className="flex w-full items-center gap-2 px-0.5" style={{ height: CARD_HEADER_HEIGHT }}>
-          <span
-            className="text-[12px] font-medium text-muted"
-            title={count > 1 ? shortcut('Drag the image to move the board, or use ⌥← and ⌥→') : undefined}
-          >
+          <span className="text-[12px] font-medium text-muted" title={count > 1 ? `Board ${number} – ${reorderHint()}` : undefined}>
             Board {number}
           </span>
           <span className="ml-auto" />
@@ -138,7 +147,7 @@ export default function BoardCard({
             confirmLabel="Remove"
             onConfirm={onDelete}
             title="Remove the board. The transitions to and from it go too, with their prompts; their clips stay in Media."
-            className="flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition hover:bg-raised hover:text-accent focus-visible:opacity-100 group-hover/card:opacity-100 group-focus-within/card:opacity-100"
+            className="flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition hover:bg-raised hover:text-danger focus-visible:opacity-100 group-hover/card:opacity-100 group-focus-within/card:opacity-100"
           >
             <CloseIcon size={11} />
           </ConfirmButton>
@@ -211,7 +220,7 @@ function BoardNote({
         className="block max-h-32 min-h-[3.25rem] w-full resize-none rounded-md border border-transparent bg-transparent px-2 py-1.5 text-[12px] leading-snug outline-none transition [field-sizing:content] placeholder:text-muted/60 hover:border-line focus:border-muted focus:bg-raised"
       />
       {draft.error && (
-        <p className="mt-0.5 px-2 text-[11px] text-accent" title={draft.error}>
+        <p className="mt-0.5 px-2 text-[11px] text-danger" title={draft.error}>
           The note couldn’t be saved
         </p>
       )}

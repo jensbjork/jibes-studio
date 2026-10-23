@@ -13,15 +13,17 @@ import type {
 } from '@shared/types'
 import { variantsPrice, variantsText } from '@shared/variants'
 import { withBudgetConfirm } from '../../lib/budget'
-import { ipcErrorMessage, useDirectorAssets, useQuote } from '../../lib/hooks'
+import { NO_API_KEY, ipcErrorMessage, useDirectorAssets, useHasApiKey, useQuote } from '../../lib/hooks'
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
-import { FILE_MANAGER, shortcut } from '../../lib/platform'
-import { useVariantCount, withVariants } from '../../lib/variants'
+import { FILE_MANAGER, submitKeyHandler } from '../../lib/platform'
+import { useVariantCount } from '../../lib/variants'
 import { useReportOpenSegment } from '../../lib/workspace'
 import ConsentDialog from '../ConsentDialog'
-import ParamsForm from '../ParamsForm'
-import VariantPicker from '../VariantPicker'
+import GenerateBar from '../GenerateBar'
+import ParamsForm, { OutputSettings } from '../ParamsForm'
+import { SETTINGS_SECTION, showSettingsSection } from '../settings/SettingsLayout'
+import DraftSaveState from '../ui/DraftSaveState'
 import { workingCopyNote } from '../feed/ownClips'
 import CastLine from './CastLine'
 import { clipBlocked } from './clipChecks'
@@ -37,7 +39,7 @@ import {
   continuationOf,
   continues,
   effectiveParams,
-  formatClock,
+  formatLength,
   isOwnTake,
   parseConsent,
   readyTake,
@@ -45,7 +47,7 @@ import {
   stableJson,
   takePromptsFor
 } from './sequenceUtils'
-import { useDraft, useRegisterFlush, type DraftStatus, type FlushRegistry } from './useDraft'
+import { useDraft, useRegisterFlush, type FlushRegistry } from './useDraft'
 import type { SequenceStore } from './useSequence'
 
 /** Lets the take list push an old take's prompt back into the editor. */
@@ -160,7 +162,7 @@ export default function SegmentEditor({
   const sent = effectiveParams({ ...segment, params }, index, sequence, directors)
   const model = models.find((m) => m.id === sent.model)
   const quote = useQuote(sent, model)
-  // ×1–×4 beside "Generate take" (⌘+Enter sends as many): each variant becomes a take of the clip.
+  // ×1–×4 beside "Generate take" (⌘↵ sends as many): each variant becomes a take of the clip.
   const [count, setCount] = useVariantCount('clip')
   const total = variantsPrice(quote, count)
 
@@ -183,8 +185,19 @@ export default function SegmentEditor({
     clipNowRef.current = clipNow
   })
 
-  // Checked as main will send it: a continuation is image-to-video, where @ImageN tokens point at nothing.
-  const blocked = clipBlocked({ sequence, index, params, models, modelsError, ffmpegOk })
+  // Checked as main will send it: a continuation is image-to-video, where @ImageN tokens point at nothing. A missing
+  // API key comes first, as on every paid button.
+  const hasKey = useHasApiKey()
+  const clipProblem = clipBlocked({ sequence, index, params, models, modelsError, ffmpegOk })
+  const blocked = (hasKey ? undefined : NO_API_KEY) ?? clipProblem
+  // Every blocker under the button, the key first (the first one stops generate()).
+  const problems = [hasKey ? undefined : NO_API_KEY, clipProblem].filter((p): p is string => !!p)
+  // Only the key missing: the button stays clickable and opens Settings at it (⌘↵ still sends nothing).
+  const keyOnly = !hasKey && !clipProblem
+  const openVeniceSettings = () => {
+    showSettingsSection(SETTINGS_SECTION.venice)
+    navigate('settings')
+  }
 
   /** Sends `n` takes of the clip (the count chosen): the first comes back, the others arrive as updates. */
   const generate = async (n = count, overBudgetOk = false) => {
@@ -334,6 +347,10 @@ export default function SegmentEditor({
     onChooseSinger: revealWhoSings
   }
 
+  // ⌘↵ sends the clip from any field of its form – the song box, the form and the bar under it (not while an own film
+  // stands in for the form). Not from the header or the Notes, which are never sent.
+  const submitKeys = formOpen ? submitKeyHandler(() => void generate()) : undefined
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {consent && (
@@ -352,13 +369,7 @@ export default function SegmentEditor({
       <div className="flex-1 overflow-y-auto px-5 pb-5">
         <div className="sticky top-0 z-10 -mx-5 mb-4 flex h-11 items-center gap-2 border-b border-line bg-bg/95 px-5 backdrop-blur">
           <h2 className="font-semibold">Clip {index + 1}</h2>
-          {ownTake && (
-            <span className="flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-[11px] text-text">
-              <CameraIcon size={11} />
-              {ownTake.source === 'edit' ? 'Edited film' : 'Own clip'}
-            </span>
-          )}
-          <SaveState status={draft.status} error={draft.error} />
+          <DraftSaveState status={draft.status} error={draft.error} className="min-w-0 truncate" />
           <div className="ml-auto flex items-center gap-1">
             <button
               onClick={() => onPreviewFrom(segmentId)}
@@ -385,17 +396,19 @@ export default function SegmentEditor({
         </div>
 
         {place && (
-          <SongBox
-            sequence={sequence}
-            segment={segment}
-            params={params}
-            setParams={setParams}
-            referenceImages={shown.referenceImages ?? []}
-            sentModel={sent.model}
-            models={models}
-            take={readyTake(segment)}
-            store={store}
-          />
+          <div onKeyDown={submitKeys}>
+            <SongBox
+              sequence={sequence}
+              segment={segment}
+              params={params}
+              setParams={setParams}
+              referenceImages={shown.referenceImages ?? []}
+              sentModel={sent.model}
+              models={models}
+              take={readyTake(segment)}
+              store={store}
+            />
+          </div>
         )}
 
         {ownTake && <OwnClipInfo take={ownTake} />}
@@ -403,22 +416,17 @@ export default function SegmentEditor({
         <NotesField segment={segment} store={store} flushers={flushers} className="mb-4" />
 
         {!formOpen ? (
-          <div className="rounded-lg border border-dashed border-line p-3">
-            <button
-              type="button"
-              onClick={() => setAiAsked(true)}
-              className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-1 text-left transition hover:text-text"
-            >
-              <span>Generate an AI take instead…</span>
-              <ChevronDownIcon size={12} className="shrink-0 text-muted" />
-            </button>
-            <p className="mt-1 px-1 text-[11px] leading-snug text-muted">
-              The clip is your own film. To try an AI take in the same place, open the form – the film stays among the
-              takes and you choose which one is used.
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={() => setAiAsked(true)}
+            title="Opens the form. Your film stays among the takes and you choose which one is used."
+            className="mb-3 flex items-center gap-1 text-[12px] text-muted transition hover:text-text"
+          >
+            <ChevronDownIcon size={11} />
+            Generate an AI take instead…
+          </button>
         ) : (
-          <>
+          <div onKeyDown={submitKeys}>
             {ownTake && (
               <button
                 type="button"
@@ -478,43 +486,42 @@ export default function SegmentEditor({
               startImageNote={continuing ? `The last frame of clip ${index} is used as the start image.` : undefined}
               endImageNote={endFromNext ? `The first frame of clip ${index + 2} is used as the end image.` : undefined}
               onSubmit={() => void generate()}
+              outputSettings="none"
               navigate={navigate}
               sequenceId={sequence.id}
               durationFixed={place ? `Automatic: ${durationText(params.duration, place)}` : undefined}
               song={songForm || undefined}
               followDirector={{ what: 'sequence', directorId: sequence.director }}
             />
-          </>
+          </div>
         )}
       </div>
 
       {formOpen && (
-        <div className="border-t border-line p-4">
-          {error && <p className="mb-3 max-h-32 overflow-y-auto text-accent select-text">{error}</p>}
-          <div className="flex items-stretch gap-2">
-            <VariantPicker count={count} onChange={setCount} each={quote} />
-            <button
-              onClick={() => void generate()}
-              disabled={!!blocked || submitting}
-              className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-            >
-              <span className="truncate" title={blocked}>
-                {/* With variants the count says what is made: "Generate ×3" (the long label wouldn't fit beside them). */}
-                {submitting
-                  ? 'Sending…'
-                  : (blocked ??
-                    (count > 1
-                      ? withVariants('Generate', count)
-                      : segment.takes.length
-                        ? 'Generate new take'
-                        : 'Generate take'))}
-              </span>
-              <span className="shrink-0 text-white/80">{formatUsd(total)}</span>
-            </button>
-          </div>
-          <p className="mt-2 text-center text-[11px] text-muted">
-            {shortcut('⌘ + Enter')} to generate{count > 1 ? ` ${variantsText(count)}` : ''}
-          </p>
+        <div onKeyDown={submitKeys} className="border-t border-line p-4">
+          <GenerateBar
+            // With variants the count says what is made: "Generate ×3" (the long label wouldn't fit beside them).
+            label={count > 1 ? 'Generate' : segment.takes.length ? 'Generate new take' : 'Generate take'}
+            count={count}
+            onCount={setCount}
+            total={total}
+            problems={problems}
+            onBlockedClick={keyOnly ? openVeniceSettings : undefined}
+            submitting={submitting}
+            error={error}
+            onDismissError={() => setError(undefined)}
+            above={
+              // What sets the price, right above it; a song clip's duration follows its place.
+              <OutputSettings
+                model={models.find((m) => m.id === shown.model)}
+                params={shown}
+                set={(key, value) => setShown((p) => ({ ...p, [key]: value }))}
+                durationFixed={place ? `Automatic: ${durationText(params.duration, place)}` : undefined}
+                className="mb-3"
+              />
+            }
+            onSubmit={() => void generate()}
+          />
         </div>
       )}
     </div>
@@ -547,8 +554,9 @@ interface FileFacts {
 }
 
 /**
- * An own film's name and info line: "0:31 · 1080p · 30 fps · sound · working copy of 4K HDR". The frame rate and
- * the sound are read from the file itself; the working copy's reasons from the import.
+ * An own film's name and info line: "31 s · 1080p · 30 fps · sound · working copy of 4K HDR", the camera before the
+ * name saying it is an own film (or an edited one). The frame rate and the sound are read from the file itself; the
+ * working copy's reasons from the import.
  */
 function OwnClipInfo({ take }: { take: Generation }) {
   const [facts, setFacts] = useState<FileFacts>()
@@ -567,8 +575,9 @@ function OwnClipInfo({ take }: { take: Generation }) {
     }
   }, [path, take.fileMissing])
 
+  const kindName = take.source === 'edit' ? 'Edited film' : 'Own clip'
   const parts = [
-    take.videoDuration !== undefined ? formatClock(take.videoDuration) : undefined,
+    take.videoDuration !== undefined ? formatLength(take.videoDuration) : undefined,
     take.params.resolution,
     facts?.fps ? `${Math.round(facts.fps)} fps` : undefined,
     facts ? (facts.hasAudio ? 'sound' : 'no sound') : undefined,
@@ -577,11 +586,15 @@ function OwnClipInfo({ take }: { take: Generation }) {
 
   return (
     <div className="mb-4 rounded-lg border border-line bg-panel px-3 py-2.5">
-      <p className="truncate font-medium" title={generationTitle(take)}>
-        {generationTitle(take, 80)}
+      <p className="flex items-center gap-1.5 font-medium" title={generationTitle(take)}>
+        <span title={kindName} className="flex shrink-0 text-muted">
+          <CameraIcon size={12} />
+        </span>
+        <span className="sr-only">{kindName}:</span>
+        <span className="min-w-0 truncate">{generationTitle(take, 80)}</span>
       </p>
       {take.fileMissing ? (
-        <p className="mt-0.5 text-[11px] leading-snug text-amber-300">
+        <p className="mt-0.5 text-[11px] leading-snug text-warning">
           The film is no longer where it was (moved or deleted in {FILE_MANAGER}). Add the file again or generate an AI
           take.
         </p>
@@ -589,18 +602,5 @@ function OwnClipInfo({ take }: { take: Generation }) {
         <p className="mt-0.5 text-[11px] text-muted tabular-nums">{parts.join(' · ')}</p>
       )}
     </div>
-  )
-}
-
-function SaveState({ status, error }: { status: DraftStatus; error?: string }) {
-  if (error) {
-    return (
-      <span className="truncate text-[11px] text-accent" title={error}>
-        Couldn't save
-      </span>
-    )
-  }
-  return (
-    <span className="text-[11px] text-muted">{status === 'idle' ? 'Saved' : 'Saving…'}</span>
   )
 }

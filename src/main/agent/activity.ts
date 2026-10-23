@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentActivity } from '@shared/types'
 
-/** How many tool calls the log keeps (the drawer shows the latest ones). */
+/** How many tool calls the log keeps (the Agent panel shows the latest ones). */
 const CAPACITY = 200
 
 /**

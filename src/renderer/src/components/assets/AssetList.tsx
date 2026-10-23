@@ -53,17 +53,15 @@ export default function AssetList({
   return (
     <SideList
       title={copy.plural}
-      // "＋ New": "Environments ＋ New environment" doesn't fit the list's header; the tooltip names the kind.
-      createLabel="New"
-      createTitle={copy.newName}
+      // The button reads "New"; its tooltip and accessible name say what it makes.
+      createLabel={copy.newName}
       onCreate={onCreate}
       creating={creating}
       items={ready ? assets : undefined}
       selectedId={selectedId}
       onSelect={onSelect}
-      searchPlaceholder="Search name or description"
       searchText={(a) => a.description}
-      emptyText={copy.listHint}
+      // Nothing in the list while it is empty: the editor's empty state says what the kind is for.
       deleteQuestion={(a) => deleteAssetQuestion(a)}
       deleteNote={(a) =>
         [deleteOutfitNote(wearerNames?.get(a.id) ?? []), deleteAssetFilesNote(a)].filter(Boolean).join(' ')

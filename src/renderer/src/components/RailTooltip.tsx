@@ -119,12 +119,14 @@ export function fade(collapsed: boolean): string {
 }
 
 /**
- * One sidebar row: 36 px high, the 16 px icon box always centred at x = 36 (aside px-3 + row pl-4 expanded; in the
- * rail a 40 px button 4 px in, with pl-3), so nothing moves sideways as the sidebar collapses. `tall` lets a row
- * with two lines of text grow.
+ * One sidebar row: 36 px high (32 px on a short window), the 16 px icon box always centred at x = 36 (aside px-3 +
+ * row pl-4 expanded; in the rail a 40 px button 4 px in, with pl-3), so nothing moves sideways as the sidebar
+ * collapses. `tall` lets a row with two lines of text grow.
  */
 export function rowClass(active: boolean, collapsed: boolean, tall = false): string {
-  const size = collapsed ? 'mx-1 h-9 w-10 pl-3' : `w-full pl-4 pr-2 ${tall ? 'min-h-9 py-1.5' : 'h-9'}`
+  const size = collapsed
+    ? 'mx-1 h-9 w-10 pl-3 short:h-8'
+    : `w-full pl-4 pr-2 ${tall ? 'min-h-9 py-1.5' : 'h-9 short:h-8'}`
   // --row-bg: badges on the icon (StatusMark variant="badge") cut their ring out of the row's own background.
   const tone = active
     ? 'bg-raised text-text [--row-bg:var(--color-raised)]'

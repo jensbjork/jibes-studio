@@ -1,10 +1,12 @@
 import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import type { Storyboard, StoryboardTransition } from '@shared/types'
+import { focusedWithKeyboard } from '../../lib/focusOrigin'
 import { formatUsd, mediaUrl } from '../../lib/media'
 import { useSeenWhenVisible } from '../../lib/work'
 import { useClipQuote } from '../sequences/useTotalQuote'
 import { PlayIcon, PlusIcon } from '../sequences/icons'
 import type { SegmentNews } from '../takes/takeText'
+import { buttonClass } from '../ui/button'
 import { Spinner } from '../work/StatusMark'
 import {
   boardNumber,
@@ -40,13 +42,15 @@ interface Props {
   onOpen: () => void
   onGenerate: () => void
   onInsert: () => void
+  /** ← / → on the card: the focus goes to the board before or after it. */
+  onArrow?: (dir: -1 | 1) => void
 }
 
 /**
  * The clip between two boards, as a compact card on an arrow from one picture to the next: what happens (the
  * prompt's start), its state – the take in use, its progress, or what it waits for – its length and price, and
- * Generate when it has nothing yet. A click opens it in the editor beside the boards; the + above it inserts a
- * board between the two.
+ * Generate when it has nothing yet and can be sent. A click (Enter, Space) opens it in the editor beside the boards;
+ * ← / → go on along the row; the + above it, shown on hover, inserts a board between the two.
  */
 export default function TransitionConnector({
   storyboard,
@@ -60,7 +64,8 @@ export default function TransitionConnector({
   adding,
   onOpen,
   onGenerate,
-  onInsert
+  onInsert,
+  onArrow
 }: Props) {
   const status = t ? transitionStatus(t) : undefined
   const fromNumber = t ? boardNumber(storyboard, t.fromBoardId) : 0
@@ -78,13 +83,19 @@ export default function TransitionConnector({
   useSeenWhenVisible(cardRef, news?.failed[0])
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    if (e.target !== e.currentTarget || e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return
+    // Only on a card reached with the keyboard: on a clicked one Space plays the take (TransitionEditor).
+    if ((e.key === 'Enter' || e.key === ' ') && focusedWithKeyboard(e.currentTarget)) onOpen()
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') onArrow?.(e.key === 'ArrowLeft' ? -1 : 1)
+    else return
     e.preventDefault()
-    onOpen()
   }
 
   return (
-    <div className="relative flex shrink-0 items-center justify-center" style={{ width: CONNECTOR_WIDTH, height, marginTop: offsetTop }}>
+    <div
+      className="group/gap relative flex shrink-0 items-center justify-center"
+      style={{ width: CONNECTOR_WIDTH, height, marginTop: offsetTop }}
+    >
       {/* The arrow from one picture to the next, behind the card. */}
       <span className="absolute inset-x-1 top-1/2 h-px -translate-y-1/2 bg-line" aria-hidden />
       <svg className="absolute right-0 top-1/2 -translate-y-1/2 text-line" width="8" height="10" viewBox="0 0 8 10" aria-hidden>
@@ -106,7 +117,8 @@ export default function TransitionConnector({
           disabled={adding}
           title="Add a board here – the transition between the boards is then replaced by two new ones"
           aria-label="Add a board here"
-          className="absolute -top-9 left-1/2 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-bg text-muted opacity-50 transition hover:border-muted hover:text-text hover:opacity-100 focus-visible:opacity-100 disabled:opacity-20"
+          // Shown on hover, as the + between two clips in Sequences; "New board" at the end is always there.
+          className="absolute -top-9 left-1/2 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-bg text-muted opacity-0 transition hover:border-muted hover:text-text focus-visible:opacity-100 group-hover/gap:opacity-100 disabled:opacity-0"
         >
           <PlusIcon size={11} />
         </button>
@@ -125,7 +137,8 @@ export default function TransitionConnector({
             }`}
           >
             <div className="flex items-center gap-2">
-              <StatusThumb status={status} />
+              {/* A picture only when there is one to show: the take in use, or the one being made. */}
+              {(status.kind === 'done' || status.kind === 'generating') && <StatusThumb status={status} />}
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[11px] text-muted">
                   {transitionLabel(storyboard, t)}
@@ -134,7 +147,7 @@ export default function TransitionConnector({
               </div>
             </div>
 
-            <p className={`line-clamp-2 min-h-[2lh] text-[11px] leading-snug ${t.params.prompt.trim() ? 'text-text/85' : 'italic text-muted/70'}`}>
+            <p className={`line-clamp-2 min-h-[2lh] text-[11px] leading-snug ${t.params.prompt.trim() ? 'text-text/85' : 'italic text-muted'}`}>
               {t.params.prompt.trim() ? excerpt(t.params.prompt, 120) : 'What happens? Click to write.'}
             </p>
 
@@ -143,7 +156,8 @@ export default function TransitionConnector({
                 {durationLabel(t.params.duration)}
                 {offerGenerate && !blocked && <> · {formatUsd(quote)}</>}
               </span>
-              {offerGenerate && (
+              {/* Only when it can be sent (or is being sent): otherwise a click here opens the editor, which says why. */}
+              {offerGenerate && (!blocked || submitting) && (
                 <button
                   type="button"
                   onClick={(e) => {
@@ -151,16 +165,16 @@ export default function TransitionConnector({
                     onGenerate()
                   }}
                   disabled={!!blocked || submitting}
-                  title={blocked ?? `Generate the clip (${formatUsd(quote)})`}
-                  className="ml-auto rounded-md bg-accent px-2 py-0.5 font-medium text-white transition hover:bg-accent-hover disabled:bg-raised disabled:text-muted"
+                  title={blocked ?? `Generate a take of the clip (${formatUsd(quote)})`}
+                  className={`${buttonClass('primary', 'inline')} ml-auto`}
                 >
-                  {submitting ? 'Sending…' : status.kind === 'empty' ? 'Generate' : 'Again'}
+                  {submitting ? 'Sending…' : 'Generate'}
                 </button>
               )}
             </div>
             {/* What stands in the way, unless the card already says it (no pictures yet, no prompt yet). */}
             {offerGenerate && blocked && t.params.prompt.trim() && (
-              <p className="-mt-1 text-[10px] leading-snug text-amber-300/90">{blocked}</p>
+              <p className="-mt-1 text-[10px] leading-snug text-warning">{blocked}</p>
             )}
           </div>
         ) : (
@@ -173,7 +187,8 @@ export default function TransitionConnector({
   )
 }
 
-function StatusThumb({ status }: { status: TransitionStatus }) {
+/** The take in use (with ▶) or the one being made (its progress), as a small picture beside the label. */
+function StatusThumb({ status }: { status: Extract<TransitionStatus, { kind: 'done' | 'generating' }> }) {
   let content: ReactNode
   if (status.kind === 'done') {
     content = (
@@ -188,7 +203,7 @@ function StatusThumb({ status }: { status: TransitionStatus }) {
         </span>
       </>
     )
-  } else if (status.kind === 'generating') {
+  } else {
     content = (
       <span className="flex h-full w-full items-end bg-raised p-1">
         <span className="h-1 w-full overflow-hidden rounded-full bg-line">
@@ -199,8 +214,6 @@ function StatusThumb({ status }: { status: TransitionStatus }) {
         </span>
       </span>
     )
-  } else {
-    content = <span className="h-full w-full bg-raised" />
   }
   return <span className="relative flex h-[30px] w-[54px] shrink-0 overflow-hidden rounded bg-black">{content}</span>
 }
@@ -209,7 +222,7 @@ function StatusLine({ status, fresh }: { status: TransitionStatus; fresh: boolea
   if (fresh && status.kind !== 'generating') {
     return (
       <p
-        className="truncate text-[11px] font-medium text-emerald-300"
+        className="truncate text-[11px] font-medium text-success"
         title="A new take is ready. Open the transition and click the take to watch it."
       >
         {status.kind === 'done' ? 'Done · new take' : 'New take'}
@@ -219,11 +232,11 @@ function StatusLine({ status, fresh }: { status: TransitionStatus; fresh: boolea
   switch (status.kind) {
     case 'done':
       return status.stale ? (
-        <p className="truncate text-[11px] text-amber-300" title="The clip was made with an earlier image on one of the boards">
+        <p className="truncate text-[11px] text-warning" title="The selected take was made with an earlier image on one of the boards">
           Earlier image
         </p>
       ) : (
-        <p className="truncate text-[11px] text-emerald-300/90">Done</p>
+        <p className="truncate text-[11px] text-success">Done</p>
       )
     case 'generating':
       return (
@@ -236,7 +249,7 @@ function StatusLine({ status, fresh }: { status: TransitionStatus; fresh: boolea
       )
     case 'failed':
       return (
-        <p className="truncate text-[11px] text-accent" title={status.take.error}>
+        <p className="truncate text-[11px] text-danger" title={status.take.error}>
           Failed
         </p>
       )

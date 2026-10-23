@@ -88,18 +88,21 @@ function grouped(hits: Hit[]): ResultGroup[] {
 }
 
 /**
- * The groups for a query. An empty query lists `recent` (newest first), then the places and actions marked
- * `initial`, in their own order.
+ * The groups for a query. An empty query lists `recent` (newest first), then the actions marked `initial` (New
+ * sequence, New storyboard …), then any place marked so – not the sidebar's places again – each capped like any group.
  */
 export function rank(entries: readonly Entry[], recent: readonly Entry[], query: string): ResultGroup[] {
   const tokens = queryTokens(query)
   if (!tokens.length) {
     const initial = entries.filter((e) => e.initial)
     const groups: ResultGroup[] = []
+    // Already the newest few (recentEntries).
     if (recent.length) groups.push({ id: 'recent', label: GROUPS.recent.label, hits: recent.map(asHit), total: recent.length })
-    for (const id of ['goto', 'actions'] as const) {
+    for (const id of ['actions', 'goto'] as const) {
       const list = initial.filter((e) => e.group === id)
-      if (list.length) groups.push({ id, label: GROUPS[id].label, hits: list.map(asHit), total: list.length })
+      if (list.length) {
+        groups.push({ id, label: GROUPS[id].label, hits: list.slice(0, GROUPS[id].cap).map(asHit), total: list.length })
+      }
     }
     return groups
   }

@@ -399,7 +399,7 @@ export interface Settings {
   variant?: string
   /** Look for a newer Studio on GitHub once a day when Studio starts (default on; never in Studio Dev). */
   autoUpdateCheck: boolean
-  /** When Studio last asked GitHub for its newest release (ISO), if it ever has (Settings → About Studio). */
+  /** When Studio last asked GitHub for its newest release (ISO), if it ever has (Settings → About). */
   lastUpdateCheck?: string
   /** A development build (Studio Dev, any unpackaged build, a variant): it never looks for updates (git updates it). */
   developmentBuild?: boolean
@@ -2601,6 +2601,8 @@ export interface StudioApi {
   setImageSafeMode(on: boolean): Promise<void>
   /** Fires after a setting that several views show changed in one of them (so far "Safe mode for images"). */
   onSettingsChange(cb: () => void): () => void
+  /** Settings… in the app menu (⌘, / Ctrl+,): the window opens Settings. */
+  onOpenSettings(cb: () => void): () => void
 
   // Generation
   listModels(force?: boolean): Promise<VideoModel[]>

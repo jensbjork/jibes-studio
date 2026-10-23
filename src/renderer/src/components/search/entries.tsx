@@ -23,7 +23,7 @@ import { fileName, formatLength, originLabel, summaryLine } from '../editor/edit
 import { ScissorsIcon } from '../editor/icons'
 import { FilmIcon, GearIcon, MediaIcon, PictureIcon, QuoteIcon, SidebarIcon, TrayIcon } from '../icons'
 import { NoteIcon, PlusIcon, SparkleIcon } from '../sequences/icons'
-import { SETTINGS_SECTION, showSettingsSection } from '../settings/SettingsLayout'
+import { SETTINGS_SECTION, showSettingsSection, type SettingsSectionId } from '../settings/SettingsLayout'
 import { StoryboardIcon } from '../storyboards/icons'
 import { flatten } from './match'
 
@@ -76,7 +76,7 @@ export interface Entry {
   proseTitle?: boolean
   /** Listed only when a word of the query is in the detail (a clip by its notes, not by its sequence's name). */
   needsDetail?: boolean
-  /** Listed while the query is empty. */
+  /** Listed while the query is empty (the main New … actions; Recent comes first, the places only when typed for). */
   initial?: boolean
   /** The focus goes back where it was (the action changes nothing on screen that wants it). */
   keepsFocus?: boolean
@@ -132,6 +132,8 @@ interface Place {
   title: string
   icon: ReactNode
   keywords?: string
+  /** Its shortcut, at the right. */
+  hint?: string
 }
 
 // The sidebar's rows, in its order.
@@ -148,26 +150,28 @@ const PLACES: Place[] = [
     keywords: kind === 'director' ? 'library direction style look camera editing ready-made' : 'library'
   })),
   { view: 'prompts', title: 'Prompts', icon: <QuoteIcon />, keywords: 'saved library learnings' },
-  { view: 'settings', title: 'Settings', icon: <GearIcon />, keywords: 'preferences options' }
+  { view: 'settings', title: 'Settings', icon: <GearIcon />, keywords: 'preferences options', hint: shortcut('⌘,') }
 ]
 
 const MEDIA_TABS = [
-  { tab: 'videos', title: 'Videos', keywords: 'clips feed own clips' },
+  { tab: 'videos', title: 'Clips', keywords: 'videos feed own clips' },
   { tab: 'pictures', title: 'Images', keywords: 'pictures stills frames' },
   { tab: 'films', title: 'Films', keywords: 'exports exported' }
 ] as const
 
-// Every section of Settings, in its order (a new section must be named here, or the type check fails).
+// Every pane of Settings, in its order (a new pane must be named here, or the type check fails).
 const SETTINGS_SECTIONS: Record<keyof typeof SETTINGS_SECTION, { title: string; keywords: string }> = {
   venice: { title: 'Venice', keywords: 'api key account' },
   spending: { title: 'Spending', keywords: 'budget cost money spent price' },
   generation: { title: 'Generation', keywords: 'prompt language safe mode images descriptions' },
   library: { title: 'Library', keywords: 'folder base tidy up change move' },
-  archive: { title: 'Export & import', keywords: 'zip backup archive library' },
   agent: { title: 'Agent connection', keywords: 'mcp token claude code hermes openclaw connect' },
-  tools: { title: 'Tools', keywords: 'ffmpeg voice separation' },
-  about: { title: 'About JIBES Studio', keywords: 'version studio' }
+  // The pane is "About"; here the longer name, as in the macOS app menu.
+  about: { title: 'About JIBES Studio', keywords: 'version updates studio tools ffmpeg voice separation' }
 }
+
+/** Export & import lives in Settings → Library ("Move to another computer"), but is found by its own name. */
+const ARCHIVE_ENTRY = { title: 'Export & import', keywords: 'zip backup archive library move computer' }
 
 /** The places (views, Media's tabs, Settings' sections, the two panels) and the actions ("New …"). */
 export function commandEntries(sidebarCollapsed: boolean): Entry[] {
@@ -177,7 +181,7 @@ export function commandEntries(sidebarCollapsed: boolean): Entry[] {
     title: p.title,
     keywords: p.keywords,
     icon: p.icon,
-    initial: true,
+    hint: p.hint,
     run: ({ navigate }) => navigate(p.view)
   }))
   const tabs: Entry[] = MEDIA_TABS.map((t) => ({
@@ -189,23 +193,26 @@ export function commandEntries(sidebarCollapsed: boolean): Entry[] {
     icon: t.tab === 'pictures' ? <PictureIcon /> : t.tab === 'films' ? <FilmIcon /> : <MediaIcon />,
     run: ({ navigate }) => navigate('media', { type: 'open-media', tab: t.tab })
   }))
-  // Export & import is left out where it can't run (it only says so there).
-  const sectionKeys = (Object.keys(SETTINGS_SECTIONS) as (keyof typeof SETTINGS_SECTION)[]).filter(
-    (key) => key !== 'archive' || !ARCHIVE_UNAVAILABLE
-  )
-  const sections: Entry[] = sectionKeys.map((key) => ({
+  const section = (key: string, title: string, keywords: string, id: SettingsSectionId): Entry => ({
     key: `settings:${key}`,
     group: 'goto',
-    title: SETTINGS_SECTIONS[key].title,
+    title,
     context: 'Settings',
-    keywords: SETTINGS_SECTIONS[key].keywords,
+    keywords,
     icon: <GearIcon />,
     run: ({ navigate }) => {
-      // Settings already open scrolls there at once; otherwise it opens there.
-      showSettingsSection(SETTINGS_SECTION[key])
+      // Settings already open shows that pane at once; otherwise it opens on it.
+      showSettingsSection(id)
       navigate('settings')
     }
-  }))
+  })
+  const sections: Entry[] = (Object.keys(SETTINGS_SECTIONS) as (keyof typeof SETTINGS_SECTION)[]).map((key) =>
+    section(key, SETTINGS_SECTIONS[key].title, SETTINGS_SECTIONS[key].keywords, SETTINGS_SECTION[key])
+  )
+  // Left out where it can't run (Library only says so there).
+  if (!ARCHIVE_UNAVAILABLE) {
+    sections.push(section('archive', ARCHIVE_ENTRY.title, ARCHIVE_ENTRY.keywords, SETTINGS_SECTION.library))
+  }
   const panels: Entry[] = [
     {
       key: 'panel:work',
@@ -229,8 +236,9 @@ export function commandEntries(sidebarCollapsed: boolean): Entry[] {
     }
   ]
 
-  // "＋ New …" in the view's list, pressed for you (lib/createRequest.ts).
-  const create = (key: string, title: string, view: View, initial = false): Entry => ({
+  // "＋ New …" in the view's list, pressed for you (lib/createRequest.ts). A view with two lists (Prompts: prompts
+  // and learnings) is told which by the target.
+  const create = (key: string, title: string, view: View, initial = false, target?: string): Entry => ({
     key: `new:${key}`,
     group: 'actions',
     title,
@@ -239,7 +247,7 @@ export function commandEntries(sidebarCollapsed: boolean): Entry[] {
     initial,
     run: ({ navigate }) => {
       navigate(view)
-      requestCreate()
+      requestCreate(target)
     }
   })
   const actions: Entry[] = [
@@ -255,6 +263,8 @@ export function commandEntries(sidebarCollapsed: boolean): Entry[] {
     create('storyboard', 'New storyboard', 'storyboards', true),
     create('edit', 'New edit', 'editor', true),
     ...LIBRARY_KINDS.map((kind) => create(kind, ASSET_COPY[kind].newName, ASSET_VIEW[kind], kind === 'character')),
+    create('prompt', 'New prompt', 'prompts', false, 'prompts'),
+    create('learning', 'New learning', 'prompts', false, 'learnings'),
     {
       key: 'sidebar',
       group: 'actions',
@@ -365,7 +375,7 @@ function shownTake(takes: Generation[], selectedId: string | undefined): Generat
   return takes.find((t) => t.id === selectedId) ?? takes[0]
 }
 
-/** A sequence's clips, found by their notes ("What happens") and prompts; opened on that clip. */
+/** A sequence's clips, found by their notes and prompts; opened on that clip. */
 function clipEntries(s: Sequence): Entry[] {
   const name = s.name || 'Untitled sequence'
   return s.segments.flatMap((segment, i): Entry[] => {
@@ -521,7 +531,7 @@ function exportEntry(e: ExportSummary): Entry {
   }
 }
 
-/** The ready-made directors (always there): opened in Directors, where "Use a copy" makes one to change. */
+/** The ready-made directors (always there): opened in Directors, where "Copy to edit" makes one to change. */
 function presetDirectorEntries(): Entry[] {
   return presetEntries().map((d) => ({
     key: d.id,

@@ -4,6 +4,7 @@ import { readdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { shell } from 'electron'
 import { directorPreset, sanitizeDirection } from '@shared/direction'
+import { DIRECTOR_PRESETS } from '@shared/directors'
 import { pathKey } from '@shared/generation-filter'
 import {
   DEFAULT_AUDIO_CLIP_SECONDS,
@@ -1040,23 +1041,25 @@ function refuseDirection(kind: AssetKind, direction: unknown): void {
 
 // ── Directors ────────────────────────────────────────────────────────────────
 
-/** A director's name not taken by another director: "Noir", else "Noir (2)" … */
+/**
+ * A director's name neither another director nor a ready-made one has (a copy must never read like the ready-made
+ * one in a picker): "Noir (copy)", else "Noir (copy) 2" … – numbered as the window numbers a new one.
+ */
 function freeDirectorName(name: string): string {
-  const taken = new Set(
-    (getDb().prepare("SELECT name FROM assets WHERE kind = 'director'").pluck().all() as string[]).map((n) =>
-      n.normalize('NFC').toLocaleLowerCase('en')
-    )
-  )
+  const key = (n: string) => n.normalize('NFC').toLocaleLowerCase('en')
+  const own = getDb().prepare("SELECT name FROM assets WHERE kind = 'director'").pluck().all() as string[]
+  const taken = new Set([...own, ...DIRECTOR_PRESETS.map((p) => p.name)].map(key))
   for (let n = 1; ; n++) {
-    const candidate = n === 1 ? name : `${name} (${n})`
-    if (!taken.has(candidate.normalize('NFC').toLocaleLowerCase('en'))) return candidate
+    const candidate = n === 1 ? name : `${name} ${n}`
+    if (!taken.has(key(candidate))) return candidate
   }
 }
 
+/** A ready-made director as one of the user's own, to change: "Noir (copy)". */
 async function copyPreset(presetId: unknown): Promise<Asset> {
   const preset = directorPreset(presetId)
   if (!preset) throw new Error('There is no such ready-made director.')
-  return createAsset('director', freeDirectorName(preset.name), preset.description, null, preset.direction)
+  return createAsset('director', freeDirectorName(`${preset.name} (copy)`), preset.description, null, preset.direction)
 }
 
 async function addVideos(assetId: unknown, paths: unknown): Promise<Asset> {
@@ -1432,7 +1435,10 @@ export function deleteAsset(id: string): Promise<void> {
   return assetTask(() => remove(id))
 }
 
-/** A ready-made director (shared/directors.ts) copied into the library as a director of its own, named after it. */
+/**
+ * A ready-made director (shared/directors.ts) copied into the library as a director of its own: "Noir (copy)", or
+ * "Noir (copy) 2" when that is taken.
+ */
 export function copyDirectorPreset(presetId: string): Promise<Asset> {
   return assetTask(() => copyPreset(presetId))
 }
@@ -1465,7 +1471,10 @@ export function addAssetImages(
   return assetTask(() => addImages(assetId, paths, origin))
 }
 
-/** Removes the image (its copy goes to the Trash); the remaining images close up. */
+/**
+ * Removes the image (its copy goes to the Trash, or to Reference images if generations used it); the remaining
+ * images close up.
+ */
 export function removeAssetImage(imageId: string): Promise<Asset> {
   return assetTask(() => removeImage(imageId))
 }

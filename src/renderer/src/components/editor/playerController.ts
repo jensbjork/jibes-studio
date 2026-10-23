@@ -12,7 +12,7 @@ export interface PlayerState {
   rate: number
   /** -1 while J plays backwards. */
   direction: 1 | -1
-  /** Spela markeringen: the marked range plays over and over. */
+  /** Loop the selection: the marked range plays over and over. */
   looping: boolean
 }
 
@@ -248,7 +248,7 @@ export class PlayerController {
 
   // ── Looping the marked range ──
 
-  /** Spela markeringen: starts the range from its beginning and loops it; undefined stops looping. */
+  /** Loop the selection: starts the range from its beginning and loops it; undefined stops looping. */
   loopRange(range: EditRange | undefined): void {
     this.loop = range
     this.setState({ looping: !!range })

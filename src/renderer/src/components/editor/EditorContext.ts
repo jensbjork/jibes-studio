@@ -16,7 +16,11 @@ import type { RunOutcome, RunRequest, Runner } from './useEditOps'
 // What every part of the open edit's view needs: the edit and its current version, the timeline, the marked range,
 // the player, the audio models and the runner. Provided by EditWorkspace.
 
-export type EditorTab = 'bild' | 'ljud' | 'rost' | 'musik' | 'text'
+/**
+ * The action tabs: Picture, Sound (with music and effects), Voice, Text. The ids are older than the English names;
+ * they are kept, since they are stored ('editor:tab') and key the open cards (cards.ts).
+ */
+export type EditorTab = 'bild' | 'ljud' | 'rost' | 'text'
 
 export interface EditorContextValue {
   edit: Edit
@@ -29,7 +33,7 @@ export interface EditorContextValue {
   /** Seconds and frames per second of the current version. */
   duration: number
   fps: number
-  /** Markeringen. */
+  /** The marked range ("the selection" in the UI), if any. */
   selection?: EditRange
   setSelection: (range: EditRange | undefined) => void
   player: PlayerController

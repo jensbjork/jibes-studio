@@ -11,6 +11,7 @@ export default function AssetAvatar({ asset, className }: { asset: Asset; classN
     return (
       <img
         src={mediaUrl(cover.path)}
+        alt=""
         draggable={false}
         decoding="async"
         onError={() => setFailedPath(cover.path)}

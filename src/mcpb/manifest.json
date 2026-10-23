@@ -44,14 +44,14 @@
     "studio_url": {
       "type": "string",
       "title": "Studio's address",
-      "description": "Where Studio listens for agents, as shown in Studio under Settings → Agent connection → Addresses.",
+      "description": "Where Studio listens for agents, as shown in Studio under Settings → Agent connection → Advanced → Addresses.",
       "default": "http://127.0.0.1:8770/mcp",
       "required": false
     },
     "studio_token": {
       "type": "string",
       "title": "Token",
-      "description": "Studio's token, from Settings → Agent connection → Token. If you change the token in Studio, paste the new one here or add Studio to Claude Desktop again.",
+      "description": "Studio's token, from Settings → Agent connection → Advanced → Token. If you change the token in Studio, paste the new one here or add Studio to Claude Desktop again.",
       "sensitive": true,
       "required": false
     }

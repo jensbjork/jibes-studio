@@ -256,7 +256,7 @@ function ReferenceCard({
 
   let body: ReactNode
   if (problem || !target) {
-    body = <p className="leading-snug text-red-300">{problem ?? `${token} doesn’t point at anything that is sent.`}</p>
+    body = <p className="leading-snug text-danger">{problem ?? `${token} doesn’t point at anything that is sent.`}</p>
   } else if (content.ref === 'video') {
     const w = target.window
     body = (
@@ -282,7 +282,7 @@ function ReferenceCard({
         <p className="truncate text-[11px] text-muted">
           {[where, w ? windowText(w) : undefined].filter(Boolean).join(' · ')}
         </p>
-        {target.unsent && <p className="text-[11px] leading-snug text-accent">{target.unsent}</p>}
+        {target.unsent && <p className="text-[11px] leading-snug text-danger">{target.unsent}</p>}
       </>
     )
   } else if (content.ref === 'audio') {
@@ -314,7 +314,7 @@ function ReferenceCard({
               .filter(Boolean)
               .join(' · ')}
           </span>
-          {target.unsent && <span className="block text-[11px] leading-snug text-accent">{target.unsent}</span>}
+          {target.unsent && <span className="block text-[11px] leading-snug text-danger">{target.unsent}</span>}
         </span>
       </div>
     )
@@ -341,7 +341,7 @@ function ReferenceCard({
         {(where || (!target.name && target.path)) && (
           <p className="text-[11px] text-muted">{where ?? 'own image'}</p>
         )}
-        {target.unsent && <p className="text-[11px] leading-snug text-accent">{target.unsent}</p>}
+        {target.unsent && <p className="text-[11px] leading-snug text-danger">{target.unsent}</p>}
         {content.hint && <p className="mt-0.5 text-[11px] leading-snug text-muted">{content.hint}</p>}
       </>
     )
@@ -374,7 +374,7 @@ function CardPicture({ path, dim, maxHeight }: { path: string; dim: boolean; max
   const [missing, setMissing] = useState(false)
   if (missing) {
     return (
-      <span className="flex h-16 items-center justify-center rounded bg-raised px-2 text-center text-[11px] text-accent">
+      <span className="flex h-16 items-center justify-center rounded bg-raised px-2 text-center text-[11px] text-danger">
         The image file no longer exists
       </span>
     )

@@ -5,7 +5,7 @@ import { FILE_MANAGER } from '../../lib/platform'
 import { useEditor } from './EditorContext'
 import { fileName, formatClock } from './editorUtils'
 import { usePlayheadValue } from './playerController'
-import { linkButton } from './ui'
+import { linkButton, smallButton } from './ui'
 import { languageName } from './VoiceTab'
 
 // Text: the transcript, line by line. Click a time to go there; fix a word for free (saved when leaving the line);
@@ -74,24 +74,19 @@ export default function TextTab({ onTranscribe }: { onTranscribe: () => void }) 
           {transcript.segments.length} {transcript.segments.length === 1 ? 'line' : 'lines'}
           {transcript.language && ` · ${languageName(transcript.language)}`}
         </p>
-        <button
-          type="button"
-          onClick={() => void saveSrt()}
-          disabled={saving}
-          className="shrink-0 rounded-md border border-line px-2.5 py-1 text-[12px] transition hover:bg-raised disabled:opacity-40"
-        >
+        <button type="button" onClick={() => void saveSrt()} disabled={saving} className={`${smallButton} shrink-0`}>
           {saving ? 'Saving…' : 'Save subtitles (.srt)'}
         </button>
       </div>
       {saved && (
-        <p className="mb-2 flex items-center gap-2 text-[11px] text-emerald-300/90">
+        <p className="mb-2 flex items-center gap-2 text-[11px] text-success">
           Saved: <span className="min-w-0 truncate font-mono">{fileName(saved)}</span>
           <button type="button" onClick={() => window.studio.revealFile(saved)} className={linkButton}>
             Show in {FILE_MANAGER}
           </button>
         </p>
       )}
-      {error && <p className="mb-2 text-[11px] text-accent select-text">{error}</p>}
+      {error && <p className="mb-2 text-[11px] text-danger select-text">{error}</p>}
       <ol ref={list} className="space-y-0.5">
         {transcript.segments.map((s) => (
           <Line key={`${s.id}:${s.text}`} segment={s} active={s.id === playing} onSeek={() => player.seek(s.start)} onSave={save} />

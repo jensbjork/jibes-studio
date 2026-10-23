@@ -1,3 +1,4 @@
+import { ASSET_COPY } from '../../lib/assets'
 import { directorSummary, type DirectorEntry } from '../../lib/directors'
 import SideList, { SideListRow } from '../library/SideList'
 import DirectorAvatar from './DirectorAvatar'
@@ -19,8 +20,7 @@ export default function DirectorList({ entries, selectedId, onSelect, onCreate, 
   return (
     <SideList
       title="Directors"
-      createLabel="New"
-      createTitle="New director"
+      createLabel="New director"
       onCreate={onCreate}
       creating={creating}
       items={entries}
@@ -33,7 +33,7 @@ export default function DirectorList({ entries, selectedId, onSelect, onCreate, 
           .join(' ')
       }
       groupOf={(e) => (e.preset ? 'Ready-made' : 'Yours')}
-      emptyText="Directors you create show up here."
+      emptyText={ASSET_COPY.director.listHint}
       deleteQuestion={(e) => `Delete “${e.name}”?`}
       deleteNote={() => DELETE_DIRECTOR_NOTE}
       onDelete={(e, next) => onDelete(e.id, next?.id)}
@@ -43,7 +43,7 @@ export default function DirectorList({ entries, selectedId, onSelect, onCreate, 
           visual={<DirectorAvatar entry={e} className="h-10 w-10 rounded-md" />}
           name={e.name}
           meta={directorSummary(e)}
-          title={e.preset ? `${e.name} – ready-made: use a copy to change it` : undefined}
+          title={e.preset ? 'ready-made: copy it to edit' : undefined}
           deleteTitle={e.preset ? undefined : 'Delete the director'}
         />
       )}

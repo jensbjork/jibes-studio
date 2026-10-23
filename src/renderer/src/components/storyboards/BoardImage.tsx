@@ -170,7 +170,7 @@ export default function BoardImage({
           className="group/image relative block h-full w-full overflow-hidden rounded-lg bg-black outline-none ring-offset-2 ring-offset-bg focus-visible:ring-2 focus-visible:ring-muted"
         >
           {missing === path ? (
-            <span className="flex h-full w-full items-center justify-center p-3 text-center text-[12px] text-accent">
+            <span className="flex h-full w-full items-center justify-center p-3 text-center text-[12px] text-danger">
               The image file is missing – pick a new image
             </span>
           ) : (
@@ -231,7 +231,7 @@ export default function BoardImage({
               Pick image…
             </button>
           </div>
-          <span className="text-[11px] text-muted/70">or drop an image here</span>
+          <span className="text-[11px] text-muted">or drop an image here</span>
         </div>
       )}
 
@@ -258,7 +258,7 @@ export default function BoardImage({
         <div
           ref={failureBox}
           role="alert"
-          className="absolute inset-x-2 bottom-2 flex items-start gap-2 rounded-md border border-accent/30 bg-[#2a1416]/95 px-2.5 py-2 text-[11px] leading-snug text-[#ffb3b5]"
+          className="absolute inset-x-2 bottom-2 flex items-start gap-2 rounded-md border border-accent/30 bg-danger-soft/95 px-2.5 py-2 text-[11px] leading-snug text-danger"
         >
           <span className="min-w-0 flex-1 select-text">
             The image couldn’t be created{shownFailure.error ? `: ${shownFailure.error}` : '.'}
@@ -391,7 +391,7 @@ export default function BoardImage({
                   data-menu-item
                   onClick={() => choose(null)}
                   title="The board becomes empty again. The image itself isn’t deleted."
-                  className={`${menuRow} text-muted hover:text-accent`}
+                  className={`${menuRow} text-muted hover:text-danger focus-visible:text-danger`}
                 >
                   Remove image
                 </button>

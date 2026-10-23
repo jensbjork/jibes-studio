@@ -3,13 +3,15 @@ import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-la
 import { durationSeconds, kindOfModelId, referenceVideosOf, videosAreReferences, type Kind } from '@shared/models'
 import { workKey, type Edit, type Generation, type GenerationReview, type VideoModel } from '@shared/types'
 import { ASSET_VIEW } from '../../lib/assets'
+import { isTextTarget, MODAL_SELECTOR } from '../../lib/dialogs'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { fileName } from '../../lib/library'
 import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import { FILE_MANAGER, TRASH } from '../../lib/platform'
-import { markSeen, useSeenWhenVisible } from '../../lib/work'
 import { findTakeOwner, openTakeOwner, takeOwnerLabel, type TakeOwner } from '../../lib/takes'
+import { nativeVideoControls } from '../../lib/video'
+import { markSeen, useSeenWhenVisible } from '../../lib/work'
 import { KIND_TONE, VIDEO_TONE } from '../pickers/assetKinds'
 import { useVideoFacts } from '../pickers/videoFacts'
 import { videoLabelParts } from '../pickers/videoRefs'
@@ -21,8 +23,8 @@ import { sentPromptDiffers } from '../prompt/descriptions'
 import { CopyButton } from '../prompts/controls'
 import { formatWhen } from '../prompts/prompt-utils'
 import { requestLearning, useLearnings } from '../prompts/useLearnings'
-import ConfirmButton from '../sequences/ConfirmButton'
 import { CloseIcon } from '../sequences/icons'
+import ConfirmButton from '../ui/ConfirmButton'
 import { Spinner } from '../work/StatusMark'
 import { STATUS_LABEL, formatClipLength, isPending, progressOf } from './feedText'
 import HighlightedPrompt from './HighlightedPrompt'
@@ -47,7 +49,7 @@ interface Props {
   generation: Generation
   models: readonly VideoModel[]
   index: LibraryIndex
-  /** Where the clip is in the list the drawer steps through ("3 av 42"). */
+  /** Where the clip is in the list the drawer steps through ("3 of 42"). */
   position?: { index: number; total: number }
   onPrev?: () => void
   onNext?: () => void
@@ -75,22 +77,15 @@ const MODE_LABEL: Record<Kind, string> = {
   'reference-to-video': 'Reference images to video'
 }
 
-const sectionTitle = 'mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted'
+const sectionTitle = 'section-label mb-2'
 const actionButton =
   'rounded-md border border-line px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40'
-
-/** A text field: typing (and Escape, e.g. closing the prompt editor's @ menu) belongs to it. */
-function isTextField(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-  )
-}
 
 /** Whether a key press belongs to a field, a player or a control rather than to the drawer's shortcuts. */
 function ownsKeys(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   return (
-    isTextField(target) ||
+    isTextTarget(target) ||
     ['VIDEO', 'AUDIO'].includes(target.tagName) ||
     target.closest('[role="slider"], [role="grid"], [role="menu"], [role="dialog"], [role="listbox"]') !== null
   )
@@ -142,10 +137,10 @@ export default function ClipDrawer({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
-      // A popover or dialog on top (the sequence picker, an approval) handles its own Escape.
-      const overlay = document.querySelector('[role="dialog"], [aria-modal="true"]')
+      // A popover or dialog on top (the sequence picker, a ⋯ menu, an approval) handles its own Escape.
+      const overlay = document.querySelector(`${MODAL_SELECTOR}, [role="dialog"]`)
       if (e.key === 'Escape') {
-        if (overlay || isTextField(e.target)) return
+        if (overlay || isTextTarget(e.target)) return
         e.preventDefault()
         onClose()
         return
@@ -246,7 +241,11 @@ export default function ClipDrawer({
             navigate={navigate}
             reuseTitle={reuseTitle}
           />
-          {error && <p className="text-[12px] text-accent select-text">{error}</p>}
+          {error && (
+            <p role="alert" className="text-[12px] text-danger select-text">
+              {error}
+            </p>
+          )}
 
           <YourReview key={g.id} generation={g} review={userReview} loaded={loaded} onRate={onRate} />
 
@@ -256,7 +255,7 @@ export default function ClipDrawer({
           {(g.prompt || g.source === undefined || g.source === 'generated') && (
             <section>
               <div className="mb-2 flex items-center">
-                <h3 className={`${sectionTitle} mb-0 flex-1`}>Prompt</h3>
+                <h3 className="section-label flex-1">Prompt</h3>
                 <CopyButton text={g.prompt} disabled={!g.prompt} />
               </div>
               <HighlightedPrompt
@@ -343,7 +342,7 @@ function Player({
           ref={videoRef}
           src={mediaUrl(g.filePath)}
           poster={g.thumbPath ? mediaUrl(g.thumbPath) : undefined}
-          controls
+          {...nativeVideoControls}
           autoPlay={autoPlay}
           loop
           preload="auto"
@@ -367,7 +366,7 @@ function Player({
       ) : (
         <div
           ref={failureRef}
-          className="flex h-full items-center justify-center overflow-y-auto p-6 text-center text-accent select-text"
+          className="flex h-full items-center justify-center overflow-y-auto p-6 text-center text-danger select-text"
         >
           {g.status === 'failed' ? (g.error ?? 'Failed') : 'The video doesn’t exist.'}
         </div>
@@ -411,7 +410,7 @@ function Actions({
             type="button"
             onClick={() => onReuse(g)}
             title={reuseTitle}
-            className="rounded-md bg-accent px-3 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
+            className="rounded-md bg-accent-fill px-3 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
           >
             Use again
           </button>
@@ -443,16 +442,17 @@ function Actions({
         )}
         {g.filePath && (
           <button type="button" onClick={() => void window.studio.revealFile(g.filePath!)} className={actionButton}>
-            Show file
+            Show in {FILE_MANAGER}
           </button>
         )}
         {!isPending(g) && (
           <span className="ml-auto">
             <ConfirmButton
               question={g.segmentId ? 'Used as a take – delete?' : 'Delete the video?'}
+              note={`The video file goes to ${TRASH}.`}
               onConfirm={() => onDelete(g)}
               title={`Moves the video to ${TRASH}`}
-              className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-accent"
+              className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-danger"
             >
               Delete
             </ConfirmButton>
@@ -461,7 +461,7 @@ function Actions({
       </div>
       {added && (
         <div className="mt-2 flex items-center gap-2 rounded-md bg-raised px-2.5 py-1.5 text-[12px]">
-          <span className="text-emerald-400">✓</span>
+          <span className="text-success">✓</span>
           <span className="min-w-0 flex-1 truncate">
             Clip {added.clipNumber} in “{added.name}”
           </span>

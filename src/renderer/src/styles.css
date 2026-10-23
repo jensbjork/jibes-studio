@@ -1,5 +1,8 @@
 @import 'tailwindcss';
 
+/* Short windows (a laptop with the Dock shown): the sidebar's rows and headings tighten up. */
+@custom-variant short (@media (max-height: 760px));
+
 @theme {
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
   --color-bg: #0b0b0d;
@@ -8,8 +11,28 @@
   --color-line: #26262c;
   --color-muted: #8b8b96;
   --color-text: #ececf1;
+  /* Text, dots, bars and selection. Under white text it is too light: fills use accent-fill. */
   --color-accent: #e5484d;
-  --color-accent-hover: #f2555a;
+  /* The fill of primary buttons: 4.7:1 with white text. */
+  --color-accent-fill: #d4383d;
+  /* Only a hover fill. */
+  --color-accent-hover: #c42f34;
+  /* Status text: an error, a warning, something that went well. */
+  --color-danger: #ffb3b5;
+  --color-warning: oklch(87.9% 0.169 91.605);
+  --color-success: oklch(84.5% 0.143 164.978);
+  /* Solid backgrounds behind an error or a warning (a tile, a timeline block). */
+  --color-danger-soft: #2a1416;
+  --color-warning-soft: #2a2113;
+}
+
+/* The one look of an uppercase group heading (lists, menus, panels). */
+@utility section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-muted);
 }
 
 html,
@@ -32,6 +55,26 @@ input,
 textarea,
 [contenteditable] {
   user-select: text;
+}
+
+/*
+ * One focus outline for everything reached with the keyboard. Controls with a ring of their own say outline-none,
+ * which wins (utilities come after the base layer). Not on tabIndex -1: a dialog's panel or a roving item that only
+ * holds the focus for a moment.
+ */
+@layer base {
+  :focus-visible:not([tabindex='-1']) {
+    outline: 2px solid var(--color-muted);
+    outline-offset: 2px;
+  }
+}
+
+/* Windows High Contrast drops box-shadow rings: an outline in the system's colour, over every outline-none. */
+@media (forced-colors: active) {
+  :focus-visible:not([tabindex='-1']) {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
 }
 
 /* Window drag region for the hidden-inset title bar (macOS). Windows has its own title bar to drag. */

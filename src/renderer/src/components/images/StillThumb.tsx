@@ -26,6 +26,11 @@ interface Props {
   selected?: boolean
   /** Size and shape; default a 16:9 tile 96 px wide. */
   className?: string
+  /**
+   * Fills the picture area of a card (Media's Images): square corners, and the focus mark drawn inside, since the
+   * card clips anything outside it. An outline, not an inset ring: the picture covers an inset shadow.
+   */
+  fill?: boolean
   /** Shown in the corner, e.g. a delete button; stays clickable without opening the still. */
   children?: ReactNode
 }
@@ -37,6 +42,7 @@ export default function StillThumb({
   draggable = false,
   selected = false,
   className = 'aspect-video w-24',
+  fill = false,
   children
 }: Props) {
   const [missing, setMissing] = useState(false)
@@ -65,12 +71,16 @@ export default function StillThumb({
           : undefined
       }
       title={missing ? `File missing: ${still.path}` : title}
-      className={`group relative shrink-0 overflow-hidden rounded-md bg-raised outline-none ring-offset-2 ring-offset-panel transition focus-visible:ring-2 focus-visible:ring-muted ${
+      className={`group relative shrink-0 overflow-hidden bg-raised outline-none transition ${
+        fill
+          ? 'focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-muted'
+          : 'rounded-md ring-offset-2 ring-offset-panel focus-visible:ring-2 focus-visible:ring-muted'
+      } ${
         selected ? 'ring-2 ring-accent' : ''
       } ${onOpen ? 'cursor-pointer hover:brightness-110' : ''} ${draggable ? 'cursor-grab active:cursor-grabbing' : ''} ${className}`}
     >
       {missing ? (
-        <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
+        <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-danger">
           File missing
         </span>
       ) : (

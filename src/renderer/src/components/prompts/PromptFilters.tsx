@@ -1,12 +1,14 @@
 import { useState, type KeyboardEvent, type RefObject } from 'react'
+import { shortcut } from '../../lib/platform'
+import { CloseIcon } from '../sequences/icons'
 import { SORT_OPTIONS, isSortKey, type SortKey, type TagInfo } from './prompt-utils'
 
 interface Props {
   query: string
   onQuery: (query: string) => void
   searchRef: RefObject<HTMLInputElement | null>
-  /** ArrowDown in the search field hands focus to the list. */
-  onSearchArrowDown: () => void
+  /** The list's keys in the search (lib/listKeys): ↓ to the rows, Enter opens the first match, Esc clears. */
+  onSearchKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void
   tags: TagInfo[]
   activeTags: string[]
   onToggleTag: (key: string) => void
@@ -26,11 +28,12 @@ const chip = (active: boolean) =>
     active ? 'border-accent/50 bg-accent/10 text-text' : 'border-line text-muted hover:border-muted hover:text-text'
   }`
 
+/** The Prompts list's search (the side lists' search), the favourites and tag chips, the count and the sort order. */
 export default function PromptFilters({
   query,
   onQuery,
   searchRef,
-  onSearchArrowDown,
+  onSearchKeyDown,
   tags,
   activeTags,
   onToggleTag,
@@ -50,26 +53,21 @@ export default function PromptFilters({
     : tags.filter((t, i) => i < COLLAPSED_TAGS || activeTags.includes(t.key))
   const hiddenCount = tags.length - visibleTags.length
 
-  const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape' && query) {
-      e.preventDefault()
-      onQuery('')
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      onSearchArrowDown()
-    }
-  }
-
   return (
-    <div className="shrink-0 space-y-2.5 px-4 pb-2">
+    <div className="shrink-0 space-y-2.5 px-2 pb-2">
       <div className="relative">
         <input
           ref={searchRef}
+          type="text"
+          role="searchbox"
           value={query}
           onChange={(e) => onQuery(e.target.value)}
-          onKeyDown={onSearchKey}
+          onKeyDown={onSearchKeyDown}
           placeholder="Search title, text and tags…"
-          className="w-full rounded-md border border-line bg-raised py-1.5 pl-3 pr-8 outline-none focus:border-muted"
+          aria-label="Search prompts"
+          title={shortcut('Search prompts (⌘F)')}
+          spellCheck={false}
+          className="w-full rounded-md border border-line bg-raised py-1.5 pl-2.5 pr-7 outline-none focus:border-muted"
         />
         {query && (
           <button
@@ -78,10 +76,11 @@ export default function PromptFilters({
               onQuery('')
               searchRef.current?.focus()
             }}
-            title="Clear the search"
-            className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-[10px] text-muted hover:bg-line hover:text-text"
+            title="Clear search"
+            aria-label="Clear search"
+            className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted hover:bg-line hover:text-text"
           >
-            ✕
+            <CloseIcon size={9} />
           </button>
         )}
       </div>
@@ -118,7 +117,7 @@ export default function PromptFilters({
           <select
             value={sort}
             onChange={(e) => isSortKey(e.target.value) && onSort(e.target.value)}
-            className="cursor-pointer rounded bg-transparent py-0.5 text-right text-muted outline-none hover:text-text"
+            className="cursor-pointer rounded bg-transparent py-0.5 text-right text-muted outline-none hover:text-text focus-visible:ring-1 focus-visible:ring-muted"
           >
             {SORT_OPTIONS.map((o) => (
               <option key={o.id} value={o.id}>

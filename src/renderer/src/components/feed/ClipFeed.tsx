@@ -11,11 +11,14 @@ import {
 import { queryGenerations, summarizeGenerations } from '@shared/generation-filter'
 import { inGenerateSession } from '@shared/session'
 import type { Generation, VideoModel } from '@shared/types'
-import { useAssetsState } from '../../lib/hooks'
+import { useAssetsState, useFindShortcut } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
 import { useFreshGenerationIds } from '../../lib/work'
 import GenerationCard from '../GenerationCard'
+import { MediaIcon } from '../icons'
+import { NoticeRow } from '../media/ui'
 import { CloseIcon } from '../sequences/icons'
+import EmptyState from '../ui/EmptyState'
 import { Spinner } from '../work/StatusMark'
 import ClipDrawer from './ClipDrawer'
 import ClipTable from './ClipTable'
@@ -38,7 +41,7 @@ import {
   type SortKey
 } from './feedFilter'
 import { isPending, summaryText } from './feedText'
-import FeedToolbar, { MediaLink, SessionToolbar } from './FeedToolbar'
+import FeedToolbar, { SessionToolbar } from './FeedToolbar'
 import { ImportIcon } from './icons'
 import { carriesFiles, DropHint, droppedVideoPaths, ImportCardView, useImportCards, useImportFlow } from './ownClips'
 import { buildLibraryIndex } from './references'
@@ -50,7 +53,7 @@ interface Props {
   models: readonly VideoModel[]
   navigate: Navigate
   /**
-   * library (Media's Videos): every clip, with search, filters and order. session (Generate): only what was
+   * library (Media's Clips): every clip, with search, filters and order. session (Generate): only what was
    * made in Generate this session (shared/session.ts), newest first, under a short header.
    */
   mode?: FeedMode
@@ -58,12 +61,14 @@ interface Props {
   onReuse: (g: Generation) => void
   /** The drawer's tooltip for "Use again", when it also leaves for Generate. */
   reuseTitle?: string
-  /** Shown while the list has nothing at all (in session mode: nothing made this session). */
+  /** Under "No clips yet" while the list has nothing at all (in session mode: nothing made this session). */
   emptyText: ReactNode
   /** Left end of the toolbar's first row (Media's tabs). */
   leading?: ReactNode
   /** Right end of the toolbar's first row (e.g. the folder button). */
   trailing?: ReactNode
+  /** A notice of the view's own under the toolbar, above the feed's (the folder button's error): a NoticeRow. */
+  notice?: ReactNode
   /**
    * Open this clip in the drawer (Activity, an agent's open_in_studio); `source: 'agent'` marks nothing seen.
    * In session mode a clip from outside the session is shown in Media instead.
@@ -92,6 +97,7 @@ export default function ClipFeed({
   emptyText,
   leading,
   trailing,
+  notice,
   openRequest,
   onOpenRequestHandled
 }: Props) {
@@ -196,7 +202,6 @@ export default function ClipFeed({
     const listed = newIds ? pool.filter((g) => newIds.has(g.id)) : pool
     return queryGenerations(listed, toGenerationFilter({ ...active, unseen: undefined }, sort, Date.now()), index.paths)
   }, [pool, newIds, active, sort, index])
-  const pendingCount = useMemo(() => generations.filter(isPending).length, [generations])
   const unseenCount = useMemo(() => generations.filter((g) => unseenIds.has(g.id)).length, [generations, unseenIds])
   const filtering = hasFilters(active)
 
@@ -223,18 +228,7 @@ export default function ClipFeed({
   }, [filterKey])
 
   // ⌘F searches the clips (the session list has no search).
-  useEffect(() => {
-    if (session) return
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.defaultPrevented && e.key.toLowerCase() === 'f') {
-        e.preventDefault()
-        searchRef.current?.focus()
-        searchRef.current?.select()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [session])
+  useFindShortcut(searchRef, !session)
 
   // ── The drawer ───────────────────────────────────────────────────────────────
 
@@ -361,13 +355,13 @@ export default function ClipFeed({
         type="button"
         onClick={() => void pickFiles()}
         disabled={importFlow.inspecting}
-        title="Add your own films (or drag them in here)"
-        aria-label={session ? importLabel : undefined}
+        title={importFlow.inspecting ? importLabel : 'Add your own films (or drag them in here)'}
+        aria-label={importLabel}
         className="no-drag flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
       >
         <ImportIcon size={13} />
-        {/* Beside Generate's form the list is narrow: the label shows once the work area has room for it. */}
-        <span className={session ? 'hidden @min-[67rem]/main:inline' : undefined}>{importLabel}</span>
+        {/* In a narrow work area the toolbar shows icons only, like the folder button beside it. */}
+        <span className="hidden @min-[67rem]/main:inline">{importLabel}</span>
       </button>
       {trailing}
     </>
@@ -397,7 +391,6 @@ export default function ClipFeed({
           assets={assets}
           index={index}
           searchRef={searchRef}
-          pendingCount={pendingCount}
           unseenCount={unseenCount}
           onSearchArrowDown={() => {
             if (view === 'table') {
@@ -407,51 +400,31 @@ export default function ClipFeed({
               scrollRef.current?.querySelector<HTMLElement>('[data-card-open]')?.focus()
             }
           }}
+          onSearchEnter={() => shown[0] && open(shown[0].id)}
           leading={leading}
           trailing={toolbarTrailing}
         />
       )}
 
+      {notice}
       {importNotice && (
-        <div
-          className={`flex items-start gap-2 border-b border-line/60 px-6 py-2 text-[12px] ${
-            importNotice.error ? 'bg-accent/10 text-accent' : 'bg-raised/50 text-text'
-          }`}
-        >
-          <span className="min-w-0 flex-1 whitespace-pre-line select-text">{importNotice.text}</span>
-          <button
-            type="button"
-            onClick={() => setImportNotice(undefined)}
-            className="shrink-0 hover:text-text"
-            title="Close"
-          >
-            ✕
-          </button>
-        </div>
+        <NoticeRow tone={importNotice.error ? 'error' : 'info'} onClose={() => setImportNotice(undefined)}>
+          {importNotice.text}
+        </NoticeRow>
       )}
-
       {feed.error && (
-        <div className="flex items-start gap-2 border-b border-line/60 bg-accent/10 px-6 py-2 text-[12px] text-accent">
-          <span className="min-w-0 flex-1 select-text">{feed.error}</span>
-          <button type="button" onClick={feed.clearError} className="shrink-0 hover:text-text" title="Close">
-            ✕
-          </button>
-        </div>
+        <NoticeRow tone="error" onClose={feed.clearError}>
+          {feed.error}
+        </NoticeRow>
       )}
       {hiddenPending > 0 && (
-        <div className="flex items-center gap-2 border-b border-line/60 bg-raised/50 px-6 py-1.5 text-[12px] text-muted">
-          <Spinner />
-          <span className="min-w-0 flex-1">
-            {hiddenPending === 1 ? 'A clip is generating' : `${hiddenPending} clips are generating`} but hidden by the filters.
-          </span>
-          <button
-            type="button"
-            onClick={() => setFilters({ query: '' })}
-            className="shrink-0 text-text underline-offset-2 hover:underline"
-          >
-            Clear filters
-          </button>
-        </div>
+        <NoticeRow
+          tone="quiet"
+          leading={<Spinner />}
+          action={{ label: 'Clear filters', onClick: () => setFilters({ query: '' }) }}
+        >
+          {hiddenPending === 1 ? 'A clip is generating' : `${hiddenPending} clips are generating`} but hidden by the filters.
+        </NoticeRow>
       )}
 
       {importing.length > 0 && (
@@ -474,10 +447,13 @@ export default function ClipFeed({
       >
         {dropping && <DropHint text="Drop to import as own clips" />}
         {!loaded ? null : pool.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted">
-            <p className="max-w-md leading-relaxed text-balance">{emptyText}</p>
-            {session && <MediaLink onClick={showAll} className="mb-2" />}
-            <span className="text-[12px]">Have your own films? Drag them in here or choose Import own clips.</span>
+          <div className="flex h-full flex-col">
+            <EmptyState
+              icon={<MediaIcon size={24} />}
+              title="No clips yet"
+              text={emptyText}
+              footnote="Drop your own films here to import them."
+            />
           </div>
         ) : shown.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-muted">
@@ -519,6 +495,7 @@ export default function ClipFeed({
             onRate={rate}
             bodyRef={tableRef}
             resetKey={filterKey}
+            onExitTop={session ? undefined : () => searchRef.current?.focus()}
           />
         ) : (
           <div ref={scrollRef} className="h-full overflow-y-auto px-6 pb-6 pt-4">

@@ -9,13 +9,15 @@ import { useFreshGenerationIds, useUnseen } from '../../lib/work'
 import ClipFeed from '../feed/ClipFeed'
 import { useGenerations } from '../feed/useGenerations'
 import OpenFolderButton from '../library/OpenFolderButton'
+import Tabs from '../ui/Tabs'
 import { StatusDot } from '../work/StatusMark'
 import FilmsTab from './FilmsTab'
 import PicturesTab from './PicturesTab'
+import { NoticeRow } from './ui'
 
-// Media: everything made, in three tabs. Videos is the whole clip feed (Generate lists only this session's),
-// Images every still wherever it belongs, Films every exported film. The tab is remembered (lib/mediaTab.ts) and
-// read by the agents' get_workspace.
+// Media: everything made, in three tabs. Clips is the whole clip feed (Generate lists only this session's), Images
+// every still wherever it belongs, Films every exported film. The tab is remembered (lib/mediaTab.ts) and read by the
+// agents' get_workspace, where Clips is still the tab "videos" and Images "pictures".
 
 interface Props {
   intent?: Intent
@@ -57,12 +59,8 @@ export default function MediaView({ intent, onIntentHandled, navigate }: Props) 
   // Every clip, live; kept here so switching tabs doesn't load them again.
   const feed = useGenerations()
   const { models } = useModels()
+  // Shown in full under the header until it is closed, not cut short beside the button.
   const [folderError, setFolderError] = useState<string>()
-  useEffect(() => {
-    if (!folderError) return
-    const t = setTimeout(() => setFolderError(undefined), 6000)
-    return () => clearTimeout(t)
-  }, [folderError])
 
   const tabs = <MediaTabs tab={tab} onTab={setTab} />
 
@@ -85,32 +83,32 @@ export default function MediaView({ intent, onIntentHandled, navigate }: Props) 
       leading={tabs}
       onReuse={(g: Generation) => navigate('generate', { type: 'use-generation', generationId: g.id })}
       reuseTitle="Open Generate with the clip’s settings"
-      emptyText="No clips yet. What you generate in Generate, sequences and storyboards ends up here."
+      emptyText="What you generate in Generate, sequences and storyboards ends up here."
       openRequest={openGeneration}
       onOpenRequestHandled={onIntentHandled}
+      notice={
+        folderError && (
+          <NoticeRow tone="error" onClose={() => setFolderError(undefined)}>
+            {folderError}
+          </NoticeRow>
+        )
+      }
       trailing={
-        <>
-          {folderError && (
-            <span className="no-drag min-w-0 max-w-64 truncate text-[12px] text-accent select-text" title={folderError}>
-              {folderError}
-            </span>
-          )}
-          <OpenFolderButton
-            target="generations"
-            title={`Open the folder “Generations” in ${FILE_MANAGER}`}
-            onError={setFolderError}
-            compact
-            className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
-          />
-        </>
+        <OpenFolderButton
+          target="generations"
+          title={`Open the folder “Generations” in ${FILE_MANAGER}`}
+          onError={setFolderError}
+          compact
+          className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
+        />
       }
     />
   )
 }
 
 const TABS: { id: MediaTab; label: string; title: string }[] = [
-  { id: 'videos', label: 'Videos', title: 'Every clip: generated, your own and edited' },
-  { id: 'pictures', label: 'Images', title: 'Every image: created, uploaded and frames from clips' },
+  { id: 'videos', label: 'Clips', title: 'Every clip: generated, your own and edited' },
+  { id: 'pictures', label: 'Images', title: 'Every image: created, your own and frames from clips' },
   { id: 'films', label: 'Films', title: 'Films exported from sequences and storyboards' }
 ]
 
@@ -122,7 +120,7 @@ function isNewFilm(w: FinishedWork): boolean {
   return w.kind === 'export' && w.status === 'completed'
 }
 
-/** Videos, Images, Films; a tab with something new in it that isn't on screen gets the "new" dot. */
+/** Clips, Images, Films; a tab with something new in it that isn't on screen gets the "new" dot. */
 function MediaTabs({ tab, onTab }: { tab: MediaTab; onTab: (tab: MediaTab) => void }) {
   const fresh: Record<MediaTab, boolean> = {
     videos: useFreshGenerationIds().size > 0,
@@ -130,26 +128,19 @@ function MediaTabs({ tab, onTab }: { tab: MediaTab; onTab: (tab: MediaTab) => vo
     films: useUnseen(isNewFilm).length > 0
   }
   return (
-    <div role="tablist" aria-label="Media tabs" className="no-drag flex shrink-0 items-center gap-1">
-      {TABS.map((t) => {
+    <Tabs
+      ariaLabel="Media tabs"
+      value={tab}
+      onChange={onTab}
+      tabs={TABS.map((t) => {
         const dot = fresh[t.id] && tab !== t.id
-        return (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => onTab(t.id)}
-            title={dot ? `${t.title} – there’s something new here` : t.title}
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-semibold transition ${
-              tab === t.id ? 'text-text' : 'text-muted hover:text-text'
-            }`}
-          >
-            {t.label}
-            {dot && <StatusDot />}
-          </button>
-        )
+        return {
+          id: t.id,
+          label: t.label,
+          title: dot ? `${t.title} – there’s something new here` : t.title,
+          dot: dot ? <StatusDot /> : undefined
+        }
       })}
-    </div>
+    />
   )
 }

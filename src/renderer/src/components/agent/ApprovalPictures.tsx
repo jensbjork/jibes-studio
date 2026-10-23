@@ -10,6 +10,13 @@ import { useTokenCard } from '../pickers/ReferenceCard'
 // picture larger while hovered (or focused from the keyboard); reference videos play the part that is sent. Nothing
 // opens on a click: a request can be looked at from the dialog, not changed.
 
+/**
+ * Keyboard focus on a picture: a light outline set off from it, so it reads differently from the lit ring a picture
+ * gets while its reference is pointed at in the prompt.
+ */
+const focusOutline =
+  'outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-white/70'
+
 /** A library photo: its asset and its place among the asset's photos. */
 export interface Photo {
   asset: Asset
@@ -114,12 +121,12 @@ export function ImageTile({
       badge={badge}
       info={{ photo, name: title ?? caption, kind }}
       onLight={onLight}
-      className={`relative block shrink-0 overflow-hidden rounded bg-raised text-left outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-white/70 ${
+      className={`relative block shrink-0 overflow-hidden rounded bg-raised text-left transition-shadow ${focusOutline} ${
         large ? 'h-24 w-40' : 'h-16 w-16'
       } ${lit ? 'ring-2 ring-white/70' : missing ? 'ring-1 ring-accent' : ''}`}
     >
       {missing ? (
-        <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
+        <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-danger">
           File missing
         </span>
       ) : (
@@ -193,7 +200,7 @@ export function VideoTile({
       onMouseLeave={on(false)}
       onFocus={on(true)}
       onBlur={on(false)}
-      className={`relative block h-[72px] w-32 shrink-0 overflow-hidden rounded bg-black text-left outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-white/70 ${
+      className={`relative block h-[72px] w-32 shrink-0 overflow-hidden rounded bg-black text-left transition-shadow ${focusOutline} ${
         lit ? 'ring-2 ring-white/70' : ''
       } ${unsent ? 'opacity-45' : ''}`}
     >

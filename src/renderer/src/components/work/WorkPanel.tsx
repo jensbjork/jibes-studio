@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { FinishedWork, RunningWork, WorkTarget, WorkView } from '@shared/types'
 import { pendingApprovals, showApproval, useAgentState } from '../../lib/agent'
 import { mediaUrl } from '../../lib/media'
@@ -6,7 +6,9 @@ import type { Navigate } from '../../lib/navigation'
 import { jumpTo, markAllSeen, markSeen, useNow, useSeenWhenVisible, useWork } from '../../lib/work'
 import { ScissorsIcon } from '../editor/icons'
 import { ArrowInIcon, CheckIcon, FilmIcon, PictureIcon, WaveIcon } from '../icons'
-import { CloseIcon, SparkleIcon } from '../sequences/icons'
+import { SparkleIcon } from '../sequences/icons'
+import SidePanel from '../SidePanel'
+import { buttonClass } from '../ui/button'
 import { Spinner, StatusDot } from './StatusMark'
 import { finishedMeta, runningMeta, VIEW_LABEL } from './workText'
 
@@ -18,7 +20,7 @@ interface Props {
 
 /**
  * Activity: everything Studio is working on, grouped by place, and everything that finished that the user
- * hasn't looked at yet, wherever it was started. Floats beside the sidebar, bottom-aligned with its row. A row
+ * hasn't looked at yet, wherever it was started. A SidePanel beside the sidebar, bottom-aligned with its row. A row
  * goes there; nothing here stops or cancels anything (each control lives in one place, its view).
  */
 export default function WorkPanel({ open, onClose, navigate }: Props) {
@@ -31,7 +33,6 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
   const agent = useAgentState()
   const waiting = pendingApprovals(agent)
   const now = useNow(work.running.length > 0)
-  const panel = useRef<HTMLDivElement>(null)
 
   // Rows that became seen by being on screen here stay listed (without their dot) until the panel closes, so a
   // failure or a picture doesn't vanish while it is being read. Explicit marks (✓, Mark all) remove at once.
@@ -39,24 +40,6 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
   const keep = useCallback((w: FinishedWork) => {
     setSeenHere((m) => (m.has(w.key) ? m : new Map(m).set(w.key, w)))
   }, [])
-
-  // Focus moves into the dialog and back to where it came from (the sidebar row) when it closes.
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null
-    panel.current?.focus()
-    return () => {
-      if (before?.isConnected) before.focus()
-    }
-  }, [])
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent): void => {
-      // Escape belongs to a dialog shown over the panel (e.g. an approval), not to the panel.
-      if (e.key === 'Escape' && !document.querySelector('[aria-modal="true"]')) onClose()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
 
   const go = (target: WorkTarget): void => {
     onClose()
@@ -95,136 +78,117 @@ function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
   }
 
   return (
-    <>
-      {/* Clicking anywhere outside closes the panel (the sidebar stays usable: its row toggles it). */}
-      <div className="no-drag fixed inset-y-0 left-[var(--sidebar-w)] right-0 z-30" onMouseDown={onClose} />
-      <div
-        ref={panel}
-        role="dialog"
-        aria-label="Activity"
-        tabIndex={-1}
-        className="no-drag fixed bottom-3 left-[calc(var(--sidebar-w)+8px)] z-40 flex max-h-[min(70vh,560px)] w-[360px] flex-col rounded-xl border border-line bg-panel shadow-2xl shadow-black/50 outline-none transition-[left] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none"
-      >
-        <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-3">
-          <h2 className="font-semibold">Activity</h2>
-          {anyUnseen && (
-            <button
-              onClick={markAll}
-              className="ml-auto rounded px-1.5 py-0.5 text-xs text-muted transition hover:bg-raised hover:text-text"
-            >
-              Mark all as seen
-            </button>
-          )}
+    <SidePanel
+      label="Activity"
+      title="Activity"
+      onClose={onClose}
+      headerExtra={
+        anyUnseen && (
+          <button type="button" onClick={markAll} className={buttonClass('ghost', 'inline')}>
+            Mark all as seen
+          </button>
+        )
+      }
+    >
+      {waiting.length > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-line bg-accent/5 px-4 py-2.5 text-[12px]">
+          <StatusDot failed large />
+          <span className="min-w-0 flex-1 truncate">
+            {waiting.length === 1 ? 'A request is waiting for your OK' : `${waiting.length} requests are waiting for your OK`}
+          </span>
           <button
-            onClick={onClose}
-            title="Close"
-            aria-label="Close"
-            className={`rounded p-1 text-muted transition hover:bg-raised hover:text-text ${anyUnseen ? '' : 'ml-auto'}`}
+            onClick={() => {
+              onClose()
+              showApproval(waiting[0].id)
+            }}
+            className={buttonClass('primary', 'inline')}
           >
-            <CloseIcon size={12} />
+            Review
           </button>
         </div>
+      )}
 
-        {waiting.length > 0 && (
-          <div className="flex shrink-0 items-center gap-2 border-b border-line bg-accent/5 px-4 py-2.5 text-xs">
-            <StatusDot failed large />
-            <span className="min-w-0 flex-1 truncate">
-              {waiting.length === 1 ? 'A request is waiting for your OK' : `${waiting.length} requests are waiting for your OK`}
-            </span>
-            <button
-              onClick={() => {
-                onClose()
-                showApproval(waiting[0].id)
-              }}
-              className="rounded-md bg-accent px-2.5 py-1 font-medium text-white transition hover:bg-accent-hover"
-            >
-              Review
-            </button>
-          </div>
-        )}
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {empty ? (
-            <p className="px-2 pt-4 text-xs leading-relaxed text-muted">
-              Nothing is running right now. What you generate, import, edit or export shows up here while it runs –
-              and when it’s done, even if you’re in another view.
-            </p>
-          ) : (
-            <>
-              {/* Counted as the sidebar counts (a run with a take at Venice is one), not row by row. */}
-              <Section title={`Running · ${work.total.running}`}>
-                {groups.length ? (
-                  groups.map((g) => (
-                    <div key={g.id} className="mb-1">
-                      <GroupHeading group={g} onGo={go} />
-                      <ul>
-                        {g.items.map((w) => (
-                          <RunningRow key={w.key} work={w} label={g.shorten(w.label)} now={now} onGo={go} />
-                        ))}
-                      </ul>
-                    </div>
-                  ))
-                ) : (
-                  <Empty>Nothing is running right now.</Empty>
-                )}
-              </Section>
-
-              <Section title={`Ready to look at · ${work.total.unseen}`}>
-                {fresh.length ? (
-                  <ul>
-                    {fresh.map((w) => (
-                      <FinishedRow
-                        key={w.key}
-                        work={w}
-                        seen={isSeen(w)}
-                        now={now}
-                        onGo={go}
-                        onMark={markOne}
-                        onSeenHere={keep}
-                      />
-                    ))}
-                  </ul>
-                ) : (
-                  <Empty>Nothing new to look at.</Empty>
-                )}
-              </Section>
-
-              {failed.length > 0 && (
-                <Section title={`Failed · ${work.total.failed}`}>
-                  <ul>
-                    {failed.map((w) => (
-                      <FinishedRow
-                        key={w.key}
-                        work={w}
-                        seen={isSeen(w)}
-                        now={now}
-                        onGo={go}
-                        onMark={markOne}
-                        onSeenHere={keep}
-                      />
-                    ))}
-                  </ul>
-                </Section>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        {empty ? (
+          <p className="px-2 pt-4 text-[12px] leading-relaxed text-muted">
+            Nothing is running right now. What you generate, import, edit or export shows up here while it runs –
+            and when it’s done, even if you’re in another view.
+          </p>
+        ) : (
+          <>
+            {/* Counted as the sidebar counts (a run with a take at Venice is one), not row by row. */}
+            <Section title={`Running · ${work.total.running}`}>
+              {groups.length ? (
+                groups.map((g) => (
+                  <div key={g.id} className="mb-1">
+                    <GroupHeading group={g} onGo={go} />
+                    <ul>
+                      {g.items.map((w) => (
+                        <RunningRow key={w.key} work={w} label={g.shorten(w.label)} now={now} onGo={go} />
+                      ))}
+                    </ul>
+                  </div>
+                ))
+              ) : (
+                <Empty>Nothing is running right now.</Empty>
               )}
-            </>
-          )}
-        </div>
+            </Section>
+
+            <Section title={`Ready to look at · ${work.total.unseen}`}>
+              {fresh.length ? (
+                <ul>
+                  {fresh.map((w) => (
+                    <FinishedRow
+                      key={w.key}
+                      work={w}
+                      seen={isSeen(w)}
+                      now={now}
+                      onGo={go}
+                      onMark={markOne}
+                      onSeenHere={keep}
+                    />
+                  ))}
+                </ul>
+              ) : (
+                <Empty>Nothing new to look at.</Empty>
+              )}
+            </Section>
+
+            {failed.length > 0 && (
+              <Section title={`Failed · ${work.total.failed}`}>
+                <ul>
+                  {failed.map((w) => (
+                    <FinishedRow
+                      key={w.key}
+                      work={w}
+                      seen={isSeen(w)}
+                      now={now}
+                      onGo={go}
+                      onMark={markOne}
+                      onSeenHere={keep}
+                    />
+                  ))}
+                </ul>
+              </Section>
+            )}
+          </>
+        )}
       </div>
-    </>
+    </SidePanel>
   )
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="pt-3">
-      <h3 className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">{title}</h3>
+      <h3 className="section-label mb-1 px-2">{title}</h3>
       {children}
     </section>
   )
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <p className="px-2 py-1.5 text-xs text-muted">{children}</p>
+  return <p className="px-2 py-1.5 text-[12px] text-muted">{children}</p>
 }
 
 // ── Running work, grouped by place ───────────────────────────────────────────
@@ -305,7 +269,7 @@ function placeTarget(g: RunGroup): WorkTarget | undefined {
 
 function GroupHeading({ group, onGo }: { group: RunGroup; onGo: (t: WorkTarget) => void }) {
   const target = placeTarget(group)
-  const cls = 'block w-full truncate px-2 pb-0.5 pt-1.5 text-left text-xs text-muted'
+  const cls = 'block w-full truncate px-2 pb-0.5 pt-1.5 text-left text-[12px] text-muted'
   if (!target) return <div className={cls}>{group.title}</div>
   return (
     <button onClick={() => onGo(target)} title="Go there" className={`${cls} transition hover:text-text`}>
@@ -395,7 +359,7 @@ function RunningRow({
       >
         <Thumb path={w.thumbPath} icon={runningIcon(w)} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12.5px] text-text">{label}</span>
+          <span className="block truncate text-[12px] text-text">{label}</span>
           {meta && <span className="block truncate text-[11px] text-muted">{meta}</span>}
         </span>
         <Spinner />
@@ -440,10 +404,10 @@ function FinishedRow({
           )}
         </span>
         <span className="min-w-0 flex-1">
-          <span className={`block truncate text-[12.5px] ${seen ? 'text-muted' : 'text-text'}`}>{w.label}</span>
+          <span className={`block truncate text-[12px] ${seen ? 'text-muted' : 'text-text'}`}>{w.label}</span>
           <span
             title={failed && w.error ? w.error : undefined}
-            className={`block truncate text-[11px] ${failed && !seen ? 'text-[#ffb3b5]' : 'text-muted'}`}
+            className={`block truncate text-[11px] ${failed && !seen ? 'text-danger' : 'text-muted'}`}
           >
             {meta}
           </span>

@@ -4,6 +4,8 @@ import { ipcErrorMessage } from '../../lib/hooks'
 import { displayPath, folderName } from '../../lib/library'
 import { ARCHIVE_UNAVAILABLE, FILE_MANAGER } from '../../lib/platform'
 import DevBadge, { VariantBadge } from '../DevBadge'
+import { noticeTones } from '../ui/Banner'
+import { buttonClass } from '../ui/button'
 import FolderDecision from './FolderDecision'
 import FolderTree from './FolderTree'
 import SwitchingOverlay from './SwitchingOverlay'
@@ -19,12 +21,13 @@ interface Props {
   variant?: string
 }
 
-const primary =
-  'rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40'
-const secondary = 'rounded-md border border-line px-4 py-2 transition hover:bg-raised disabled:opacity-40'
 const link = 'text-[12px] text-muted transition hover:text-text disabled:opacity-40'
 
-/** Full-window screen shown instead of the app until a reachable library folder is chosen. */
+/**
+ * Full-window screen shown instead of the app until a reachable library folder is chosen: one question, the folder
+ * once (the tree's root, what goes in it folded away), one row of actions, and importing an exported library as a
+ * link under them.
+ */
 export default function LibrarySetup({ status, onRetry, devProfile = false, variant }: Props) {
   const choice = useFolderChoice()
   const switcher = useLibrarySwitch(status)
@@ -75,7 +78,10 @@ export default function LibrarySetup({ status, onRetry, devProfile = false, vari
                 </span>{' '}
                 but couldn't open the library in it:
               </p>
-              <p className="mt-2 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[12px] leading-relaxed text-[#ffb3b5] select-text">
+              <p
+                role="alert"
+                className={`mt-2 rounded-md border px-3 py-2 text-[12px] leading-relaxed select-text ${noticeTones.error}`}
+              >
                 {status.error}
               </p>
               <p className="mt-2 leading-relaxed text-muted">
@@ -86,7 +92,7 @@ export default function LibrarySetup({ status, onRetry, devProfile = false, vari
             <>
               <h1 className="text-xl font-semibold">The library folder can't be found</h1>
               <p className="mt-2 leading-relaxed text-muted">
-                The library folder can't be found:{' '}
+                Studio looked in{' '}
                 <span className="break-all font-mono text-[12px] text-text select-text">
                   {status.root ? displayPath(status.root) : '–'}
                 </span>
@@ -100,12 +106,11 @@ export default function LibrarySetup({ status, onRetry, devProfile = false, vari
             <>
               <h1 className="text-xl font-semibold">Where should Studio save everything?</h1>
               <p className="mt-2 leading-relaxed text-muted">
-                Choose a library folder on your computer. Studio keeps characters, environments, products, outfits,
-                poses, reference images, generated videos, own clips, sequences, storyboards and edits there in
-                clearly named folders, so you can look around in {FILE_MANAGER} whenever you like.
+                Choose a folder for your library. Studio keeps everything there in clearly named folders you can open
+                in {FILE_MANAGER}.
               </p>
               {legacy && (
-                <p className="mt-3 rounded-md border border-line bg-panel px-3 py-2 text-[12px] leading-relaxed text-muted">
+                <p className={`mt-3 rounded-md border px-3 py-2 text-[12px] leading-relaxed ${noticeTones.info}`}>
                   {legacy.oldLayout ? 'Studio found your library from an earlier version in' : 'Studio found your library in'}{' '}
                   <span className="font-mono text-text">{displayPath(legacy.path)}</span>.{' '}
                   {legacy.oldLayout
@@ -117,7 +122,12 @@ export default function LibrarySetup({ status, onRetry, devProfile = false, vari
           )}
 
           <div className="mt-6 rounded-lg border border-line bg-panel p-3">
-            <FolderTree rootName={folderName(treeRoot)} rootDetail={displayPath(treeRoot)} detail="example" />
+            <FolderTree
+              rootName={folderName(treeRoot)}
+              rootDetail={displayPath(treeRoot)}
+              detail="example"
+              collapsible="What goes in the folder?"
+            />
           </div>
 
           <div className="mt-6">
@@ -143,45 +153,63 @@ export default function LibrarySetup({ status, onRetry, devProfile = false, vari
               </>
             ) : missing ? (
               <div className="flex flex-wrap items-center gap-2">
-                <button onClick={() => void retry()} disabled={retrying || choice.checking} className={primary}>
+                <button
+                  type="button"
+                  onClick={() => void retry()}
+                  disabled={retrying || choice.checking}
+                  className={buttonClass('primary', 'lg')}
+                >
                   {retrying ? 'Looking…' : 'Try again'}
                 </button>
-                <button onClick={chooseOther} disabled={retrying || choice.checking} className={secondary}>
+                <button
+                  type="button"
+                  onClick={chooseOther}
+                  disabled={retrying || choice.checking}
+                  className={buttonClass('secondary', 'lg')}
+                >
                   Choose another folder…
                 </button>
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-2">
+                {/* The path is in the tree's root row above; the button names it only in its tooltip. */}
                 <button
+                  type="button"
                   onClick={() => void choice.inspect(status.suggested)}
                   disabled={choice.checking}
                   title={status.suggested}
-                  className={primary}
+                  className={buttonClass('primary', 'lg')}
                 >
-                  Use {displayPath(status.suggested)}
+                  Use this folder
                 </button>
-                <button onClick={chooseOther} disabled={choice.checking} className={secondary}>
+                <button
+                  type="button"
+                  onClick={chooseOther}
+                  disabled={choice.checking}
+                  className={buttonClass('secondary', 'lg')}
+                >
                   Choose folder…
                 </button>
               </div>
             )}
 
+            {/* Off a Mac main can't unpack an exported library (ARCHIVE_UNAVAILABLE): not offered. */}
+            {!ARCHIVE_UNAVAILABLE && <ImportArchive disabled={busy || choice.checking} />}
+
             {choice.checking && <p className="mt-3 text-[12px] text-muted">Checking the folder…</p>}
             {stillMissing && !retrying && (
-              <p className="mt-3 text-[12px] text-amber-200">
+              <p role="status" className="mt-3 text-[12px] text-warning">
                 {status.error ? "The library still can't be opened." : "The folder still can't be reached."}
               </p>
             )}
-            {choice.error && <p className="mt-3 text-[12px] text-accent select-text">{choice.error}</p>}
+            {choice.error && (
+              <p role="alert" className="mt-3 text-[12px] text-danger select-text">
+                {choice.error}
+              </p>
+            )}
           </div>
 
-          {/* Off a Mac main can't unpack an exported library (ARCHIVE_UNAVAILABLE): not offered. */}
-          {!ARCHIVE_UNAVAILABLE && <ImportArchive disabled={busy || choice.checking} />}
-
-          <p className="mt-8 text-[11px] leading-relaxed text-muted">
-            You can change the folder later in Settings. Everything you do is saved in the library folder, so it can
-            be backed up or moved in one piece.
-          </p>
+          <p className="mt-8 text-[11px] leading-relaxed text-muted">You can change the folder later in Settings.</p>
         </div>
       </div>
       <SwitchingOverlay phase={switcher.phase} />
@@ -190,9 +218,9 @@ export default function LibrarySetup({ status, onRetry, devProfile = false, vari
 }
 
 /**
- * "Have an exported library?": on a new Mac the zip from Settings → Export & import is opened from here,
- * since the rest of the app (and Settings) waits for a library. Main unpacks it into a folder the user chooses
- * and opens it; the window reloads into the library.
+ * "Import a library…", a link under the actions: on a new Mac the zip from Settings → Library → Export library… is
+ * opened from here, since the rest of the app (and Settings) waits for a library. Main unpacks it into a folder the
+ * user chooses and opens it; the window reloads into the library. Progress and errors on the line below.
  */
 function ImportArchive({ disabled }: { disabled: boolean }) {
   const [progress, setProgress] = useState<ArchiveProgress>()
@@ -215,26 +243,32 @@ function ImportArchive({ disabled }: { disabled: boolean }) {
     progress?.total && progress.done !== undefined ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : undefined
 
   return (
-    <div className="mt-6 rounded-lg border border-line px-4 py-3">
-      <p className="text-[12px] leading-relaxed text-muted">
-        Do you have a library you exported from Studio on another computer (a zip file)? Open it here instead.
-      </p>
-      {running ? (
-        <div className="mt-2 flex items-center gap-3 text-[12px]">
+    <div className="mt-4">
+      <button
+        type="button"
+        onClick={() => void start()}
+        disabled={disabled || running}
+        title="Open a library exported from Studio on another computer (a zip file)"
+        className="text-[12px] text-text underline-offset-2 transition hover:underline disabled:opacity-40"
+      >
+        Import a library…
+      </button>
+      {running && (
+        <div role="status" className="mt-1.5 flex items-center gap-3 text-[12px]">
           <span className="min-w-0 flex-1 truncate text-muted">
             {progress?.message ?? 'Importing…'}
             {percent !== undefined && ` · ${percent}%`}
           </span>
-          <button onClick={() => void window.studio.cancelLibraryArchive()} className={link}>
+          <button type="button" onClick={() => void window.studio.cancelLibraryArchive()} className={link}>
             Cancel
           </button>
         </div>
-      ) : (
-        <button onClick={() => void start()} disabled={disabled} className={`mt-2 ${link} text-text underline-offset-2 hover:underline`}>
-          Import a library…
-        </button>
       )}
-      {error && <p className="mt-2 text-[12px] text-accent select-text">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-1.5 text-[12px] text-danger select-text">
+          {error}
+        </p>
+      )}
     </div>
   )
 }

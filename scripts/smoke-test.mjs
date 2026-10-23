@@ -178,12 +178,19 @@ try {
   await waitFor('the new library to open', `return (await window.studio.libraryStatus()).state === 'ready'`, 60)
   log('a new library was created and opened.')
 
-  // 4. Settings renders (without an API key Studio opens on it), with ffmpeg in it.
+  // 4. Settings renders (without an API key Studio opens on it, on Venice), and its About pane shows ffmpeg as found.
   await waitFor(
     'Settings to render',
     `return [...document.querySelectorAll('h1')].some((h) => h.textContent.trim() === 'Settings')`
   )
-  await waitFor('ffmpeg in Settings', `return document.body.innerText.includes('ffmpeg was found')`)
+  await evaluate(`
+    const tabs = [...document.querySelectorAll('[role=tab]')]
+    tabs.find((t) => t.textContent.trim().startsWith('About'))?.click()
+    return true`)
+  await waitFor(
+    'ffmpeg in Settings → About',
+    `return !!document.querySelector('#settings-about [data-ffmpeg="found"]')`
+  )
   log('Settings renders and shows ffmpeg.')
 
   const separation = await evaluate('return await window.studio.separationStatus()').catch(() => undefined)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type Ref } from 'react'
 import type { Asset, AssetKind, ReferenceKind, Still } from '@shared/types'
 import { fileName } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
@@ -8,6 +8,7 @@ import { assetsByPath } from '../pickers/assetRefs'
 import Popover from '../pickers/Popover'
 import { useTokenCard, type TokenCardContent } from '../pickers/ReferenceCard'
 import { SwapImagePicker } from '../pickers/SwapPicker'
+import { reorderHint, useReorder } from '../pickers/useReorder'
 import { stillSourceLabel } from './imageModels'
 import StillThumb, { isStillDrag, stillIdFromDrop } from './StillThumb'
 
@@ -17,6 +18,9 @@ const REORDER_TYPE = 'application/x-studio-reference-index'
 
 const smallButton =
   'whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-text disabled:pointer-events-none disabled:opacity-40'
+/** A picture offered with one click under the list (the clip's references, the previous board's image). */
+const offerButton =
+  'rounded-md border border-line px-2 py-1 text-[11px] text-muted transition hover:bg-raised hover:text-text'
 
 /** Tab order of the library picker: who is in the picture comes first. */
 const FIRST_KIND: ReferenceKind = 'character'
@@ -68,6 +72,11 @@ interface Props {
    * picker (which closes on them) instead of closing itself as well.
    */
   onPickerOpen?: (open: boolean) => void
+  /**
+   * One more picture offered under the list with a click of its own, e.g. "＋ Previous board's image" after its ✕
+   * took it out: its own callback, since it may go in first (as the base) rather than at the end.
+   */
+  offer?: { label: string; title: string; onAdd: () => void }
 }
 
 type Picker = 'library' | 'stills'
@@ -75,8 +84,8 @@ type Picker = 'library' | 'stills'
 /**
  * The reference images of a still: thumbnails in send order (the first is the base), with pickers for the
  * library (characters, environments, products, outfits, poses) and the sequence's stills, a file dialog, drag and
- * drop of files and stills, and drag to reorder. Hovering a thumbnail shows it larger; a click on it (or Enter /
- * Space) opens a picker anchored to it that puts another picture in the same place.
+ * drop of files and stills, and drag (or ⌥← / ⌥→) to reorder. Hovering a thumbnail shows it larger; a click on it (or
+ * Enter / Space) opens a picker anchored to it that puts another picture in the same place.
  */
 export default function ReferenceImages({
   value,
@@ -90,7 +99,8 @@ export default function ReferenceImages({
   clipNumber,
   onNote,
   onManage,
-  onPickerOpen
+  onPickerOpen,
+  offer
 }: Props) {
   const [picker, setPicker] = useState<Picker | null>(null)
   // The picture whose swap picker is open (its path: it follows the picture if the order changes meanwhile).
@@ -153,6 +163,16 @@ export default function ReferenceImages({
     next.splice(Math.max(0, Math.min(to, next.length)), 0, moved)
     onChange(next)
   }
+
+  // ⌥← / ⌥→ on a thumbnail moves it one place, as everywhere a list can be reordered; dragging stays this list's own
+  // (it also takes stills and files), so only the keyboard move, its focus and its announcement come from the hook.
+  const reorder = useReorder({
+    type: REORDER_TYPE,
+    keys: value,
+    onMove: move,
+    describeMove: (_, to) =>
+      `The image moved to place ${to + 1} of ${value.length}${to === 0 ? ' and is now the base image' : ''}.`
+  })
 
   const acceptsDrop = (e: DragEvent) =>
     isStillDrag(e) || Array.from(e.dataTransfer.types).includes('Files') || e.dataTransfer.types.includes(REORDER_TYPE)
@@ -226,7 +246,7 @@ export default function ReferenceImages({
         count: asset?.images.length,
         ...(i >= max ? { unsent: `Not sent – the model takes up to ${images(max)}` } : {})
       },
-      hint: 'Click to swap the image – drag to move it'
+      hint: `Click to swap the image – ${reorderHint()}`
     }
   }
 
@@ -239,7 +259,7 @@ export default function ReferenceImages({
         <span className="text-muted">
           Reference images
           {value.length > 0 && (
-            <span className={`ml-1.5 text-[11px] ${overflow ? 'text-accent' : ''}`}>
+            <span className={`ml-1.5 text-[11px] ${overflow ? 'text-danger' : ''}`}>
               {value.length}/{max}
             </span>
           )}
@@ -249,7 +269,10 @@ export default function ReferenceImages({
             ref={libraryButton}
             onClick={() => setPicker((p) => (p === 'library' ? null : 'library'))}
             className={`${smallButton} ${picker === 'library' ? 'bg-raised text-text' : ''}`}
-            title="Characters, environments, products, outfits and poses"
+            title={
+              'Characters, environments, products, outfits and poses – with reference images, the model combines ' +
+              'them into a new image (a character in an environment, in an outfit and pose, holding a product)'
+            }
           >
             From the library
           </button>
@@ -270,7 +293,7 @@ export default function ReferenceImages({
       <div
         ref={list}
         role="list"
-        aria-label="Reference images"
+        aria-label={`Reference images${reorder.enabled ? ` – ${reorderHint()}` : ''}`}
         onDragOver={(e) => {
           if (!acceptsDrop(e)) return
           e.preventDefault()
@@ -301,12 +324,14 @@ export default function ReferenceImages({
           const picked = swapping === path
           // The card shows the picture larger on hover – not while a picture is dragged or a picker is open.
           const hover = dragIndex !== undefined || swapIndex !== -1 ? undefined : card.hover(i, cardOf(path, i))
+          const { ref, onKeyDown: moveKeys } = reorder.itemProps(i)
           return (
             <div
               key={path}
+              ref={ref as Ref<HTMLDivElement>}
               role="listitem"
               tabIndex={0}
-              aria-label={`${place(i)}: ${caption?.text ?? name}. Enter swaps it.`}
+              aria-label={`${place(i)}: ${caption?.text ?? name}. Enter swaps it${reorder.enabled ? `; ${reorderHint()}` : ''}.`}
               aria-haspopup="dialog"
               aria-expanded={picked}
               draggable
@@ -334,7 +359,8 @@ export default function ReferenceImages({
                 openSwap(i, e.currentTarget)
               }}
               onKeyDown={(e) => {
-                if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                moveKeys?.(e)
+                if (e.defaultPrevented || e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
                 e.preventDefault()
                 openSwap(i, e.currentTarget)
               }}
@@ -345,7 +371,7 @@ export default function ReferenceImages({
               } ${dragIndex === i ? 'opacity-50' : ''}`}
             >
               {missing.has(path) ? (
-                <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
+                <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-danger">
                   File missing
                 </span>
               ) : (
@@ -368,17 +394,22 @@ export default function ReferenceImages({
                   {caption.text}
                 </span>
               )}
+              {/* Shown on hover and on keyboard focus (of the thumbnail, then of themselves when tabbed to). Hidden by
+                  opacity, not display: a button that is display:none while focus moves onto it can't take the focus. */}
               <button
+                type="button"
                 onClick={() => remove(i)}
-                className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-black/70 text-[11px] group-hover:flex"
+                className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-[11px] opacity-0 outline-none group-hover:opacity-100 group-focus-visible:opacity-100 focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-text"
                 title="Remove"
+                aria-label={`Remove ${place(i).toLocaleLowerCase('en')}`}
               >
                 ✕
               </button>
               {i > 0 && (
                 <button
+                  type="button"
                   onClick={() => move(i, 0)}
-                  className="absolute bottom-4 left-1/2 hidden -translate-x-1/2 rounded bg-black/75 px-1.5 text-[10px] whitespace-nowrap group-hover:block"
+                  className="absolute bottom-4 left-1/2 block -translate-x-1/2 whitespace-nowrap rounded bg-black/75 px-1.5 text-[10px] opacity-0 outline-none group-hover:opacity-100 group-focus-visible:opacity-100 focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-text"
                   title="Make it the base image (sent first)"
                 >
                   Make base
@@ -399,22 +430,34 @@ export default function ReferenceImages({
         )}
       </div>
 
-      {clipMissing.length > 0 && (
-        <button
-          onClick={() => add(clipMissing)}
-          className="mt-1.5 rounded-md border border-line px-2 py-1 text-[11px] text-muted transition hover:bg-raised hover:text-text"
-          title="The same characters, environments, products, outfits and poses the clip uses"
-        >
-          ＋ {clipNumber ? `Clip ${clipNumber}'s` : "The clip's"} reference images ({clipMissing.length})
-        </button>
+      {(clipMissing.length > 0 || offer) && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {offer && (
+            <button type="button" onClick={offer.onAdd} className={offerButton} title={offer.title}>
+              {offer.label}
+            </button>
+          )}
+          {clipMissing.length > 0 && (
+            <button
+              type="button"
+              onClick={() => add(clipMissing)}
+              className={offerButton}
+              title="The same characters, environments, products, outfits and poses the clip uses"
+            >
+              ＋ {clipNumber ? `Clip ${clipNumber}'s` : "The clip's"} reference images ({clipMissing.length})
+            </button>
+          )}
+        </div>
       )}
-      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-        {value.length > 1
-          ? 'The first image is the base the others are combined into. Drag the images to reorder them, and ' +
-            'refer to them in the prompt, e.g. “the woman from image 2”.'
-          : 'With reference images, the model combines them into a new image – e.g. a character in an environment, ' +
-            'in a certain outfit and pose, or holding a product.'}
-      </p>
+      {/* The Base badge and the numbers show the order; how to use it only once there is an order. */}
+      {value.length > 1 && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+          Refer to them in the prompt as “image 2”, “image 3” … – {reorderHint()}.
+        </p>
+      )}
+      <span className="sr-only" aria-live="polite">
+        {reorder.announcement}
+      </span>
 
       {card.card}
       <Popover

@@ -10,10 +10,12 @@ import {
   type ReactNode
 } from 'react'
 import { createPortal } from 'react-dom'
+import { isModalOpen } from '../../lib/dialogs'
 import { mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import { isModOnly, shortcut } from '../../lib/platform'
 import { SearchIcon } from '../feed/icons'
+import Kbd from '../ui/Kbd'
 import { Spinner } from '../work/StatusMark'
 import { commandEntries, GROUPS, libraryEntries, recentEntries, type Entry, type PaletteActions } from './entries'
 import { excerpt, flatten, matchRanges, queryTokens, type Range } from './match'
@@ -22,11 +24,9 @@ import { usePaletteData } from './usePaletteData'
 
 // ⌘K: one field that searches the whole window – its places and actions, and everything in the library: assets,
 // prompts, sequences and their clips, storyboards with their boards and transitions, edits, clips, images and films –
-// and opens the result where the rest of the app opens it. Grouped and ranked as you type (rank.ts); ↑ ↓ and Enter,
-// or the mouse; Esc closes. Opens from anywhere, text fields included, except over a dialog waiting for an answer.
-
-/** A dialog that waits for an answer: ⌘K doesn't open over it (it would navigate away underneath). */
-const MODAL = '[aria-modal="true"], [role="alertdialog"]'
+// and opens the result where the rest of the app opens it. Grouped and ranked as you type (rank.ts); with nothing
+// typed, what was opened lately and the New … actions. ↑ ↓ and Enter, or the mouse; Esc closes. Opens from anywhere,
+// text fields included, except over a dialog waiting for an answer (it would navigate away underneath).
 
 /**
  * ⌘K (Ctrl+K on Windows). Not used by the views (⌘F searches a list, ⌘⇧F is focus mode, ⌘↵ sends) or the default
@@ -59,7 +59,7 @@ export default function CommandPalette(props: Props) {
   const returnFocus = useRef<HTMLElement | null>(null)
 
   const show = useCallback(() => {
-    if (openRef.current || document.querySelector(MODAL)) return
+    if (openRef.current || isModalOpen()) return
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     openRef.current = true
     setOpen(true)
@@ -83,7 +83,7 @@ export default function CommandPalette(props: Props) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
       if (!isPaletteShortcut(e)) return
-      if (!openRef.current && document.querySelector(MODAL)) return
+      if (!openRef.current && isModalOpen()) return
       e.preventDefault()
       e.stopPropagation()
       if (e.repeat) return
@@ -232,7 +232,6 @@ function Palette({
             className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-muted/70"
           />
           {loading && <Spinner size={12} className="text-muted" />}
-          <kbd className="shrink-0 rounded border border-line px-1.5 py-px font-sans text-[10px] text-muted">esc</kbd>
         </div>
 
         <div ref={listRef} id={listId} role="listbox" aria-label="Results" className="min-h-0 overflow-y-auto p-1.5">
@@ -264,18 +263,18 @@ function Palette({
         </div>
 
         <div className="flex shrink-0 items-center gap-4 border-t border-line px-4 py-2 text-[11px] text-muted">
-          <span>
-            <Key>↑</Key>
-            <Key>↓</Key> to move
+          <span className="flex items-center gap-1">
+            <Kbd>↑</Kbd>
+            <Kbd>↓</Kbd> to move
           </span>
-          <span>
-            <Key>↵</Key> to open
+          <span className="flex items-center gap-1">
+            <Kbd>↵</Kbd> to open
           </span>
-          <span>
-            <Key>esc</Key> to close
+          <span className="flex items-center gap-1">
+            <Kbd>Esc</Kbd> to close
           </span>
-          <span className="ml-auto">
-            <Key>{shortcut('⌘K')}</Key> from anywhere
+          <span className="ml-auto flex items-center gap-1">
+            <Kbd>{shortcut('⌘K')}</Kbd> from anywhere
           </span>
         </div>
         <span className="sr-only" aria-live="polite">
@@ -284,14 +283,6 @@ function Palette({
       </div>
     </div>,
     document.body
-  )
-}
-
-function Key({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="mr-1 inline-block min-w-4 rounded border border-line px-1 text-center font-sans text-[10px] leading-4 text-muted">
-      {children}
-    </kbd>
   )
 }
 
@@ -305,7 +296,7 @@ function Group({ group, idPrefix, children }: { group: ResultGroup; idPrefix: st
       <div
         id={headingId}
         role="presentation"
-        className="flex items-baseline justify-between gap-2 px-2.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted/70"
+        className="section-label flex items-baseline justify-between gap-2 px-2.5 pb-1 pt-2"
       >
         <span>{group.label}</span>
         {more && <span className="font-normal normal-case tracking-normal">{more}</span>}
@@ -356,17 +347,15 @@ function Row({ id, entry, tokens, active, onHover, onPick }: RowProps) {
           <span className="min-w-0 truncate">
             <Highlighted text={titleText.text} ranges={titleText.ranges} />
           </span>
-          {entry.context && <span className="shrink-0 text-[11.5px] text-muted">{entry.context}</span>}
+          {entry.context && <span className="shrink-0 text-[11px] text-muted">{entry.context}</span>}
         </div>
         {second && (
-          <div className="truncate text-[11.5px] text-muted">
+          <div className="truncate text-[11px] text-muted">
             <Highlighted text={second.text} ranges={second.ranges} />
           </div>
         )}
       </div>
-      {entry.hint && (
-        <span className={`shrink-0 text-[11px] ${active ? 'text-muted' : 'text-muted/60'}`}>{entry.hint}</span>
-      )}
+      {entry.hint && <span className="shrink-0 text-[11px] text-muted">{entry.hint}</span>}
     </div>
   )
 }

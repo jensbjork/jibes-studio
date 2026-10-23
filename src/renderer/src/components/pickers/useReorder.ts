@@ -7,12 +7,22 @@ import {
   type KeyboardEvent,
   type Ref
 } from 'react'
+import { shortcut } from '../../lib/platform'
 import { gapMoves, indexForGap, nearestGap, previewPositions } from './reorder'
 
 // Reordering a wrapped row of items (reference thumbnails, audio chips) by HTML5 drag and drop – with an
-// insertion marker in the gap a drop would land in – and from the keyboard with ⌥← / ⌥→ on a focused item.
-// The hook only says where things would go; the list itself is the parent's state, changed through onMove in
-// one update, so a reorder is a single step for undo and for the prompt's tokens following along.
+// insertion marker in the gap a drop would land in – and from the keyboard with ⌥← / ⌥→ on a focused item
+// (⌥↑ / ⌥↓ in a list one under the other). The hook only says where things would go; the list itself is the
+// parent's state, changed through onMove in one update, so a reorder is a single step for undo and for the prompt's
+// tokens following along.
+
+/**
+ * The one way the app says an item can be moved, for a tooltip or a hint: "drag or ⌥← / ⌥→ to reorder" (Windows:
+ * Alt+← / Alt+→), or ⌥↑ / ⌥↓ for a vertical list.
+ */
+export function reorderHint(axis: 'x' | 'y' = 'x'): string {
+  return shortcut(axis === 'y' ? 'drag or ⌥↑ / ⌥↓ to reorder' : 'drag or ⌥← / ⌥→ to reorder')
+}
 
 /** What can take focus inside an item, in DOM order (to put focus back on the same control after a move). */
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
@@ -29,6 +39,8 @@ export interface ReorderOptions {
   onMove?: (from: number, to: number) => void
   /** What a screen reader hears after a move, e.g. "The image is now @Image1, first of 4." */
   describeMove?: (from: number, to: number) => string
+  /** x (the default): ⌥← / ⌥→ move an item; y, a list one under the other: ⌥↑ / ⌥↓. */
+  axis?: 'x' | 'y'
 }
 
 export interface Reorder {
@@ -47,13 +59,17 @@ export interface Reorder {
   onDragOver: (e: DragEvent) => boolean
   onDrop: (e: DragEvent) => boolean
   onDragLeave: (e: DragEvent) => void
-  /** Props for item i's element: dragging, ⌥← / ⌥→, and a ref for its place on screen. */
+  /**
+   * Props for item i's element: dragging, ⌥← / ⌥→ (⌥↑ / ⌥↓), and a ref for its place on screen. An item that is
+   * dragged its own way (a grip of its own, a strip with its own drop logic) can take only `ref` and `onKeyDown`:
+   * the keyboard move works with those two alone.
+   */
   itemProps: (i: number) => HTMLAttributes<HTMLElement> & { ref: Ref<HTMLElement> }
   /** The last move, for an aria-live region. */
   announcement: string
 }
 
-export function useReorder({ type, keys, onMove, describeMove }: ReorderOptions): Reorder {
+export function useReorder({ type, keys, onMove, describeMove, axis = 'x' }: ReorderOptions): Reorder {
   const enabled = !!onMove && keys.length > 1
   const elements = useRef(new Map<string, HTMLElement>())
   // The dragged item is kept by key, so a list that changes mid-drag (an agent filling the form) can't make a
@@ -165,11 +181,12 @@ export function useReorder({ type, keys, onMove, describeMove }: ReorderOptions)
             onDragEnd: clear,
             onKeyDown: (e: KeyboardEvent) => {
               if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return
-              if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+              const [back, forward] = axis === 'y' ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight']
+              if (e.key !== back && e.key !== forward) return
               // ⌥← / ⌥→ belong to the item even at the ends, where they do nothing.
               e.preventDefault()
               e.stopPropagation()
-              const to = e.key === 'ArrowLeft' ? i - 1 : i + 1
+              const to = e.key === back ? i - 1 : i + 1
               if (to < 0 || to >= keys.length) return
               const item = elements.current.get(key)
               const active = document.activeElement

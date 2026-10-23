@@ -5,6 +5,9 @@ import { FILE_MANAGER, isMac } from '../../lib/platform'
 import CopyButton from '../agent/CopyButton'
 import { SettingsItem, StatusPill } from './SettingsLayout'
 
+/** The quiet text buttons under a status ("Check again"). */
+const textButton = 'text-[12px] text-muted transition hover:text-text disabled:opacity-40'
+
 const INSTALL_COMMAND = 'brew install ffmpeg'
 
 export interface FfmpegCheck {
@@ -37,7 +40,10 @@ export function useFfmpegStatus(): FfmpegCheck {
   return { status, checking, check }
 }
 
-/** Settings → Tools: the programs on this Mac (or PC) that Studio uses, ffmpeg and Apple's voice separation. */
+/**
+ * The programs on this Mac (or PC) that Studio uses, ffmpeg and Apple's voice separation, as two settings of
+ * Settings → About. Each shows one status; the boxed help only when something is missing.
+ */
 export default function ToolsSettings({ ffmpeg }: { ffmpeg: FfmpegCheck }) {
   return (
     <>
@@ -49,7 +55,8 @@ export default function ToolsSettings({ ffmpeg }: { ffmpeg: FfmpegCheck }) {
 
 /**
  * Shows whether ffmpeg was found; sequences (the start and end frames clips take from their neighbours, frames
- * saved as stills, export) and thumbnails depend on it.
+ * saved as stills, export) and thumbnails depend on it. Found, a muted line with its version and where it is
+ * (data-ffmpeg="found": the release smoke test waits for it).
  */
 function FfmpegSetting({ status, checking, check }: FfmpegCheck) {
   return (
@@ -63,29 +70,27 @@ function FfmpegSetting({ status, checking, check }: FfmpegCheck) {
       {!status ? (
         <p className="text-muted">Checking…</p>
       ) : status.ok ? (
-        <div className="rounded-md border border-line bg-raised px-3 py-2.5">
-          <p className="flex min-w-0 items-center gap-2">
-            <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
-            <span className="shrink-0">ffmpeg was found</span>
-            {status.version && (
-              <span className="min-w-0 truncate text-muted" title={status.version}>
-                · {status.version}
-              </span>
-            )}
-          </p>
+        <p data-ffmpeg="found" className="flex min-w-0 items-baseline gap-1.5 text-[12px] text-muted">
+          {status.version && (
+            <span className="max-w-40 shrink-0 truncate select-text" title={status.version}>
+              {status.version}
+            </span>
+          )}
+          {status.version && status.path && <span aria-hidden>·</span>}
           {status.path && (
             <button
+              type="button"
               onClick={() => window.studio.revealFile(status.path!)}
               title={`Show in ${FILE_MANAGER}`}
-              className="mt-1.5 block max-w-full truncate pl-4 font-mono text-xs text-muted hover:text-text"
+              className="min-w-0 truncate font-mono text-[11px] transition hover:text-text"
             >
               {status.path}
             </button>
           )}
-        </div>
+        </p>
       ) : (
         <div className="rounded-md border border-accent/40 bg-accent/5 px-3 py-2.5">
-          <p className="flex items-start gap-2 text-accent">
+          <p role="alert" className="flex items-start gap-2 text-danger">
             <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />
             <span className="select-text">{status.message ?? 'ffmpeg wasn’t found.'}</span>
           </p>
@@ -94,10 +99,10 @@ function FfmpegSetting({ status, checking, check }: FfmpegCheck) {
             <>
               <p className="mt-3 text-muted">Install it with Homebrew in Terminal:</p>
               <div className="mt-1.5 flex items-center gap-2">
-                <code className="flex-1 rounded-md border border-line bg-bg px-3 py-2 font-mono text-xs select-text">
+                <code className="flex-1 rounded-md border border-line bg-bg px-3 py-2 font-mono text-[12px] select-text">
                   {INSTALL_COMMAND}
                 </code>
-                <CopyButton text={INSTALL_COMMAND} className="rounded-md border border-line px-3 py-2 hover:bg-raised" />
+                <CopyButton text={INSTALL_COMMAND} />
               </div>
             </>
           )}
@@ -108,12 +113,8 @@ function FfmpegSetting({ status, checking, check }: FfmpegCheck) {
         </div>
       )}
 
-      {status && (
-        <button
-          onClick={() => void check()}
-          disabled={checking}
-          className="mt-2 text-[11px] text-muted hover:text-text disabled:opacity-40"
-        >
+      {status && !status.ok && (
+        <button type="button" onClick={() => void check()} disabled={checking} className={`mt-2 ${textButton}`}>
           {checking ? 'Checking…' : 'Check again'}
         </button>
       )}
@@ -123,8 +124,8 @@ function FfmpegSetting({ status, checking, check }: FfmpegCheck) {
 
 /**
  * Voice separation: whether this Mac can tell the voice from the background (Apple's built-in sound isolation, used
- * by the Editor for Remove the voice, Only the voice and keeping the background under a new voice). Never on Windows,
- * where main says so.
+ * by the Editor for Remove the voice, Only the voice and keeping the background under a new voice). Available, the
+ * pill and one muted line; missing on a Mac, why, in a box; on Windows, where it never is, the pill alone.
  */
 function VoiceSeparationSetting() {
   const status = useSeparationStatus()
@@ -143,25 +144,19 @@ function VoiceSeparationSetting() {
     >
       {!status ? (
         <p className="text-muted">Checking…</p>
+      ) : status.available ? (
+        <p className="text-[12px] text-muted">
+          Apple, {status.quality === 'standard' ? 'standard quality' : 'high quality'}
+        </p>
       ) : (
-        <div className="rounded-md border border-line bg-raised px-3 py-2.5">
-          <p className="flex items-start gap-2">
-            <span
-              aria-hidden
-              className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${status.available ? 'bg-emerald-400' : 'bg-muted'}`}
-            />
-            <span className="select-text">
-              {status.available
-                ? `Apple (built in, ${status.quality === 'standard' ? 'standard quality' : 'high quality'})`
-                : (status.message ?? NO_SEPARATION)}
-            </span>
-          </p>
-          {!status.available && (
-            <p className="mt-1.5 pl-4 text-[11px] leading-relaxed text-muted">
+        isMac && (
+          <div className="rounded-md border border-line bg-raised px-3 py-2.5">
+            <p className="select-text">{status.message ?? NO_SEPARATION}</p>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
               Everything else in the Editor works anyway; where the voice changes, the original sound is lowered instead.
             </p>
-          )}
-        </div>
+          </div>
+        )
       )}
     </SettingsItem>
   )

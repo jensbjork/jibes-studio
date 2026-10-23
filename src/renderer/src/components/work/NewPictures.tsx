@@ -90,8 +90,8 @@ function NewPicture({ work, onSeen }: { work: FinishedWork; onSeen: () => void }
         title={work.error}
         className="flex h-10 max-w-72 shrink-0 flex-col justify-center rounded bg-accent/10 px-2 leading-tight"
       >
-        <span className="truncate text-accent">{work.label}</span>
-        <span className="truncate select-text text-[11px] text-[#ffb3b5]">{work.error ?? 'The image couldn’t be created.'}</span>
+        <span className="truncate text-text">{work.label}</span>
+        <span className="truncate select-text text-[11px] text-danger">{work.error ?? 'The image couldn’t be created.'}</span>
       </span>
     )
   }

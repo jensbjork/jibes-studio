@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { agentInSentence } from '@shared/agent-name'
 import { generationTitle } from '@shared/generation-label'
 import type { Generation, VideoModel } from '@shared/types'
@@ -7,7 +7,9 @@ import { isPending } from '../feed/feedText'
 import { PinIcon } from '../feed/icons'
 import RatingControl from '../feed/RatingControl'
 import { CloseIcon } from '../sequences/icons'
-import { ConfirmDeleteButton, CopyButton, secondaryButton } from './controls'
+import { buttonClass } from '../ui/button'
+import MoreMenu, { MenuItem } from '../ui/MoreMenu'
+import { CopyButton, FieldLabel, secondaryButton } from './controls'
 import { MAX_INSIGHT_LENGTH, MAX_TITLE_LENGTH, titleFromInsight } from './learning-utils'
 import { formatWhen } from './prompt-utils'
 import TagInput from './TagInput'
@@ -25,7 +27,8 @@ interface Props {
   /** Saves right away instead of waiting for the debounce. */
   onBlur: () => void
   onTogglePin: () => void
-  onDelete: () => void
+  /** Deletes the learning (after the question in ⋯), or discards a new one; "Deleting…" until it settles. */
+  onDelete: () => void | Promise<void>
   /** Opens one of the evidence clips in the detail drawer. */
   onOpenClip: (id: string) => void
 }
@@ -35,7 +38,7 @@ const field = 'w-full rounded-md border border-line bg-raised px-3 py-2 outline-
 function SaveIndicator({ draft, status }: { draft: LearningDraft; status?: LearningSaveStatus }) {
   if (status?.state === 'error') {
     return (
-      <span className="truncate text-accent select-text" title={status.error}>
+      <span className="no-drag truncate text-danger select-text" title={status.error}>
         Couldn't save: {status.error}
       </span>
     )
@@ -52,7 +55,11 @@ function SaveIndicator({ draft, status }: { draft: LearningDraft; status?: Learn
   return null
 }
 
-/** One learning: what was learned, for which model, and the clips it is based on. */
+/**
+ * One learning: what was learned, for which model, and the clips it is based on. Laid out as every library editor is:
+ * the save status alone in the top bar; the title and a meta line; one row of actions – Copy learning, Pin to top, then
+ * ⋯ with Delete… (a new learning has Discard instead); then the fields.
+ */
 export default function LearningEditor({
   draft,
   status,
@@ -67,7 +74,11 @@ export default function LearningEditor({
   onOpenClip
 }: Props) {
   const insightRef = useRef<HTMLTextAreaElement>(null)
+  const insightId = useId()
+  const modelId = useId()
+  const tagsId = useId()
   const isNew = !draft.id
+  const name = draft.title.trim() || titleFromInsight(draft.insight) || 'Untitled'
 
   // A fresh learning starts with the cursor in the insight; the title can be left to fill itself in.
   useEffect(() => {
@@ -81,118 +92,151 @@ export default function LearningEditor({
 
   return (
     <section className="flex min-w-0 flex-1 flex-col">
-      <div className="drag flex h-12 shrink-0 items-center gap-3 pl-8 pr-4">
-        <div className="min-w-0 flex-1 truncate text-[12px]">
+      <div className="drag flex h-12 shrink-0 items-center justify-end px-6">
+        <div className="min-w-0 truncate text-[11px]">
           <SaveIndicator draft={draft} status={status} />
-        </div>
-        <div className="no-drag flex shrink-0 items-center gap-1">
-          <CopyButton text={[draft.title.trim(), draft.insight.trim()].filter(Boolean).join('\n\n')} disabled={!canSaveLearning(draft)} />
-          <button
-            type="button"
-            onClick={onTogglePin}
-            disabled={isNew}
-            aria-pressed={draft.pinned}
-            title={
-              draft.pinned
-                ? 'Unpin – stop showing it at the top'
-                : 'Pin to top – agents read pinned learnings first when they write prompts'
-            }
-            className={`${secondaryButton} flex items-center gap-1.5 ${draft.pinned ? 'text-amber-400 hover:text-amber-300' : ''}`}
-          >
-            <PinIcon size={13} filled={draft.pinned} />
-            {draft.pinned ? 'Pinned' : 'Pin to top'}
-          </button>
-          {isNew ? (
-            <button type="button" onClick={onDelete} className={secondaryButton}>
-              Discard
-            </button>
-          ) : (
-            <ConfirmDeleteButton onConfirm={onDelete} confirmLabel="Delete learning" />
-          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl space-y-5 px-8 pb-10 pt-2">
-          <input
-            value={draft.title}
-            onChange={(e) => onChange({ title: e.target.value })}
-            onBlur={onBlur}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+      <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        <div className="mx-auto max-w-4xl px-8 pb-16">
+          <header>
+            <input
+              value={draft.title}
+              onChange={(e) => onChange({ title: e.target.value })}
+              onBlur={onBlur}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
                 e.preventDefault()
                 insightRef.current?.focus()
-              }
-            }}
-            maxLength={MAX_TITLE_LENGTH}
-            placeholder={titleFromInsight(draft.insight) || 'Title'}
-            aria-label="Title"
-            className="w-full bg-transparent text-xl font-semibold outline-none placeholder:text-muted/60"
-          />
-
-          <label className="block">
-            <span className="mb-1.5 flex justify-between text-muted">
-              <span>Learning</span>
-              <span className="text-[11px]">{draft.insight.length > 3000 ? `${draft.insight.length} / ${MAX_INSIGHT_LENGTH}` : ''}</span>
-            </span>
-            <textarea
-              ref={insightRef}
-              value={draft.insight}
-              onChange={(e) => onChange({ insight: e.target.value })}
-              onBlur={onBlur}
-              maxLength={MAX_INSIGHT_LENGTH}
-              rows={6}
-              placeholder="What works, and what doesn't? E.g. “Seedance 2.5: mention the clothes after the character's images, or it changes them.”"
-              className={`${field} min-h-32 resize-y text-[14px] leading-relaxed`}
+              }}
+              maxLength={MAX_TITLE_LENGTH}
+              placeholder={titleFromInsight(draft.insight) || 'Title'}
+              aria-label="Title"
+              spellCheck={false}
+              className="-ml-2 w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-xl font-semibold outline-none placeholder:text-muted/60 hover:border-line focus:border-muted focus:bg-raised"
             />
-            <span className="mt-1 block text-[11px] text-muted">
-              Write it as a rule you can follow next time. Agents read the learnings before they write new prompts.
-            </span>
-          </label>
+            {draft.id && (
+              <p className="mt-0.5 text-[11px] text-muted">
+                {draft.author === 'user' ? 'Written by you' : `Written by ${agentInSentence(draft.author)}`}
+                {draft.createdAt ? ` · Created ${formatWhen(draft.createdAt)}` : ''}
+                {draft.updatedAt && draft.updatedAt !== draft.createdAt
+                  ? ` · Updated ${formatWhen(draft.updatedAt)}`
+                  : ''}
+              </p>
+            )}
+          </header>
 
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4">
-            <label className="block">
-              <span className="mb-1.5 block text-muted">Applies to model</span>
-              <select
-                value={draft.model ?? ''}
-                onChange={(e) => {
-                  onChange({ model: e.target.value || undefined })
-                  onBlur()
-                }}
-                className={`${field} cursor-pointer py-[7px]`}
-              >
-                <option value="">All models</option>
-                {modelOptions.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div>
-              <span className="mb-1.5 block text-muted">Tags</span>
-              <TagInput value={draft.tags} onChange={(tags) => onChange({ tags })} suggestions={tagSuggestions} onBlur={onBlur} />
+          <div className="mt-5 flex items-center gap-2">
+            <CopyButton
+              text={[draft.title.trim(), draft.insight.trim()].filter(Boolean).join('\n\n')}
+              disabled={!canSaveLearning(draft)}
+              label="Copy learning"
+              title="Copy the learning to the clipboard"
+              size="md"
+            />
+            <button
+              type="button"
+              onClick={onTogglePin}
+              disabled={isNew}
+              aria-pressed={draft.pinned}
+              title={
+                draft.pinned
+                  ? 'Unpin – stop showing it at the top'
+                  : 'Pin to top – agents read pinned learnings first when they write prompts'
+              }
+              className={`${buttonClass('secondary')} ${draft.pinned ? 'text-amber-400 hover:text-amber-300' : ''}`}
+            >
+              <PinIcon size={13} filled={draft.pinned} />
+              {draft.pinned ? 'Pinned' : 'Pin to top'}
+            </button>
+            <div className="ml-auto">
+              {isNew ? (
+                <button type="button" onClick={() => void onDelete()} className={secondaryButton}>
+                  Discard
+                </button>
+              ) : (
+                <MoreMenu>
+                  {(menu) => (
+                    <MenuItem
+                      danger
+                      onSelect={() => menu.confirm({ question: `Delete “${name}”?`, onConfirm: onDelete })}
+                    >
+                      Delete…
+                    </MenuItem>
+                  )}
+                </MoreMenu>
+              )}
             </div>
           </div>
 
-          <Evidence
-            ids={draft.evidence}
-            generations={generations}
-            loaded={generationsLoaded}
-            onOpen={onOpenClip}
-            onRemove={(id) => {
-              onChange({ evidence: draft.evidence.filter((e) => e !== id) })
-              onBlur()
-            }}
-          />
+          <div className="mt-8 space-y-6">
+            <div>
+              <FieldLabel
+                htmlFor={insightId}
+                hint={draft.insight.length > 3000 ? `${draft.insight.length} / ${MAX_INSIGHT_LENGTH}` : undefined}
+              >
+                Learning
+              </FieldLabel>
+              <textarea
+                ref={insightRef}
+                id={insightId}
+                value={draft.insight}
+                onChange={(e) => onChange({ insight: e.target.value })}
+                onBlur={onBlur}
+                maxLength={MAX_INSIGHT_LENGTH}
+                rows={6}
+                placeholder="What works, and what doesn't? E.g. “Seedance 2.5: mention the clothes after the character's images, or it changes them.”"
+                className={`${field} min-h-32 resize-y text-[14px] leading-relaxed`}
+              />
+              <p className="mt-1 text-[11px] text-muted">
+                Write it as a rule you can follow next time. Agents read the learnings before they write new prompts.
+              </p>
+            </div>
 
-          {draft.id && (
-            <p className="border-t border-line pt-4 text-[11px] text-muted">
-              {draft.author === 'user' ? 'Written by you' : `Written by ${agentInSentence(draft.author)}`}
-              {draft.createdAt ? ` · Created ${formatWhen(draft.createdAt)}` : ''}
-              {draft.updatedAt && draft.updatedAt !== draft.createdAt ? ` · Updated ${formatWhen(draft.updatedAt)}` : ''}
-            </p>
-          )}
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4">
+              <div>
+                <FieldLabel htmlFor={modelId}>Applies to model</FieldLabel>
+                <select
+                  id={modelId}
+                  value={draft.model ?? ''}
+                  onChange={(e) => {
+                    onChange({ model: e.target.value || undefined })
+                    onBlur()
+                  }}
+                  className={`${field} cursor-pointer py-[7px]`}
+                >
+                  <option value="">All models</option>
+                  {modelOptions.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <FieldLabel htmlFor={tagsId}>Tags</FieldLabel>
+                <TagInput
+                  id={tagsId}
+                  value={draft.tags}
+                  onChange={(tags) => onChange({ tags })}
+                  suggestions={tagSuggestions}
+                  onBlur={onBlur}
+                />
+              </div>
+            </div>
+
+            <Evidence
+              ids={draft.evidence}
+              generations={generations}
+              loaded={generationsLoaded}
+              onOpen={onOpenClip}
+              onRemove={(id) => {
+                onChange({ evidence: draft.evidence.filter((e) => e !== id) })
+                onBlur()
+              }}
+            />
+          </div>
         </div>
       </div>
     </section>
@@ -215,7 +259,7 @@ function Evidence({
 }) {
   return (
     <section>
-      <span className="mb-1.5 block text-muted">Evidence</span>
+      <FieldLabel>Evidence</FieldLabel>
       {ids.length === 0 ? (
         <p className="rounded-md border border-dashed border-line px-4 py-4 text-[12px] leading-relaxed text-muted">
           No clips linked. When an agent reviews your clips and saves a learning, it links the clips it is based on

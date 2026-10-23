@@ -50,7 +50,7 @@ import { registerSongSyncIpc } from './song-sync'
 import { registerStoryboardIpc, type StoryboardService } from './storyboards'
 import { setTaskbarBadge, showTaskbarBadgeOn } from './taskbar'
 import { acceptConsent, getApiKey, getSettings, setApiKey, setImageSafeMode, setPromptLanguage } from './settings'
-import { checkForUpdatesFromMenu, registerUpdateIpc, startUpdateChecks } from './updates'
+import { checkForUpdatesFromMenu, registerUpdateIpc, sendWhenLoaded, startUpdateChecks } from './updates'
 import {
   activeStills,
   importStillFile,
@@ -627,7 +627,7 @@ function registerIpc(): void {
   registerUpdateIpc({ busy: () => libraryBusyReason() ?? archiveJobReason(), showWindow })
 }
 
-/** Studio's window in front (a new one when none is open), for Check for Updates…. */
+/** Studio's window in front (a new one when none is open), for Check for Updates… and Settings…. */
 function showWindow(): BrowserWindow {
   const win = BrowserWindow.getAllWindows()[0] ?? createWindow()
   if (win.isMinimized()) win.restore()
@@ -637,8 +637,34 @@ function showWindow(): BrowserWindow {
 }
 
 /**
- * macOS' menu: Electron's default one, with Check for Updates… under About JIBES Studio. Should building it fail, the
- * default menu stays.
+ * Settings… (⌘, / Ctrl+,): the window comes to the front and opens Settings. Sent once the page has loaded, since
+ * the window may just have been opened for it.
+ */
+const settingsItem: MenuItemConstructorOptions = {
+  label: 'Settings…',
+  accelerator: 'CmdOrCtrl+,',
+  click: () => sendWhenLoaded(showWindow(), 'app:open-settings')
+}
+
+/**
+ * The View menu of both platforms: zoom (⌘0, ⌘= and ⌘-) and full screen; reload (⌘R) and the developer tools (⌥⌘I)
+ * only in development, so a stray ⌘R never throws away what is open in a released Studio.
+ */
+function viewSubmenu(): MenuItemConstructorOptions[] {
+  const view: MenuItemConstructorOptions[] = [
+    { role: 'resetZoom' },
+    { role: 'zoomIn' },
+    { role: 'zoomOut' },
+    { type: 'separator' },
+    { role: 'togglefullscreen' }
+  ]
+  if (!app.isPackaged) view.push({ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' })
+  return view
+}
+
+/**
+ * macOS' menu: Electron's default File, Edit and Window menus, the shared View menu (viewSubmenu), and Check for
+ * Updates… and Settings… under About JIBES Studio. Should building it fail, the default menu stays.
  */
 function setMacMenu(): void {
   try {
@@ -646,6 +672,8 @@ function setMacMenu(): void {
     const appMenu: MenuItemConstructorOptions[] = [
       { role: 'about', label: `About ${PUBLIC_NAME}` },
       { label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() },
+      { type: 'separator' },
+      settingsItem,
       { type: 'separator' },
       { role: 'services' },
       { type: 'separator' },
@@ -660,7 +688,7 @@ function setMacMenu(): void {
         { label: app.name, submenu: appMenu },
         { role: 'fileMenu' },
         { role: 'editMenu' },
-        { role: 'viewMenu' },
+        { label: 'View', submenu: viewSubmenu() },
         { role: 'windowMenu' },
         { role: 'help', submenu: [] }
       ])
@@ -671,21 +699,15 @@ function setMacMenu(): void {
 }
 
 /**
- * Windows' menu, never shown (createWindow hides its bar), only for its shortcuts: Ctrl+0, Ctrl+= and Ctrl+- zoom,
- * F11 full screen and, in development only, Ctrl+R reload and Ctrl+Shift+I the developer tools. No Edit menu: text
- * fields copy, paste and undo by themselves on Windows. macOS has Electron's default menu plus Check for Updates…
- * (setMacMenu).
+ * Windows' menu, never shown (createWindow hides its bar), only for its shortcuts: Ctrl+, Settings, and the shared
+ * View menu's Ctrl+0, Ctrl+= and Ctrl+- zoom, F11 full screen and, in development only, Ctrl+R reload and
+ * Ctrl+Shift+I the developer tools. No Edit menu: text fields copy, paste and undo by themselves on Windows.
  */
 function windowsMenu(): Menu {
-  const view: MenuItemConstructorOptions[] = [
-    { role: 'resetZoom' },
-    { role: 'zoomIn' },
-    { role: 'zoomOut' },
-    { type: 'separator' },
-    { role: 'togglefullscreen' }
-  ]
-  if (!app.isPackaged) view.push({ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' })
-  return Menu.buildFromTemplate([{ label: 'View', submenu: view }])
+  return Menu.buildFromTemplate([
+    { label: 'Studio', submenu: [settingsItem] },
+    { label: 'View', submenu: viewSubmenu() }
+  ])
 }
 
 void app.whenReady().then(async () => {

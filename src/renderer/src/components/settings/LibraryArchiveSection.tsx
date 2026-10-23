@@ -5,10 +5,12 @@ import { ipcErrorMessage } from '../../lib/hooks'
 import { readRememberedParams, rememberAfterSwitch } from '../../lib/library'
 import { ARCHIVE_UNAVAILABLE, FILE_MANAGER, PATH_SEPARATOR } from '../../lib/platform'
 import SwitchingOverlay from '../library/SwitchingOverlay'
+import { buttonClass } from '../ui/button'
+import { MoreAbout } from './SettingsLayout'
 
-// Settings → Export & import: the whole library to one zip file, and such a zip opened as the library (main's
-// library-archive.ts does the work). What runs is kept here, outside the component, so it is still shown after the
-// user has been elsewhere in the app while a long export ran.
+// Settings → Library → Move to another computer (Export & import): the whole library to one zip file, and such a zip
+// opened as the library (main's library-archive.ts does the work). What runs is kept here, outside the component, so
+// it is still shown after the user has been elsewhere in the app while a long export ran.
 
 type Kind = ArchiveProgress['kind']
 
@@ -124,8 +126,6 @@ async function cancel(): Promise<void> {
   }
 }
 
-const secondary = 'rounded-md border border-line px-4 py-2 transition hover:bg-raised disabled:opacity-40'
-
 const PHASE_TEXT: Record<ArchiveProgress['phase'], string> = {
   preparing: 'Preparing…',
   packing: 'Packing the files…',
@@ -157,7 +157,7 @@ function countsTitle(c: ArchiveResult['counts']): string {
   )
 }
 
-/** Export & import (no heading of its own: Settings puts it under one). */
+/** Export & import: the buttons and what they did (no heading or intro of its own: Settings → Library has them). */
 export default function LibraryArchiveSection() {
   const s = useSyncExternalStore(subscribe, snapshot, snapshot)
 
@@ -171,23 +171,14 @@ export default function LibraryArchiveSection() {
 
   return (
     <div>
-      <p className="mb-3 text-muted">
-        Pack the whole library – the database and every file – into a zip file, for example to move it to another
-        computer. The API key and the agent’s token aren’t included.
-      </p>
-
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => void start('export')} disabled={busy} className={secondary}>
+        <button type="button" onClick={() => void start('export')} disabled={busy} className={buttonClass()}>
           Export library…
         </button>
-        <button onClick={() => void start('import')} disabled={busy} className={secondary}>
+        <button type="button" onClick={() => void start('import')} disabled={busy} className={buttonClass()}>
           Import a library…
         </button>
       </div>
-      <p className="mt-2 text-[11px] leading-relaxed text-muted">
-        The import unpacks the zip file into a new folder and opens the library in it. The library you have open now
-        stays where it is, and you can switch back under Library.
-      </p>
 
       {progress && <ProgressBox progress={progress} cancelling={!!running?.cancelling} />}
 
@@ -219,7 +210,20 @@ export default function LibraryArchiveSection() {
         </p>
       )}
 
-      {!running && s.error && <p className="mt-3 text-[12px] text-accent select-text">{s.error}</p>}
+      {!running && s.error && (
+        <p role="alert" className="mt-3 text-[12px] text-danger select-text">
+          {s.error}
+        </p>
+      )}
+
+      <div className="mt-3">
+        <MoreAbout summary="More about importing">
+          <p>
+            The import unpacks the zip file into a new folder and opens the library in it. The library you have open
+            now stays where it is, and you can switch back with Change folder… above.
+          </p>
+        </MoreAbout>
+      </div>
 
       <SwitchingOverlay
         phase={s.reloading ? { kind: 'reloading' } : opening ? { kind: 'working', mode: 'open' } : { kind: 'idle' }}

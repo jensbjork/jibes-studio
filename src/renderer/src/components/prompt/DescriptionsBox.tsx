@@ -49,7 +49,7 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
     blank
       ? { tone: 'text-muted', text: 'Added after the prompt once you have written it.' }
       : direction?.dropped || !direction?.section
-        ? { tone: 'text-accent', text: 'Nothing of the direction is sent.' }
+        ? { tone: 'text-danger', text: 'Nothing of the direction is sent.' }
         : { tone: 'text-muted', text: 'Sent after the prompt.' }
   const note = !rows.length
     ? directionNote()
@@ -57,7 +57,7 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
       ? { tone: 'text-muted', text: 'The descriptions aren’t sent.' }
       : dropped
         ? {
-            tone: 'text-accent',
+            tone: 'text-danger',
             text:
               `The descriptions don’t fit within the model’s limit of ${limit} characters and aren’t sent. ` +
               'Shorten the prompt or switch some of them off.'
@@ -68,7 +68,7 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
             ? { tone: 'text-muted', text: 'Added after the prompt once you have written it.' }
             : truncated
               ? {
-                  tone: 'text-amber-300',
+                  tone: 'text-warning',
                   text: `The descriptions have been shortened so the prompt fits within the model’s limit of ${limit} characters.`
                 }
               : { tone: 'text-muted', text: 'Sent after the prompt, as a list of the references.' }
@@ -160,7 +160,7 @@ export default function DescriptionsBox({ view, onInclude, onToggle, onOpenAsset
         {/* The length of the prompt as it is sent; nothing is sent while the prompt is blank. */}
         {!blank && (
           <span
-            className={`shrink-0 tabular-nums ${over ? 'text-accent' : 'text-muted'}`}
+            className={`shrink-0 tabular-nums ${over ? 'text-danger' : 'text-muted'}`}
             title={
               limit
                 ? `The prompt as sent, with the descriptions: ${length} of at most ${limit} characters`
@@ -234,7 +234,7 @@ function Row({
           <div className="mt-0.5 flex items-center gap-2 text-[11px]">
             {shortened !== undefined && (
               <span
-                className="text-amber-300"
+                className="text-warning"
                 title={
                   shortened
                     ? `Shortened to fit within the model’s limit. The whole description: ${description}`
@@ -395,7 +395,7 @@ function DirectionBlock({
         </p>
       )}
       {direction.notes.length > 0 && (
-        <ul className="mt-1 space-y-0.5 text-[11px] leading-snug text-amber-300">
+        <ul className="mt-1 space-y-0.5 text-[11px] leading-snug text-warning">
           {direction.notes.map((n) => (
             <li key={n}>{n}</li>
           ))}

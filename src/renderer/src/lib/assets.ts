@@ -23,8 +23,11 @@ export function isReferenceKind(kind: AssetKind): kind is ReferenceKind {
   return (ASSET_KINDS as readonly AssetKind[]).includes(kind)
 }
 
-/** "2–15 seconds": how long the part of a sound clip sent to Venice may be. */
-const CLIP_SECONDS = `${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} seconds`
+/** "2–15 s": how long the part of a sound clip sent to Venice may be. */
+const CLIP_SECONDS = `${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} s`
+
+/** What every kind's description is for, beside its label (a director's says where it shows instead). */
+const DESCRIPTION_HINT = 'Added to the prompt automatically in reference mode'
 
 /** The wording for the sound clips of a kind that has them (a character's voice, a place's sound). */
 export interface AudioCopy {
@@ -38,13 +41,15 @@ export interface AudioCopy {
   clipDefinite: string
   /** In the list column, when the asset has clips: "3 images · voice". */
   listLabel: string
-  /** What the section is for, under its title. */
+  /** What the section is for, in one line under its title. */
   intro: string
+  /** The rest of the explanation, as that line's tooltip. */
+  introMore: string
   /** Advice under the drop area. */
   tips: string
   /**
-   * Badge on the first clip when it comes along automatically as the asset is added to a generation, with
-   * its tooltip. Absent when nothing comes along by itself.
+   * Badge on the first clip, the one a generation gets (a character's comes along as it is added, an environment's
+   * with "Include the soundscape" on its chip), with its tooltip ("Make default" on another clip moves that one first).
    */
   firstBadge?: { label: string; title: string }
 }
@@ -65,21 +70,25 @@ export interface AssetCopy {
   generatePhrase: string
   /** Placeholder of the description field. */
   descriptionPlaceholder: string
-  /** Next to the description label. */
+  /** Under the description label (and focus mode's line). */
   descriptionHint: string
   emptyTitle: string
   /** What the kind is for, in the empty state. */
   emptyText: string
-  /** Shown in the list column while it is empty. */
-  listHint: string
+  /**
+   * What the kind is, in one sentence, where a first-time user lands without an empty state: Directors (its list and
+   * every ready-made director's page, since the ready-made ones are always there). The other kinds' lists say nothing
+   * while the editor's empty state explains.
+   */
+  listHint?: string
   /** Advice under the image drop area. */
   imageTips: string
   /**
-   * The images' section, when it isn't "Reference images" (a director's style frames): its title, the line under it
-   * and the note when there are more than a generation takes.
+   * The images' section, when it isn't "Reference images" (a director's style frames): its title, how they are sent
+   * (the tooltip of the line under the title) and the note when there are more than a generation takes.
    */
   images?: { title: string; intro: string; many: string }
-  /** How the asset is used when generating, shown in the editor when the kind needs explaining. */
+  /** How the asset is used when generating, in one sentence after the Reference images line, where it needs saying. */
   usage?: string
   /** Kinds that can have sound clips (characters' voices, environments' sounds); absent for the others. */
   audio?: AudioCopy
@@ -94,13 +103,11 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
     newName: 'New character',
     generatePhrase: 'with the character',
     descriptionPlaceholder: 'Looks, age, hairstyle, personality…',
-    descriptionHint: 'Paste into prompts to keep the look consistent',
+    descriptionHint: DESCRIPTION_HINT,
     emptyTitle: 'No characters yet',
     emptyText:
-      'Save people or figures with a few reference photos, a description of their looks and ideally a ' +
-      'voice clip. Then generate with them in reference mode, where the images get @Image numbers and the voice ' +
-      'an @Audio number that you refer to in the prompt.',
-    listHint: 'Characters you create show up here. Drop images or sound on a character to add them.',
+      'Save a person with a few photos, a description and ideally a voice clip. Add them in Generate and they look ' +
+      'and sound the same in every clip.',
     imageTips: 'A few angles with a clear face give the best results. You can save the clothes separately under Outfits.',
     audio: {
       title: 'Voice',
@@ -108,15 +115,17 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
       clips: 'voice clips',
       clipDefinite: 'the voice clip',
       listLabel: 'voice',
-      intro:
-        `How the character sounds. Venice uses an excerpt of ${CLIP_SECONDS} as a model for the voice's timbre, ` +
-        'tone and pace – the result is a similar voice, not an exact copy.',
+      intro: `How the character sounds – a ${CLIP_SECONDS} excerpt is sent.`,
+      introMore:
+        "Venice uses the excerpt as a model for the voice's timbre, tone and pace – the result is a similar voice, not " +
+        'an exact copy. Only with a model that takes audio. The clip sets how the character sounds – write what is ' +
+        'said in the prompt.',
       tips: 'A recording where only the person speaks, without music or background noise, gives the best results.',
       firstBadge: {
-        label: 'Comes along',
+        label: 'Default',
         title:
           'The first voice clip comes along when you add the character in Generate and the model takes audio. ' +
-          'Move another clip to the top to use it instead.'
+          'Use “Make default” on another clip to use it instead.'
       }
     }
   },
@@ -128,12 +137,11 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
     newName: 'New environment',
     generatePhrase: 'in the environment',
     descriptionPlaceholder: 'Place, time of day, light, weather, mood…',
-    descriptionHint: 'Paste into prompts to keep the place consistent',
+    descriptionHint: DESCRIPTION_HINT,
     emptyTitle: 'No environments yet',
     emptyText:
       'Save places – a kitchen, a beach, a street in the rain – with a few photos, a description and ideally how it ' +
       'sounds there. Use them as a reference or as a start image, and the clips play out in the same place every time.',
-    listHint: 'Environments you create show up here. Drop images or sound on an environment to add them.',
     imageTips: 'A few views of the place in the same light give the best results – ideally with no people in the picture.',
     audio: {
       title: 'Soundscape',
@@ -141,10 +149,18 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
       clips: 'sound clips',
       clipDefinite: 'the sound clip',
       listLabel: 'sound',
-      intro:
-        `How the place sounds – waves, chatter, traffic, rain. Venice uses an excerpt of ${CLIP_SECONDS} as a ` +
-        'model for the sound in the clip when you add it in Generate with a model that takes audio.',
-      tips: 'A recording of the place itself, without speech or music, gives the best results.'
+      intro: `How the place sounds – a ${CLIP_SECONDS} excerpt is sent.`,
+      introMore:
+        'Waves, chatter, traffic, rain: Venice uses the excerpt as a model for the sound in the clip when you switch on ' +
+        '“Include the soundscape” on the environment in Generate, with a model that takes audio. The clip sets how ' +
+        'the place sounds – write what happens in the prompt.',
+      tips: 'A recording of the place itself, without speech or music, gives the best results.',
+      firstBadge: {
+        label: 'Default',
+        title:
+          'The first sound clip is the one “Include the soundscape” sends when you add the environment in Generate ' +
+          'and the model takes audio. Use “Make default” on another clip to send that one instead.'
+      }
     }
   },
   product: {
@@ -155,18 +171,15 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
     newName: 'New product',
     generatePhrase: 'with the product',
     descriptionPlaceholder: 'Brand, model, colour, material, size, what the packaging says…',
-    descriptionHint: 'Added to the prompt so the product looks the same in every clip',
+    descriptionHint: DESCRIPTION_HINT,
     emptyTitle: 'No products yet',
     emptyText:
       'Save products you want in your films – a package, a bottle, a gadget – with a few clear images ' +
       'and a description. Then refer to them in the prompt, e.g. a character holding the product.',
-    listHint: 'Products you create show up here. Drop images on a product to add them.',
     imageTips:
       'Clear images against a plain background – the front with the label first, ideally also the side and in a hand for ' +
       'scale. Small text and logos are rarely exact in video.',
-    usage:
-      'Add the product in Generate together with the character holding it, and the prompt says e.g. ' +
-      '“Anna (@Image1) holding Coffee tin (@Image4)”.'
+    usage: 'In Generate, add it together with the character holding it: “Anna (@Image1) holding Coffee tin (@Image4)”.'
   },
   outfit: {
     plural: 'Outfits',
@@ -176,12 +189,11 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
     newName: 'New outfit',
     generatePhrase: 'with the outfit',
     descriptionPlaceholder: 'Garments, colours, materials, style…',
-    descriptionHint: 'Paste into prompts to keep the clothes consistent',
+    descriptionHint: DESCRIPTION_HINT,
     emptyTitle: 'No outfits yet',
     emptyText:
       'Save outfits with a few images and a description, and dress your characters in them when you generate. Give a ' +
       'character a default outfit and it comes along automatically.',
-    listHint: 'Outfits you create show up here. Drop images on an outfit to add them.',
     imageTips:
       'Images where the garments show clearly and in full – ideally against a plain background or worn by someone – give ' +
       'the best results.'
@@ -194,20 +206,17 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
     newName: 'New pose',
     generatePhrase: 'with the pose',
     descriptionPlaceholder: 'Who stands where, posture, distance, camera angle…',
-    descriptionHint: 'Paste into prompts to get the same placement and posture',
+    descriptionHint: DESCRIPTION_HINT,
     emptyTitle: 'No poses yet',
     emptyText:
-      'Save a photo or a sketch of the positions you want – how someone stands, sits or moves, or ' +
-      'how several people stand in relation to each other. When you generate, you refer to the people in the ' +
-      'image with your characters, and they take the same stance.',
-    listHint: 'Poses you create show up here. Drop images on a pose to add them.',
+      'Save a photo or sketch of how people stand, sit or move. Add it in Generate with your characters and they take ' +
+      'the same positions.',
     imageTips:
       'Whole bodies and clear positions give the best results. A simple sketch works well – and the less ' +
       'the faces show, the less the clip borrows from the people in the image.',
     usage:
-      'Add the pose in Generate together with the characters, and the prompt says who should stand like that, ' +
-      'e.g. “Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)”. It is the positions that are borrowed, not ' +
-      'the people in the image.'
+      'In Generate, add it with your characters: “Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)” – only ' +
+      'the positions are borrowed.'
   },
   director: {
     plural: 'Directors',
@@ -223,7 +232,7 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
       'A director is a way of making a film – how it is cut, its look, the camera, the light, the framing, the rhythm, ' +
       'the acting and the sound, what it never does, and pictures and videos of the style. Choose one in Generate, for ' +
       'a sequence or a storyboard, and every prompt it directs gets the same direction.',
-    listHint: 'Directors you create show up here. Start from a ready-made one with “Use a copy”.',
+    listHint: 'A director gives every clip it directs the same cut, look, camera, light and sound.',
     imageTips:
       'Stills whose grade, light and texture the clips should match – never their people, places or objects. Three or ' +
       'four that agree with each other work best.',
@@ -231,7 +240,7 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
       title: 'Style frames',
       intro:
         'Sent after a clip’s own reference images, in this order, so the clip matches their look – grade, light, ' +
-        'texture – never their people, places or objects. Only in reference mode. The first is the cover.',
+        'texture – never their people, places or objects. Only in reference mode.',
       many:
         'A clip takes only as many style frames as the model has places left after its own reference images; the ' +
         'first ones come along.'
@@ -313,6 +322,18 @@ export function originText(origin: AssetFileOrigin | undefined, now = Date.now()
 export function englishList(items: readonly string[]): string {
   if (items.length <= 1) return items[0] ?? ''
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+/**
+ * The name for something new: `base` ("New character"), else "New character 2" … – the first one no other item has
+ * (case aside). Main numbers a copied ready-made director the same way.
+ */
+export function uniqueNewName(items: readonly { name: string }[], base: string): string {
+  const taken = new Set(items.map((a) => a.name.toLocaleLowerCase('en')))
+  if (!taken.has(base.toLocaleLowerCase('en'))) return base
+  let n = 2
+  while (taken.has(`${base} ${n}`.toLocaleLowerCase('en'))) n++
+  return `${base} ${n}`
 }
 
 /** "Anna", "Anna och Kalle", "Anna, Kalle och Bo": only for prompt text written in Swedish (Prompt language). */

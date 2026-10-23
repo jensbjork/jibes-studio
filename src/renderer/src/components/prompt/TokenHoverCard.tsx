@@ -101,7 +101,7 @@ export default function TokenHoverCard({ mark, reference, audio, video, rect }: 
           {reference && <Thumb path={reference.path} className="h-10 w-10 opacity-60" />}
           <span className="min-w-0">
             <span
-              className={`block text-[12px] leading-snug ${mark.tone === 'warning' ? 'text-amber-200' : 'text-red-300'}`}
+              className={`block text-[12px] leading-snug ${mark.tone === 'warning' ? 'text-warning' : 'text-danger'}`}
             >
               {mark.problem ?? 'The reference is wrong.'}
             </span>

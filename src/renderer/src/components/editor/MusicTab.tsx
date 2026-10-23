@@ -1,27 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import type { AudioGenModel, EditOperation } from '@shared/types'
-import { useOpenCard, useReportRange } from './cards'
+import { NO_API_KEY } from '../../lib/hooks'
+import { useReportRange } from './cards'
 import { useCardRun, useEditor } from './EditorContext'
 import PromptField from '../prompt/PromptField'
 import { formatLength, formatPrice, operationRange } from './editorUtils'
 import { usePlan, usePlans } from './useEditOps'
-import { Check, Choice, Field, GainSlider, OpCard, PlanNotes, RunButton, TimeAt, fieldInput, textArea } from './ui'
+import { Check, Choice, Field, GainSlider, OpCard, PlanNotes, RunButton, TimeAt, fieldInput } from './ui'
 
-// Music & effects: new music under the film (or the marked part of it) and sound effects at a point. Each result
-// lands on the Layers lane as a layer, so its volume and place can be changed for free afterwards.
+// The paid sound cards, shown in the Sound tab after its free ones: new music under the film (or the marked part of
+// it) and sound effects at a point. Each result lands on the Layers lane as a layer, so its volume and place can be
+// changed for free afterwards.
 
 const DEFAULT_MUSIC = 'ace-step-15'
 const DEFAULT_EFFECT = 'elevenlabs-sound-effects-v2'
 
-export default function MusicTab() {
-  const [open, toggle] = useOpenCard('musik')
-  return (
-    <div className="space-y-1">
-      <MusicCard open={open === 'music'} onToggle={() => toggle('music')} />
-      <EffectCard open={open === 'effect'} onToggle={() => toggle('effect')} />
-    </div>
-  )
-}
+/** The Sound tab has no API key banner (most of it is free): its paid cards say it themselves. */
+const NO_KEY_WARNING = [`${NO_API_KEY}.`]
 
 interface CardProps {
   open: boolean
@@ -38,8 +33,8 @@ function lengthHint(m: AudioGenModel): string {
   return `${m.minSeconds}–${m.maxSeconds} s`
 }
 
-function MusicCard({ open, onToggle }: CardProps) {
-  const { edit, current, selection, audio, duration } = useEditor()
+export function MusicCard({ open, onToggle }: CardProps) {
+  const { edit, current, selection, audio, duration, hasApiKey } = useEditor()
   const models = audio.catalog?.music ?? []
   const [prompt, setPrompt] = useState('')
   const [modelChoice, setModelChoice] = useState<string>()
@@ -139,7 +134,7 @@ function MusicCard({ open, onToggle }: CardProps) {
                 label: (
                   <span className="flex items-baseline gap-2">
                     <span>{m.name}</span>
-                    {cheapest === m.id && <span className="text-[11px] text-emerald-300/80">cheapest</span>}
+                    {cheapest === m.id && <span className="text-[11px] text-success">cheapest</span>}
                     <span className="text-[11px] tabular-nums text-muted">
                       {p && !p.problems.length && p.priceUsd !== undefined ? formatPrice(p.priceUsd) : ''}
                     </span>
@@ -158,7 +153,12 @@ function MusicCard({ open, onToggle }: CardProps) {
       <Check checked={fades} onChange={setFades}>
         Fade in and out (2 s)
       </Check>
-      <PlanNotes plan={plan} error={card.error ?? planError} quiet={missing} />
+      <PlanNotes
+        plan={plan}
+        error={card.error ?? planError}
+        quiet={missing}
+        extraWarnings={hasApiKey ? undefined : NO_KEY_WARNING}
+      />
       <RunButton
         label="Create music"
         plan={plan}
@@ -168,13 +168,15 @@ function MusicCard({ open, onToggle }: CardProps) {
         disabledReason={missing}
         onClick={() => plan && op && void card.run({ op, plan, label: 'Create music' })}
       />
-      {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+      {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
     </OpCard>
   )
 }
 
-function EffectCard({ open, onToggle }: CardProps) {
-  const { edit, current, selection, player, audio } = useEditor()
+export function EffectCard({ open, onToggle }: CardProps) {
+  const { edit, current, selection, player, audio, hasApiKey } = useEditor()
+  const lengthField = useId()
+  const modelField = useId()
   const models = audio.catalog?.effects ?? []
   const [prompt, setPrompt] = useState('')
   const [modelChoice, setModelChoice] = useState<string>()
@@ -217,8 +219,8 @@ function EffectCard({ open, onToggle }: CardProps) {
         <p className="mt-1 text-[11px] text-muted">Write in English if you can.</p>
       </Field>
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Length">
-          <select value={length} onChange={(e) => setSeconds(Number(e.target.value))} className={fieldInput}>
+        <Field label="Length" htmlFor={lengthField}>
+          <select id={lengthField} value={length} onChange={(e) => setSeconds(Number(e.target.value))} className={fieldInput}>
             {Array.from({ length: max - min + 1 }, (_, i) => min + i).map((s) => (
               <option key={s} value={s}>
                 {s} s
@@ -227,8 +229,13 @@ function EffectCard({ open, onToggle }: CardProps) {
           </select>
         </Field>
         {models.length > 1 && (
-          <Field label="Model">
-            <select value={model?.id} onChange={(e) => setModelChoice(e.target.value)} className={fieldInput}>
+          <Field label="Model" htmlFor={modelField}>
+            <select
+              id={modelField}
+              value={model?.id}
+              onChange={(e) => setModelChoice(e.target.value)}
+              className={fieldInput}
+            >
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
@@ -240,7 +247,12 @@ function EffectCard({ open, onToggle }: CardProps) {
       </div>
       <TimeAt label="Starts at" value={at} onChange={setAt} player={player} />
       <GainSlider value={gain} onChange={setGain} />
-      <PlanNotes plan={plan} error={card.error ?? planError ?? (audio.catalog ? undefined : audio.error)} quiet="Describe the sound." />
+      <PlanNotes
+        plan={plan}
+        error={card.error ?? planError ?? (audio.catalog ? undefined : audio.error)}
+        quiet="Describe the sound."
+        extraWarnings={hasApiKey ? undefined : NO_KEY_WARNING}
+      />
       <RunButton
         label="Create sound effect"
         plan={plan}
@@ -250,7 +262,7 @@ function EffectCard({ open, onToggle }: CardProps) {
         disabledReason={!prompt.trim() ? 'Describe the sound.' : undefined}
         onClick={() => plan && op && void card.run({ op, plan, label: 'Create sound effect' })}
       />
-      {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+      {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
     </OpCard>
   )
 }

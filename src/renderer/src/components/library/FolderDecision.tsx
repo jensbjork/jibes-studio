@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { FolderInspection, LibraryMode, LibraryStatus } from '@shared/types'
 import { displayPath, folderName } from '../../lib/library'
+import { noticeTones } from '../ui/Banner'
 import FolderIcon from './FolderIcon'
 import { planFor, type PlanAction } from './plan'
 
@@ -44,7 +45,7 @@ export default function FolderDecision({ inspection, status, busy, error, onConf
       )}
 
       {error && (
-        <p className="mt-3 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[12px] text-[#ffb3b5] select-text">
+        <p role="alert" className={`mt-3 rounded-md border px-3 py-2 text-[12px] select-text ${noticeTones.error}`}>
           {error}
         </p>
       )}
@@ -69,7 +70,7 @@ function ActionCard({ action, busy, onClick }: { action: PlanAction; busy: boole
     >
       <span className="min-w-0 flex-1">
         <span className="block font-medium">{action.label}</span>
-        <span className={`mt-0.5 block text-[12px] leading-relaxed ${unavailable ? 'text-amber-200' : 'text-muted'}`}>
+        <span className={`mt-0.5 block text-[12px] leading-relaxed ${unavailable ? 'text-warning' : 'text-muted'}`}>
           {action.disabled ?? action.description}
         </span>
       </span>
@@ -82,11 +83,14 @@ function ActionCard({ action, busy, onClick }: { action: PlanAction; busy: boole
   )
 }
 
+/** A note on the chosen folder, in the app's notice colours. */
 function Callout({ tone, children }: { tone: 'info' | 'warning' | 'error'; children: ReactNode }) {
-  const tones = {
-    info: 'border-line text-muted',
-    warning: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-    error: 'border-accent/30 bg-accent/10 text-[#ffb3b5]'
-  }
-  return <p className={`mt-3 rounded-md border px-3 py-2 text-[12px] leading-relaxed ${tones[tone]}`}>{children}</p>
+  return (
+    <p
+      role={tone === 'error' ? 'alert' : undefined}
+      className={`mt-3 rounded-md border px-3 py-2 text-[12px] leading-relaxed ${noticeTones[tone]}`}
+    >
+      {children}
+    </p>
+  )
 }

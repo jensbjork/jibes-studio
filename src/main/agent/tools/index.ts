@@ -141,7 +141,7 @@ async function promptContext(ctx: ToolContext, segmentId: string | undefined, tr
       const generated = asGenerated(segment.params, continuing, ending)
       const head = `You are writing the prompt for clip ${index + 1} of the sequence "${sequence.name}" (segment_id ${segment.id}), ${generated.duration}, model ${generated.model}.`
       const notes = segment.notes?.trim()
-        ? `\nThe clip's notes ("What happens"):\n"""${segment.notes.trim()}"""`
+        ? `\nThe clip's notes ("Notes" in Studio):\n"""${segment.notes.trim()}"""`
         : ''
       // A continuation in reference mode is written with the references it carries; the frame goes after them.
       const plan = continuing ? continuationOf(sequence, index) : undefined

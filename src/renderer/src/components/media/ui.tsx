@@ -1,10 +1,16 @@
-import type { KeyboardEvent, ReactNode, RefObject } from 'react'
-import { shortcut } from '../../lib/platform'
-import { SearchIcon } from '../feed/icons'
+import type { ReactNode } from 'react'
 import { CloseIcon } from '../sequences/icons'
 
-// Media's shared pieces: the header Images and Films use (laid out like the clip feed's, so the tabs stay
-// put when switching), its search field, and the notice row under it.
+// Media's shared pieces: the header Images and Films use (laid out like the clip feed's, so the tabs and the search
+// stay put when switching), the card shell of their grids, and the notice row under the header.
+
+export { default as SearchField } from '../feed/SearchField'
+
+/** A card of a Media grid (a film, an image; the clip cards look the same): framed, the picture full-bleed on top. */
+export const MEDIA_CARD = 'group min-w-0 overflow-hidden rounded-lg border border-line bg-panel'
+
+/** The text under a card's picture: a 13 px title, then an 11 px muted line of facts. */
+export const MEDIA_CAPTION = 'px-3 py-2.5'
 
 /**
  * The header: the tabs and anything else on the first row (a drag strip, like every view's top), then the filters
@@ -46,68 +52,58 @@ export function CountLine({ text }: { text: string }) {
   )
 }
 
-/** A search field like the clip feed's: Esc clears it, ↓ hands the keyboard to the list. */
-export function SearchField({
-  value,
-  onChange,
-  placeholder,
-  inputRef,
-  onArrowDown
+const NOTICE_TONE = {
+  info: 'bg-raised/50 text-text',
+  /** A side remark ("2 clips are generating but hidden by the filters"). */
+  quiet: 'bg-raised/50 text-muted',
+  error: 'bg-accent/10 text-danger'
+} as const
+
+/**
+ * A strip under a Media header (a filter lifted, an item that is gone, an import's outcome, an error), across the
+ * whole width and never cut short: the text keeps its line breaks and can be selected. Errors are announced at once,
+ * the rest politely. `leading` goes before the text (a spinner), `action` after it (an underlined text button).
+ */
+export function NoticeRow({
+  children,
+  tone = 'info',
+  onClose,
+  action,
+  leading
 }: {
-  value: string
-  onChange: (value: string) => void
-  placeholder: string
-  inputRef: RefObject<HTMLInputElement | null>
-  onArrowDown?: () => void
+  children: ReactNode
+  tone?: keyof typeof NOTICE_TONE
+  onClose?: () => void
+  action?: { label: string; onClick: () => void }
+  leading?: ReactNode
 }) {
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape' && value) {
-      e.preventDefault()
-      e.stopPropagation()
-      onChange('')
-    } else if (e.key === 'ArrowDown' && onArrowDown) {
-      e.preventDefault()
-      onArrowDown()
-    }
-  }
   return (
-    <div className="no-drag relative min-w-36 max-w-72 flex-1">
-      <SearchIcon size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-      <input
-        ref={inputRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        aria-label={placeholder.replace(/…$/, '')}
-        title={`${placeholder.replace(/…$/, '')} (${shortcut('⌘ F')})`}
-        className="h-7 w-full rounded-md border border-line bg-raised pl-7 pr-7 text-[12px] outline-none focus:border-muted"
-      />
-      {value && (
+    <div
+      role={tone === 'error' ? 'alert' : 'status'}
+      className={`flex shrink-0 items-start gap-2 border-b border-line/60 px-6 py-2 text-[12px] ${NOTICE_TONE[tone]}`}
+    >
+      {leading && <span className="flex h-[1lh] shrink-0 items-center">{leading}</span>}
+      <span className="min-w-0 flex-1 whitespace-pre-line select-text">{children}</span>
+      {action && (
         <button
           type="button"
-          onClick={() => {
-            onChange('')
-            inputRef.current?.focus()
-          }}
-          title="Clear the search"
-          className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted hover:bg-line hover:text-text"
+          onClick={action.onClick}
+          className="shrink-0 text-text underline-offset-2 hover:underline"
         >
-          <CloseIcon size={9} />
+          {action.label}
         </button>
       )}
-    </div>
-  )
-}
-
-/** A note under the header (a filter lifted, an item that is gone), closed with ✕. */
-export function NoticeRow({ text, onClose }: { text: string; onClose: () => void }) {
-  return (
-    <div className="flex items-start gap-2 border-b border-line/60 bg-raised/50 px-6 py-2 text-[12px] text-text">
-      <span className="min-w-0 flex-1 select-text">{text}</span>
-      <button type="button" onClick={onClose} className="shrink-0 hover:text-text" title="Close">
-        ✕
-      </button>
+      {onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          title="Close"
+          className="flex h-[1lh] shrink-0 items-center opacity-60 transition hover:opacity-100"
+        >
+          <CloseIcon size={11} />
+        </button>
+      )}
     </div>
   )
 }

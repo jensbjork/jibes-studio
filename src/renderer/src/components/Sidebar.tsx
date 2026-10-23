@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import type { WorkView } from '@shared/types'
 import { ASSET_COPY, ASSET_VIEW, LIBRARY_KINDS } from '../lib/assets'
 import type { View } from '../lib/navigation'
@@ -14,7 +14,7 @@ import { fade, IconBox, rowClass, useRailTooltip } from './RailTooltip'
 import { openCommandPalette } from './search/CommandPalette'
 import { SparkleIcon } from './sequences/icons'
 import { StoryboardIcon } from './storyboards/icons'
-import { StatusMark } from './work/StatusMark'
+import { StatusDot, StatusMark } from './work/StatusMark'
 import WorkIndicator from './work/WorkIndicator'
 import { viewStatusText } from './work/workText'
 
@@ -28,6 +28,8 @@ interface Item {
   id: View
   label: string
   icon: ReactNode
+  /** Its shortcut, joined Mac glyphs ("⌘,"): in its tooltip. */
+  keys?: string
 }
 
 const CREATE: Item[] = [
@@ -49,7 +51,7 @@ const LIBRARY: Item[] = [
   { id: 'prompts', label: 'Prompts', icon: <QuoteIcon /> }
 ]
 
-const SETTINGS: Item = { id: 'settings', label: 'Settings', icon: <GearIcon /> }
+const SETTINGS: Item = { id: 'settings', label: 'Settings', icon: <GearIcon />, keys: '⌘,' }
 
 const WORK_VIEWS = new Set<View>([
   'generate',
@@ -73,17 +75,21 @@ interface RowProps {
   active: boolean
   collapsed: boolean
   onSelect: (v: View) => void
+  /** Something there needs the user (Settings without an API key): an accent dot, and the words as its status. */
+  attention?: string
 }
 
-function Row({ item, active, collapsed, onSelect }: RowProps) {
+function Row({ item, active, collapsed, onSelect, attention }: RowProps) {
   const workView = workViewOf(item.id)
   const counts = useViewWork(workView ?? 'generate')
   // Uploads have no view; rows without one (Prompts, Settings) must not pick them up.
   const running = useRunning((w) => workView !== undefined && w.view === workView)
   const unseen = useUnseen((w) => workView !== undefined && w.view === workView)
-  const status = workView ? viewStatusText(workView, counts, running, unseen) : undefined
+  const status = (workView ? viewStatusText(workView, counts, running, unseen) : undefined) || attention
   const shown = workView ? counts : undefined
-  const { trigger, tooltip } = useRailTooltip(collapsed, item.label, status)
+  const dot = !shown && !!attention
+  const name = item.keys ? shortcut(`${item.label} (${item.keys})`) : item.label
+  const { trigger, tooltip } = useRailTooltip(collapsed, name, status)
 
   return (
     <>
@@ -91,7 +97,7 @@ function Row({ item, active, collapsed, onSelect }: RowProps) {
         onClick={() => onSelect(item.id)}
         aria-current={active ? 'page' : undefined}
         aria-label={collapsed ? (status ? `${item.label}: ${status}` : item.label) : undefined}
-        title={collapsed ? undefined : status}
+        title={collapsed ? undefined : [item.keys && name, status].filter(Boolean).join(' · ') || undefined}
         className={rowClass(active, collapsed)}
         {...trigger}
       >
@@ -100,10 +106,19 @@ function Row({ item, active, collapsed, onSelect }: RowProps) {
           {collapsed && shown && (
             <StatusMark variant="badge" running={shown.running} fresh={shown.unseen} failed={shown.failed} />
           )}
+          {collapsed && dot && (
+            <StatusDot failed className="absolute -right-1 -top-1 ring-2 ring-[var(--row-bg,var(--color-panel))]" />
+          )}
         </IconBox>
         <span className={`min-w-0 flex-1 truncate ${fade(collapsed)}`}>{item.label}</span>
         {!collapsed && shown && (
           <StatusMark variant="inline" running={shown.running} fresh={shown.unseen} failed={shown.failed} />
+        )}
+        {!collapsed && dot && (
+          <>
+            <StatusDot failed className="mr-1" />
+            <span className="sr-only">: {attention}</span>
+          </>
         )}
       </button>
       {tooltip}
@@ -127,11 +142,8 @@ function Group({ title, items, view, collapsed, onSelect }: GroupProps) {
   const headingId = useId()
   return (
     <div role="group" aria-labelledby={headingId} className="flex flex-col gap-0.5">
-      <div className="relative h-8 shrink-0">
-        <div
-          id={headingId}
-          className={`absolute inset-x-0 bottom-1 px-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted/70 ${fade(collapsed)}`}
-        >
+      <div className="relative h-8 shrink-0 short:h-6">
+        <div id={headingId} className={`section-label absolute inset-x-0 bottom-1 px-4 ${fade(collapsed)}`}>
           {title}
         </div>
         <div
@@ -156,18 +168,20 @@ interface Props {
   /** The icon rail instead of the full sidebar. */
   collapsed: boolean
   onToggleCollapsed: () => void
-  /** Which panel next to the sidebar is open: the agent drawer or Activity. */
+  /** Which panel next to the sidebar is open: Agent or Activity. */
   panel?: 'agent' | 'work'
   onTogglePanel: (panel: 'agent' | 'work') => void
+  /** Settings needs the user (no API key yet): its row carries an accent dot and says why. */
+  settingsAttention?: string
 }
 
 /**
  * The window's navigation: Create (the places that make things) and Library (what was made, and what it is made
- * from), each row
- * with what runs there and what is new. At the bottom two slim status rows – Activity and the agent
- * connection – and, below a divider, Settings as the last row. By the wordmark, search (⌘K, the command palette) and
- * the toggle. Collapses to a 72 px icon rail (⌃⌘S) whose rows keep their status as badges and explain themselves in
- * tooltips.
+ * from), each row with what runs there and what is new. At the bottom, under one rule, the slim status rows – Activity,
+ * and the agent connection while it has something to say – and Settings (⌘,) as the last row, with an accent dot while
+ * there is no API key. By the wordmark, search (⌘K, the command palette) and the toggle. Collapses to a 72 px icon rail
+ * (⌃⌘S) whose rows keep their status as badges and explain themselves in tooltips. On a short window the rows and
+ * headings tighten up; should the navigation still not fit, it scrolls without a scrollbar, its bottom fading out.
  */
 export default function Sidebar({
   view,
@@ -177,13 +191,15 @@ export default function Sidebar({
   collapsed,
   onToggleCollapsed,
   panel,
-  onTogglePanel
+  onTogglePanel,
+  settingsAttention
 }: Props) {
   const toggleLabel = shortcut(collapsed ? 'Expand the sidebar (⌃⌘S)' : 'Collapse the sidebar (⌃⌘S)')
   const toggleTip = useRailTooltip(collapsed, toggleLabel)
   const searchLabel = shortcut('Search (⌘K)')
   const searchTip = useRailTooltip(collapsed, searchLabel)
   const badge = devProfile ? <DevBadge /> : variant ? <VariantBadge name={variant} /> : null
+  const nav = useOverflowMark<HTMLElement>()
 
   return (
     <aside
@@ -234,10 +250,12 @@ export default function Sidebar({
         <div className={`flex h-6 shrink-0 items-center ${collapsed ? 'justify-center' : 'pl-4'}`}>{badge}</div>
       )}
 
-      {/* Scrolls when the window is too short, so the bottom stack is never pushed out. */}
+      {/* Scrolls when the window is too short, so the bottom stack is never pushed out: without a scrollbar, which
+          would narrow the rows, and with the bottom fading out while more is below. */}
       <nav
+        ref={nav}
         aria-label="Navigation"
-        className="no-drag -mx-3 mb-2 flex min-h-0 flex-col gap-1 overflow-y-auto overflow-x-hidden px-3"
+        className="no-drag -mx-3 mb-2 flex min-h-0 flex-col gap-1 overflow-y-auto overflow-x-hidden px-3 [scrollbar-width:none] data-overflow:[mask-image:linear-gradient(to_bottom,black_calc(100%_-_24px),transparent)]"
       >
         <Group title="Create" items={CREATE} view={view} collapsed={collapsed} onSelect={onChange} />
         <Group title="Library" items={LIBRARY} view={view} collapsed={collapsed} onSelect={onChange} />
@@ -245,13 +263,43 @@ export default function Sidebar({
 
       <div className="no-drag mt-auto flex shrink-0 flex-col border-t border-line pt-2">
         {/* Status, not places: slimmer rows that open their panel beside the sidebar. */}
-        <div role="group" aria-label="Status" className="flex flex-col gap-0.5">
+        <div role="group" aria-label="Status" className="flex flex-col gap-0.5 pb-1">
           <WorkIndicator collapsed={collapsed} active={panel === 'work'} onClick={() => onTogglePanel('work')} />
           <AgentIndicator collapsed={collapsed} active={panel === 'agent'} onClick={() => onTogglePanel('agent')} />
         </div>
-        <div aria-hidden className="mx-3 my-2 h-px shrink-0 bg-line" />
-        <Row item={SETTINGS} active={view === 'settings'} collapsed={collapsed} onSelect={onChange} />
+        <Row
+          item={SETTINGS}
+          active={view === 'settings'}
+          collapsed={collapsed}
+          onSelect={onChange}
+          attention={settingsAttention}
+        />
       </div>
     </aside>
   )
+}
+
+/**
+ * Marks a scroller with data-overflow while more of it is below the visible part: when it or its content changes
+ * size, and as it scrolls.
+ */
+function useOverflowMark<T extends HTMLElement>() {
+  const ref = useRef<T>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = (): void => {
+      el.toggleAttribute('data-overflow', el.scrollTop + el.clientHeight < el.scrollHeight - 1)
+    }
+    const resize = new ResizeObserver(update)
+    resize.observe(el)
+    for (const child of el.children) resize.observe(child)
+    el.addEventListener('scroll', update, { passive: true })
+    update()
+    return () => {
+      resize.disconnect()
+      el.removeEventListener('scroll', update)
+    }
+  }, [])
+  return ref
 }

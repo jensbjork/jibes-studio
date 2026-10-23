@@ -192,7 +192,7 @@ export default function ClipWindowTrack({
             )
           }
           title={`The excerpt ${range} is sent. Drag to move it.`}
-          className="absolute inset-y-0 cursor-grab rounded-[5px] border-2 border-accent/80 bg-accent/15 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 active:cursor-grabbing"
+          className="absolute inset-y-0 cursor-grab rounded-[5px] border-2 border-accent/80 bg-accent/15 outline-none focus-visible:ring-2 focus-visible:ring-muted active:cursor-grabbing"
           style={{ left: pct(w.start), width: `calc(${pct(end)} - ${pct(w.start)})` }}
         />
         {playhead !== undefined && (
@@ -231,7 +231,7 @@ export default function ClipWindowTrack({
             }`}
             style={{ left: pct(edge === 'start' ? w.start : end) }}
           >
-            <span className="h-full w-1.5 rounded-full bg-accent shadow-[0_0_0_2px_#0b0b0d] group-focus-visible:ring-2 group-focus-visible:ring-accent/60" />
+            <span className="h-full w-1.5 rounded-full bg-accent shadow-[0_0_0_2px_#0b0b0d] group-focus-visible:ring-2 group-focus-visible:ring-muted" />
           </div>
         ))}
       </div>

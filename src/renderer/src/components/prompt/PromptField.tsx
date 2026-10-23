@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import type { PromptBlockContext } from '@shared/prompt-blocks'
-import { shortcut } from '../../lib/platform'
+import { isFocusModeKey, isMac, isSubmitKey, shortcut } from '../../lib/platform'
+import { ExpandIcon } from '../feed/icons'
 import FocusDialog from './FocusDialog'
 import { caretRect, replaceRange } from './textareaDom'
 import { ALL, useBlockMenu, type BlockMenuControls } from './useBlockMenu'
@@ -10,16 +11,11 @@ export const PROMPT_TEXT = 'text-[14.5px] leading-[1.65]'
 /** In focus mode. */
 export const PROMPT_TEXT_LARGE = 'text-[16px] leading-[1.7]'
 
-/** The frame of a prompt field, with a clear focus state. */
+/** The frame of a prompt field, with a clear focus state (the app's focus colour, as on every other field). */
 export function promptFrame(invalid?: boolean): string {
   return invalid
     ? 'border-accent/50 focus:border-accent/80 focus:ring-2 focus:ring-accent/20'
-    : 'border-white/12 hover:border-white/20 focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/15'
-}
-
-/** ⌘⇧F in a prompt field: focus mode. */
-export function isFocusShortcut(e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; code: string }): boolean {
-  return (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.code === 'KeyF'
+    : 'border-white/12 hover:border-white/20 focus:border-muted'
 }
 
 /**
@@ -50,8 +46,11 @@ export function useAutoGrow(
   }, [el, value, minRows, maxRows, fill])
 }
 
-/** The chips shown under a field: the first few groups (the scene template and the rest are under "More…"). */
-const PRIMARY_CHIPS = 4
+/**
+ * The chips shown under a field: the first few groups (the scene template and the rest are under "More…"). Three,
+ * so they fit on one line in Generate's and a clip's form column.
+ */
+const PRIMARY_CHIPS = 3
 
 function primaryChips(chips: { id: string; label: string }[]): { id: string; label: string }[] {
   return chips.filter((c) => c.id !== 'scene').slice(0, PRIMARY_CHIPS)
@@ -86,7 +85,7 @@ interface ToolbarProps {
 
 /**
  * The strip under a prompt field: the building-block chips (each opens the menu for its group), the character
- * count and the focus mode button.
+ * count (only against a limit) and the focus mode button.
  */
 export function PromptToolbar({ blocks, count, onExpand, children }: ToolbarProps) {
   const over = count?.limit !== undefined && count.length > count.limit
@@ -94,24 +93,26 @@ export function PromptToolbar({ blocks, count, onExpand, children }: ToolbarProp
     <div className="mt-1.5 flex items-start gap-3">
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
         {blocks && blocks.chips.length > 0 && (
-          <>
-            <span className="mr-0.5 text-[11px] text-muted" title="Type / in the text to search the building blocks">
-              Building blocks
-            </span>
+          <div
+            role="group"
+            aria-label="Building blocks"
+            title="Type / in the text to search the building blocks"
+            className="flex flex-wrap items-center gap-1"
+          >
             {primaryChips(blocks.chips).map((c) => (
               <Chip key={c.id} id={c.id} label={`＋ ${c.label}`} blocks={blocks} />
             ))}
             {blocks.chips.length > primaryChips(blocks.chips).length && (
               <Chip id={ALL} label="More…" blocks={blocks} title="All building blocks, your prompts and learnings" />
             )}
-          </>
+          </div>
         )}
         {children}
       </div>
       <div className="flex shrink-0 items-center gap-2 pt-0.5">
         {count && (count.length > 0 || count.limit !== undefined) && (
           <span
-            className={`text-[11px] tabular-nums ${over ? 'text-accent' : 'text-muted'}`}
+            className={`text-[11px] tabular-nums ${over ? 'text-danger' : 'text-muted'}`}
             title={count.limit !== undefined ? `${count.length} of at most ${count.limit} characters` : `${count.length} characters`}
           >
             {count.limit !== undefined ? `${count.length}/${count.limit}` : `${count.length} ${count.length === 1 ? 'character' : 'characters'}`}
@@ -121,10 +122,11 @@ export function PromptToolbar({ blocks, count, onExpand, children }: ToolbarProp
           <button
             type="button"
             onClick={onExpand}
+            aria-label="Write in a larger window"
             title={`Write in a larger window (${shortcut('⌘⇧F')})`}
-            className="rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-text"
+            className="flex h-5 w-5 items-center justify-center rounded text-muted transition hover:bg-raised hover:text-text"
           >
-            ⤢ Larger
+            <ExpandIcon size={12} />
           </button>
         )}
       </div>
@@ -142,12 +144,10 @@ export interface PromptFieldProps {
   /** Lines it shows empty, and grows to before it scrolls. */
   minRows?: number
   maxRows?: number
-  /** ⌘/Ctrl+Enter. */
+  /** ⌘↵ (Ctrl+Enter). */
   onSubmit?: () => void
-  /** The model's character limit, shown with the count. */
+  /** The model's character limit: the count is shown against it (and only with one). */
   limit?: number
-  /** Show the character count (always on with a limit). */
-  showCount?: boolean
   /** Focus mode's heading, e.g. "What happens?"; also the field's accessible name when no label points at it. */
   title: string
   /** Focus mode's line under the heading. */
@@ -172,8 +172,9 @@ export interface PromptFieldProps {
 
 /**
  * A prompt field: a textarea with larger text that grows with what is written, a clear frame, building blocks
- * ("/" or the chips), the character count and focus mode (⤢, ⌘⇧F) – the same help in every place a prompt is
- * written. The reference-aware prompt editor (Generate, Sequences) has the same look and tools.
+ * ("/" or the chips), the character count against a limit and focus mode (the expand button, ⌘⇧F) – the same help
+ * in every place a prompt is written. The reference-aware prompt editor (Generate, Sequences) has the same look and
+ * tools.
  */
 export default function PromptField(props: PromptFieldProps) {
   const {
@@ -186,7 +187,6 @@ export default function PromptField(props: PromptFieldProps) {
     maxRows = 14,
     onSubmit,
     limit,
-    showCount,
     title,
     focusHint,
     ariaLabel,
@@ -268,6 +268,7 @@ export default function PromptField(props: PromptFieldProps) {
         aria-label={ariaLabel ?? (id ? undefined : title)}
         aria-invalid={invalid || undefined}
         aria-describedby={ariaDescribedBy}
+        aria-keyshortcuts={onSubmit ? (isMac ? 'Meta+Enter' : 'Control+Enter') : undefined}
         spellCheck={spellCheck}
         aria-autocomplete={withBlocks ? 'list' : undefined}
         aria-controls={blocks.slashOpen ? blocks.menuId : undefined}
@@ -279,12 +280,12 @@ export default function PromptField(props: PromptFieldProps) {
         onSelect={(e) => withBlocks && blocks.onSelect(e.currentTarget)}
         onKeyDown={(e) => {
           if (withBlocks && blocks.onKeyDown(e)) return
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && onSubmit) {
+          if (onSubmit && isSubmitKey(e)) {
             e.preventDefault()
             onSubmit()
             return
           }
-          if (isFocusShortcut(e)) {
+          if (isFocusModeKey(e)) {
             e.preventDefault()
             if (inFocus) return
             expand()
@@ -303,7 +304,7 @@ export default function PromptField(props: PromptFieldProps) {
       {!bare && (
         <PromptToolbar
           blocks={withBlocks ? blocks : undefined}
-          count={showCount || limit !== undefined ? { length: value.length, limit } : undefined}
+          count={limit !== undefined ? { length: value.length, limit } : undefined}
           onExpand={inFocus ? undefined : expand}
         />
       )}

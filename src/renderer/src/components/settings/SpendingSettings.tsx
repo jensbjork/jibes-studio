@@ -6,11 +6,12 @@ import { ipcErrorMessage } from '../../lib/hooks'
 import { COMPUTER } from '../../lib/platform'
 import { useWork } from '../../lib/work'
 import { BudgetMeter } from '../BudgetDialog'
-import { MoreAbout, SettingsItem } from './SettingsLayout'
+import { MoreAbout, SaveActions, SettingsItem } from './SettingsLayout'
 
-// Settings → Spending: what Studio has paid Venice for – today, this month, the last 30 days and this month by kind,
-// place and who asked – and the optional daily and monthly budget. Read from the library's own records (main's
-// spending.ts); what is still rendering is on its way, not spent.
+// Settings → Spending: what Studio has paid Venice for – today, this month and the last 30 days, then the optional
+// daily and monthly budget (the one setting here), and under "Spending details" the days as a chart and this month by
+// kind, place and who asked. Read from the library's own records (main's spending.ts); what is still rendering is on
+// its way, not spent. Nothing spent in 30 days is one line, not a page of zeros.
 
 /** The spending, read again when work starts or finishes, when the window comes back and when the budget changes. */
 function useSpending(budget: BudgetSettings): { spending?: SpendingSummary; error?: string; refresh: () => void } {
@@ -41,18 +42,28 @@ function useSpending(budget: BudgetSettings): { spending?: SpendingSummary; erro
 
 export default function SpendingSettings({ budget, onChanged }: { budget: BudgetSettings; onChanged: () => void }) {
   const { spending, error } = useSpending(budget)
+  const nothing = !!spending && !spending.last30Usd && !spending.monthUsd && !spending.pendingUsd
   return (
     <>
-      <SettingsItem
-        title="Spent"
-        help={`What Studio has paid Venice for, by your ${COMPUTER}’s calendar. Work still rendering is on its way: it isn’t spent yet, but it counts against the budget.`}
-      >
-        {error && <p className="text-[12px] text-accent">{error}</p>}
+      <SettingsItem>
+        {error && (
+          <p role="alert" className="text-[12px] text-danger">
+            {error}
+          </p>
+        )}
         {!spending && !error && <p className="text-[12px] text-muted">Reading…</p>}
-        {spending && <Overview spending={spending} />}
+        {nothing && <p className="text-[12px] text-muted">Nothing spent in the last 30 days.</p>}
+        {spending && !nothing && <Overview spending={spending} />}
       </SettingsItem>
-      {spending && <Breakdowns spending={spending} />}
       <BudgetSetting budget={budget} spending={spending} onChanged={onChanged} />
+      {spending && !nothing && (
+        <MoreAbout summary="Spending details" plain>
+          <div className="space-y-8 pt-2">
+            <DayChart days={spending.days} dailyCap={spending.budget.dailyUsd} />
+            <Breakdowns spending={spending} />
+          </div>
+        </MoreAbout>
+      )}
       <MoreAbout summary="More about what counts">
         <p>
           A video counts when it is finished, at the price Venice quoted – from Generate, a sequence, a storyboard or the
@@ -60,12 +71,17 @@ export default function SpendingSettings({ budget, onChanged }: { budget: Budget
           transcripts and designed voices count as their parts are sent.
         </p>
         <p>
+          Days follow your {COMPUTER}’s calendar. Work still rendering is on its way: not spent yet, but it counts against
+          the budget.
+        </p>
+        <p>
           The numbers come from your library, so something you delete drops out of them. Your Venice account is the
           record of what was billed.
         </p>
         <p>
           Who asked: what an agent’s request paid for counts as that agent’s once you approved it. Everything else is
-          yours – so is anything approved before Studio kept track of who asked.
+          yours – so is anything approved before Studio kept track of who asked. An agent’s request that would go past a
+          budget shows the same warning in its approval dialog – approving it counts as yes.
         </p>
       </MoreAbout>
     </>
@@ -75,22 +91,19 @@ export default function SpendingSettings({ budget, onChanged }: { budget: Budget
 // ── Today, this month, the last 30 days ──────────────────────────────────────
 
 function Overview({ spending: s }: { spending: SpendingSummary }) {
-  const daily = s.budget.dailyUsd
-  const monthly = s.budget.monthlyUsd
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div className="grid grid-cols-3 gap-2">
-        <Tile label="Today" usd={s.todayUsd} cap={daily} pending={s.pendingUsd} />
-        <Tile label="This month" usd={s.monthUsd} cap={monthly} pending={s.pendingUsd} />
+        <Tile label="Today" usd={s.todayUsd} cap={s.budget.dailyUsd} pending={s.pendingUsd} />
+        <Tile label="This month" usd={s.monthUsd} cap={s.budget.monthlyUsd} pending={s.pendingUsd} />
         <Tile label="Last 30 days" usd={s.last30Usd} />
       </div>
       {s.pendingUsd > 0 && (
-        <p className="-mt-2 text-[12px] text-muted">
+        <p className="text-[12px] text-muted">
           <span className="text-text tabular-nums">{usdText(s.pendingUsd)}</span> on its way – rendering now, not spent
           yet.
         </p>
       )}
-      <DayChart days={s.days} dailyCap={daily} />
     </div>
   )
 }
@@ -198,36 +211,30 @@ function DayChart({ days, dailyCap }: { days: SpendingSummary['days']; dailyCap?
         <span>{shortDay(days[Math.floor(days.length / 2)].day)}</span>
         <span>Today</span>
       </div>
-      <details className="mt-2 text-[11px] text-muted">
-        <summary className="cursor-pointer list-none hover:text-text [&::-webkit-details-marker]:hidden">
-          Show the days as a table
-        </summary>
-        <table id={tableId} className="mt-2 w-full max-w-xs tabular-nums">
-          <tbody>
-            {[...days].reverse().map((d) => (
-              <tr key={d.day} className="border-t border-line/60">
-                <td className="py-0.5">{shortDay(d.day)}</td>
-                <td className="py-0.5 text-right text-text">{usdText(d.usd)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
+      <div className="mt-2">
+        <MoreAbout summary="Show as a table">
+          <table id={tableId} className="w-full max-w-xs tabular-nums">
+            <tbody>
+              {[...days].reverse().map((d) => (
+                <tr key={d.day} className="border-t border-line/60">
+                  <td className="py-0.5">{shortDay(d.day)}</td>
+                  <td className="py-0.5 text-right text-text">{usdText(d.usd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </MoreAbout>
+      </div>
     </figure>
   )
 }
 
 // ── This month by kind, place and who ────────────────────────────────────────
 
+/** Nothing when this month is $0 so far: the This month tile already says so. */
 function Breakdowns({ spending: s }: { spending: SpendingSummary }) {
   const month = new Date().toLocaleDateString('en-US', { month: 'long' })
-  if (!s.monthUsd) {
-    return (
-      <SettingsItem title={`${month} so far`}>
-        <p className="text-[12px] text-muted">Nothing paid for this month yet.</p>
-      </SettingsItem>
-    )
-  }
+  if (!s.monthUsd) return null
   const places = s.byPlace.map((p) => ({
     key: p.sequenceId ?? p.storyboardId ?? p.editId ?? p.label,
     label: p.label,
@@ -281,7 +288,7 @@ function Ranked({ title, rows, total, limit }: { title: string; rows: Row[]; tot
         ))}
       </ul>
       {rest > 0 && (
-        <button type="button" onClick={() => setAll(true)} className="mt-2 text-[11px] text-muted hover:text-text">
+        <button type="button" onClick={() => setAll(true)} className="mt-2 text-[12px] text-muted transition hover:text-text">
           {rest} more…
         </button>
       )}
@@ -320,9 +327,12 @@ function BudgetSetting({
   const next = useMemo(() => ({ dailyUsd: parseAmount(daily), monthlyUsd: parseAmount(monthly) }), [daily, monthly])
   const invalid = [next.dailyUsd, next.monthlyUsd].some((v) => v !== undefined && (Number.isNaN(v) || v > MAX_BUDGET_USD))
   const changed = next.dailyUsd !== budget.dailyUsd || next.monthlyUsd !== budget.monthlyUsd
+  // What was typed, against what is saved ("5" and "5.00" are the same budget).
+  const dirty = changed || daily !== amountText(budget.dailyUsd) || monthly !== amountText(budget.monthlyUsd)
 
   const save = async () => {
-    if (invalid || !changed || saving) return
+    if (invalid || saving) return
+    if (!changed) return revert()
     setSaving(true)
     setError(undefined)
     setSaved(false)
@@ -337,6 +347,18 @@ function BudgetSetting({
     }
   }
 
+  const revert = () => {
+    setDaily(amountText(budget.dailyUsd))
+    setMonthly(amountText(budget.monthlyUsd))
+    setError(undefined)
+  }
+
+  const edit = (set: (v: string) => void) => (v: string) => {
+    set(v)
+    setSaved(false)
+    setError(undefined)
+  }
+
   const left = (cap: number | undefined, used: number | undefined): string | undefined => {
     const room = spending && used !== undefined ? roomLeft(cap, used, spending.pendingUsd) : undefined
     return room === undefined ? undefined : `${usdText(room)} left`
@@ -345,44 +367,35 @@ function BudgetSetting({
   return (
     <SettingsItem
       title="Budget"
-      help="Optional. When something paid would take today’s or this month’s spending past a budget, Studio asks before it sends it. An agent’s request shows the same warning in its approval dialog – approving it counts as yes. Leave a field empty for no limit."
+      help="Optional. Studio asks before anything paid would go past it. Leave a field empty for no limit."
     >
-      <form
-        className="flex flex-wrap items-end gap-3"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void save()
-        }}
-      >
+      <div className="flex flex-wrap items-end gap-3">
         <AmountField
           label="Per day"
           value={daily}
-          onChange={(v) => {
-            setDaily(v)
-            setSaved(false)
-          }}
+          onChange={edit(setDaily)}
+          onEnter={() => void save()}
+          onEscape={revert}
           hint={left(budget.dailyUsd, spending?.todayUsd)}
         />
         <AmountField
           label="Per month"
           value={monthly}
-          onChange={(v) => {
-            setMonthly(v)
-            setSaved(false)
-          }}
+          onChange={edit(setMonthly)}
+          onEnter={() => void save()}
+          onEscape={revert}
           hint={left(budget.monthlyUsd, spending?.monthUsd)}
         />
-        <button
-          type="submit"
-          disabled={invalid || !changed || saving}
-          className="mb-[18px] rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-        >
-          Save
-        </button>
-      </form>
-      {invalid && <p className="mt-1 text-[12px] text-accent">Enter an amount in dollars, like 5 or 12.50.</p>}
-      {error && <p className="mt-1 text-[12px] text-accent">{error}</p>}
-      {saved && !changed && <p className="mt-1 text-[12px] text-emerald-300">Saved.</p>}
+        <span className="flex h-8 items-center">
+          <SaveActions
+            dirty={dirty}
+            saving={saving}
+            onSave={() => void save()}
+            onRevert={revert}
+            status={invalid ? 'Enter an amount in dollars, like 5 or 12.50.' : (error ?? (saved ? 'saved' : undefined))}
+          />
+        </span>
+      </div>
     </SettingsItem>
   )
 }
@@ -391,31 +404,45 @@ function AmountField({
   label,
   value,
   onChange,
+  onEnter,
+  onEscape,
   hint
 }: {
   label: string
   value: string
   onChange: (value: string) => void
+  onEnter: () => void
+  onEscape: () => void
+  /** "$4.20 left": on the label's line. */
   hint?: string
 }) {
   const id = useId()
   return (
-    <div className="w-36">
-      <label htmlFor={id} className="block text-[12px] text-muted">
+    <div className="w-40">
+      <label htmlFor={id} className="block truncate text-[12px] text-muted">
         {label}
+        {hint && <span className="tabular-nums"> · {hint}</span>}
       </label>
-      <div className="mt-1 flex items-center rounded-md border border-line bg-raised focus-within:border-muted">
+      <div className="mt-1 flex h-8 items-center rounded-md border border-line bg-raised focus-within:border-muted">
         <span className="pl-2.5 text-muted">$</span>
         <input
           id={id}
           inputMode="decimal"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              onEnter()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              onEscape()
+            }
+          }}
           placeholder="No limit"
-          className="min-w-0 flex-1 bg-transparent px-1.5 py-1.5 tabular-nums outline-none placeholder:text-muted/70"
+          className="min-w-0 flex-1 bg-transparent px-1.5 tabular-nums outline-none placeholder:text-muted/70"
         />
       </div>
-      <p className="mt-0.5 h-[14px] text-[11px] tabular-nums text-muted">{hint}</p>
     </div>
   )
 }

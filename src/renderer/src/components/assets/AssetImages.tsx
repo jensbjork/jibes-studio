@@ -1,15 +1,24 @@
-import { useCallback, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useMemo, useRef, useState, type DragEvent, type HTMLAttributes, type Ref } from 'react'
 import { DEFAULT_MODEL, maxReferenceImages } from '@shared/models'
 import type { Asset, AssetImage, AssetKind } from '@shared/types'
 import { ASSET_COPY, originText } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
-import ImagePreview from './ImagePreview'
+import SectionTitle from '../library/SectionTitle'
+import { reorderHint, useReorder } from '../pickers/useReorder'
+import { CloseIcon, PlusIcon } from '../sequences/icons'
+import ConfirmButton from '../ui/ConfirmButton'
+import ImagePreview, { REMOVE_IMAGE_TITLE } from './ImagePreview'
 import { imageIssues, insertIndex, type DropTarget, type Size } from './imageUtils'
 
 /** In-app drags carry this type, so they can't be mistaken for files dropped from Finder. */
 const DRAG_TYPE = 'application/x-studio-asset-image'
 const MAX_REFERENCES = maxReferenceImages(DEFAULT_MODEL['reference-to-video'])
+
+/** How the reference images are sent, for the tooltip of the line under the title (style frames say their own). */
+const IMAGES_DETAIL =
+  'The images come along in this order when you generate – they get their @Image numbers in Generate, after the ' +
+  'images already there.'
 
 // Places, and poses with people side by side, are mostly photographed wide; people and clothes upright; products
 // as packshots, square; a director's style frames are film stills.
@@ -34,7 +43,10 @@ interface Props {
   onError: (message: string) => void
 }
 
-/** Reference photo grid: add, remove, reorder (drag or "Make cover") and size warnings. */
+/**
+ * Reference photo grid: add, remove (it asks first), reorder (drag, ⌥← / ⌥→ on a focused tile, or "Make cover") and
+ * size warnings.
+ */
 export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated, onError }: Props) {
   const copy = ASSET_COPY[asset.kind]
   const layout = LAYOUT[asset.kind]
@@ -81,6 +93,19 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
   const makeCover = (id: string) => {
     if (ids[0] !== id) void reorder([id, ...ids.filter((x) => x !== id)])
   }
+
+  // ⌥← / ⌥→ on a focused tile moves it one place (only the keys: the tiles keep their own drag and drop below).
+  const keyMoves = useReorder({
+    type: DRAG_TYPE,
+    keys: ids,
+    onMove: (from, to) => {
+      const next = ids.filter((_, i) => i !== from)
+      next.splice(to, 0, ids[from])
+      void reorder(next)
+    },
+    describeMove: (_, to) =>
+      to === 0 ? `The image is now the cover, first of ${ids.length}.` : `The image is now ${to + 1} of ${ids.length}.`
+  })
 
   const remove = async (id: string) => {
     setRemoving((s) => new Set(s).add(id))
@@ -159,38 +184,43 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
 
   const previewIndex = previewId ? ids.indexOf(previewId) : -1
 
+  // One line under the title – how to reorder, which is the cover, and (products, poses) how the kind is used – with
+  // how the images are sent as its tooltip.
+  const reorderLine =
+    images.length > 1
+      ? `${reorderHint().replace(/^./, (c) => c.toUpperCase())} · the first is the cover`
+      : images.length === 1
+        ? 'The first is the cover'
+        : undefined
+  const hint = [reorderLine, copy.usage].filter(Boolean).join(' · ')
+
   return (
     <div>
-      <div className="mb-3 flex items-end justify-between gap-4">
-        <div>
-          <h2 className="font-medium">{copy.images?.title ?? 'Reference images'}</h2>
-          {images.length > 0 && (
-            <p className="mt-0.5 text-[11px] text-muted">
-              {images.length > 1 ? 'Drag to reorder. ' : ''}
-              {copy.images?.intro ??
-                'The first image is the cover. The images come along in this order when you generate – they get ' +
-                  'their @Image numbers in Generate, after the images already there.'}
-            </p>
-          )}
-        </div>
-        {flagged > 0 && (
-          <span
-            className="shrink-0 text-[11px] text-amber-400"
-            title="Venice rejects images under 300 px on the shortest side or with an aspect ratio outside 0.4–2.5."
-          >
-            ⚠ {flagged === 1 ? '1 image' : `${flagged} images`} may be rejected by Venice
-          </span>
-        )}
-      </div>
+      <SectionTitle
+        title={copy.images?.title ?? 'Reference images'}
+        hint={hint || undefined}
+        hintTitle={images.length ? (copy.images?.intro ?? IMAGES_DETAIL) : undefined}
+        actions={
+          flagged > 0 && (
+            <span
+              className="text-[11px] text-warning"
+              title="Venice rejects images under 300 px on the shortest side or with an aspect ratio outside 0.4–2.5."
+            >
+              ⚠ {flagged === 1 ? '1 image' : `${flagged} images`} may be rejected by Venice
+            </span>
+          )
+        }
+      />
 
       {images.length === 0 && adding === 0 ? (
         <button
+          type="button"
           onClick={pick}
           className={`flex h-56 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed transition ${
             fileOver ? 'border-accent bg-accent/5 text-text' : 'border-line text-muted hover:border-muted hover:text-text'
           }`}
         >
-          <span className="text-2xl">＋</span>
+          <PlusIcon size={22} />
           <span className="text-sm">{fileOver ? 'Drop to add' : 'Drop images here or click to choose'}</span>
           <span className="max-w-sm text-[11px] leading-relaxed text-muted">
             JPG, PNG or WebP, at least 300 px on the shortest side. {copy.imageTips}
@@ -211,6 +241,7 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
                 key={image.id}
                 image={image}
                 index={i}
+                keyMoves={keyMoves.itemProps(i)}
                 aspect={layout.tile}
                 size={sizes[image.id]}
                 dragging={dragId === image.id}
@@ -230,13 +261,17 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
               <div key={`adding-${i}`} className={`${layout.tile} animate-pulse rounded-md bg-raised`} />
             ))}
             <button
+              type="button"
               onClick={pick}
               className={`flex ${layout.tile} flex-col items-center justify-center gap-1 rounded-md border border-dashed border-line text-muted transition hover:border-muted hover:text-text`}
             >
-              <span className="text-xl">＋</span>
+              <PlusIcon size={18} />
               <span>Add</span>
             </button>
           </div>
+          <span aria-live="polite" className="sr-only">
+            {keyMoves.announcement}
+          </span>
         </div>
       )}
 
@@ -273,6 +308,8 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
 interface TileProps {
   image: AssetImage
   index: number
+  /** ⌥← / ⌥→: its place on screen and the keys (useReorder's item props, of which the tile takes these two). */
+  keyMoves: HTMLAttributes<HTMLElement> & { ref: Ref<HTMLElement> }
   /** Tailwind aspect-ratio class of the tile. */
   aspect: string
   size?: Size
@@ -291,6 +328,7 @@ interface TileProps {
 function ImageTile({
   image,
   index,
+  keyMoves,
   aspect,
   size,
   dragging,
@@ -318,20 +356,24 @@ function ImageTile({
         />
       )}
       <div
+        ref={keyMoves.ref as Ref<HTMLDivElement>}
         role="button"
         tabIndex={0}
+        aria-label={`Image ${index + 1}${index === 0 ? ', the cover' : ''}`}
         draggable
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
         onClick={onOpen}
         onKeyDown={(e) => {
+          keyMoves.onKeyDown?.(e)
+          if (e.defaultPrevented) return
           if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault()
             onOpen()
           }
         }}
         title={tooltip || undefined}
-        className={`group relative ${aspect} cursor-pointer overflow-hidden rounded-md border bg-raised outline-none transition focus-visible:border-muted ${
+        className={`group relative ${aspect} cursor-pointer overflow-hidden rounded-md border bg-raised outline-none transition focus-visible:border-muted focus-visible:ring-1 focus-visible:ring-muted ${
           issues.length ? 'border-amber-400/50' : 'border-line'
         } ${dragging ? 'opacity-30' : ''}`}
       >
@@ -342,6 +384,7 @@ function ImageTile({
         ) : (
           <img
             src={mediaUrl(image.path)}
+            alt=""
             draggable={false}
             loading="lazy"
             decoding="async"
@@ -362,24 +405,30 @@ function ImageTile({
           ))}
         </div>
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onRemove()
-          }}
-          title="Remove image"
-          className="absolute right-1.5 top-1.5 hidden h-6 w-6 items-center justify-center rounded-full bg-black/70 text-[11px] hover:bg-accent group-hover:flex group-focus-visible:flex"
+        {/*
+          Shown on hover, while the tile has the keyboard focus, and while it has the focus itself (opacity, not
+          display: a hidden button would lose the focus Tab just gave it). Asked in place, over the top of the tile:
+          a narrow tile has no room for the question, so it reads [Cancel] [Remove].
+        */}
+        <ConfirmButton
+          confirmLabel="Remove"
+          onConfirm={onRemove}
+          title={REMOVE_IMAGE_TITLE}
+          armedClassName="absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-center gap-1 bg-black/85 p-1.5"
+          className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white opacity-0 outline-none transition hover:bg-accent-fill focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-white/70 group-hover:opacity-100 group-focus-visible:opacity-100"
         >
-          ✕
-        </button>
+          <CloseIcon size={10} />
+          <span className="sr-only">Remove image {index + 1}</span>
+        </ConfirmButton>
 
         {index > 0 && (
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation()
               onMakeCover()
             }}
-            className="absolute inset-x-0 bottom-0 bg-black/70 py-1.5 text-[11px] opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-black/90"
+            className="absolute inset-x-0 bottom-0 bg-black/70 py-1.5 text-[11px] opacity-0 outline-none transition hover:bg-black/90 focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-white/70 group-hover:opacity-100 group-focus-visible:opacity-100"
           >
             Make cover
           </button>

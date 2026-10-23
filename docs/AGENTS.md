@@ -45,12 +45,15 @@ targets – isn't available, and HEIC pictures are refused.
 2. Switch on **Allow agents to connect**. It is **off by default**, and the setting is
    per profile: JIBES Studio.app, Studio Test and Studio Dev each have their own switch, port (8770; Studio Dev 8771)
    and token.
-3. The status line shows where Studio listens. The agent row at the bottom of the sidebar reads *Agent connected*
-   when an agent is connected (a client that only calls itself "mcp" is shown as *The agent*; its technical name is in
-   the drawer). While the agent works — a tool call within the last 12 seconds — it reads *The agent is working* (or, with
-   the agent's own name, for example *Claude Code is working*) with a pulsing dot and the latest step, and a small pill at the bottom
-   of the window shows the same. Click either to open the activity drawer with every tool call and the pending
-   requests.
+3. The status line shows whether Studio is listening and which agents are connected; *Connect an agent* below it
+   has a tab per agent with its ready-made configuration, and **Advanced** (folded) holds the token, the addresses,
+   Claude Desktop on another computer and the port. While the connection is on, an agent row at the bottom of the
+   sidebar reads *Agent connected* when an agent is connected (a client that only calls itself "mcp" is shown as *The
+   agent*; its technical name is in the Agent panel). While the agent works — a tool call within the last 12 seconds —
+   it reads *The agent is working* (or, with the agent's own name, for example *Claude Code is working*) with a
+   pulsing dot and the latest step, and a small pill at the bottom of the window shows the same. Click either to open
+   the Agent panel with every tool call and the pending requests. With the connection off the row isn't there (unless
+   a request still waits); ⌘K → *Agent* opens the panel.
 
 The first time Studio listens on the Tailscale address, the macOS firewall may ask whether to allow incoming
 connections — answer *Allow*. On Windows, Windows Defender Firewall asks the same ("Allow Studio to communicate on
@@ -59,7 +62,7 @@ these networks"): allow it on private networks, which is what Tailscale's networ
 ## Addresses and token
 
 The server speaks **MCP over Streamable HTTP** at the path `/mcp`, on port **8770** unless you choose another one
-(1024–65535) in the same section. It listens on exactly these addresses and never on your LAN or `0.0.0.0`:
+(1024–65535) under *Advanced* in the same section. It listens on exactly these addresses and never on your LAN or `0.0.0.0`:
 
 | Address | For |
 | --- | --- |
@@ -67,7 +70,7 @@ The server speaks **MCP over Streamable HTTP** at the path `/mcp`, on port **877
 | `http://100.x.y.z:8770/mcp` | Agents on other devices in your [Tailscale](https://tailscale.com) tailnet (this computer's Tailscale IPv4). |
 | `http://<your-mac>.<tailnet>.ts.net:8770/mcp` | The same, by MagicDNS name, when Studio can resolve it. |
 
-Settings shows the actual addresses with copy buttons. Traffic is plain HTTP: loopback never leaves the Mac, and
+*Advanced → Addresses* shows the actual addresses with copy buttons. Traffic is plain HTTP: loopback never leaves the Mac, and
 Tailscale traffic is encrypted by WireGuard.
 
 Every request needs Studio's token:
@@ -76,8 +79,9 @@ Every request needs Studio's token:
 Authorization: Bearer <token>
 ```
 
-The token is a random 256-bit value, stored encrypted in the macOS Keychain. Show, copy or replace it in the
-**Token** field. Replacing it disconnects every connected agent and expires their pending requests.
+The token is a random 256-bit value, stored encrypted in the macOS Keychain. Show, copy or replace it under
+**Advanced → Token** (*Change token…*). Replacing it disconnects every connected agent and expires their pending
+requests.
 
 Optionally, send `X-Studio-Agent-Name: <name>` to choose the name Studio shows in the activity log and the approval
 dialog (otherwise it uses the name the MCP client reports, which may be generic).
@@ -85,13 +89,15 @@ dialog (otherwise it uses the name the MCP client reports, which may be generic)
 ## Client configuration
 
 Claude Desktop needs no configuration: Settings → Agent connection adds Studio to it in one click (see
-[Claude Desktop](#claude-desktop)). For Claude Code, Hermes Agent and OpenClaw the same section shows ready-made
-snippets with your address, and its copy buttons include the real token. The examples below use placeholders: replace `<token>` and the
+[Claude Desktop](#claude-desktop)). For Claude Code, Hermes Agent and OpenClaw, *Connect an agent* in the same
+section has a tab each with a ready-made snippet for the address you choose, and its copy buttons include the real
+token. The examples below use placeholders: replace `<token>` and the
 URL. Treat the token like a password and keep it out of files you commit or share.
 
 ### Claude Desktop
 
-In Studio, open **Settings → Agent connection → Claude Desktop** and click **Add to Claude Desktop**. Studio makes a
+In Studio, open **Settings → Agent connection → Connect an agent → Claude Desktop** and click **Add to Claude
+Desktop**. Studio makes a
 Claude Desktop extension — a `.mcpb` file ([MCP Bundle](https://github.com/modelcontextprotocol/mcpb), manifest
 version 0.3) with this computer's address and the current token filled in — and opens it in Claude Desktop, which asks
 you to install it. That's all: Claude Desktop starts the extension whenever it runs, and Studio shows *Claude* among
@@ -101,7 +107,7 @@ the connected agents, in the activity log and in its approval dialogs.
   links to [claude.ai/download](https://claude.ai/download). Studio looks for it in `/Applications` and
   `~/Applications` (on Windows: its per-user install in `%LOCALAPPDATA%\AnthropicClaude`, or the Microsoft Store
   package), and only looks: it never reads or changes Claude Desktop's settings.
-- **Claude Desktop on another computer:** open *For Claude Desktop on another computer…*, choose the Tailscale
+- **Claude Desktop on another computer:** open *Advanced → For Claude Desktop on another computer…*, choose the Tailscale
   address (or name) and click *Save…*. On that computer, double-click the file, or install it in Claude Desktop under
   *Settings → Extensions → Advanced settings → Install Extension…*. The computer must be in your tailnet. The same
   works for this computer (*This Mac*) if Claude Desktop doesn't open the file by itself.
@@ -260,13 +266,13 @@ frames, reference images and text work without it.
 | --- | --- |
 | `get_studio_guide` | How Studio works and how to write video prompts for it (voices, poses and the review loop included), ending with the learnings recorded so far. Read once at the start of a session. |
 | `get_prompt_blocks` | The building blocks the user inserts into prompts with **/** and the chips under every prompt field: a scene template, framing, camera, light, style, motion and sound (video), framing, light and style (pictures), things to avoid (negative prompts), music and sound effects. Each block's label + the English text it inserts; `context` filters by field. Use the same wording in prompts you write. |
-| `get_workspace` | What the user is looking at (view — `generate`, `media` (Media, with `media_tab`: `videos`, `pictures` or `films`, the tab on screen), `sequences`, `storyboards`, `editor`, `prompts`, `settings` or a library view: `characters`, `environments`, `products`, `outfits`, `poses` —, open sequence and clip, open storyboard, or the edit open in the Editor: view `editor`, `edit_id`, `edit_name`) and the Generate form: mode, model, settings, prompt, reference token maps (`@ImageN`, `@AudioN` and `@VideoN`: `references`, `audio_references`, `video_references` with each video's window), what the model takes (`max_reference_images`, `audio_input`, `reference_videos` with `max_reference_videos` and `reference_video_seconds`), pictures past the model's limit (`not_sent`), `composed_prompt` (the prompt as it is sent, with the References legend of the referenced assets' descriptions) and `description_entries` (with `worn_by` for an outfit somebody wears), validation issues, price. |
+| `get_workspace` | What the user is looking at (view — `generate`, `media` (Media, with `media_tab`: `videos` — the *Clips* tab —, `pictures` or `films`, the tab on screen), `sequences`, `storyboards`, `editor`, `prompts`, `settings` or a library view: `characters`, `environments`, `products`, `outfits`, `poses` —, open sequence and clip, open storyboard, or the edit open in the Editor: view `editor`, `edit_id`, `edit_name`) and the Generate form: mode, model, settings, prompt, reference token maps (`@ImageN`, `@AudioN` and `@VideoN`: `references`, `audio_references`, `video_references` with each video's window), what the model takes (`max_reference_images`, `audio_input`, `reference_videos` with `max_reference_videos` and `reference_video_seconds`), pictures past the model's limit (`not_sent`), `composed_prompt` (the prompt as it is sent, with the References legend of the referenced assets' descriptions) and `description_entries` (with `worn_by` for an outfit somebody wears), validation issues, price. |
 | `list_assets` | Characters, environments, products, outfits, poses and the user's directors (`kind: "director"`, with their `direction` and `style_video_count`; their photos are style frames) with ids, descriptions, photo ids, default outfits and — for characters and environments — their audio clips (`audio_id`, role `voice` or `soundscape`, duration, reference window `clip_start` / `clip_length`; for a character's voice `clone_consent`, whether you allow cloning it for new lines); optional `kind` and `query` filters. `get_asset` shows the same per clip. Photos and clips an agent added carry `added_by` (`{agent, host?}`). |
 | `get_asset` | One asset with its photos as images (JPEG, at most 768 px; `max_images` 1–12, default 4), each labelled with its photo number and `image_id` (and `added_by` when an agent added it); for an outfit, the characters wearing it by default. With `include_audio` (the first clip, or the one named by `audio_id`) also a clip's reference window as MP3 audio, exactly as Venice would get it. |
 | `list_directors` | Every director: the user's own and Studio's ready-made ones (`ready_made: true`, read-only), each with its `direction` (editing, look, camera, light, framing, rhythm, performance, sound, avoid, `shot_seconds`, `continuity`, `defaults`), its style frames and videos, and `section_preview` — the Direction section as Studio appends it in your prompt language. See [Directors](#directors). |
 | `list_models` | Venice's usable video models (optionally one `kind`) with mode, durations, resolutions, aspect ratios, reference image limit, whether they take reference audio (`audio_input`, `max_reference_audios`), whether they take reference videos (`reference_videos`; Seedance 2.x: `max_reference_videos` and `reference_video_seconds: {min, max_each, max_total}` — 2.0: 3 of 2–15 s, 15 s together; 2.5: 10 of 2–30 s, 30 s), audio and prompt length limit, and for image-to-video models whether they take an end image (`supports_end_image`); the default model is marked. |
 | `list_prompts` | The prompt library, favourites first. |
-| `list_generations` | Every generation, filtered and sorted like Media's *Videos* (`session: true` — only Generate's list: what was made there since Studio started and clips that were still being made when it started, with `session_started` in the answer —, `query`, `status`, `model`, `asset_id`, `min_rating` (1–3 stars; thumbs down never passes), `thumbs_down`, `unrated`, `since_days`, `placement`, `has_reviews`, `source` — where it came from: `generated`, `import` (own clips, and copies of exported films opened in the Editor, marked `recipe.export`) or `edit` — `sort`, `limit` 1–50 default 20, `offset`), each with its `source`, `title` (an own clip's file name, a version's "<edit> v3"), `parent_id` and `edit_id` where they apply, status, prompt, settings, price, the user's rating (-1 = thumbs down, 1–3 stars), review count, a reference summary and — for finished and failed rows — `seen_by_user` (whether you have played or opened it yet; `unseen_only` lists only the new ones), plus totals for the filtered set. |
+| `list_generations` | Every generation, filtered and sorted like Media's *Clips* (`session: true` — only Generate's list: what was made there since Studio started and clips that were still being made when it started, with `session_started` in the answer —, `query`, `status`, `model`, `asset_id`, `min_rating` (1–3 stars; thumbs down never passes), `thumbs_down`, `unrated`, `since_days`, `placement`, `has_reviews`, `source` — where it came from: `generated`, `import` (own clips, and copies of exported films opened in the Editor, marked `recipe.export`) or `edit` — `sort`, `limit` 1–50 default 20, `offset`), each with its `source`, `title` (an own clip's file name, a version's "<edit> v3"), `parent_id` and `edit_id` where they apply, status, prompt, settings, price, the user's rating (-1 = thumbs down, 1–3 stars), review count, a reference summary and — for finished and failed rows — `seen_by_user` (whether you have played or opened it yet; `unseen_only` lists only the new ones), plus totals for the filtered set. |
 | `get_generation` | One generation with its source fields, the `recipe` of an own clip or a version (how it was made: the operation, its base version, its cost, its added sound `layers`; for an import the file name and why a working copy was made; for a copy of an exported film `export`) and `original_path` (an import's untouched original next to its working copy), its token maps, `sent_prompt` (what Venice got, when descriptions were appended), the sequence clip or storyboard transition it is a take of (with the boards it goes between), the user's rating and every review, `seen_by_user`, its poster frame and optionally up to 6 `frames` from the video. |
 | `list_sequences` | Sequences with clip count and the length of the current cut. Storyboards are not listed (a note points to `list_storyboards`). |
 | `get_sequence` | One sequence (a storyboard's id is refused with a pointer to `get_storyboard`) with its clips, its number of stills, its `defaults` (what new clips start from), its `export_height` (the *Export format*, null = the first clip's own size; `update_sequence` changes both) and its `cast` (the token maps `references` / `audio_references` of the assets chosen for the whole sequence, `outfit_wearers` and `following_clips`); each clip with `follows_cast` (its references are exactly the cast's, so it changes with the cast; `carries_cast_from_clip` for a continuation that carries the cast from a clip that follows it), its `notes`, token maps (with `video_references` and `video_reference_seconds` for a clip with reference videos), `composed_prompt` and `description_entries` (with `worn_by`), `start_image` / `end_image` (`{kind: "previous" \| "next", from_clip}`, `{kind: "image", still_id \| asset_image_id, path}` or null), `continue_from_previous`, `end_from_next` — a continuing clip also has `continue_mode` (`references` or `exact`), `sent_as` (how its take goes now; `continue_mode_note` says why it differs or doesn't apply) and, in reference mode, `carried_references` (`from_clip`, `inherited`, the `references` / `audio_references` / `video_references` it sends and `start_frame_token`, the previous clip's last frame sent after them; `not_sent` when a reference gives way for it); its `composed_prompt` includes the instruction to start on the frame —, `supports_end_image`, validation issues, `frame_problems` (why its neighbours' frames can't be had yet) and selected take (with its `source`; `own_clip: true` when it is your own film or a version from the Editor); poster frames with `include_thumbnails` (default true). A sequence cut to a song also has its `song` (name, `duration`, `bpm` when the song has been analysed, `has_vocals`, `lyrics`: lines numbered from 1 with their times) and each clip its `song` (place, `part`, `singer`, `words`) and `take_sync` (see [Clips in a song](#clips-in-a-song)). The sequence's `director`, and per clip `director_choice` (`own`, `sequence`, `none`) and `director`; `direction` shows the Direction section its prompt gets. |
@@ -286,7 +292,7 @@ frames, reference images and text work without it.
 | `review_export` | A whole exported film (of a sequence or a storyboard): when it still matches its sequence or storyboard, the clips (a storyboard's transitions) with their place in the film, `frames_per_clip` frames inside each clip (1–4, default 2) and the last frame before and first frame after every cut (`include_cut_frames`), at most 24 frames; otherwise evenly spread frames and a note why the cuts are unknown. With `include_audio`, up to 30 s of its sound from `audio_start`. |
 | `review_sequence` | A sequence clip by clip: prompt, references, continuation, the selected take's rating and review count, and `frames_per_clip` frames of it (2–6, default 3; first and last frame included, within the trims; at most 30 frames in all), plus continuity hints for every cut. |
 | `list_reviews` | Reviews by the user (author `user`) and agents, most recently changed first (for one generation: the user's first), filtered by `generation_id`, `author`, `tag`, `min_rating` (1–3) or `thumbs_down`; outside a single generation each comes with that generation's prompt and model. |
-| `list_edits` | The edits in the Editor, newest first: origin (a clip from the feed, a take, an export or an own film), current version, number of versions, length, whether a paid job runs and the cost so far. |
+| `list_edits` | The edits in the Editor, newest first: origin (a clip from Media, a take, an export or an own film), current version, number of versions, length, whether a paid job runs and the cost so far. |
 | `get_edit` | One edit: the version tree (`version_id`, `parent_version_id`, the operation, its cost, which sequence clips use it, its added sound `layers` with `layer_id`), the current version, the paid jobs (progress, errors), AI takes, the edit's audio media (`media_id`), and for the current version its cut markers, its layers and muted spans as the timeline draws them and a transcript summary; whether this Mac separates voice and background and whether Venice lists a voice changer; poster frames with `include_thumbnails`. |
 | `get_transcript` | A version's (or any generation's) transcript lines (`segment_id`, start, end, text) as JSON, or as SubRip with `format: "srt"`; an inherited one names `inherited_from`. |
 | `plan_edit_operation` | Checks an operation on a version exactly as the Editor's cards do and says what it would do and cost, without doing it: the normalized operation (range snapped, defaults filled), `paid`, `price_usd`, `partial_price` / `price_note`, the parts, notes, warnings and problems — and for picture operations the frames it works from as images (`regenerate`: the frame before and after the range, or the film's first frame for a range at 0; `extend`: the film's last frame; `prompt_edit`: the first and last frame of the range; `upscale`: none). Free (it may ask Venice for free quotes). |
@@ -305,10 +311,10 @@ frames, reference images and text work without it.
 | `set_references` | Sets the form's reference images and audio from assets, in order (`replace` or `append`): all photos or chosen `image_ids` (`[]` for none, e.g. only a voice); with a model that takes reference audio, a character's first voice clip unless `include_voice` is false, an environment's first sound clip with `include_voice: true`, or chosen `audio_ids`. An item can also be a loose picture, `{still_id}` or `{upload_id}` (made a still in `Reference images` first), with no description to append, or a reference video, `{video: {generation_id} \| {export_id} \| {upload_id}, start?, length?}` (see [Reference videos](#reference-videos)). Switches the form to reference-to-video if needed and returns the token maps (`references`, `audio_references`, `video_references`) to write the prompt with. Photos, clips and videos over the model's limits (9 images for Seedance; 3 clips, 15 s of audio in all; Seedance 2.0 3 videos and 15 s, 2.5 10 videos and 30 s) are listed in `not_added` / `not_added_audio` / `not_added_videos`, and so is a default voice under 2 s (no model takes it). Replacing the references doesn't renumber the prompt's tokens; `reorder_references` does. |
 | `reorder_references` | Changes the order of the form's (`target: "form"`, default) or a clip's (`target: {segment_id}`) reference images (`images`), audio clips (`audios`) and/or reference videos (`videos`), like dragging a thumbnail in Studio, and renumbers every `@ImageN` / `@AudioN` / `@VideoN` in the prompt and negative prompt so each keeps pointing at the same picture, clip or video: references [A, B, C] with "@Image1 hugs @Image3", `images: ["@Image3"]` → [C, A, B] and "@Image2 hugs @Image1". References are named by token, `image_id` / `audio_id` or `asset_id` (all of that asset's photos or clips), a video by its token, `generation_id` or `export_id`; the named ones come first, the rest keep their order. Answers with the new token maps, `moved` (old → new token), the prompt, `composed_prompt` and the pictures past the model's limit (`not_sent`; moving one forward sends it). For a continuing clip only its own references (one that carries another clip's says where to reorder them); not for a clip that sends no references. |
 | `swap_reference` | Swaps the picture in one place of the form's (`target: "form"`, default) or a clip's (`target: {segment_id}`) references for another, as clicking a reference thumbnail does in Studio, without changing any number: `image` names the place (its token in the current numbering, or the `image_id` there), `with` the new picture (`{asset_id, image_id?}` — the cover unless `image_id` —, `{still_id}` or `{upload_id}`, made a still in `Reference images` first). `whole_asset: true` swaps the whole asset, as clicking a library photo does in Studio: every place of the asset whose photo is in `image` goes to the asset in `with.asset_id` (its photos in order, reused from the first when it has fewer), and its voice or sound takes the old one's `@Audio` places (the old clips stay, with a note, when it has none). One character for another also hands over the outfit it wore among the references: the new character's default outfit takes that outfit's places, or — when it has none — the old outfit stays and is worn by the new character (`outfit_wearers` follows either way; a note says which). The name written right before a group of tokens that all changed follows (`Anna (@Image1, voice @Audio1)` → `Bo (…)`), as do the description switches and who wears which outfit; a name before a group that still holds some of the old asset's pictures stays. Answers with the token maps, `swapped` (each token that shows something else now: `was` / `now`), the prompt, `composed_prompt`, issues and `notes`. Refused for a loose picture or a non-asset with `whole_asset`, and for a clip that sends no references of its own (one that carries another clip's names the clip to swap in — the clips carrying its references keep their tokens). |
-| `open_in_studio` | Brings a place to the front: the Generate view (with `generation_id`, that clip in its drawer; a clip that isn't in Generate's list — made in an earlier session, a take, a version — opens in Media instead: `shown: "media"` and a `note`), Media (`view: "media"`, `tab` `videos`, `pictures` or `films`; `generation_id` opens a clip in *Videos*' drawer, `still_id` a picture in *Images*, `export_id` a film in *Films*, each on its own tab; answers `{shown: "media", tab}`), a sequence (optionally one clip), a storyboard (with `transition_id`, that transition in the transition editor), an edit in the Editor (`view: "editor"`, `edit_id`, with `version_id` that version in the player; without either the list), an asset in its library view (`view: "asset"`, `asset_id`) or the prompt library (`view: "prompts"`). Opening something never counts as the user having seen it. |
+| `open_in_studio` | Brings a place to the front: the Generate view (with `generation_id`, that clip in its drawer; a clip that isn't in Generate's list — made in an earlier session, a take, a version — opens in Media instead: `shown: "media"` and a `note`), Media (`view: "media"`, `tab` `videos`, `pictures` or `films`; `generation_id` opens a clip in *Clips*' drawer, `still_id` a picture in *Images*, `export_id` a film in *Films*, each on its own tab; answers `{shown: "media", tab}`), a sequence (optionally one clip), a storyboard (with `transition_id`, that transition in the transition editor), an edit in the Editor (`view: "editor"`, `edit_id`, with `version_id` that version in the player; without either the edit the Editor opens by itself — the one open last, else the most recently changed —, named in the answer's `edit_id`), an asset in its library view (`view: "asset"`, `asset_id`) or the prompt library (`view: "prompts"`). Opening something never counts as the user having seen it. |
 | `create_asset` | Creates a character, environment, product, outfit, pose or director with a name and description (a director also with its `direction`). Add photos with `add_asset_images` (a director's are its style frames) and, for characters and environments, sound with `add_asset_audio`. |
 | `update_asset` | Changes an asset's name, description, (characters) default outfit or (directors) `direction` — the parts given replace, `null` removes one, the style videos stay. Renaming also renames its folder. The description is appended to every later prompt that sends the asset's photos or voice. |
-| `copy_director_preset` | Copies a ready-made director (`preset:…`) into the library as one of your own, named after it, to be changed. |
+| `copy_director_preset` | Copies a ready-made director (`preset:…`) into the library as one of your own, named “<name> (copy)” (“Noir (copy)”, or “Noir (copy) 2” when that is taken), to be changed. |
 | `add_director_videos` | Adds style videos to one of your directors — `{video: {generation_id} \| {export_id} \| {upload_id}, start?, length?}`, a window of 2–15 s (default the first 5 s) — copied into its folder (`Directors/<name>/`). Only you remove one, in Studio. |
 | `update_asset_audio` | Moves or resizes an audio clip's reference window (`clip_start`, `clip_length`); Studio keeps it 2–15 s inside the file and says when it adjusted it. |
 | `add_asset_images` | Adds photos to an asset of any kind, after its photos: `sources` (1–12, in order) are `{upload_id}`, `{url}` (fetched like `begin_upload`; the call waits at most 45 s for its URLs), `{still_id}`, `{asset_image_id}` (another asset's photo) or `{generation_id, time}` (a frame of a finished clip). Copied into the asset's folder under the file's own name; all or nothing. Answers with the added photos (`image_id`, `photo_number`) as images. The user sees who added them. |
@@ -659,7 +665,7 @@ doesn't count.
    another picture) and whether *Safe mode for images* is on. A request that would take your spending past the
    budget says so under its price, with how full the day or month is; approving it is your yes, and Studio doesn't
    ask again when it is sent. If Studio is
-   not in front, its Dock icon bounces once. Pending requests are also listed in the activity drawer.
+   not in front, its Dock icon bounces once. Pending requests are also listed in the Agent panel.
 4. You approve or decline (optionally with a reason). On approval Studio re-checks that the clips, the image and
    audio files and the composed prompt are still exactly what was shown — a description edited or switched off, or
    the prompt language changed, since the request makes it lapse, and the dialog says so before you click (the
@@ -861,12 +867,12 @@ one to three stars — is what `list_generations({min_rating})`, `list_generatio
 `100.64.0.0/10` IPv4 address next to an `fd7a:115c:a1e0::/48` IPv6 address); other VPNs or networks that happen to
 use `100.x` addresses are deliberately ignored. On Windows it is the network adapter Tailscale installs, named
 *Tailscale*, with an IPv4 address in Tailscale's range and an `fd7a:115c:a1e0::/48` IPv6 address (renaming the
-adapter hides it from Studio). Make sure Tailscale is running and connected, then search again in Agent connection —
+adapter hides it from Studio). Make sure Tailscale is running and connected, then click *Check again* in Agent connection —
 Studio also re-checks every 30 seconds. Until then only agents on the same computer can connect.
 
-**The port is in use.** Studio reports that the port is used by another program. Choose another port in
-Agent connection and update your agents' URLs. Note that JIBES Studio.app and Studio Dev both default to 8770, so give one
-of them another port if both have the connection switched on. To see what holds the port:
+**The port is in use.** Studio reports that the port is used by another program. Choose another port under
+*Agent connection → Advanced → Port* and update your agents' URLs. Note that JIBES Studio.app and Studio Test both
+default to 8770 (Studio Dev to 8771), so give one of them another port if both have the connection switched on. To see what holds the port:
 `lsof -nP -iTCP:8770 -sTCP:LISTEN` (on Windows: `netstat -ano | findstr :8770`).
 
 **Studio could not listen on the Tailscale address.** The connection still works on `127.0.0.1`; the status line
@@ -874,7 +880,7 @@ explains the error. Check the macOS firewall (System Settings → Network → Fi
 allow Studio in Windows Defender Firewall (*Allow an app through firewall*).
 
 **HTTP 401 Unauthorized.** The `Authorization: Bearer <token>` header is missing or the token is wrong — typically
-after the token was replaced. Copy the current token from Agent connection. The Claude Desktop extension says *Studio
+after the token was replaced. Copy the current token from *Agent connection → Advanced → Token*. The Claude Desktop extension says *Studio
 refused the token*: add Studio to Claude Desktop again.
 
 **Claude Desktop has no Studio tools, or only `studio_status`.** Ask Claude to call `studio_status`: it says why.
@@ -884,7 +890,7 @@ Claude Desktop has its lines prefixed `[studio]` (never the token).
 
 **HTTP 403 Forbidden.** The request came from an address that isn't allowed on the socket it reached: the
 loopback address only serves this Mac, and the Tailscale address only serves tailnet peers (not devices on a LAN
-that happens to use `100.x` addresses). Use one of the addresses listed in Settings.
+that happens to use `100.x` addresses). Use one of the addresses under *Agent connection → Advanced → Addresses*.
 
 **HTTP 403 "Browser access is not allowed".** The request carried an `Origin` header. Web pages and browser-based
 clients are refused by design; use a native MCP client or `mcp-remote`.

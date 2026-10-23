@@ -5,8 +5,9 @@ import { APPROVAL_TTL_MS, pendingApprovals, showApproval, useAgentState } from '
 import { formatUsd } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import { THIS_COMPUTER } from '../../lib/platform'
-import { CloseIcon } from '../sequences/icons'
 import { SETTINGS_SECTION, showSettingsSection } from '../settings/SettingsLayout'
+import SidePanel from '../SidePanel'
+import { buttonClass } from '../ui/button'
 import {
   activityText,
   agentSummary,
@@ -27,26 +28,20 @@ interface Props {
 }
 
 /**
- * What the connected agents have done, newest first, with requests waiting for the user's OK pinned on top.
- * Slides out next to the sidebar (at --sidebar-w, so it follows the sidebar when it is collapsed to its icon rail).
+ * The Agent panel: what the connected agents have done, newest first, with requests waiting for the user's OK pinned
+ * on top. A SidePanel beside the sidebar, like Activity. While the connection is off it shows the status card (with
+ * its one way to Settings) and only the events from before it was switched off.
  */
 export default function AgentDrawer({ open, onClose, navigate }: Props) {
-  const agent = useAgentState()
-  const summary = agentSummary(agent.status)
-  const waiting = pendingApprovals(agent)
-  const now = useNow(open ? 15_000 : 0)
-
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      // Escape belongs to a dialog shown over the drawer (e.g. an approval), not to the drawer.
-      if (e.key === 'Escape' && !document.querySelector('[aria-modal="true"]')) onClose()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
-
   if (!open) return null
+  return <Panel onClose={onClose} navigate={navigate} />
+}
+
+function Panel({ onClose, navigate }: Omit<Props, 'open'>) {
+  const agent = useAgentState()
+  const waiting = pendingApprovals(agent)
+  const now = useNow(15_000)
+  const enabled = !!agent.status?.enabled
 
   // Straight to Agent connection, not the top of Settings.
   const openSettings = () => {
@@ -56,42 +51,36 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
   }
 
   return (
-    <>
-      {/* Clicking anywhere outside closes the drawer. It opens next to the sidebar, expanded or collapsed. */}
-      <div className="no-drag fixed inset-y-0 left-[var(--sidebar-w,208px)] right-0 z-30" onMouseDown={onClose} />
-      <aside
-        aria-label="Agent"
-        className="no-drag fixed inset-y-0 left-[var(--sidebar-w,208px)] z-40 flex w-[340px] flex-col border-r border-line bg-panel shadow-2xl shadow-black/50 transition-[left] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none"
-      >
-        <div className="drag flex h-12 shrink-0 items-center gap-2 px-4">
-          <h2 className="font-semibold">Agent</h2>
-          <button
-            onClick={onClose}
-            title="Close"
-            className="no-drag ml-auto rounded p-1 text-muted transition hover:bg-raised hover:text-text"
-          >
-            <CloseIcon size={12} />
+    <SidePanel
+      label="Agent"
+      title="Agent"
+      onClose={onClose}
+      // While the connection is off, the status card's "Turn on in Settings" is the way there.
+      footer={
+        enabled && (
+          <button type="button" onClick={openSettings} className="text-[12px] text-muted transition hover:text-text">
+            Agent connection settings →
           </button>
-        </div>
+        )
+      }
+    >
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+        <StatusCard status={agent.status} error={agent.statusError} onOpenSettings={openSettings} />
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
-          <StatusCard status={agent.status} error={agent.statusError} onOpenSettings={openSettings} />
-
-          {waiting.length > 0 && (
-            <section>
-              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
-                Waiting for your OK
-              </h3>
-              <div className="space-y-2">
-                {waiting.map((a) => (
-                  <PendingCard key={a.id} approval={a} now={now} />
-                ))}
-              </div>
-            </section>
-          )}
-
+        {waiting.length > 0 && (
           <section>
-            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Latest events</h3>
+            <h3 className="section-label mb-2">Waiting for your OK</h3>
+            <div className="space-y-2">
+              {waiting.map((a) => (
+                <PendingCard key={a.id} approval={a} now={now} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {(enabled || agent.activity.length > 0) && (
+          <section>
+            <h3 className="section-label mb-2">Latest events</h3>
             {agent.activity.length ? (
               <ol className="space-y-px">
                 {agent.activity.map((a) => {
@@ -99,7 +88,7 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
                   return (
                     <li key={a.id} className="flex gap-2.5 rounded px-1.5 py-1 text-[12px] leading-snug hover:bg-raised/50">
                       <span className="w-11 shrink-0 text-muted tabular-nums">{formatTime(a.at)}</span>
-                      <span className={`min-w-0 flex-1 break-words ${a.ok ? '' : 'text-[#ffb3b5]'}`} title={a.tool}>
+                      <span className={`min-w-0 flex-1 break-words ${a.ok ? '' : 'text-danger'}`} title={a.tool}>
                         {!a.ok && <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-accent align-middle" />}
                         {activityText(a)}
                         {request && (
@@ -117,21 +106,14 @@ export default function AgentDrawer({ open, onClose, navigate }: Props) {
               </ol>
             ) : (
               <p className="text-[12px] leading-relaxed text-muted">
-                {summary.tone === 'off'
-                  ? 'Nothing yet. Turn on the agent connection and everything an agent does shows up here.'
-                  : 'Nothing yet. When an agent connects, everything it does shows up here – what it reads and changes, and what it wants to generate or delete.'}
+                Nothing yet. When an agent connects, everything it does shows up here – what it reads and changes, and
+                what it wants to generate or delete.
               </p>
             )}
           </section>
-        </div>
-
-        <div className="border-t border-line px-4 py-3">
-          <button onClick={openSettings} className="text-[12px] text-muted transition hover:text-text">
-            Agent connection settings →
-          </button>
-        </div>
-      </aside>
-    </>
+        )}
+      </div>
+    </SidePanel>
   )
 }
 
@@ -152,7 +134,11 @@ function StatusCard({
         {summary.label}
       </p>
       <p className="mt-1 text-[12px] leading-relaxed text-muted">{summary.detail}</p>
-      {error && <p className="mt-1 text-[12px] text-accent">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-1 text-[12px] text-danger">
+          {error}
+        </p>
+      )}
 
       {status?.enabled && status.running && (
         <>
@@ -173,18 +159,16 @@ function StatusCard({
             </ul>
           )}
           {!status.tailscaleAddress && (
-            <p className="mt-2 text-[12px] leading-relaxed text-amber-300">
+            <p className="mt-2 text-[12px] leading-relaxed text-warning">
               Tailscale isn’t running – only agents on {THIS_COMPUTER} can connect.
             </p>
           )}
         </>
       )}
 
-      {!status?.enabled && (
-        <button
-          onClick={onOpenSettings}
-          className="mt-2.5 rounded-md border border-line px-3 py-1.5 text-[12px] transition hover:bg-raised"
-        >
+      {/* Not before the status is known: it would flash in while the connection may well be on. */}
+      {status && !status.enabled && (
+        <button type="button" onClick={onOpenSettings} className={`mt-2.5 ${buttonClass('secondary', 'sm')}`}>
           Turn on in Settings
         </button>
       )}
@@ -215,7 +199,7 @@ function PendingCard({ approval: a, now }: { approval: ApprovalRequest; now: num
         <span className="min-w-0 flex-1 truncate text-muted">{expiresText(a.createdAt + APPROVAL_TTL_MS, now)}</span>
         <button
           onClick={() => showApproval(a.id)}
-          className="shrink-0 rounded-md bg-accent px-2.5 py-1 font-medium text-white transition hover:bg-accent-hover"
+          className="shrink-0 rounded-md bg-accent-fill px-2.5 py-1 font-medium text-white transition hover:bg-accent-hover"
         >
           Review
         </button>

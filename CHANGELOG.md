@@ -10,7 +10,7 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
-- **Updates from GitHub**: Studio looks for a newer release once a day when it starts (*Settings → About Studio* to
+- **Updates from GitHub**: Studio looks for a newer release once a day when it starts (*Settings → About* to
   switch it off or check now; on a Mac also **Check for Updates…** in the app menu; never in a development build). A
   newer one is offered in a small notice – **Update now**, **Release notes**, **Later** (which skips that version):
   Studio downloads the file for this computer from the release, checks it against the SHA-256 GitHub publishes (or the
@@ -20,22 +20,22 @@ breaking changes; they are called out under **Changed** or **Removed**.
   replace (the Windows zip, a read-only folder) says so and offers the release page. Agents can't start an update.
 - **Studio in Claude Desktop**: *Settings → Agent connection → Add to Claude Desktop* makes a Desktop Extension
   (`.mcpb`, manifest 0.3) with this Studio's address and token and opens it in Claude Desktop, which asks to install it –
-  then Studio is one of Claude's connectors, with all its tools. *For Claude Desktop on another computer…* saves the file
-  with the Tailscale address instead. The extension's small bridge connects Claude to Studio's agent server, answers
-  clearly when Studio isn't running or the token was replaced, and reconnects when Studio comes back. The `mcp-remote`
-  configuration remains as the way by hand.
-- **Directors**: a new kind in the library (*Directors*, folder `Regissörer/`) – a way of making a film that every
+  then Studio is one of Claude's connectors, with all its tools. *For Claude Desktop on another computer…* (under
+  *Advanced*) saves the file with the Tailscale address instead. The extension's small bridge connects Claude to
+  Studio's agent server, answers clearly when Studio isn't running or the token was replaced, and reconnects when
+  Studio comes back. The `mcp-remote` configuration remains as the way by hand.
+- **Directors**: a new kind in the library (*Directors*, folder `Directors/`) – a way of making a film that every
   prompt it directs carries: *editing* (with the shot length a sequence aims for and whether shots cut or flow on),
   *look*, *camera*, *light*, *framing*, *rhythm*, *performance*, *sound* (only for clips with sound) and *avoid* (added
   to the negative prompt), with **style frames** (its photos: the look to match, never their people or places) and
   **style videos** (camera movement to follow, on Seedance 2.x), and the model, aspect ratio and resolution it brings.
   Eight ready-made directors to start from (Documentary, Music video, Noir, Commercial, Dreamy, Action, Vintage film,
-  Minimal) – *Use a copy* to make one your own. Choose one in Generate (under Model), for a whole sequence or music
-  video (the *Director* chip next to *Cast*: new clips get its shot length and cut or flow; a clip can follow it,
-  choose another or none) and for a storyboard (its transitions, and *Create image…* takes its look, light and
-  framing). When a clip is sent, the director is appended after the References legend as a *Direction* section (in the
-  prompt language), within the model's prompt limit (parts left out from the end, with a note), and the editor shows
-  that section live. Schema 14 (`assets.direction`). Agents: `list_directors`, `copy_director_preset`,
+  Minimal) – *Copy to edit* makes one your own (named “Noir (copy)”). Choose one in Generate (under Model), for a
+  whole sequence or music video (the *Director* chip next to *Cast*: new clips get its shot length and cut or flow; a
+  clip can follow it, choose another or none) and for a storyboard (its transitions, and *Create image…* takes its
+  look, light and framing). When a clip is sent, the director is appended after the References legend as a
+  *Direction* section (in the prompt language), within the model's prompt limit (parts left out from the end, with a
+  note), and the editor shows that section live. Schema 14 (`assets.direction`). Agents: `list_directors`, `copy_director_preset`,
   `add_director_videos`, `direction` on `create_asset` / `update_asset`, `director` on `set_form`, `validate_prompt`,
   `add_segment`, `update_segment`, `update_sequence` and `update_storyboard`; the answers show the section. 99 tools in
   all (38 read, 51 write, 10 ask for approval).
@@ -44,7 +44,7 @@ breaking changes; they are called out under **Changed** or **Removed**.
   (2–30 s each, 30 s in all) – from Media, a take, an exported film or a file (pick or drop; a video dropped on the
   reference images lands here too, and with a model that takes no videos a note says which does). Each tile shows its
   `@Video1` token and the part that is sent; click it to choose the window (start and length), hover to play it, drag
-  or ⌥←/→ to reorder (the prompt's tokens follow). They are references only – for the action, camera movement and
+  or ⌥← / ⌥→ to reorder (the prompt's tokens follow). They are references only – for the action, camera movement and
   style: the References legend says so in Venice's own wording, Seedance 2.5 also gets the task type *reference*, and
   `@VideoN` is sent as Venice's `<Video N>`. Only the window goes, as a small H.264 copy (at most 720p), and the price
   is quoted with the videos' seconds (Venice charges more with video). The checks, the `@` menu, hover cards, the clip
@@ -66,14 +66,48 @@ breaking changes; they are called out under **Changed** or **Removed**.
 - **Studio Test**: `npm run app:install:test` builds a second Mac app of your own, *Studio Test*, with its
   own settings, library (suggested `~/Movies/Studio Test`), Venice API key and a pink *Test* badge, for a build of your own beside the installed app. It runs beside Studio.app and Studio Dev, never
   updates itself from GitHub, and its Claude Desktop extension has its own name.
-- *Settings → Agent connection* has a ready-made Claude Code command (`claude mcp add …`), first and chosen by
-  default, beside the Hermes Agent and OpenClaw snippets.
-
-### Fixed
+- *Settings → Agent connection* has a ready-made Claude Code command (`claude mcp add …`), right after Claude Desktop
+  and beside the Hermes Agent and OpenClaw snippets.
+- **⌘, opens Settings** (Ctrl+, on Windows) from anywhere but an open dialog, and **Settings…** is in the Mac's app
+  menu after *Check for Updates…* (on Windows in the hidden menu, for its shortcut).
+- **One keyboard scheme** across the app, written the same way everywhere (⌘K, ⌘F, ⌘↵, ⌘⇧F, ⌥← / ⌥→; the guide has
+  the whole table):
+  - **⌘↵ sends from any field of a form** – Generate (the negative prompt too), a sequence clip, a storyboard
+    transition and *Create image…* – and runs the Editor card that has the focus; in Prompts it generates with the
+    prompt. Plain Enter never sends anything paid.
+  - **⌥← / ⌥→ moves the focused item** wherever it can be dragged: now also a sequence's clips, an asset's photos and
+    *Create image…*'s references; ⌥↑ / ⌥↓ moves a cast row and a voice or sound clip (by its grip).
+  - **Space, I and O in Sequences**: Space plays and pauses the clip anywhere in the view (not in a field or on a
+    button reached with the keyboard), I and O set where the take starts and ends, as in the Editor. Space also plays
+    the transition editor's take.
+  - **Lists**: ↑ / ↓ open the row they move to (Home / End too), Enter in the search opens the first match, ↑ from
+    the first row goes back to the search and Esc clears it – the same in the side lists, Prompts and Learnings;
+    Media's search and table have the Enter and the ↑. **⌫ / Delete on a side-list row** asks to delete it, as its ✕
+    does.
+  - **Arrow keys in every tab row and segmented control** (Media's tabs, *Cards* / *Table*, the mode switch, ×1–×4,
+    the reference picker's kinds, the Editor's action tabs, Settings' panes …): one Tab stop, ← / → and Home / End.
+    Storyboards: ← / → move along the row, board → transition → board.
+- **⌘K → New prompt** and **New learning** open Prompts with a new one. With nothing typed, ⌘K lists what you changed
+  last and the *New …* actions instead of the sidebar's places.
 
 - With ffmpeg 8, Studio found none of ffmpeg's filters (ffmpeg 8 lists them differently), so an HDR clip couldn't be
   imported ("zscale is missing") and the Editor never used rubberband for time stretching. Both versions are read
   now; ffmpeg 7 behaves as before.
+- Storyboards made the whole window scroll sideways, the sidebar included.
+- Dialogs and full-screen viewers weren't modal: ⌘K and ⌘F reached the view behind them, Tab left them and Esc could
+  close more than the top one. Esc now closes only the topmost overlay, dialogs keep Tab inside and give the focus
+  back when they close, and the image preview, the picture viewer, the film player and the sequence preview take the
+  focus while they are open. Venice's consent dialog takes the focus, closes on Esc and blocks what is behind it.
+- On a Mac, ⌃F was taken as ⌘F, and ⌃↵ as ⌘↵.
+- The prompt field's *Larger* button looked like a check mark; it is an icon button now (*Write in a larger window*,
+  ⌘⇧F).
+- A missing Venice API key only showed once you clicked *Generate*. Every paid form now names it first under the
+  button (*Add your Venice API key in Settings*), the button opens *Settings → Venice*, and Settings in the sidebar
+  has a dot until a key is saved.
+- Saving the API key could hang without an error when it couldn't be stored encrypted; it says so now.
+- A released Studio reloaded on ⌘R, throwing away what was open, and offered the developer tools; both are only in
+  development builds now.
+- Errors in Generate, Sequences, Media and Settings weren't announced to screen readers.
 
 ### Changed
 
@@ -93,6 +127,86 @@ breaking changes; they are called out under **Changed** or **Removed**.
   untitled items get English names (files that exist keep theirs). Earlier versions don't open a renamed library.
 - Studio Dev's agent connection defaults to port 8771, so it can listen beside Studio.app or Studio Test (8770).
 - The *Dev* badge has a row of its own under the wordmark, clear of the search button.
+- **Settings in six panes, one at a time**: *Venice*, *Spending*, *Generation*, *Library*, *Agent connection* and
+  *About*, chosen beside the pane (as tabs above it in a narrow window) instead of one long scroll. *Export & import*
+  is now *Library → Move to another computer*, and *Tools* and *About Studio* are one *About* pane (the version,
+  updates, ffmpeg, voice separation). Fields that save with a button show *Save* and *Undo* while changed, then
+  *Saved*; a switch is one row with one line under it. *Spending* puts the tiles and the budget first and folds the
+  chart and the month's breakdown into *Spending details*; *Library* folds the folder tree (*What's in the folder*)
+  and has *Folder*, *Move to another computer* and *Tidy up*; *Venice* puts the cursor in the key field while there
+  is no key and links to Venice's key page; *Safe mode for images* is one switch under *Generation*. The first-run
+  screen offers *Use this folder*, folds the example tree and has *Import a library…* as a link.
+- **Agent connection**: switched off it shows only the switch; on, the status, then **Connect an agent** with Claude
+  Desktop first (then Claude Code, Hermes and OpenClaw), and **Advanced** (token, addresses, Claude Desktop on another
+  computer, port) folded – it opens by itself when the server can't start. The agent's row in the sidebar shows only
+  while the connection is on or a request waits (otherwise ⌘K → *Agent*), and the Agent panel and *Activity* are the
+  same card beside the sidebar, its footer link only while the connection is on.
+- **Item editors** (Characters, Environments, Products, Outfits, Poses, Directors, Prompts, Learnings) share one
+  layout: the name, a meta line, then one row of actions – *Generate with …* first – and ⋯ with *Open folder*
+  (*Duplicate* for a prompt) and *Delete…*, asked in the menu; *Delete* is never a button of its own. Asset pages are
+  lighter: one-line intros, no *How … is used* card, footers only when they apply, one *Open folder*. The description
+  hint is right now (*Added to the prompt automatically in reference mode*), with *Copy* beside it and no character
+  count. Removing a reference image asks first, and an image's ✕ and *Make cover* can be reached with the keyboard.
+  Voice and sound clips: the first is *Default* (*Make default* picks another), with *Start here* and *Exact times…*
+  on every row. The Characters icon is a bust.
+- **Document headers** (Sequences, Storyboards, the Editor) are laid out alike: the name, chips, progress, buttons, at
+  most one accent button, and ⋯ with the rarely changed settings (*Format*, *Export format*), *Edit latest export*,
+  *Open folder*, *Mark all as seen*, other rare items and *Delete…*, asked in the menu.
+- **The *Generate missing* rule**, in Sequences and Storyboards alike: the button shows only while something is
+  missing, always with the count; the price and the accent only when the run can start. Blocked, it is a plain button
+  whose tooltip says why, and clicking it shows the clip in the way – or opens *Settings → Venice* when the API key is
+  missing.
+- **One way to confirm a delete**: the question, what happens to the files as visible text, then *Cancel* (focused)
+  and *Delete* (*Remove* when the file stays elsewhere); Esc cancels, and an inline question closes after 8 s unless
+  the pointer is on it. The same in rows, chips, tiles, menus and dialogs.
+- **Generate**: the *Text* / *Start image* / *References* switch sits in the top band; *Duration*, *Resolution*,
+  *Aspect ratio* and *Sound* (was *Generate audio*) sit in one row right above the button, also in a sequence clip.
+  One **＋ From library** button opens the picker on the kind used last, instead of five; empty *Reference videos* and
+  *Voices & sound* are a single row (what they are for is in their ＋ button's tooltip), the optional end image one
+  line, and counters show only with items. The list under the prompt is folded behind *References in the prompt (N)*
+  and remembers whether it was open, and the prompt's character count shows only near the model's limit. The
+  negative prompt is the same fold everywhere. The bar at the bottom is shared by Generate, a sequence clip and a
+  storyboard transition: ×1–×4, the button with its price (still shown while it is blocked) and one line under it
+  with what blocks it, or *⌘↵ to generate*.
+- **Create image…**: one-line subtitle and *Safe mode on · Turn off*, a *Negative prompt* fold with building blocks,
+  *Create · $0.06* on the button, and the previous board's picture as a removable *Previous* reference (＋ brings it
+  back) instead of a switch.
+- **Sequences**: a clip's free notes are called **Notes** (*Not sent – just for you*) – *What happens?* is only ever
+  a prompt now. The trims read *Starts at* and *Ends at* (points, not amounts cut). The take strip has one *＋ From
+  file…*; *Redo between neighbours* is only in the clip editor; *Add clip* stays at the strip's right edge; the start
+  and end frame switches show only where there is a neighbour, with short hints; the header no longer says *Own clip*
+  or *Saved* all the time; lengths read *6 s*, *7.4 s*, *1 min 23 s*. The clip editor is narrower in a small window.
+- **Storyboards**: *New storyboard* asks only for the format (name it in the header), *Format* is under ⋯, the board
+  row starts at the top and scrolls only itself, a transition card shows its *Generate* only when it can be sent,
+  and the transition editor shows the board pictures only until there is a take, with the Generate bar (*Generate
+  take*) pinned at its bottom.
+- **The Editor** always opens an edit – the one open last, else the most recently changed; *All edits* (the grid
+  button in its header) shows the overview, which no longer repeats the ways to start one (*Own film from file…*,
+  *From Media…*, *From an export…* in *＋ New*; a film can be dropped anywhere in the Editor). Four action tabs:
+  *Picture*, *Sound* (with music and effects), *Voice* and *Text*. *Loop* sits in the selection's chip, *Compare*
+  shows only when there is another version and offers *Use v2* while comparing, and the *Layers* and *Text* lanes
+  show only when they have something. ⋯ holds *Rename*, *Clean up versions…*, *Open folder* and *Delete…*; *Save
+  subtitles* is only in *Text*. *Change voice* shows only when Venice offers a voice changer, the Sound tab says once
+  that its tools are free, and notices appear in one place.
+- **Media**: the first tab is **Clips** (Generate links to *All clips in Media →*). A filter chip shows only while it
+  is set or can narrow the list; *Status* shows counts and replaces the *in progress* chip, and *New* sits after the
+  filters. Images' filters are named like Clips' (*Own images*, *Placement*, *Reference images*), and images are
+  framed cards like films. A clip card's ⋯ holds *Edit…*, *Show in Finder* and *Delete…* (asked in the menu); hovering
+  shows only *Use again* and *Add to sequence*. The drawer says *Show in Finder*, the film player has *Edit…*, ← / →,
+  Space and *Close (Esc)*, own clips no longer say *Own* twice, and lengths read *6 s* or *1 min 24 s*.
+- **Directors**: every part is a prompt field (`/` building blocks, ⌘⇧F), without cut-off hints. The page is as
+  narrow as the others: *Direction* with *Added to the prompt* folded under it (*Show the text*), then *Style frames*,
+  *Style videos* and a folded *Shots and defaults*. A ready-made director's page has *Generate with the director*
+  first, *Copy to edit* beside it and its settings as text.
+- **Prompts and Learnings** use the side lists' header, search and keys; their rows only show (favourite, pin, tags,
+  uses). The prompt editor's row is *Generate with the prompt*, *Copy prompt* and ⋯ (*Duplicate*, *Delete…*), and its
+  tags come after the negative prompt.
+- **Calmer colours and clearer buttons**: primary buttons are a darker red that reads 4.7:1 with white text, and a
+  disabled one turns grey instead of a faded red. Errors, warnings and success have one colour each, uppercase group
+  headings one look, and the keyboard focus one outline everywhere (also with Windows' contrast themes). Disclosures
+  use one chevron, close buttons one icon. The video players no longer offer *Download*, picture-in-picture or
+  playback speed.
+- *Open folder* always opens a folder (*Open the folder in Finder*); *Show in Finder* shows one file.
 
 ## [0.2.0] - 2026-10-19
 

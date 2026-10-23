@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
-import { ASSET_KINDS, type Asset, type Generation, type VideoModel } from '@shared/types'
+import { useEffect, useMemo, useState, type ReactNode, type RefObject } from 'react'
+import { generationAssetIds } from '@shared/generation-filter'
+import {
+  ASSET_KINDS,
+  THUMBS_DOWN,
+  type Asset,
+  type Generation,
+  type GenerationSource,
+  type VideoModel
+} from '@shared/types'
 import { ASSET_COPY } from '../../lib/assets'
-import { shortcut } from '../../lib/platform'
 import AssetAvatar from '../assets/AssetAvatar'
 import { KIND_TONE } from '../pickers/assetKinds'
-import { CloseIcon } from '../sequences/icons'
-import { Spinner, StatusDot } from '../work/StatusMark'
+import Segmented from '../ui/Segmented'
+import { StatusDot } from '../work/StatusMark'
 import {
   PERIOD_OPTIONS,
   PLACEMENT_OPTIONS,
@@ -16,13 +23,21 @@ import {
   hasFilters,
   isSortKey,
   modelName,
+  narrows,
+  periodStart,
   type FeedFilters,
   type FeedView,
-  type SortKey
+  type PeriodChoice,
+  type PlacementChoice,
+  type RatingChoice,
+  type SortKey,
+  type StatusChoice
 } from './feedFilter'
+import { isPending } from './feedText'
 import FilterMenu, { type MenuOption } from './FilterMenu'
-import { GridIcon, ListIcon, SearchIcon } from './icons'
+import { GridIcon, ListIcon } from './icons'
 import { assetUseCounts, type LibraryIndex } from './references'
+import SearchField from './SearchField'
 
 interface Props {
   view: FeedView
@@ -33,7 +48,7 @@ interface Props {
   onSort: (sort: SortKey) => void
   /** "42 clips · $38.20 · 5 min 12 s" for what is shown. */
   summary: string
-  /** Every generation (not just the shown ones), for the choices and their counts. */
+  /** Every generation (not just the shown ones), for the choices, their counts and which filters can narrow. */
   generations: readonly Generation[]
   models: readonly VideoModel[]
   assets: readonly Asset[]
@@ -41,8 +56,8 @@ interface Props {
   searchRef: RefObject<HTMLInputElement | null>
   /** ArrowDown in the search field hands the keyboard to the list. */
   onSearchArrowDown: () => void
-  /** Clips being generated right now (all of them, not just the shown ones): the "◌ n in progress" chip. */
-  pendingCount: number
+  /** Enter in the search field opens the first match. */
+  onSearchEnter?: () => void
   /** Finished clips not looked at yet: the "New" chip. */
   unseenCount: number
   /** Left end of the first row (Media's tabs). */
@@ -51,12 +66,52 @@ interface Props {
   trailing?: ReactNode
 }
 
-const segment = (on: boolean) =>
-  `flex h-full items-center gap-1.5 rounded-[5px] px-2.5 text-[12px] transition ${
-    on ? 'bg-raised text-text shadow-sm shadow-black/40' : 'text-muted hover:text-text'
-  }`
+/** How many clips each choice of a filter leaves, by filter. */
+interface ChoiceCounts {
+  source: Map<GenerationSource, number>
+  status: Map<StatusChoice, number>
+  model: Map<string, number>
+  rating: Map<RatingChoice, number>
+  period: Map<PeriodChoice, number>
+  placement: Map<PlacementChoice, number>
+}
 
-/** The feed's header: view switch, search, filters as chips, sort order and a summary of what is shown. */
+/**
+ * Every filter's counts in one pass, by the shared filter's rules (src/shared/generation-filter.ts): 'pending' is
+ * queued or processing, a minimum of stars leaves thumbs down out, a row without a source is Venice's.
+ */
+function countChoices(generations: readonly Generation[], now: number): ChoiceCounts {
+  const counts: ChoiceCounts = {
+    source: new Map(),
+    status: new Map(),
+    model: new Map(),
+    rating: new Map(),
+    period: new Map(),
+    placement: new Map()
+  }
+  const add = <K,>(map: Map<K, number>, key: K) => map.set(key, (map.get(key) ?? 0) + 1)
+  const starts = PERIOD_OPTIONS.map((o) => [o.id, periodStart(o.id, now)] as const)
+  for (const g of generations) {
+    add(counts.source, g.source ?? 'generated')
+    add(counts.status, isPending(g) ? 'pending' : g.status === 'failed' ? 'failed' : 'completed')
+    // Own clips and versions have no model ('') and aren't one.
+    if (g.model) add(counts.model, g.model)
+    const rating = g.rating
+    if (typeof rating !== 'number') add(counts.rating, 'unrated')
+    else if (rating === THUMBS_DOWN) add(counts.rating, 'thumbsDown')
+    else for (const stars of [1, 2, 3] as const) if (rating >= stars) add(counts.rating, stars)
+    if (g.reviewCount > 0) add(counts.rating, 'reviewed')
+    for (const [period, start] of starts) if (g.createdAt >= start) add(counts.period, period)
+    add(counts.placement, g.segmentId ? 'sequence' : 'standalone')
+  }
+  return counts
+}
+
+/**
+ * The feed's header. First row: Media's tabs, the search, Cards | Table, and the actions at the right end. Second
+ * row: the filters as chips – each one only while it is set or can narrow the list – then a summary of what is
+ * shown and the order.
+ */
 export default function FeedToolbar({
   view,
   onView,
@@ -71,87 +126,148 @@ export default function FeedToolbar({
   index,
   searchRef,
   onSearchArrowDown,
-  pendingCount,
+  onSearchEnter,
   unseenCount,
   leading,
   trailing
 }: Props) {
   const set = (patch: Partial<FeedFilters>) => onFilters({ ...filters, ...patch })
 
-  const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape' && filters.query) {
-      e.preventDefault()
-      e.stopPropagation()
-      set({ query: '' })
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      onSearchArrowDown()
-    }
-  }
-
-  // The models that made something, most used first; names from the model list when Venice still has it. Own clips
-  // and versions have no model ('') and aren't one.
-  const modelOptions = useMemo((): MenuOption<string>[] => {
-    const counts = new Map<string, number>()
-    for (const g of generations) if (g.model) counts.set(g.model, (counts.get(g.model) ?? 0) + 1)
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1] || modelName(a[0], models).localeCompare(modelName(b[0], models), 'en'))
-      .map(([id, count]) => ({ id, label: modelName(id, models), text: id, hint: count }))
-  }, [generations, models])
-  const sourceCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const g of generations) counts.set(g.source ?? 'generated', (counts.get(g.source ?? 'generated') ?? 0) + 1)
-    return counts
-  }, [generations])
+  // Counted over every clip, not just the shown ones, so a chip doesn't come and go while another filter changes.
+  const counts = useMemo(() => countChoices(generations, Date.now()), [generations])
+  // The models that made something, most used first; names from the model list when Venice still has it.
+  const modelOptions = useMemo(
+    (): MenuOption<string>[] =>
+      [...counts.model.entries()]
+        .sort((a, b) => b[1] - a[1] || modelName(a[0], models).localeCompare(modelName(b[0], models), 'en'))
+        .map(([id, count]) => ({ id, label: modelName(id, models), text: id, hint: count })),
+    [counts, models]
+  )
+  // Whether any clip uses something from the library: stops at the first one; the asset counts wait for the menu.
+  const usesAssets = useMemo(
+    () => generations.some((g) => generationAssetIds(g, index.paths).length > 0),
+    [generations, index]
+  )
+  const total = generations.length
+  const shows = (value: unknown, choices: ReadonlyMap<unknown, number>) => value !== undefined || narrows(choices, total)
 
   return (
     <div className="shrink-0 border-b border-line/60 px-6 pb-2.5">
       <div className="drag flex h-12 items-center gap-3">
         {leading}
+        <SearchField
+          value={filters.query}
+          onChange={(query) => set({ query })}
+          placeholder="Search prompts and names…"
+          inputRef={searchRef}
+          onArrowDown={onSearchArrowDown}
+          onEnter={onSearchEnter}
+        />
         <ViewSwitch view={view} onView={onView} />
-
-        <div className="no-drag relative min-w-36 max-w-72 flex-1">
-          <SearchIcon size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-          <input
-            ref={searchRef}
-            value={filters.query}
-            onChange={(e) => set({ query: e.target.value })}
-            onKeyDown={onSearchKey}
-            placeholder="Search prompts and names…"
-            aria-label="Search prompts and names"
-            title={`Search prompts and names (${shortcut('⌘ F')})`}
-            className="h-7 w-full rounded-md border border-line bg-raised pl-7 pr-7 text-[12px] outline-none focus:border-muted"
-          />
-          {filters.query && (
-            <button
-              type="button"
-              onClick={() => {
-                set({ query: '' })
-                searchRef.current?.focus()
-              }}
-              title="Clear the search"
-              className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted hover:bg-line hover:text-text"
-            >
-              <CloseIcon size={9} />
-            </button>
-          )}
-        </div>
-
         <span className="flex-1" />
         {trailing}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        {(pendingCount > 0 || filters.status === 'pending') && (
-          <ToggleChip
-            on={filters.status === 'pending'}
-            onToggle={() => set({ status: filters.status === 'pending' ? undefined : 'pending' })}
-            title="Show only what is generating right now"
-          >
-            <Spinner size={11} />
-            {pendingCount} in progress
-          </ToggleChip>
+      {/* As tall as a chip when no filter can narrow the list, so the header keeps its height. */}
+      <div className="flex min-h-7 flex-wrap items-center gap-1.5">
+        {shows(filters.source, counts.source) && (
+          <FilterMenu
+            title="Source"
+            value={filters.source}
+            valueLabel={SOURCE_OPTIONS.find((o) => o.id === filters.source)?.label}
+            options={SOURCE_OPTIONS.map((o) => ({
+              id: o.id,
+              label: o.label,
+              text: o.text,
+              hint: counts.source.get(o.id)
+            }))}
+            onChange={(source) => set({ source })}
+            allLabel="All"
+          />
         )}
+        {shows(filters.status, counts.status) && (
+          <FilterMenu
+            title="Status"
+            value={filters.status}
+            valueLabel={STATUS_OPTIONS.find((o) => o.id === filters.status)?.label}
+            options={STATUS_OPTIONS.map((o) => ({ id: o.id, label: o.label, hint: counts.status.get(o.id) }))}
+            onChange={(status) => set({ status })}
+          />
+        )}
+        {shows(filters.model, counts.model) && (
+          <FilterMenu
+            title="Model"
+            value={filters.model}
+            valueLabel={filters.model && modelName(filters.model, models)}
+            options={modelOptions}
+            onChange={(model) => set({ model })}
+            allLabel="All models"
+            width={300}
+            empty={<p className="px-3 py-2 text-[12px] text-muted">No clips made with a Venice model yet.</p>}
+          />
+        )}
+        {(filters.assetId !== undefined || usesAssets) && (
+          <AssetFilter
+            value={filters.assetId}
+            onChange={(assetId) => set({ assetId })}
+            generations={generations}
+            assets={assets}
+            index={index}
+          />
+        )}
+        {shows(filters.rating, counts.rating) && (
+          <FilterMenu
+            title="Rating"
+            value={filters.rating}
+            valueLabel={ratingFilterLabel(filters.rating)}
+            options={RATING_OPTIONS.map((o) => ({
+              id: o.id,
+              label:
+                typeof o.id === 'number' ? (
+                  <span className="text-amber-400">{o.label}</span>
+                ) : o.id === 'thumbsDown' ? (
+                  <span>
+                    <span aria-hidden className="mr-1.5">
+                      👎
+                    </span>
+                    {o.label}
+                  </span>
+                ) : (
+                  o.label
+                ),
+              text: o.label
+            }))}
+            onChange={(rating) => set({ rating })}
+          />
+        )}
+        {shows(filters.period, counts.period) && (
+          <FilterMenu
+            title="Time"
+            value={filters.period}
+            valueLabel={PERIOD_OPTIONS.find((o) => o.id === filters.period)?.label}
+            options={PERIOD_OPTIONS.map((o) => ({ id: o.id, label: o.label }))}
+            onChange={(period) => set({ period })}
+            allLabel="All time"
+          />
+        )}
+        {shows(filters.placement, counts.placement) && (
+          <FilterMenu
+            title="Placement"
+            value={filters.placement}
+            valueLabel={PLACEMENT_OPTIONS.find((o) => o.id === filters.placement)?.label}
+            options={PLACEMENT_OPTIONS.map((o) => ({
+              id: o.id,
+              label: o.label,
+              text:
+                o.id === 'sequence'
+                  ? 'Takes in a sequence or storyboard'
+                  : 'Clips that aren’t part of any sequence or storyboard'
+            }))}
+            onChange={(placement) => set({ placement })}
+            allLabel="All"
+          />
+        )}
+        {/* After the filters: it comes and goes as clips finish and are watched, and must not move them. */}
         {(unseenCount > 0 || filters.unseen) && (
           <ToggleChip
             on={!!filters.unseen}
@@ -163,89 +279,6 @@ export default function FeedToolbar({
             {unseenCount > 0 && <span className="text-muted tabular-nums">{unseenCount}</span>}
           </ToggleChip>
         )}
-        <FilterMenu
-          title="Source"
-          value={filters.source}
-          valueLabel={SOURCE_OPTIONS.find((o) => o.id === filters.source)?.label}
-          options={SOURCE_OPTIONS.map((o) => ({
-            id: o.id,
-            label: o.label,
-            text: o.text,
-            hint: sourceCounts.get(o.id)
-          }))}
-          onChange={(source) => set({ source })}
-          allLabel="All"
-        />
-        <FilterMenu
-          title="Status"
-          value={filters.status}
-          valueLabel={STATUS_OPTIONS.find((o) => o.id === filters.status)?.label}
-          options={STATUS_OPTIONS.map((o) => ({ id: o.id, label: o.label }))}
-          onChange={(status) => set({ status })}
-        />
-        <FilterMenu
-          title="Model"
-          value={filters.model}
-          valueLabel={filters.model && modelName(filters.model, models)}
-          options={modelOptions}
-          onChange={(model) => set({ model })}
-          allLabel="All models"
-          width={300}
-          empty={<p className="px-3 py-2 text-[12px] text-muted">No clips yet.</p>}
-        />
-        <AssetFilter
-          value={filters.assetId}
-          onChange={(assetId) => set({ assetId })}
-          generations={generations}
-          assets={assets}
-          index={index}
-        />
-        <FilterMenu
-          title="Rating"
-          value={filters.rating}
-          valueLabel={ratingFilterLabel(filters.rating)}
-          options={RATING_OPTIONS.map((o) => ({
-            id: o.id,
-            label:
-              typeof o.id === 'number' ? (
-                <span className="text-amber-400">{o.label}</span>
-              ) : o.id === 'thumbsDown' ? (
-                <span>
-                  <span aria-hidden className="mr-1.5">
-                    👎
-                  </span>
-                  {o.label}
-                </span>
-              ) : (
-                o.label
-              ),
-            text: o.label
-          }))}
-          onChange={(rating) => set({ rating })}
-        />
-        <FilterMenu
-          title="Time"
-          value={filters.period}
-          valueLabel={PERIOD_OPTIONS.find((o) => o.id === filters.period)?.label}
-          options={PERIOD_OPTIONS.map((o) => ({ id: o.id, label: o.label }))}
-          onChange={(period) => set({ period })}
-          allLabel="All time"
-        />
-        <FilterMenu
-          title="Placement"
-          value={filters.placement}
-          valueLabel={PLACEMENT_OPTIONS.find((o) => o.id === filters.placement)?.label}
-          options={PLACEMENT_OPTIONS.map((o) => ({
-            id: o.id,
-            label: o.label,
-            text:
-              o.id === 'sequence'
-                ? 'Takes in a sequence or storyboard'
-                : 'Clips that aren’t part of any sequence or storyboard'
-          }))}
-          onChange={(placement) => set({ placement })}
-          allLabel="All clips"
-        />
         {hasFilters(filters) && (
           <button
             type="button"
@@ -267,37 +300,50 @@ export default function FeedToolbar({
   )
 }
 
-/** Cards or Table. */
-function ViewSwitch({ view, onView }: { view: FeedView; onView: (view: FeedView) => void }) {
+/**
+ * Cards or Table: one Tab stop, ← → choose. The same switch wherever clips (or edits) can be shown both ways; the
+ * tooltips say what each shows there.
+ */
+export function ViewSwitch({
+  view,
+  onView,
+  cardsTitle = 'Large cards with video',
+  tableTitle = 'Table – many clips at once'
+}: {
+  view: FeedView
+  onView: (view: FeedView) => void
+  cardsTitle?: string
+  tableTitle?: string
+}) {
   return (
-    <div
-      role="radiogroup"
-      aria-label="View"
-      className="no-drag flex h-7 shrink-0 items-center rounded-md border border-line bg-panel p-0.5"
-    >
-      <button
-        type="button"
-        role="radio"
-        aria-checked={view === 'cards'}
-        onClick={() => onView('cards')}
-        title="Large cards with video"
-        className={segment(view === 'cards')}
-      >
-        <GridIcon size={12} />
-        Cards
-      </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={view === 'table'}
-        onClick={() => onView('table')}
-        title="Table – many clips at once"
-        className={segment(view === 'table')}
-      >
-        <ListIcon size={12} />
-        Table
-      </button>
-    </div>
+    <Segmented
+      ariaLabel="View"
+      value={view}
+      onChange={onView}
+      className="no-drag"
+      options={[
+        {
+          value: 'cards',
+          label: (
+            <>
+              <GridIcon size={12} />
+              Cards
+            </>
+          ),
+          title: cardsTitle
+        },
+        {
+          value: 'table',
+          label: (
+            <>
+              <ListIcon size={12} />
+              Table
+            </>
+          ),
+          title: tableTitle
+        }
+      ]}
+    />
   )
 }
 
@@ -317,7 +363,7 @@ export function SessionToolbar({
   onView: (view: FeedView) => void
   /** "This session · 3 clips · $1.20 · 24 s". */
   summary: string
-  /** "All videos in Media". */
+  /** "All clips in Media". */
   onShowAll: () => void
   trailing?: ReactNode
 }) {
@@ -338,21 +384,21 @@ export function SessionToolbar({
   )
 }
 
-/** "All videos in Media →": from Generate's session list to every clip. */
-export function MediaLink({ onClick, className = '' }: { onClick: () => void; className?: string }) {
+/** "All clips in Media →": from Generate's session list to every clip. */
+function MediaLink({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title="Show every clip you have made, also from earlier sessions"
-      className={`no-drag shrink-0 whitespace-nowrap text-[12px] text-text underline-offset-2 hover:underline ${className}`}
+      className="no-drag shrink-0 whitespace-nowrap text-[12px] text-text underline-offset-2 hover:underline"
     >
-      All videos in Media →
+      All clips in Media →
     </button>
   )
 }
 
-/** A one-click filter (In progress, New), styled like the filter menus' chips. */
+/** A one-click filter ("New"), styled like the filter menus' chips. */
 function ToggleChip({
   on,
   onToggle,

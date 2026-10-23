@@ -105,8 +105,7 @@ export default function TokenMenu({
             {query ? <p>Nothing is called “@{query}”.</p> : <p>Nothing to refer to yet.</p>}
             {noReferences && (
               <p className="mt-1 text-[11px]">
-                Add images with ＋ Character, ＋ Environment, ＋ Product, ＋ Outfit or ＋ Pose above – they get the
-                numbers @Image1, @Image2 … and voices @Audio1 …
+                Add images with ＋ From library above – they get the numbers @Image1, @Image2 … and voices @Audio1 …
                 {videosPossible && ' Videos added with ＋ Video are @Video1 …'}
               </p>
             )}
@@ -114,7 +113,7 @@ export default function TokenMenu({
         ) : (
           sections.map((section) => (
             <div key={section.key} role="group" aria-label={section.title}>
-              <p className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted">
+              <p className="section-label px-2 pb-1 pt-2">
                 {section.title}
               </p>
               {section.items.map((item) => {
@@ -142,7 +141,7 @@ export default function TokenMenu({
           ))
         )}
       </div>
-      <p className="border-t border-line px-3 py-1.5 text-[10px] text-muted">↑↓ choose · ↩ or ⇥ insert · esc close</p>
+      <p className="border-t border-line px-3 py-1.5 text-[10px] text-muted">↑ ↓ choose · ↵ or ⇥ insert · Esc close</p>
     </div>,
     document.body
   )
@@ -214,7 +213,7 @@ function OptionContent({ item }: { item: MenuItem }) {
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
           {name} · {detail} · {windowLabel(a)}
         </span>
-        {!a.sent && <span className="shrink-0 text-[11px] text-accent">not sent</span>}
+        {!a.sent && <span className="shrink-0 text-[11px] text-danger">not sent</span>}
       </>
     )
   }
@@ -230,7 +229,7 @@ function OptionContent({ item }: { item: MenuItem }) {
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
           {name} · {detail} · {windowLabel(v)}
         </span>
-        {!v.sent && <span className="shrink-0 text-[11px] text-accent">not sent</span>}
+        {!v.sent && <span className="shrink-0 text-[11px] text-danger">not sent</span>}
       </>
     )
   }
@@ -245,7 +244,7 @@ function OptionContent({ item }: { item: MenuItem }) {
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
           {r.asset ? `${r.asset.name} · photo ${r.photo ?? 1}` : `own image · ${fileName(r.path)}`}
         </span>
-        {!r.sent && <span className="shrink-0 text-[11px] text-accent">not sent</span>}
+        {!r.sent && <span className="shrink-0 text-[11px] text-danger">not sent</span>}
       </>
     )
   }
@@ -262,7 +261,7 @@ function OptionContent({ item }: { item: MenuItem }) {
         </span>
         <span className="block truncate text-[11px] text-muted">
           {status}
-          {warning && <span className="text-accent"> · {warning}</span>}
+          {warning && <span className="text-warning"> · {warning}</span>}
         </span>
       </span>
       {!item.disabled && <span className="shrink-0 pr-0.5 text-muted">＋</span>}
@@ -277,6 +276,7 @@ export function Thumb({ path, className = 'h-6 w-6' }: { path: string; className
   return (
     <img
       src={mediaUrl(path)}
+      alt=""
       draggable={false}
       decoding="async"
       onError={() => setFailed(path)}

@@ -4,10 +4,6 @@
 import type { AssetKind, ReferenceKind } from '@shared/types'
 
 interface PickerCopy {
-  /** Header button, after "＋ ". */
-  add: string
-  /** Tooltip of the header button. */
-  addTitle: string
   search: string
   emptyTitle: string
   emptyText: string
@@ -21,8 +17,6 @@ interface PickerCopy {
 /** Per reference kind: directors are never picked as references. */
 export const PICKER_COPY: Record<ReferenceKind, PickerCopy> = {
   character: {
-    add: 'Character',
-    addTitle: 'Add a saved character’s images (and its default outfit)',
     search: 'Search characters…',
     emptyTitle: 'No characters yet.',
     emptyText: 'Save people with reference photos and you can reuse them here.',
@@ -32,8 +26,6 @@ export const PICKER_COPY: Record<ReferenceKind, PickerCopy> = {
     needsImages: 'Add images to the character first'
   },
   environment: {
-    add: 'Environment',
-    addTitle: 'Add a saved environment’s images',
     search: 'Search environments…',
     emptyTitle: 'No environments yet.',
     emptyText: 'Save places with photos – a beach, a kitchen, a street – and let the scene play out there.',
@@ -43,8 +35,6 @@ export const PICKER_COPY: Record<ReferenceKind, PickerCopy> = {
     needsImages: 'Add images to the environment first'
   },
   product: {
-    add: 'Product',
-    addTitle: 'Add a saved product’s images',
     search: 'Search products…',
     emptyTitle: 'No products yet.',
     emptyText: 'Save products with images and you can include them in your clips.',
@@ -54,8 +44,6 @@ export const PICKER_COPY: Record<ReferenceKind, PickerCopy> = {
     needsImages: 'Add images to the product first'
   },
   outfit: {
-    add: 'Outfit',
-    addTitle: 'Add a saved outfit’s images',
     search: 'Search outfits…',
     emptyTitle: 'No outfits yet.',
     emptyText: 'Save outfits with photos and you can choose what the characters wear.',
@@ -65,8 +53,6 @@ export const PICKER_COPY: Record<ReferenceKind, PickerCopy> = {
     needsImages: 'Add images to the outfit first'
   },
   pose: {
-    add: 'Pose',
-    addTitle: 'Add a saved pose: images that show how the people stand and where, in relation to each other',
     search: 'Search poses…',
     emptyTitle: 'No poses yet.',
     emptyText:

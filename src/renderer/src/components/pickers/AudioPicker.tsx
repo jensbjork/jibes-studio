@@ -102,7 +102,7 @@ export default function AudioPicker({ assets, audios, byPath, max, onPick, onMan
             if (!rows.length) return null
             return (
               <div key={kind} role="group" aria-label={title}>
-                <p className="flex items-center gap-1.5 px-1.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted">
+                <p className="section-label flex items-center gap-1.5 px-1.5 pb-1 pt-2">
                   <span className={`flex ${KIND_TONE[kind].text}`}>
                     <AssetIcon kind={kind} />
                   </span>

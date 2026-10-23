@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore, type RefObject } from 'react'
 import { paramsForSubmit, rememberModelKinds } from '@shared/models'
 import type {
   Asset,
@@ -9,8 +9,9 @@ import type {
   SeparationStatus,
   VideoModel
 } from '@shared/types'
+import { isModalOpen } from './dialogs'
 import { directorAssets, rememberDirectors, subscribeDirectors } from './directors'
-import { isMac } from './platform'
+import { isFindKey, isMac } from './platform'
 
 // The model list rarely changes; share one request across all views (and the agent bridge). Venice does add and
 // retire models, and a window can stay open for days, so the copy is dropped after as long as main keeps its own.
@@ -142,6 +143,53 @@ export function usePromptsState(): { prompts: SavedPrompt[]; loaded: boolean } {
 
 export function usePrompts(): SavedPrompt[] {
   return usePromptsState().prompts
+}
+
+/**
+ * ⌘F (Ctrl+F): focuses the view's search field and selects what is in it. Only one view is mounted, so the view on
+ * screen owns the key; not while a dialog or viewer is open over it, and not for a key something else took first.
+ */
+export function useFindShortcut(ref: RefObject<HTMLInputElement | null>, enabled = true): void {
+  useEffect(() => {
+    if (!enabled) return
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (!isFindKey(e) || e.defaultPrevented || e.repeat || isModalOpen() || !ref.current) return
+      e.preventDefault()
+      ref.current.focus()
+      ref.current.select()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [ref, enabled])
+}
+
+/** The first thing every paid button names while there is no Venice API key (it opens Settings → Venice). */
+export const NO_API_KEY = 'Add your Venice API key in Settings'
+
+/**
+ * Whether a Venice API key is saved, live (a key added or removed in Settings). True until Settings has answered,
+ * so no "add your key" flashes up on every view that opens.
+ */
+export function useHasApiKey(): boolean {
+  const [hasKey, setHasKey] = useState(true)
+  useEffect(() => {
+    let active = true
+    const read = (): void => {
+      window.studio.getSettings().then(
+        (s) => active && setHasKey(s.hasApiKey),
+        () => {
+          // Keep the last answer: a failed read says nothing about the key.
+        }
+      )
+    }
+    read()
+    const off = window.studio.onSettingsChange(read)
+    return () => {
+      active = false
+      off()
+    }
+  }, [])
+  return hasKey
 }
 
 /** Strips Electron's "Error invoking remote method '…': Error: " prefix from IPC errors. */

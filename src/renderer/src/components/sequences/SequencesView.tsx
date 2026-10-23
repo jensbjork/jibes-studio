@@ -15,7 +15,9 @@ import {
 } from '@shared/types'
 import { withBudgetConfirm } from '../../lib/budget'
 import { ASSET_VIEW } from '../../lib/assets'
-import { ipcErrorMessage, useDirectorAssets, useModels } from '../../lib/hooks'
+import { isModalOpen, isTextTarget } from '../../lib/dialogs'
+import { focusedWithKeyboard, trackFocusOrigin } from '../../lib/focusOrigin'
+import { ipcErrorMessage, NO_API_KEY, useDirectorAssets, useHasApiKey, useModels } from '../../lib/hooks'
 import { LAST_SEQUENCE_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
 import type { Intent, Navigate } from '../../lib/navigation'
@@ -24,12 +26,16 @@ import { markSeen, useRunning, useSeenWhenVisible, useUnseen } from '../../lib/w
 import ConsentDialog from '../ConsentDialog'
 import GenerationPickerDialog from '../feed/GenerationPickerDialog'
 import { useImportCards, useImportFlow, type ImportOutcome } from '../feed/ownClips'
+import { SETTINGS_SECTION, showSettingsSection } from '../settings/SettingsLayout'
 import { aspectValue } from '../storyboards/storyboardUtils'
 import { isPlayable } from '../takes/takeText'
 import TakeStrip, { type PickedBy, type TakeBadge } from '../takes/TakeStrip'
 import { KEY_SELECT_DELAY, useTakeSelection } from '../takes/useTakeSelection'
+import { Banner } from '../ui/Banner'
+import { buttonClass } from '../ui/button'
+import EmptyState from '../ui/EmptyState'
 import { ownEndImageRefused, sendInputProblem } from './clipChecks'
-import { CloseIcon, FilmIcon } from './icons'
+import { FilmIcon } from './icons'
 import PreviewPlayer from './PreviewPlayer'
 import SegmentEditor, { type EditorHandle } from './SegmentEditor'
 import type { CastPatch } from './CastPanel'
@@ -97,6 +103,9 @@ function clipList(numbers: number[]): string {
 function runPlanKeys(sequence: Sequence): string[] {
   return sequence.segments.flatMap((s, i) => (!needsTake(s) || pendingTake(s) ? [] : [clipKey(sequence, i)]))
 }
+
+/** What a run that can't start is priced at: nothing (no quotes are asked for). */
+const NO_RUN: GenerationParams[] = []
 
 /** The first segment "Generate missing" would have to generate but can't, so it can be pointed out up front. */
 function findRunProblem(sequence: Sequence, ffmpegOk: boolean): { segmentId: string; message: string } | undefined {
@@ -791,7 +800,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
 
   const reusePrompt = (take: Generation) => editorHandle.current?.applyPrompt(take.params)
 
-  /** "Add take from file…". */
+  /** "From file…" above the take strip. */
   const pickTakeFiles = async () => {
     try {
       const paths = await window.studio.pickVideos(true)
@@ -837,7 +846,22 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
     })
     return { toGenerate, generating }
   }, [sequence, directors])
-  const runQuote = useTotalQuote(runPlan.toGenerate)
+  // What stands in the way of "Generate missing", checked up front as Storyboards does: the API key first, then the
+  // first clip that can't be generated. A run that can't start is neither priced nor in the accent colour, and a
+  // click shows the clip (startRun checks again with fresh data) or opens Settings for the key.
+  const hasKey = useHasApiKey()
+  const runBlocked = useMemo(() => {
+    if (!hasKey) return NO_API_KEY
+    if (!sequence || sequence.running) return undefined
+    return findRunProblem(sequence, ffmpegOk)?.message.replace(/\.\s*$/, '')
+  }, [hasKey, sequence, ffmpegOk])
+  const runQuote = useTotalQuote(runBlocked ? NO_RUN : runPlan.toGenerate)
+
+  /** Where a missing key is added: Settings, at Venice. */
+  const openVeniceSettings = () => {
+    showSettingsSection(SETTINGS_SECTION.venice)
+    navigate('settings')
+  }
 
   const notReady = sequence ? sequence.segments.flatMap((s, i) => (readyTake(s) ? [] : [i + 1])) : []
   const readyCount = (sequence?.segments.length ?? 0) - notReady.length
@@ -895,6 +919,36 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   useEffect(() => {
     if (bridgedId && segment?.id !== bridgedId) setBridgedId(undefined)
   }, [segment?.id, bridgedId])
+
+  // The player's keys anywhere in the view, as in the Editor: Space plays and pauses the clip, I and O set where it
+  // starts and ends at the playhead. Left alone: a key something else handled (a take tile, a clip card, the song
+  // strip), with a modifier, in a field, menu, dialog or open question, on the native player (Space is its own), on
+  // a button or disclosure reached with the keyboard (Space presses it), and while the preview – it has keys of its
+  // own – or a dialog is open.
+  useEffect(() => {
+    if (preview) return
+    trackFocusOrigin()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      const key = e.key === ' ' ? 'Space' : e.key.toLowerCase()
+      if (key !== 'Space' && key !== 'i' && key !== 'o') return
+      const target = e.target
+      if (isTextTarget(target) || isModalOpen()) return
+      if (target instanceof Element) {
+        if (target.closest('[role="menu"], [role="dialog"], [role="alertdialog"], [data-confirm], video')) return
+        const pressable = target.closest('button, a[href], summary, [role="button"], [role="tab"]')
+        if (pressable && focusedWithKeyboard(target)) return
+      }
+      const handle = player.current
+      if (!handle) return
+      e.preventDefault()
+      if (key === 'Space') handle.toggle()
+      else if (key === 'i') handle.markIn()
+      else handle.markOut()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [preview])
 
   const editor =
     segment &&
@@ -993,8 +1047,9 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 Generate missing stopped: the model needs you to accept the provider's terms.
                 <button
+                  type="button"
                   onClick={() => sequence && setRunConsentOpen(new Set(runPlanKeys(sequence)))}
-                  className="rounded bg-accent px-2 py-0.5 font-medium text-white hover:bg-accent-hover"
+                  className={buttonClass('primary', 'inline')}
                 >
                   Review and continue
                 </button>
@@ -1072,6 +1127,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               readyCount={readyCount}
               toGenerate={runPlan.toGenerate.length}
               generating={runPlan.generating}
+              runBlocked={runBlocked}
               runQuote={runQuote}
               stopping={stopping}
               previewDisabled={previewDisabled}
@@ -1081,7 +1137,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               autoFocusName={focusNameFor === sequence.id}
               onAutoFocused={() => setFocusNameFor(undefined)}
               onRename={rename}
-              onGenerateAll={() => void generateAll()}
+              onGenerateAll={() => (hasKey ? void generateAll() : openVeniceSettings())}
               onStop={() => void stopAll()}
               // A song plays from its start, whatever clips have takes yet; otherwise from the first clip with one.
               onPreview={() => void openPreview(sequence.song ? undefined : sequence.segments.find((s) => readyTake(s))?.id)}
@@ -1122,12 +1178,14 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               unseen={ownerUnseen}
               running={ownerRunning}
               onMove={moveSegment}
-              onBridge={(id) => void bridge(id)}
             />
 
             {segment && shownSegment ? (
               <div className="flex min-h-0 flex-1">
-                <section className="flex w-[360px] shrink-0 flex-col border-r border-line">{editor}</section>
+                {/* Narrower in a narrow window, where the sequence list beside it leaves the player little room. */}
+                <section className="flex w-[320px] shrink-0 flex-col border-r border-line @min-[75rem]/main:w-[360px]">
+                  {editor}
+                </section>
                 <section
                   className="min-w-0 flex-1 overflow-y-auto"
                   onKeyDown={(e) => {
@@ -1188,7 +1246,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               </Banner>
             )}
             {sequences?.length === 0 && !selectedId ? (
-              <EmptyState creating={creating} onCreate={() => void createSequence()} navigate={navigate} />
+              <SequencesEmptyState creating={creating} onCreate={() => void createSequence()} navigate={navigate} />
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted">
                 {selectedId && !store.error ? 'Loading sequence…' : ''}
@@ -1230,35 +1288,6 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   )
 }
 
-function Banner({
-  tone,
-  children,
-  onDismiss
-}: {
-  tone: 'error' | 'warning' | 'success' | 'info'
-  children: ReactNode
-  onDismiss?: () => void
-}) {
-  const tones = {
-    error: 'border-accent/30 bg-accent/10 text-[#ffb3b5]',
-    warning: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-    success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
-    info: 'border-line bg-raised text-text'
-  }
-  return (
-    <div
-      className={`mx-4 mt-3 flex shrink-0 items-start gap-3 rounded-lg border px-3.5 py-2.5 text-[12px] leading-relaxed ${tones[tone]}`}
-    >
-      <div className="min-w-0 flex-1 select-text">{children}</div>
-      {onDismiss && (
-        <button onClick={onDismiss} title="Close" className="mt-0.5 shrink-0 opacity-60 transition hover:opacity-100">
-          <CloseIcon size={11} />
-        </button>
-      )}
-    </div>
-  )
-}
-
 /** Whether main will choose a take of the clip by itself when it is done: only while none usable is chosen. */
 function autoSelects(segment: Segment): boolean {
   const chosen = selectedTake(segment)
@@ -1292,7 +1321,8 @@ function SeenWhenVisible({ seenKey, children }: { seenKey?: string; children: Re
   return <div ref={ref}>{children}</div>
 }
 
-function EmptyState({
+/** No sequence yet: what a sequence is, one way in, and the other places to start from. */
+function SequencesEmptyState({
   creating,
   onCreate,
   navigate
@@ -1303,34 +1333,25 @@ function EmptyState({
 }) {
   const link = 'underline decoration-muted/50 underline-offset-2 hover:text-text'
   return (
-    <div className="flex flex-1 items-center justify-center p-8">
-      <div className="max-w-md text-center">
-        <FilmIcon size={30} className="mx-auto mb-4 text-muted" />
-        <h2 className="mb-2 text-base font-semibold">Build longer videos from several clips</h2>
-        <p className="mb-5 leading-relaxed text-muted">
-          A generation is at most around 15 seconds. In a sequence you put clips one after another, let each clip
-          continue from the last frame of the one before, pick the best takes, trim, and export it all as one film.
-        </p>
-        <button
-          onClick={onCreate}
-          disabled={creating}
-          className="rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-        >
-          Create a sequence
-        </button>
-        <p className="mt-4 text-[11px] leading-relaxed text-muted">
+    <EmptyState
+      icon={<FilmIcon size={24} />}
+      title="Build longer videos from several clips"
+      text="A generation is at most around 15 seconds. In a sequence you put clips one after another, let each clip continue from the last frame of the one before, pick the best takes, trim, and export it all as one film."
+      action={{ label: 'Create a sequence', onClick: onCreate, disabled: creating }}
+      footnote={
+        <>
           Rather start with images? In{' '}
-          <button onClick={() => navigate('storyboards')} className={link}>
+          <button type="button" onClick={() => navigate('storyboards')} className={link}>
             Storyboards
           </button>{' '}
-          you make an image for every key moment and generate the clips between them. You can put existing videos into
+          you make an image for every key moment and generate the clips between them. Videos you already have go into
           a sequence straight from{' '}
-          <button onClick={() => navigate('generate')} className={link}>
+          <button type="button" onClick={() => navigate('generate')} className={link}>
             Generate
           </button>
           .
-        </p>
-      </div>
-    </div>
+        </>
+      }
+    />
   )
 }

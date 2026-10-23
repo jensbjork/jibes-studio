@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { buttonClass } from '../ui/button'
 
 interface Props {
   /** The text, or a function that fetches it when clicked (e.g. the token, read from main on demand). */
@@ -8,7 +9,7 @@ interface Props {
   className?: string
 }
 
-const base = 'shrink-0 rounded-md border border-line px-3 py-1.5 text-[12px] transition hover:bg-raised disabled:opacity-40'
+const base = `shrink-0 ${buttonClass('secondary', 'sm')}`
 
 /** Copies to the clipboard and says so for a moment. */
 export default function CopyButton({ text, label = 'Copy', title, className = base }: Props) {

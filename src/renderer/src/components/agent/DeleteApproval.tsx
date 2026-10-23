@@ -8,6 +8,7 @@ import AssetIcon from '../assets/AssetIcon'
 import { clipFileName, formatDuration } from '../assets/audioUtils'
 import AudioPlayButton from '../pickers/AudioPlayButton'
 import { KIND_TONE } from '../pickers/assetKinds'
+import { noticeTones } from '../ui/Banner'
 import { changedSinceText } from './agentText'
 
 // The approval dialog's panel for a removal an agent asks for (request_delete): every item grouped by what it is,
@@ -126,7 +127,7 @@ export function DeleteSummary({
       {pending && check.problem && (
         <p
           role="alert"
-          className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[12px] leading-relaxed text-[#ffb3b5] select-text"
+          className={`rounded-md border px-3 py-2 text-[12px] leading-relaxed select-text ${noticeTones.error}`}
         >
           {changedSinceText(check.problem)}
         </p>
@@ -144,7 +145,7 @@ export function DeleteSummary({
           </ul>
         </div>
       ))}
-      {!request.items.length && <p className="text-accent">The request doesn’t say what should be deleted.</p>}
+      {!request.items.length && <p className="text-danger">The request doesn’t say what should be deleted.</p>}
       <p className="border-t border-line pt-4 text-[12px] leading-relaxed text-muted">{TRASH_NOTE}</p>
     </section>
   )
@@ -194,7 +195,7 @@ function ItemRow({ item }: { item: ApprovalDeleteItem }) {
           </ul>
         )}
         {failed && item.outcome?.error && (
-          <p className="mt-1 text-[12px] leading-snug text-[#ffb3b5] select-text">{item.outcome.error}</p>
+          <p className="mt-1 text-[12px] leading-snug text-danger select-text">{item.outcome.error}</p>
         )}
       </div>
     </li>
@@ -202,9 +203,9 @@ function ItemRow({ item }: { item: ApprovalDeleteItem }) {
 }
 
 const OUTCOME: Record<NonNullable<ApprovalDeleteItem['outcome']>['status'], { text: string; tone: string }> = {
-  deleted: { text: 'Deleted', tone: 'bg-emerald-500/15 text-emerald-300' },
+  deleted: { text: 'Deleted', tone: 'bg-emerald-500/15 text-success' },
   gone: { text: 'Already gone', tone: 'bg-raised text-muted' },
-  failed: { text: 'Failed', tone: 'bg-accent/15 text-[#ffb3b5]' }
+  failed: { text: 'Failed', tone: 'bg-accent/15 text-danger' }
 }
 
 function OutcomeChip({ status }: { status: keyof typeof OUTCOME }) {

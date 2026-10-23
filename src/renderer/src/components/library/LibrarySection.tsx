@@ -2,17 +2,21 @@ import { useEffect, useState } from 'react'
 import type { LibraryStatus, ReorganizeReport } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { displayPath, folderName } from '../../lib/library'
-import { FILE_MANAGER } from '../../lib/platform'
+import { ARCHIVE_UNAVAILABLE, FILE_MANAGER } from '../../lib/platform'
 import Modal from '../pickers/Modal'
+import LibraryArchiveSection from '../settings/LibraryArchiveSection'
+import { MoreAbout, SettingsItem } from '../settings/SettingsLayout'
+import { buttonClass } from '../ui/button'
 import FolderDecision from './FolderDecision'
 import FolderTree from './FolderTree'
 import type { RevealTarget } from './OpenFolderButton'
 import SwitchingOverlay from './SwitchingOverlay'
 import { useFolderChoice, useLibrarySwitch } from './useLibrarySwitch'
 
-const secondary = 'rounded-md border border-line px-4 py-2 transition hover:bg-raised disabled:opacity-40'
-
-/** Settings → Library: where everything is stored, switching folders and tidying up. */
+/**
+ * Settings → Library, as three settings: the folder (where it is, open it, change it, and what is in it), moving the
+ * library to another computer (Export & import) and tidying up.
+ */
 export default function LibrarySection() {
   const [status, setStatus] = useState<LibraryStatus>()
   const [error, setError] = useState<string>()
@@ -39,44 +43,69 @@ export default function LibrarySection() {
   }
 
   const root = status?.root
+  const shownError = error ?? (!dialogOpen ? choice.error : undefined)
 
   return (
-    <section className="mb-8">
-      <h2 className="mb-1 font-medium">Library</h2>
-      <p className="mb-3 text-muted">
-        Everything Studio saves is in the library folder below, sorted into folders you can browse right in {FILE_MANAGER}.
-        Click a folder to open it.
-      </p>
-
-      {root ? (
-        <div className="rounded-md border border-line bg-raised/40 p-1.5">
-          <FolderTree
-            rootName={folderName(root)}
-            rootDetail={displayPath(root)}
-            detail="explain"
-            onOpen={(target) => void reveal(target)}
-          />
+    <>
+      <SettingsItem
+        title="Folder"
+        help={
+          root ? (
+            <span className="break-all font-mono text-[11px] select-text">{displayPath(root)}</span>
+          ) : (
+            status && 'No library folder is chosen.'
+          )
+        }
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          {root && (
+            <button type="button" onClick={() => void reveal('root')} className={buttonClass()}>
+              Show in {FILE_MANAGER}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void changeFolder()}
+            disabled={!status || choice.checking}
+            className={buttonClass()}
+          >
+            Change folder…
+          </button>
+          {choice.checking && !dialogOpen && <span className="text-[12px] text-muted">Checking the folder…</span>}
         </div>
-      ) : (
-        status && <p className="text-muted">No library folder is chosen.</p>
-      )}
+        {shownError && (
+          <p role="alert" className="mt-2 text-[12px] text-danger select-text">
+            {shownError}
+          </p>
+        )}
+        {root && (
+          <div className="mt-3">
+            {/* The folders, each opening in the file manager on a click. */}
+            <MoreAbout summary="What’s in the folder" plain>
+              <FolderTree rootName={folderName(root)} detail="explain" onOpen={(target) => void reveal(target)} />
+            </MoreAbout>
+          </div>
+        )}
+      </SettingsItem>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button onClick={() => void changeFolder()} disabled={!status || choice.checking} className={secondary}>
-          Change folder…
-        </button>
-        {choice.checking && !dialogOpen && <span className="text-[12px] text-muted">Checking the folder…</span>}
-      </div>
-      {(error ?? (!dialogOpen && choice.error)) && (
-        <p className="mt-2 text-[12px] text-accent select-text">{error ?? choice.error}</p>
-      )}
+      <SettingsItem
+        title="Move to another computer"
+        help={
+          ARCHIVE_UNAVAILABLE
+            ? undefined
+            : 'Pack the whole library – the database and every file – into one zip, or open such a zip as a new ' +
+              'library. The API key and the agent’s token aren’t included.'
+        }
+      >
+        <LibraryArchiveSection />
+      </SettingsItem>
 
       {root && <Cleanup />}
 
       {dialogOpen && status && (
         <ChangeFolderDialog status={status} choice={choice} onClose={() => setDialogOpen(false)} />
       )}
-    </section>
+    </>
   )
 }
 
@@ -114,7 +143,7 @@ function ChangeFolderDialog({
             >
               Choose another folder…
             </button>
-            <button onClick={close} disabled={busy} className={secondary}>
+            <button type="button" onClick={close} disabled={busy} className={buttonClass()}>
               Cancel
             </button>
           </>
@@ -131,7 +160,11 @@ function ChangeFolderDialog({
         ) : (
           choice.checking && <p className="text-muted">Checking the folder…</p>
         )}
-        {choice.error && <p className="mt-3 text-[12px] text-accent select-text">{choice.error}</p>}
+        {choice.error && (
+          <p role="alert" className="mt-3 text-[12px] text-danger select-text">
+            {choice.error}
+          </p>
+        )}
         <p className="mt-4 text-[11px] leading-relaxed text-muted">
           The folder can't be changed while something is generating or exporting. Studio reloads when the change is done.
         </p>
@@ -175,18 +208,19 @@ function Cleanup() {
   }
 
   return (
-    <div className="mt-6 border-t border-line pt-5">
-      <h3 className="mb-1 font-medium">Tidy up</h3>
-      <p className="mb-3 text-muted">
-        Moves misplaced files to the right folder and gives them descriptive names, for example after a character,
-        environment, product, outfit, pose, sequence or storyboard was renamed. Nothing is deleted and no files are
-        overwritten.
-      </p>
-      <button onClick={() => void run()} disabled={running} className={secondary}>
+    <SettingsItem
+      title="Tidy up"
+      help="Puts misplaced files back in the right folder with descriptive names, for example after a rename. Nothing is deleted or overwritten."
+    >
+      <button type="button" onClick={() => void run()} disabled={running} className={buttonClass()}>
         {running ? 'Tidying up…' : 'Tidy up the folder structure'}
       </button>
 
-      {error && <p className="mt-3 text-[12px] text-accent select-text">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-3 text-[12px] text-danger select-text">
+          {error}
+        </p>
+      )}
       {report && (
         <div className="mt-3 rounded-md border border-line bg-raised px-3 py-2.5 text-[12px] leading-relaxed">
           <p className="flex items-center gap-2">
@@ -203,7 +237,7 @@ function Cleanup() {
           )}
           {report.errors.length > 0 && (
             <>
-              <p className="mt-1.5 text-amber-200">
+              <p className="mt-1.5 text-warning">
                 {report.errors.length === 1 ? "This couldn't be moved:" : "These couldn't be moved:"}
               </p>
               <ul className="mt-1 max-h-40 list-disc space-y-0.5 overflow-y-auto pl-5 text-muted select-text">
@@ -215,6 +249,6 @@ function Cleanup() {
           )}
         </div>
       )}
-    </div>
+    </SettingsItem>
   )
 }

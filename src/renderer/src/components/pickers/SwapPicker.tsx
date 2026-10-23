@@ -7,6 +7,7 @@ import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
 import { useStills } from '../images/imageModels'
 import StillThumb from '../images/StillThumb'
+import { CloseIcon } from '../sequences/icons'
 import { KIND_TONE } from './assetKinds'
 import { imageCount, matchesQuery } from './text'
 
@@ -32,12 +33,13 @@ function PanelHeader({ title, hint, onClose }: { title: string; hint?: string; o
         {hint && <p className="mt-0.5 text-[11px] leading-snug text-muted">{hint}</p>}
       </div>
       <button
+        type="button"
         onClick={onClose}
-        className="-mr-1 rounded px-1.5 py-0.5 text-muted transition hover:bg-raised hover:text-text"
+        className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition hover:bg-raised hover:text-text"
         title="Close (Esc)"
-        aria-label="Close the picker"
+        aria-label="Close"
       >
-        ✕
+        <CloseIcon size={11} />
       </button>
     </div>
   )

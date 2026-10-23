@@ -12,7 +12,7 @@ function userOnly(e: IpcMainInvokeEvent): void {
   if (isAgentCall(e)) throw new Error(USER_ONLY)
 }
 
-/** The window's side of the agent connection: Settings, the activity drawer and the approval dialog. */
+/** The window's side of the agent connection: Settings, the Agent panel and the approval dialog. */
 export function registerAgentIpc(agent: AgentService): void {
   ipcMain.handle('agent:status', () => agent.status())
   ipcMain.handle('agent:setEnabled', (e, enabled: unknown) => {

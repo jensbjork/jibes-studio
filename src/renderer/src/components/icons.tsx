@@ -126,3 +126,35 @@ export function CheckIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/**
+ * The chevron of a disclosure (Disclosure, "More about …", a section that folds): points right, down when open.
+ * Given `open` it follows that; without, it turns inside an open `<details className="group">`.
+ */
+export function DisclosureChevron({
+  open,
+  size = 10,
+  className = '',
+  ...rest
+}: SVGProps<SVGSVGElement> & { size?: number; open?: boolean }) {
+  const turned = open === undefined ? 'group-open:rotate-90' : open ? 'rotate-90' : ''
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 10 10"
+      aria-hidden
+      className={`shrink-0 transition-transform motion-reduce:transition-none ${turned} ${className}`}
+      {...rest}
+    >
+      <path
+        d="M3.5 2l3 3-3 3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}

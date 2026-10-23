@@ -15,6 +15,7 @@ import { maxReferenceAudios, type Kind } from '@shared/models'
 import { validatePromptReferences, type ReferenceKind, type ValidateOptions } from '@shared/prompt-refs'
 import { remapPromptReferences } from '@shared/prompt-remap'
 import type { Asset, PromptLanguage } from '@shared/types'
+import { isFocusModeKey, isMac, isSubmitKey } from '../../lib/platform'
 import { KIND_TONE, OWN_IMAGE_TOKEN, VIDEO_TONE } from '../pickers/assetKinds'
 import type { FormAudio } from '../pickers/audioRefs'
 import type { FormVideo } from '../pickers/videoRefs'
@@ -42,7 +43,7 @@ import {
   type TextRange
 } from './promptText'
 import FocusDialog from './FocusDialog'
-import { isFocusShortcut, PROMPT_TEXT, PROMPT_TEXT_LARGE, PromptToolbar, promptFrame, useAutoGrow } from './PromptField'
+import { PROMPT_TEXT, PROMPT_TEXT_LARGE, PromptToolbar, promptFrame, useAutoGrow } from './PromptField'
 import { issueViews, type FixAction } from './quickFixes'
 import ReferenceStrip from './ReferenceStrip'
 import { markAtPoint, replaceRange, textRect } from './textareaDom'
@@ -62,8 +63,10 @@ interface Props {
   id?: string
   value: string
   onChange: (value: string) => void
-  /** ⌘/Ctrl+Enter. */
+  /** ⌘↵ (Ctrl+Enter); handled here, so the form's own ⌘↵ handler doesn't send again. */
   onSubmit?: () => void
+  /** The model's character limit: the count shows against it once the text reaches 80 % of it. */
+  limit?: number
   placeholder?: string
   rows?: number
   /** The selected model's mode; @ImageN and @AudioN tokens only mean something in reference mode. */
@@ -163,12 +166,12 @@ function markClass(mark: PromptMark, lit: string | undefined): string {
   const glow = lit !== undefined && markKey(mark.ref, mark.index) === lit ? ' ring-1 ring-white/50' : ''
   if (mark.tone === 'error') {
     return (
-      'rounded-[3px] bg-accent/15 text-red-300 underline decoration-accent decoration-wavy underline-offset-[3px] ' +
+      'rounded-[3px] bg-accent/15 text-danger underline decoration-accent decoration-wavy underline-offset-[3px] ' +
       `[text-decoration-skip-ink:none]${glow}`
     )
   }
   if (mark.tone === 'warning') {
-    return 'text-amber-200 underline decoration-amber-400/80 decoration-dotted underline-offset-[3px]'
+    return 'text-warning underline decoration-amber-400/80 decoration-dotted underline-offset-[3px]'
   }
   // Videos are no asset's: they have a colour of their own.
   if (mark.ref === 'video') return `rounded-[3px] ${VIDEO_TONE.token}${glow}`
@@ -183,7 +186,7 @@ function sameRect(a: DOMRect | undefined, b: DOMRect | undefined): boolean {
 
 /**
  * The prompt field. A transparent textarea (so typing, undo, IME, selection, spell check, resizing and
- * ⌘Enter stay native) over a mirror layer that renders the same text with the @ImageN and @AudioN tokens
+ * ⌘↵ stay native) over a mirror layer that renders the same text with the @ImageN and @AudioN tokens
  * coloured by the kind of asset they name, and wrong ones red with a wavy underline. Typing "@" opens a menu of
  * the references, the audio clips and library assets next to the caret. Below: the problems with quick fixes,
  * and the key to the reference images and clips with the ones the prompt doesn't mention marked.
@@ -195,6 +198,7 @@ export default function PromptEditor(props: Props) {
     value,
     onChange,
     onSubmit,
+    limit,
     placeholder,
     rows = 7,
     kind,
@@ -730,7 +734,7 @@ export default function PromptEditor(props: Props) {
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.nativeEvent.isComposing) return
     if (blocks.onKeyDown(e)) return
-    if (isFocusShortcut(e)) {
+    if (isFocusModeKey(e)) {
       e.preventDefault()
       if (!inFocus) expand()
       return
@@ -763,9 +767,12 @@ export default function PromptEditor(props: Props) {
         return
       }
     }
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    if (isSubmitKey(e)) {
       setMenu(undefined)
-      onSubmit?.()
+      if (!onSubmit) return
+      // Marked handled, so the form's ⌘↵ (submitKeyHandler) around the field doesn't send a second time.
+      e.preventDefault()
+      onSubmit()
     }
   }
 
@@ -844,13 +851,19 @@ export default function PromptEditor(props: Props) {
           }
           aria-describedby={views.length ? issuesId : undefined}
           aria-invalid={hasError || undefined}
+          aria-keyshortcuts={onSubmit ? (isMac ? 'Meta+Enter' : 'Control+Enter') : undefined}
           className={`relative block w-full resize-none rounded-lg border bg-transparent px-3.5 py-2.5 text-transparent caret-text outline-none transition-[border-color,box-shadow] placeholder:text-muted/80 selection:bg-sky-500/35 selection:text-transparent ${
             inFocus ? `min-h-0 flex-1 ${PROMPT_TEXT_LARGE}` : PROMPT_TEXT
           } ${promptFrame(hasError)}`}
         />
       </div>
 
-      <PromptToolbar blocks={blocks} onExpand={inFocus ? undefined : expand} />
+      <PromptToolbar
+        blocks={blocks}
+        // Only near the limit: far from it, the count is noise.
+        count={limit && text.length >= 0.8 * limit ? { length: text.length, limit } : undefined}
+        onExpand={inFocus ? undefined : expand}
+      />
       {blocks.menu}
 
       {restored !== undefined && restored !== text && (
@@ -887,6 +900,8 @@ export default function PromptEditor(props: Props) {
           highlighted={lit}
           onHighlight={setHighlighted}
           onInsert={insertAtCaret}
+          // Folded beside the thumbnails and chips; open in focus mode, which shows neither.
+          collapsible={!inFocus}
         />
       )}
 

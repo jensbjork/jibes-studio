@@ -1,23 +1,23 @@
-import { useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import type { EditSummary } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { useOwnerWork, useRunning } from '../../lib/work'
-import { GridIcon, ListIcon } from '../feed/icons'
-import { carriesFiles, droppedVideoPaths, ImportCardView, useImportCards } from '../feed/ownClips'
+import { ViewSwitch } from '../feed/FeedToolbar'
+import { ImportCardView, useImportCards } from '../feed/ownClips'
 import { formatWhen } from '../prompts/prompt-utils'
-import { CloseIcon, FilmIcon } from '../sequences/icons'
-import { secondaryButton } from '../storyboards/ui'
+import { FilmIcon } from '../sequences/icons'
+import EmptyState from '../ui/EmptyState'
 import { formatLength, formatPrice, originLabel, summaryLine } from './editorUtils'
 import { CameraIcon, ScissorsIcon } from './icons'
 import { NewChip, Spinner } from '../work/StatusMark'
 import { countsTitle } from '../work/workText'
 
-// All edits, the Editor's overview beside the list while no edit is open: every edit as a card (poster, name,
-// where it came from, versions, length, spent) or as a table row – the same Cards/Table switch as Generate's clip
-// feed – and the ways to start one: an own film (file dialog, or dropped here), a clip from the feed, an exported
-// film. Each edit can be deleted from here too (after a question). It lays out by its own width (@container/edits):
-// in a narrow window the table drops its less needed columns and the header leaves the ways to start one to the
-// list's "＋ New edit".
+// All edits, the Editor's overview: every edit as a card (poster, name, where it came from, versions, length, spent)
+// or as a table row – the same Cards/Table switch as Generate's clip feed. It shows while no edit is open (there are
+// none yet, or a film is being brought in) and when the open edit's "All edits" asks for it. New edits start from the
+// list's "＋ New edit" (or ⌘K), from the empty state here, or by dropping a film anywhere in the Editor (EditorView).
+// Deleting is the list's ✕ (or the edit's ⋯). It lays out by its own width (@container/edits): in a narrow window the
+// table drops its less needed columns.
 
 export type EditListView = 'cards' | 'table'
 export type EditSort = 'updated' | 'name' | 'length' | 'cost' | 'versions'
@@ -57,10 +57,8 @@ function sortEdits(edits: readonly EditSummary[], sort: EditSort): EditSummary[]
   }
 }
 
-const segment = (on: boolean) =>
-  `flex h-full items-center gap-1.5 rounded-[5px] px-2.5 text-[12px] transition ${
-    on ? 'bg-raised text-text shadow-sm shadow-black/40' : 'text-muted hover:text-text'
-  }`
+/** The empty state's other ways in: text that reads as a link. */
+const footLink = 'underline decoration-muted/50 underline-offset-2 transition hover:text-text disabled:opacity-40'
 
 interface Props {
   edits?: EditSummary[]
@@ -70,25 +68,11 @@ interface Props {
   busy?: string
   onOpen: (editId: string) => void
   onOwnFilm: () => void
-  onDropFiles: (paths: string[], hadOther: boolean) => void
   onFromFeed: () => void
   onFromExport: () => void
-  /** Asks before it deletes (the view shows the question). */
-  onDelete: (edit: EditSummary) => void
 }
 
-export default function EditList({
-  edits,
-  error,
-  importing,
-  busy,
-  onOpen,
-  onOwnFilm,
-  onDropFiles,
-  onFromFeed,
-  onFromExport,
-  onDelete
-}: Props) {
+export default function EditList({ edits, error, importing, busy, onOpen, onOwnFilm, onFromFeed, onFromExport }: Props) {
   const cards = useImportCards().filter((c) => importing.has(c.path))
   const [view, setViewState] = useState<EditListView>(loadView)
   const setView = (v: EditListView) => {
@@ -97,107 +81,45 @@ export default function EditList({
   }
   const [sort, setSort] = useState<EditSort>('updated')
   const sorted = useMemo(() => (edits ? sortEdits(edits, sort) : undefined), [edits, sort])
-  const [over, setOver] = useState(false)
-  const depth = useRef(0)
-
-  const onDragEnter = (e: DragEvent) => {
-    if (!carriesFiles(e)) return
-    depth.current += 1
-    setOver(true)
-  }
-  const onDragLeave = (e: DragEvent) => {
-    if (!carriesFiles(e)) return
-    depth.current = Math.max(0, depth.current - 1)
-    if (!depth.current) setOver(false)
-  }
-  const onDragOver = (e: DragEvent) => {
-    if (!carriesFiles(e)) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
-  }
-  const onDrop = (e: DragEvent) => {
-    if (!carriesFiles(e)) return
-    e.preventDefault()
-    depth.current = 0
-    setOver(false)
-    const { paths, other } = droppedVideoPaths(e)
-    onDropFiles(paths, other)
-  }
 
   const empty = edits?.length === 0 && cards.length === 0
-  const actions = (
-    <>
-      <button type="button" onClick={onOwnFilm} disabled={!!busy} className={secondaryButton}>
-        <CameraIcon size={13} />
-        Open your own film…
-      </button>
-      <button type="button" onClick={onFromFeed} disabled={!!busy} className={secondaryButton}>
-        From the clip feed…
-      </button>
-      <button type="button" onClick={onFromExport} disabled={!!busy} className={secondaryButton}>
-        From an export…
-      </button>
-    </>
-  )
 
   return (
-    <div
-      className="@container/edits relative flex h-full flex-col"
-      onDragEnter={onDragEnter}
-      onDragLeave={onDragLeave}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
+    <div className="@container/edits flex h-full flex-col">
       <div className="drag flex h-12 shrink-0 items-center gap-3 border-b border-line pl-5 pr-3">
         <h1 className="shrink-0 font-medium">All edits</h1>
         {!empty && (
-          <div
-            role="radiogroup"
-            aria-label="View"
-            className="no-drag flex h-7 shrink-0 items-center rounded-md border border-line bg-panel p-0.5"
-          >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={view === 'cards'}
-              onClick={() => setView('cards')}
-              title="Large cards with a picture"
-              className={segment(view === 'cards')}
-            >
-              <GridIcon size={12} />
-              Cards
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={view === 'table'}
-              onClick={() => setView('table')}
-              title="Table – many edits at once"
-              className={segment(view === 'table')}
-            >
-              <ListIcon size={12} />
-              Table
-            </button>
-          </div>
+          <ViewSwitch
+            view={view}
+            onView={setView}
+            cardsTitle="Large cards with a picture"
+            tableTitle="Table – many edits at once"
+          />
         )}
         {busy && <span className="ml-2 truncate text-[12px] text-muted">{busy}</span>}
-        {!empty && <div className="no-drag ml-auto hidden items-center gap-2 @min-[56rem]/edits:flex">{actions}</div>}
       </div>
-      {error && <p className="mx-5 mt-3 text-[12px] text-accent select-text">{error}</p>}
+      {error && <p className="mx-5 mt-3 text-[12px] text-danger select-text">{error}</p>}
 
       {empty ? (
-        <div className="flex flex-1 items-center justify-center overflow-y-auto p-8">
-          <div className="max-w-md text-center">
-            <ScissorsIcon size={30} className="mx-auto mb-4 text-muted" />
-            <h2 className="mb-2 text-base font-semibold">Edit a film</h2>
-            <p className="leading-relaxed text-muted">
-              Open a clip from Media, an exported film or your own film to change it with AI. The original is left
-              untouched — every change becomes a new version.
-            </p>
-            <div className="mt-6 flex flex-wrap justify-center gap-2">{actions}</div>
-            <p className="mt-4 text-[11px] text-muted">You can also drop a film file here.</p>
-          </div>
-        </div>
+        <EmptyState
+          icon={<ScissorsIcon size={24} />}
+          title="Edit a film"
+          text="Open a clip from Media, an exported film or your own film to change it with AI. The original is left untouched – every change becomes a new version."
+          action={{ label: 'Own film from file…', onClick: onOwnFilm, disabled: !!busy }}
+          footnote={
+            <>
+              Or start from{' '}
+              <button type="button" onClick={onFromFeed} disabled={!!busy} className={footLink}>
+                a clip in Media
+              </button>{' '}
+              or{' '}
+              <button type="button" onClick={onFromExport} disabled={!!busy} className={footLink}>
+                an export
+              </button>{' '}
+              – or drop a film file here.
+            </>
+          }
+        />
       ) : !sorted ? (
         <div className="flex flex-1 items-center justify-center text-muted">Loading edits…</div>
       ) : view === 'table' ? (
@@ -207,7 +129,7 @@ export default function EditList({
               <ImportCardView card={card} compact />
             </div>
           ))}
-          <EditTable edits={sorted} sort={sort} onSort={setSort} onOpen={onOpen} onDelete={onDelete} />
+          <EditTable edits={sorted} sort={sort} onSort={setSort} onOpen={onOpen} />
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -221,15 +143,9 @@ export default function EditList({
               </div>
             ))}
             {sorted.map((e) => (
-              <EditCard key={e.id} edit={e} onOpen={() => onOpen(e.id)} onDelete={() => onDelete(e)} />
+              <EditCard key={e.id} edit={e} onOpen={() => onOpen(e.id)} />
             ))}
           </div>
-        </div>
-      )}
-
-      {over && (
-        <div className="pointer-events-none absolute inset-3 top-14 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-bg/80">
-          <p className="text-base">Drop to open as your own film</p>
         </div>
       )}
     </div>
@@ -259,80 +175,59 @@ export function useEditStatus(edit: EditSummary) {
   return { counts, running, runningCount, runningText, title }
 }
 
-/** The ✕ that deletes an edit (after the view's question), shown on hover or keyboard focus. */
-function DeleteButton({ edit, onDelete, className }: { edit: EditSummary; onDelete: () => void; className: string }) {
+function EditCard({ edit, onOpen }: { edit: EditSummary; onOpen: () => void }) {
+  const { counts, running, runningText, title } = useEditStatus(edit)
   return (
     <button
       type="button"
-      onClick={(e) => {
-        e.stopPropagation()
-        onDelete()
-      }}
-      title="Delete the edit"
-      aria-label={`Delete ${edit.name}`}
-      className={`flex h-7 w-7 items-center justify-center rounded-md text-muted opacity-0 transition hover:text-accent focus:opacity-100 group-hover:opacity-100 ${className}`}
+      onClick={onOpen}
+      title={title}
+      className="block w-full overflow-hidden rounded-lg border border-line bg-panel text-left outline-none transition hover:border-muted/60 focus-visible:ring-1 focus-visible:ring-muted"
     >
-      <CloseIcon size={11} />
+      <div className="relative flex aspect-video items-center justify-center bg-black">
+        {edit.posterPath ? (
+          <img src={mediaUrl(edit.posterPath)} alt="" draggable={false} className="h-full w-full object-contain" />
+        ) : (
+          <FilmIcon size={22} className="text-muted/50" />
+        )}
+        <span className="absolute left-2 top-2 flex max-w-[calc(100%-1rem)] items-center gap-1">
+          {running && (
+            <span className="flex min-w-0 items-center gap-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] text-white backdrop-blur">
+              <Spinner size={10} className="text-white" />
+              <span className="truncate">{runningText}</span>
+            </span>
+          )}
+          {counts.unseen > 0 && (
+            <NewChip
+              variant="overlay"
+              label={counts.unseen === 1 ? 'New version' : `${counts.unseen} new versions`}
+              className="shrink-0"
+            />
+          )}
+          {counts.failed > 0 && (
+            <span className="shrink-0 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-danger backdrop-blur">
+              Failed
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="px-3 py-2.5">
+        <p className="truncate font-medium">{edit.name}</p>
+        <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted">
+          {edit.origin.kind === 'import' && <CameraIcon size={11} className="shrink-0" />}
+          <span className="truncate">
+            {originLabel(edit.origin)}
+            {edit.origin.missing && ' (gone)'}
+          </span>
+        </p>
+        <p className="mt-0.5 text-[11px] tabular-nums text-muted">{summaryLine(edit)}</p>
+      </div>
     </button>
   )
 }
 
-function EditCard({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => void; onDelete: () => void }) {
-  const { counts, running, runningText, title } = useEditStatus(edit)
-  return (
-    <div className="group relative">
-      <button
-        type="button"
-        onClick={onOpen}
-        title={title}
-        className="block w-full overflow-hidden rounded-lg border border-line bg-panel text-left outline-none transition hover:border-muted/60 focus-visible:ring-1 focus-visible:ring-muted"
-      >
-        <div className="relative flex aspect-video items-center justify-center bg-black">
-          {edit.posterPath ? (
-            <img src={mediaUrl(edit.posterPath)} alt="" draggable={false} className="h-full w-full object-contain" />
-          ) : (
-            <FilmIcon size={22} className="text-muted/50" />
-          )}
-          <span className="absolute left-2 top-2 flex max-w-[calc(100%-3rem)] items-center gap-1">
-            {running && (
-              <span className="flex min-w-0 items-center gap-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] text-white backdrop-blur">
-                <Spinner size={10} className="text-white" />
-                <span className="truncate">{runningText}</span>
-              </span>
-            )}
-            {counts.unseen > 0 && (
-              <NewChip
-                variant="overlay"
-                label={counts.unseen === 1 ? 'New version' : `${counts.unseen} new versions`}
-                className="shrink-0"
-              />
-            )}
-            {counts.failed > 0 && (
-              <span className="shrink-0 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-[#ffb3b5] backdrop-blur">
-                Failed
-              </span>
-            )}
-          </span>
-        </div>
-        <div className="px-3 py-2.5">
-          <p className="truncate font-medium">{edit.name}</p>
-          <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted">
-            {edit.origin.kind === 'import' && <CameraIcon size={11} className="shrink-0" />}
-            <span className="truncate">
-              {originLabel(edit.origin)}
-              {edit.origin.missing && ' (gone)'}
-            </span>
-          </p>
-          <p className="mt-0.5 text-[11px] tabular-nums text-muted">{summaryLine(edit)}</p>
-        </div>
-      </button>
-      <DeleteButton edit={edit} onDelete={onDelete} className="absolute right-2 top-2 bg-black/70 backdrop-blur" />
-    </div>
-  )
-}
-
 interface Column {
-  id: 'thumb' | 'name' | 'versions' | 'length' | 'cost' | 'status' | 'updated' | 'actions'
+  id: 'thumb' | 'name' | 'versions' | 'length' | 'cost' | 'status' | 'updated'
   label: string
   width: string
   align?: 'right'
@@ -348,8 +243,7 @@ const COLUMNS: Column[] = [
   { id: 'length', label: 'Length', width: '60px', align: 'right', sort: 'length' },
   { id: 'cost', label: 'Cost', width: '72px', align: 'right', sort: 'cost', wide: true },
   { id: 'status', label: 'Status', width: '160px' },
-  { id: 'updated', label: 'Changed', width: '96px', sort: 'updated', wide: true },
-  { id: 'actions', label: '', width: '40px' }
+  { id: 'updated', label: 'Changed', width: '96px', sort: 'updated', wide: true }
 ]
 // Both templates as variables; the grid takes the one its container's width calls for.
 const GRID_STYLE = {
@@ -363,20 +257,18 @@ const WIDE_CELL = 'hidden @min-[50rem]/edits:block'
 
 /**
  * Every edit as one row, like Generate's clip table: poster, name with where it came from, versions, length, spent,
- * what is running or new, last change, and ✕. A click (or Enter) opens it; the column headers sort.
+ * what is running or new, and last change. A click (or Enter) opens it; the column headers sort.
  */
 function EditTable({
   edits,
   sort,
   onSort,
-  onOpen,
-  onDelete
+  onOpen
 }: {
   edits: EditSummary[]
   sort: EditSort
   onSort: (sort: EditSort) => void
   onOpen: (id: string) => void
-  onDelete: (edit: EditSummary) => void
 }) {
   return (
     <div role="table" aria-label="Edits" aria-rowcount={edits.length + 1} className="pb-5">
@@ -418,13 +310,13 @@ function EditTable({
         })}
       </div>
       {edits.map((e) => (
-        <EditRow key={e.id} edit={e} onOpen={() => onOpen(e.id)} onDelete={() => onDelete(e)} />
+        <EditRow key={e.id} edit={e} onOpen={() => onOpen(e.id)} />
       ))}
     </div>
   )
 }
 
-function EditRow({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => void; onDelete: () => void }) {
+function EditRow({ edit, onOpen }: { edit: EditSummary; onOpen: () => void }) {
   const { counts, running, runningText, title } = useEditStatus(edit)
   return (
     <div
@@ -438,7 +330,7 @@ function EditRow({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => 
           onOpen()
         }
       }}
-      className={`group grid h-12 cursor-pointer items-center border-b border-line/50 px-5 outline-none transition hover:bg-raised/60 focus-visible:bg-raised/60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-muted ${GRID}`}
+      className={`grid h-12 cursor-pointer items-center border-b border-line/50 px-5 outline-none transition hover:bg-raised/60 focus-visible:bg-raised/60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-muted ${GRID}`}
       style={GRID_STYLE}
     >
       <div role="cell" className="px-2">
@@ -476,7 +368,7 @@ function EditRow({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => 
             <span className="truncate text-muted">{runningText}</span>
           </>
         ) : counts.failed > 0 ? (
-          <span className="truncate text-[#ffb3b5]">Failed</span>
+          <span className="truncate text-danger">Failed</span>
         ) : counts.unseen > 0 ? (
           <NewChip label={counts.unseen === 1 ? 'New version' : `${counts.unseen} new`} />
         ) : (
@@ -485,9 +377,6 @@ function EditRow({ edit, onOpen, onDelete }: { edit: EditSummary; onOpen: () => 
       </div>
       <div role="cell" className={`truncate px-2 text-[12px] text-muted ${WIDE_CELL}`}>
         {formatWhen(edit.updatedAt)}
-      </div>
-      <div role="cell" className="flex justify-end">
-        <DeleteButton edit={edit} onDelete={onDelete} className="hover:bg-line" />
       </div>
     </div>
   )

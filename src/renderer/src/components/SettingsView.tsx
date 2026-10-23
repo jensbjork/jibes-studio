@@ -1,31 +1,32 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Settings } from '@shared/types'
-import { THIS_COMPUTER } from '../lib/platform'
 import AgentSettingsSection from './agent/AgentSettingsSection'
 import LibrarySection from './library/LibrarySection'
 import AboutSettings from './settings/AboutSettings'
 import GenerationSettings from './settings/GenerationSettings'
-import LibraryArchiveSection from './settings/LibraryArchiveSection'
 import SpendingSettings from './settings/SpendingSettings'
 import {
   SETTINGS_SECTION as SECTION,
   SettingsNav,
   SettingsSection,
+  takeRequestedSection,
   useRequestedSection,
-  useScrollSpy,
-  type SettingsNavItem
+  type SettingsNavItem,
+  type SettingsSectionId
 } from './settings/SettingsLayout'
-import ToolsSettings, { useFfmpegStatus } from './settings/ToolsSettings'
+import { useFfmpegStatus } from './settings/ToolsSettings'
 import VeniceSettings from './settings/VeniceSettings'
 
-// Settings: one section per subject, each with a heading, one line on what it is for and then its settings,
-// and a navigation that follows the scroll – beside the sections when there is room, as a sticky row of pills above
-// them on a narrow window. Every setting does what it did before; only the order and the wording around it changed.
+// Settings: one pane per subject, shown one at a time and chosen in the navigation – beside the pane when there is
+// room, as a sticky row of tabs above it on a narrow window. Each pane has a heading, one line on what it is for and
+// then its settings. Every pane stays mounted while another is shown, so nothing in one is lost by looking at another.
 
 export default function SettingsView({ settings, onChanged }: { settings: Settings; onChanged: () => void }) {
   const scroller = useRef<HTMLDivElement>(null)
   const ffmpeg = useFfmpegStatus()
   const ffmpegMissing = ffmpeg.status !== undefined && !ffmpeg.status.ok
+  // A pane asked for before Settings opened (⌘K, the Agent panel) is the first one shown: no frame of Venice first.
+  const [active, setActive] = useState<SettingsSectionId>(() => takeRequestedSection() ?? SECTION.venice)
 
   const items = useMemo<SettingsNavItem[]>(
     () => [
@@ -37,17 +38,24 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
       { id: SECTION.spending, label: 'Spending' },
       { id: SECTION.generation, label: 'Generation' },
       { id: SECTION.library, label: 'Library' },
-      { id: SECTION.archive, label: 'Export & import' },
       { id: SECTION.agent, label: 'Agent connection' },
-      { id: SECTION.tools, label: 'Tools', attention: ffmpegMissing ? 'ffmpeg is missing' : undefined },
-      { id: SECTION.about, label: 'About JIBES Studio' }
+      { id: SECTION.about, label: 'About', attention: ffmpegMissing ? 'ffmpeg is missing' : undefined }
     ],
     [settings.hasApiKey, ffmpegMissing]
   )
-  const ids = useMemo(() => items.map((i) => i.id), [items])
-  const { active, go } = useScrollSpy(scroller, ids)
-  // Opened at a section from elsewhere (the agent drawer): straight there, without a long smooth scroll.
-  useRequestedSection((id) => go(id, true))
+
+  // Asked for while open: that pane, with keyboard focus on its heading.
+  useRequestedSection((id) => {
+    setActive(id)
+    requestAnimationFrame(() => document.getElementById(`${id}-heading`)?.focus({ preventScroll: true }))
+  })
+
+  // Every pane starts at the top.
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: 0 })
+  }, [active])
+
+  const pane = (id: SettingsSectionId) => ({ id, hidden: id !== active })
 
   return (
     <div ref={scroller} className="drag h-full overflow-y-auto">
@@ -55,24 +63,21 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
         <h1 className="pb-6 pt-14 text-xl font-semibold">Settings</h1>
 
         <div className="@4xl/main:flex @4xl/main:items-start @4xl/main:gap-12">
-          {/* Beside the sections when there is room… */}
-          <nav
-            aria-label="Settings sections"
-            className="sticky top-8 hidden w-44 shrink-0 @4xl/main:block"
-          >
-            <SettingsNav items={items} active={active} onGo={go} layout="side" />
+          {/* Beside the panes when there is room… */}
+          <nav aria-label="Settings sections" className="sticky top-8 hidden w-44 shrink-0 @4xl/main:block">
+            <SettingsNav items={items} active={active} onGo={setActive} layout="side" />
           </nav>
           {/* …and a sticky row above them on a narrow window. */}
           <nav
             aria-label="Settings sections"
             className="sticky top-0 z-10 -mx-8 mb-8 overflow-x-auto border-b border-line bg-bg/90 px-8 py-2.5 backdrop-blur @4xl/main:hidden"
           >
-            <SettingsNav items={items} active={active} onGo={go} layout="top" />
+            <SettingsNav items={items} active={active} onGo={setActive} layout="top" />
           </nav>
 
           <div className="min-w-0 flex-1 @4xl/main:max-w-[620px]">
             <SettingsSection
-              id={SECTION.venice}
+              {...pane(SECTION.venice)}
               title="Venice"
               description="Studio generates video, images and sound through your Venice account."
             >
@@ -80,34 +85,31 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
             </SettingsSection>
 
             <SettingsSection
-              id={SECTION.spending}
+              {...pane(SECTION.spending)}
               title="Spending"
-              description="What Studio has paid Venice for, and an optional budget it keeps you to."
+              description="What you’ve spent on Venice, and an optional budget."
             >
               <SpendingSettings budget={settings.budget ?? {}} onChanged={onChanged} />
             </SettingsSection>
 
             <SettingsSection
-              id={SECTION.generation}
+              {...pane(SECTION.generation)}
               title="Generation"
               description="How Studio writes prompts and creates images."
             >
               <GenerationSettings settings={settings} onChanged={onChanged} />
             </SettingsSection>
 
-            <SettingsSection id={SECTION.library} title="Library" ownIntro>
-              {/* LibrarySection brings its own heading too; this section's is the one shown. */}
-              <div className="[&>section]:mb-0 [&>section>h2]:hidden">
-                <LibrarySection />
-              </div>
-            </SettingsSection>
-
-            <SettingsSection id={SECTION.archive} title="Export & import" ownIntro>
-              <LibraryArchiveSection />
+            <SettingsSection
+              {...pane(SECTION.library)}
+              title="Library"
+              description="Where everything Studio saves is kept, and how to move it."
+            >
+              <LibrarySection />
             </SettingsSection>
 
             <SettingsSection
-              id={SECTION.agent}
+              {...pane(SECTION.agent)}
               title="Agent connection"
               description="Let your own AI agents, such as Claude Code, Hermes Agent or OpenClaw, work in Studio through MCP."
             >
@@ -115,19 +117,11 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
             </SettingsSection>
 
             <SettingsSection
-              id={SECTION.tools}
-              title="Tools"
-              description={`Programs on ${THIS_COMPUTER} that Studio uses.`}
+              {...pane(SECTION.about)}
+              title="About"
+              description="The version, updates and the programs Studio uses."
             >
-              <ToolsSettings ffmpeg={ffmpeg} />
-            </SettingsSection>
-
-            <SettingsSection
-              id={SECTION.about}
-              title="About JIBES Studio"
-              description="The version you are running, and updates."
-            >
-              <AboutSettings settings={settings} onChanged={onChanged} />
+              <AboutSettings settings={settings} onChanged={onChanged} ffmpeg={ffmpeg} />
             </SettingsSection>
           </div>
         </div>

@@ -4,7 +4,7 @@
 
 import { durationSeconds } from '@shared/models'
 import type { Generation, Sequence, Storyboard, StoryboardBoard, StoryboardTransition } from '@shared/types'
-import { FFMPEG_INSTALL, isMac } from '../../lib/platform'
+import { FFMPEG_INSTALL, isMac, TRASH } from '../../lib/platform'
 import { freshestTake, isPending, takeProgress } from '../sequences/sequenceUtils'
 
 export {
@@ -499,11 +499,15 @@ export function fitBox(
   return { width: Math.round(width), height: Math.round(width / ratio) }
 }
 
+/** "landscape", "portrait", "square" or "wide": the shape of an aspect ratio, in words. */
+export function aspectShape(aspect: string): string {
+  const ratio = aspectValue(aspect)
+  return Math.abs(ratio - 1) < 0.01 ? 'square' : ratio > 1 ? (ratio > 2 ? 'wide' : 'landscape') : 'portrait'
+}
+
 /** "16:9 – landscape", "9:16 – portrait", "1:1 – square". */
 export function aspectLabel(aspect: string): string {
-  const ratio = aspectValue(aspect)
-  const shape = Math.abs(ratio - 1) < 0.01 ? 'square' : ratio > 1 ? (ratio > 2 ? 'wide' : 'landscape') : 'portrait'
-  return `${aspect} – ${shape}`
+  return `${aspect} – ${aspectShape(aspect)}`
 }
 
 /** "5 s" from "5s". */
@@ -525,3 +529,11 @@ export function clipCountLabel(n: number): string {
 export function clipProgressLabel(done: number, total: number): string {
   return done === total ? clipCountLabel(total) : `${done} of ${clipCountLabel(total)} done`
 }
+
+/** "3 clips" when every transition has a finished clip, else "2 of 3 clips": short enough for a list row. */
+export function clipProgressShort(done: number, total: number): string {
+  return done === total ? clipCountLabel(total) : `${done} of ${clipCountLabel(total)}`
+}
+
+/** What deleting a storyboard does, for its question in ⋯ and in the list's row alike. */
+export const DELETE_STORYBOARD_TEXT = `The clips stay in Media and finished films in their folder; the storyboard’s images that nothing else uses are moved to ${TRASH}.`

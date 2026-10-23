@@ -57,7 +57,7 @@ export default function WorkIndicator({ collapsed, active, onClick }: Props) {
       <>
         {running > 0 && `${running} running`}
         {running > 0 && unseen > 0 && <span className="text-muted"> · </span>}
-        {unseen > 0 && <span className="text-emerald-300">{`${unseen} new`}</span>}
+        {unseen > 0 && <span className="text-success">{`${unseen} new`}</span>}
       </>
     ) : undefined
 
@@ -75,7 +75,7 @@ export default function WorkIndicator({ collapsed, active, onClick }: Props) {
       lit={running + unseen + failed > 0}
       trailing={
         failed > 0 && (
-          <span className="flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-[#ffb3b5]">
+          <span className="flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-danger">
             <StatusDot failed />
             {failed}
           </span>

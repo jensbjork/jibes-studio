@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { durationSeconds } from '@shared/models'
 import type { Sequence } from '@shared/types'
+import { useViewerKeys } from '../../lib/dialogs'
+import { focusedWithKeyboard, refocused } from '../../lib/focusOrigin'
 import { mediaUrl } from '../../lib/media'
 import { isMac } from '../../lib/platform'
 import { CloseIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon } from './icons'
@@ -33,9 +36,36 @@ function ignoreAbort(e: unknown): boolean {
 // Keeps clicks on controls from moving focus, so Space keeps meaning play/pause.
 const keepFocus = (e: ReactMouseEvent) => e.preventDefault()
 
-/** The sequence played through: its clips back to back, or – cut to a song – the song with the clips over it. */
+/**
+ * The sequence played through: its clips back to back, or – cut to a song – the song with the clips over it. A modal
+ * over the whole window: portaled and marked aria-modal (the window's shortcuts leave the view behind it alone), with
+ * the focus while it is open – so Space can't press a button behind it – and back where it was once it closes.
+ */
 export default function PreviewPlayer(props: Props) {
-  return props.sequence.song ? <SongPreview {...props} /> : <ClipPreview {...props} />
+  const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const byKeyboard = focusedWithKeyboard(before)
+    root.current?.focus({ preventScroll: true })
+    return () => {
+      const lost = !document.activeElement || document.activeElement === document.body
+      if (before?.isConnected && lost) refocused(before, byKeyboard)
+    }
+  }, [])
+  return createPortal(
+    // no-drag over the view's title bar; the preview's own top bar drags the window.
+    <div
+      ref={root}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Preview"
+      className="no-drag fixed inset-0 z-40 flex flex-col bg-black/95 outline-none"
+    >
+      {props.sequence.song ? <SongPreview {...props} /> : <ClipPreview {...props} />}
+    </div>,
+    document.body
+  )
 }
 
 /**
@@ -188,23 +218,8 @@ function ClipPreview({ sequence, startSegmentId, onClose }: Props) {
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  const keys = useRef({ onClose, togglePlay, next, previous })
-  useEffect(() => {
-    keys.current = { onClose, togglePlay, next, previous }
-  })
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const k = keys.current
-      if (e.key === 'Escape') k.onClose()
-      else if (e.key === ' ') k.togglePlay()
-      else if (e.key === 'ArrowRight') k.next()
-      else if (e.key === 'ArrowLeft') k.previous()
-      else return
-      e.preventDefault()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  // Esc, ← / → between clips and Space, before anything behind the preview sees them.
+  useViewerKeys({ onClose, onPrev: previous, onNext: next, onSpace: togglePlay })
 
   const lengths = clips.map(lengthOf)
   const total = lengths.reduce((a, b) => a + b, 0)
@@ -215,7 +230,7 @@ function ClipPreview({ sequence, startSegmentId, onClose }: Props) {
     'flex h-9 w-9 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent'
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-black/95" role="dialog" aria-label="Preview">
+    <>
       {/* Over the whole window: on a Mac the traffic lights are at the left of this bar. */}
       <div className={`drag flex h-12 shrink-0 items-center gap-3 pr-4 ${isMac ? 'pl-24' : 'pl-4'}`}>
         <span className="truncate font-medium text-white/90">{sequence.name}</span>
@@ -300,7 +315,7 @@ function ClipPreview({ sequence, startSegmentId, onClose }: Props) {
             onMouseDown={keepFocus}
             disabled={!clip}
             className={`${control} bg-white/10`}
-            title={playing ? 'Pause (space)' : 'Play (space)'}
+            title={playing ? 'Pause (Space)' : 'Play (Space)'}
           >
             {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
           </button>
@@ -330,7 +345,7 @@ function ClipPreview({ sequence, startSegmentId, onClose }: Props) {
                   title={ci === -1 ? `Clip ${i + 1} has no finished selected take and is skipped` : `Play from clip ${i + 1}`}
                   className={`h-7 min-w-7 rounded-md px-2 text-[12px] tabular-nums transition ${
                     current
-                      ? 'bg-accent text-white'
+                      ? 'bg-accent-fill text-white'
                       : ci === -1
                         ? 'text-white/25 line-through'
                         : 'bg-white/10 text-white/80 hover:bg-white/20'
@@ -343,6 +358,6 @@ function ClipPreview({ sequence, startSegmentId, onClose }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }

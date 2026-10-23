@@ -4,6 +4,7 @@ import { ipcErrorMessage, useSeparationStatus } from '../../../lib/hooks'
 import { formatUsd } from '../../../lib/media'
 import { THIS_COMPUTER } from '../../../lib/platform'
 import Popover from '../../pickers/Popover'
+import { buttonClass } from '../../ui/button'
 import { NoteIcon } from '../icons'
 import { formatFrameTime } from '../sequenceUtils'
 import { placedClips, workText } from './songText'
@@ -167,7 +168,7 @@ export default function SongChip({ sequence, onReplace, onRemove, onSeparate, on
                 {workText(sequence.songWork)}
               </p>
             )}
-            {error && view === 'facts' && <p className="select-text text-[11px] text-accent">{error}</p>}
+            {error && view === 'facts' && <p className="select-text text-[11px] text-danger">{error}</p>}
           </dl>
         )}
         {view === 'transcribe' ? null : view === 'remove' ? (
@@ -177,23 +178,19 @@ export default function SongChip({ sequence, onReplace, onRemove, onSeparate, on
               The clips keep their prompts and takes and become ordinary clips; the preview and the export play their
               own sound again. The song's files stay in the sequence's folder.
             </p>
-            {error && <p className="mb-2 select-text text-[11px] text-accent">{error}</p>}
+            {error && <p className="mb-2 select-text text-[11px] text-danger">{error}</p>}
+            {/* Cancel has the focus, as in every question before throwing work away. */}
             <div className="flex justify-end gap-1.5">
               <button
                 type="button"
+                autoFocus
                 onClick={() => setView('facts')}
                 disabled={busy}
-                className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
+                className={buttonClass('ghost', 'sm')}
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                autoFocus
-                onClick={() => void remove()}
-                disabled={busy}
-                className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-              >
+              <button type="button" onClick={() => void remove()} disabled={busy} className={buttonClass('danger', 'sm')}>
                 {busy ? 'Removing…' : 'Remove'}
               </button>
             </div>
@@ -219,7 +216,7 @@ export default function SongChip({ sequence, onReplace, onRemove, onSeparate, on
                 setView('remove')
               }}
               disabled={!!sequence.songWork}
-              className="ml-auto rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-accent disabled:opacity-40"
+              className="ml-auto rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-danger disabled:opacity-40"
             >
               Remove the song…
             </button>

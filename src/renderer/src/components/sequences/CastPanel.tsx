@@ -1,10 +1,12 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { castFollowAt, castIsEmpty, swapCastAsset } from '@shared/cast'
 import { maxReferenceImages, supportsAudioInput } from '@shared/models'
 import { resolveOutfitWearers } from '@shared/outfits'
 import type { Asset, AssetKind, Sequence, SequenceCast, SequenceCastSwap } from '@shared/types'
 import { ipcErrorMessage, useAssets } from '../../lib/hooks'
 import { ASSET_COPY, isReferenceKind } from '../../lib/assets'
+import { isTextTarget } from '../../lib/dialogs'
+import { shortcut } from '../../lib/platform'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
 import AssetPicker from '../pickers/AssetPicker'
@@ -84,6 +86,9 @@ export function castSummary(sequence: Sequence): string {
 const iconButton =
   'flex h-6 min-w-6 items-center justify-center rounded px-1 text-[11px] text-muted transition hover:bg-line hover:text-text disabled:pointer-events-none disabled:opacity-30'
 
+/** What can have the focus in a cast row, in order (to put it back on the same one after a move). */
+const ROW_CONTROLS = 'button, select'
+
 /**
  * "Cast" in the sequence header: the assets chosen once for the whole sequence, as small avatars, and the panel to
  * change them – add (at the end), remove, move, swap for another asset, a character's voice, who wears an outfit.
@@ -150,6 +155,26 @@ function CastPanel({
   const model = castModel(sequence)
   const max = maxReferenceImages(model)
 
+  // A move disables the rows' buttons while it is saved, which takes the focus away: it goes back to the same control
+  // in the moved row once the move is in, so ⌥↑ / ⌥↓ can be pressed again.
+  const rows = useRef<HTMLDivElement>(null)
+  const refocus = useRef<{ key: string; control: number } | undefined>(undefined)
+  const rowOf = (key: string) => rows.current?.querySelector<HTMLElement>(`[data-cast-key="${CSS.escape(key)}"]`)
+  const rememberFocus = (key: string) => {
+    const row = rowOf(key)
+    const active = document.activeElement
+    if (!row || !(active instanceof HTMLElement) || !row.contains(active)) return
+    refocus.current = { key, control: [...row.querySelectorAll(ROW_CONTROLS)].indexOf(active) }
+  }
+  useEffect(() => {
+    const want = refocus.current
+    if (!want || busy) return
+    refocus.current = undefined
+    const controls = [...(rowOf(want.key)?.querySelectorAll<HTMLElement>(ROW_CONTROLS) ?? [])]
+    const same = controls[want.control]
+    ;(same && !same.matches(':disabled') ? same : controls.find((c) => !c.matches(':disabled')))?.focus()
+  }, [busy, entries])
+
   const save = async (patch: CastPatch, said?: string) => {
     setBusy(true)
     setError(undefined)
@@ -187,7 +212,7 @@ function CastPanel({
         >
           ← Cast
         </button>
-        {error && <p className="px-3 pt-2 text-[11px] text-accent select-text">{error}</p>}
+        {error && <p className="px-3 pt-2 text-[11px] text-danger select-text">{error}</p>}
         <AssetPicker
           assets={assets}
           initialKind={swap && isReferenceKind(swap.kind) ? swap.kind : 'character'}
@@ -217,7 +242,7 @@ function CastPanel({
           follow the cast change with it – their prompts keep pointing at the same pictures.
         </p>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+      <div ref={rows} className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {entries.length === 0 ? (
           <p className="px-2 py-5 text-center text-[12px] leading-relaxed text-muted">
             No cast yet. Add the characters (their outfits and voices come along), the places and anything else every
@@ -234,7 +259,10 @@ function CastPanel({
               first={i === 0}
               last={i === entries.length - 1}
               audioSupported={supportsAudioInput(model)}
-              onMove={(step) => apply({ cast: moveInCast(cast, entries, i, step) })}
+              onMove={(step) => {
+                rememberFocus(entry.key)
+                apply({ cast: moveInCast(cast, entries, i, step) })
+              }}
               onRemove={() => apply({ cast: removeFromCast(cast, entry) })}
               onSwap={() => entry.asset && setView({ mode: 'swap', entry: { ...entry, asset: entry.asset } })}
               onVoice={(on) => entry.asset && apply(setCastVoice(cast, entry.asset, on, assets, model))}
@@ -244,7 +272,7 @@ function CastPanel({
         )}
       </div>
       {(error || note) && (
-        <p className={`border-t border-line px-3 py-2 text-[11px] leading-snug select-text ${error ? 'text-accent' : 'text-amber-300'}`}>
+        <p className={`border-t border-line px-3 py-2 text-[11px] leading-snug select-text ${error ? 'text-danger' : 'text-warning'}`}>
           {error ?? note}
         </p>
       )}
@@ -313,8 +341,21 @@ function CastRow({
   const voiceOn = entry.audios.length > 0
   let extra: ReactNode = null
   if (a?.kind === 'outfit') extra = <WornBy outfit={a} entries={entries} cast={cast} busy={busy} onWear={onWear} />
+  // ⌥↑ / ⌥↓ with the focus anywhere in the row (but in its Worn by list) move it, like the ↑ ↓ buttons.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || isTextTarget(e.target)) return
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+    const step = e.key === 'ArrowUp' ? -1 : 1
+    if (busy || (step === -1 ? first : last)) return
+    onMove(step)
+  }
   return (
-    <div className="group flex items-start gap-2.5 rounded-md p-1.5 hover:bg-raised/60">
+    <div
+      data-cast-key={entry.key}
+      onKeyDown={onKeyDown}
+      className="group flex items-start gap-2.5 rounded-md p-1.5 hover:bg-raised/60"
+    >
       {a ? (
         <AssetAvatar asset={a} className="h-9 w-9 rounded-md" />
       ) : (
@@ -337,7 +378,7 @@ function CastRow({
         </p>
         {extra}
       </div>
-      <div className="flex shrink-0 items-center gap-0.5 pt-0.5 opacity-70 transition group-hover:opacity-100">
+      <div className="flex shrink-0 items-center gap-0.5 pt-0.5 opacity-70 transition group-focus-within:opacity-100 group-hover:opacity-100">
         {hasClips && (audioSupported || voiceOn) && (
           <button
             type="button"
@@ -351,10 +392,26 @@ function CastRow({
             <span className={`ml-1 h-1.5 w-1.5 rounded-full ${voiceOn ? 'bg-emerald-400' : 'bg-line'}`} />
           </button>
         )}
-        <button type="button" onClick={() => onMove(-1)} disabled={busy || first} title="Move up" aria-label="Move up" className={iconButton}>
+        <button
+          type="button"
+          onClick={() => onMove(-1)}
+          disabled={busy || first}
+          title={shortcut('Move up (⌥↑)')}
+          aria-label="Move up"
+          aria-keyshortcuts="Alt+ArrowUp"
+          className={iconButton}
+        >
           ↑
         </button>
-        <button type="button" onClick={() => onMove(1)} disabled={busy || last} title="Move down" aria-label="Move down" className={iconButton}>
+        <button
+          type="button"
+          onClick={() => onMove(1)}
+          disabled={busy || last}
+          title={shortcut('Move down (⌥↓)')}
+          aria-label="Move down"
+          aria-keyshortcuts="Alt+ArrowDown"
+          className={iconButton}
+        >
           ↓
         </button>
         {a && entry.images.length > 0 && (
@@ -374,7 +431,7 @@ function CastRow({
           disabled={busy}
           title="Remove from the cast (its tokens leave the prompts of the clips that follow it)"
           aria-label="Remove"
-          className={`${iconButton} hover:text-accent`}
+          className={`${iconButton} hover:text-danger`}
         >
           <CloseIcon size={9} />
         </button>

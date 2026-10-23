@@ -16,6 +16,7 @@ import type { Generation, Segment, Sequence, Still } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import Modal from '../pickers/Modal'
+import { buttonClass } from '../ui/button'
 import {
   clipChoices,
   firstClipChoice,
@@ -65,8 +66,6 @@ export default function FramePickerDialog(props: FramePickerDialogProps) {
   return <FramePickerBody {...props} />
 }
 
-const pickButton =
-  'rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-hover disabled:opacity-40'
 
 function FramePickerBody({
   sequenceId,
@@ -120,23 +119,32 @@ function FramePickerBody({
       maxWidth={1040}
       footer={
         <>
-          {error && <p className="mr-auto max-w-lg text-[12px] text-accent select-text">{error}</p>}
+          {error && (
+            <p role="alert" className="mr-auto max-w-lg text-[12px] text-danger select-text">
+              {error}
+            </p>
+          )}
           {!error && choice && !unplayable && (
             <p className="mr-auto text-[11px] text-muted">
               ← → one frame · Shift + ← → one second · Space plays
             </p>
           )}
-          <button onClick={onClose} className="rounded-md border border-line px-4 py-2 hover:bg-raised">
+          <button type="button" onClick={onClose} className={buttonClass('secondary')}>
             Cancel
           </button>
-          <button onClick={() => void pick()} disabled={!choice || saving || unplayable} className={pickButton}>
+          <button
+            type="button"
+            onClick={() => void pick()}
+            disabled={!choice || saving || unplayable}
+            className={buttonClass('primary')}
+          >
             {saving ? 'Saving…' : 'Use this frame'}
           </button>
         </>
       }
     >
       {source.error ? (
-        <p className="text-accent select-text">{source.error}</p>
+        <p role="alert" className="text-danger select-text">{source.error}</p>
       ) : !source.loaded ? (
         <p className="text-muted">{library ? 'Loading the clips…' : 'Loading the sequence…'}</p>
       ) : source.empty ? (
@@ -369,7 +377,7 @@ function LibraryChooser({
         autoFocus
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search prompts and names"
+        placeholder="Search prompts and names…"
         aria-label="Search the clips"
         spellCheck={false}
         className="mb-2 w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted"
@@ -697,7 +705,7 @@ function FramePlayer({
         className="aspect-video max-h-[50vh] w-full cursor-pointer rounded-lg bg-black object-contain"
       />
       {broken && (
-        <p className="mt-2 text-[12px] text-accent select-text">
+        <p className="mt-2 text-[12px] text-danger select-text">
           The video couldn't be played – the file is no longer where Studio keeps it. Pick another clip.
         </p>
       )}
@@ -775,7 +783,7 @@ function FramePlayer({
       <p className="mt-2 text-[11px] leading-relaxed text-muted select-text">
         {choice.caption}
         {inCut && (trimStart > 0 || trimEnd > 0) && ' Hatched parts are trimmed away in the sequence.'}
-        {outside && <span className="text-accent"> This frame isn't shown in the sequence.</span>}
+        {outside && <span className="text-warning"> This frame isn't shown in the sequence.</span>}
       </p>
     </div>
   )

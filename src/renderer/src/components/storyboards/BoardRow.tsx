@@ -95,9 +95,11 @@ interface Props {
 
 /**
  * The storyboard's boards as one row of large pictures in film order, with the clip between every two of them
- * on the arrow that joins them. Scrolls sideways (also with an ordinary scroll wheel); the pictures fit the
- * window's height. Boards are reordered by dragging or with ⌥← / ⌥→ (useReorder); + before, between and after
- * them adds one, and pictures dropped on "New board" become new boards.
+ * on the arrow that joins them, from the top of the view. Scrolls sideways (also with an ordinary scroll wheel); the
+ * pictures are as large as two boards and the clip between them side by side allow, within the window's height.
+ * ← / → go along the row, board – clip – board; boards are reordered by dragging or with ⌥← / ⌥→ (useReorder); +
+ * before and between them (on hover) and "New board" after them add one, and pictures dropped on "New board" become
+ * new boards.
  */
 export default function BoardRow({
   storyboard,
@@ -171,20 +173,52 @@ export default function BoardRow({
       moveAsked.current ? '' : `Board ${from + 1} is now board ${to + 1} of ${boards.length}.`
   })
 
-  // ── Scrolling things into view ─────────────────────────────────────────────
+  // ── Scrolling things into view, and the focus along the row ───────────────
 
   const elements = useRef(new Map<string, HTMLElement>())
   const track = (id: string) => (el: HTMLElement | null) => {
     if (el) elements.current.set(id, el)
     else elements.current.delete(id)
   }
+
+  /**
+   * Scrolls the row – only the row: scrollIntoView would move the window too – so `el` is in view: not at all when
+   * it already is, otherwise centred.
+   */
+  const scrollToShow = (el: HTMLElement) => {
+    const box = scroller.current
+    if (!box) return
+    const r = el.getBoundingClientRect()
+    const b = box.getBoundingClientRect()
+    if (r.left >= b.left && r.right <= b.right) return
+    const left = box.scrollLeft + r.left - b.left - (box.clientWidth - r.width) / 2
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    box.scrollTo({ left: Math.max(0, left), behavior: still ? 'auto' : 'smooth' })
+  }
+
   useEffect(() => {
     if (!reveal) return
     const el = elements.current.get(reveal)
     if (!el) return
-    el.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' })
+    scrollToShow(el)
     onRevealed()
   })
+
+  // ← / → from a board or a clip: the next one along the row, board – clip – board (a clip that main hasn't made
+  // for a new order yet is skipped).
+  const order = boards.flatMap((b, i) => {
+    const t = i < boards.length - 1 ? transitionBetween(storyboard, b.id, boards[i + 1].id) : undefined
+    return t ? [b.id, t.id] : [b.id]
+  })
+  const focusAlong = (from: string, dir: -1 | 1) => {
+    const id = order[order.indexOf(from) + dir]
+    const tracked = id ? elements.current.get(id) : undefined
+    // A clip's tracked element is its wrapper; the card in it takes the focus.
+    const el = tracked?.tabIndex === 0 ? tracked : tracked?.querySelector<HTMLElement>('[tabindex="0"]')
+    if (!el) return
+    el.focus({ preventScroll: true })
+    scrollToShow(el)
+  }
 
   /** An ordinary (vertical) scroll wheel scrolls the row sideways, since it has nothing to scroll up and down. */
   const onWheel = (e: WheelEvent<HTMLDivElement>) => {
@@ -210,13 +244,15 @@ export default function BoardRow({
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragLeave={reorder.onDragLeave}
-      className="min-h-0 flex-1 overflow-auto"
+      // relative: the row's sr-only and absolute parts are placed (and clipped) in it, not in the window.
+      className="relative min-h-0 flex-1 overflow-auto"
     >
-      <div className="flex min-h-full w-max items-center" style={{ paddingBlock: ROW_PADDING_Y, paddingInline: ROW_PADDING_X }}>
+      {/* From the top, under the header (as the Sequences strip): the pictures are sized by the width. */}
+      <div className="flex min-h-full w-max items-start" style={{ paddingBlock: ROW_PADDING_Y, paddingInline: ROW_PADDING_X }}>
         <div className="flex items-start">
           {/* Before the first board: + to add one there, and the drop marker for gap 0. */}
           <div
-            className="relative flex shrink-0 items-center justify-center"
+            className="group/lead relative flex shrink-0 items-center justify-center"
             style={{ width: LEAD_WIDTH, height: image.height, marginTop: CARD_HEADER_HEIGHT }}
           >
             {reorder.gap === 0 && <DropMarker />}
@@ -227,7 +263,7 @@ export default function BoardRow({
                 disabled={adding}
                 title="Add a board at the start"
                 aria-label="Add a board at the start"
-                className="flex h-6 w-6 items-center justify-center rounded-full border border-line text-muted opacity-50 transition hover:border-muted hover:text-text hover:opacity-100 focus-visible:opacity-100 disabled:opacity-20"
+                className="flex h-6 w-6 items-center justify-center rounded-full border border-line text-muted opacity-0 transition hover:border-muted hover:text-text focus-visible:opacity-100 group-hover/lead:opacity-100 disabled:opacity-0"
               >
                 <PlusIcon size={11} />
               </button>
@@ -269,6 +305,7 @@ export default function BoardRow({
                   onManage={onManage}
                   onDelete={() => onDeleteBoard(board.id)}
                   onError={onError}
+                  onArrow={(dir) => focusAlong(board.id, dir)}
                 />
                 {next && (
                   <div ref={transition ? track(transition.id) : undefined} className="shrink-0">
@@ -285,6 +322,7 @@ export default function BoardRow({
                       onOpen={() => transition && onOpenTransition(transition.id)}
                       onGenerate={() => transition && onGenerate(transition.id)}
                       onInsert={() => onAddBoard({ afterBoardId: board.id })}
+                      onArrow={(dir) => transition && focusAlong(transition.id, dir)}
                     />
                   </div>
                 )}
@@ -379,7 +417,7 @@ function AddCard({
       >
         <PlusIcon size={18} />
         <span>{first ? 'First board' : 'New board'}</span>
-        <span className="text-[11px] text-muted/70">or drop images here</span>
+        <span className="text-[11px] text-muted">or drop images here</span>
       </button>
     </div>
   )

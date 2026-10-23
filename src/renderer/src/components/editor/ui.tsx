@@ -1,6 +1,10 @@
-import { useId, type ReactNode } from 'react'
+import { useId, useRef, type ReactNode } from 'react'
 import type { EditPlan, EditRange } from '@shared/types'
+import { shortcut, submitKeyHandler } from '../../lib/platform'
+import { buttonClass } from '../ui/button'
+import Kbd from '../ui/Kbd'
 import { formatClock, formatRange, priceText } from './editorUtils'
+import { ChevronDownIcon } from './icons'
 import type { PlayerController } from './playerController'
 
 // Form pieces shared by the edit view's operation cards: one look for every field, the run button with its price,
@@ -10,17 +14,36 @@ export const fieldInput =
   'w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none transition focus:border-muted disabled:opacity-50'
 export const textArea =
   'block max-h-60 min-h-20 w-full resize-none rounded-md border border-line bg-raised px-3 py-2 leading-relaxed outline-none transition [field-sizing:content] placeholder:text-muted/60 focus:border-muted'
-export const smallButton =
-  'rounded-md border border-line px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted'
-export const linkButton =
-  'rounded px-1.5 py-0.5 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40 disabled:hover:bg-transparent'
+/** A small bordered button in a line of a card ("Here", an example chip, "Save subtitles"). */
+export const smallButton = buttonClass('secondary', 'inline')
+/** A button that reads like a link ("Suggest", "All", "Go to Transcribe"). */
+export const linkButton = buttonClass('ghost', 'inline')
+/**
+ * A card's free action (Remove noise, Cut out the selection): bordered like a secondary button, but its words wrap,
+ * which the two-column grids of the 320 px panel need.
+ */
+export const actionButton =
+  'rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent'
 
-/** A labelled field. */
-export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+/**
+ * A labelled field. With htmlFor the label names its one control (a select, an input), for screen readers and for a
+ * click on it; a field with several controls names them itself.
+ */
+export function Field({
+  label,
+  hint,
+  htmlFor,
+  children
+}: {
+  label: ReactNode
+  hint?: ReactNode
+  htmlFor?: string
+  children: ReactNode
+}) {
   return (
     <div>
       <div className="mb-1.5 flex items-baseline justify-between gap-2 text-muted">
-        <span>{label}</span>
+        {htmlFor ? <label htmlFor={htmlFor}>{label}</label> : <span>{label}</span>}
         {hint && <span className="text-[11px]">{hint}</span>}
       </div>
       {children}
@@ -159,12 +182,6 @@ export function NeedsSelection({ what = 'the section' }: { what?: string }) {
   )
 }
 
-export function Kbd({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="rounded border border-line bg-raised px-1 py-px font-sans text-[10px] text-text">{children}</kbd>
-  )
-}
-
 /** A time in the film: typed by the card, set to the playhead with "Here". */
 export function TimeAt({
   label,
@@ -219,12 +236,12 @@ export function PlanNotes({
   return (
     <div className="space-y-1 text-[11px] leading-relaxed">
       {problems.map((p) => (
-        <p key={`p:${p}`} className={sameText(p, quiet) ? 'text-muted' : 'text-accent select-text'}>
+        <p key={`p:${p}`} className={sameText(p, quiet) ? 'text-muted' : 'text-danger select-text'}>
           {p}
         </p>
       ))}
       {warnings.map((w) => (
-        <p key={`w:${w}`} className="text-amber-300/90 select-text">
+        <p key={`w:${w}`} className="text-warning select-text">
           {w}
         </p>
       ))}
@@ -233,7 +250,7 @@ export function PlanNotes({
           {n}
         </p>
       ))}
-      {error && <p className="text-accent select-text">{error}</p>}
+      {error && <p className="text-danger select-text">{error}</p>}
     </div>
   )
 }
@@ -262,7 +279,8 @@ export function priceLabel(plan: EditPlan | undefined, approximate = false): str
 
 /**
  * The card's main button: what it does and, from the plan, what it costs. Disabled while the plan is being made
- * (the price on the button is the one that is sent), when the plan has problems, and while it runs.
+ * (the price on the button is the one that is sent), when the plan has problems, and while it runs. It is the card's
+ * data-run button, which ⌘↵ in the card presses (OpCard), so the keys go through the same checks as a click.
  */
 export function RunButton({
   label,
@@ -294,14 +312,17 @@ export function RunButton({
     <div>
       <button
         type="button"
+        data-run
         onClick={onClick}
         disabled={off}
-        title={off && !running ? (disabledReason ?? plan?.problems[0]) : undefined}
-        className="flex w-full items-center justify-between gap-3 rounded-md bg-accent px-3.5 py-2 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40 disabled:hover:bg-accent"
+        title={running ? undefined : off ? (disabledReason ?? plan?.problems[0]) : `${label} (${shortcut('⌘↵')})`}
+        className={`${buttonClass('primary')} w-full`}
       >
-        <span className="min-w-0 truncate">{running ? runningLabel : label}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{running ? runningLabel : label}</span>
         {price && !running && (
-          <span className={`shrink-0 tabular-nums ${planning ? 'text-white/50' : 'text-white/80'}`}>{price}</span>
+          <span className={`shrink-0 tabular-nums group-disabled:text-muted ${planning ? 'text-white/50' : 'text-white'}`}>
+            {price}
+          </span>
         )}
       </button>
       {plan?.paid && plan.priceNote && !running && (
@@ -311,7 +332,10 @@ export function RunButton({
   )
 }
 
-/** An operation in a tab: a title row that opens it, and its form below while it is open. */
+/**
+ * An operation in a tab: a title row that opens it, and its form below while it is open. ⌘↵ from anywhere in the form
+ * presses its run button (RunButton), when that can be pressed.
+ */
 export function OpCard({
   title,
   summary,
@@ -329,6 +353,11 @@ export function OpCard({
   children: ReactNode
 }) {
   const bodyId = useId()
+  const body = useRef<HTMLDivElement>(null)
+  const run = () => {
+    const button = body.current?.querySelector<HTMLButtonElement>('button[data-run]')
+    if (button && !button.disabled) button.click()
+  }
   return (
     <section className={`rounded-lg border transition ${open ? 'border-line bg-panel' : 'border-transparent'}`}>
       <button
@@ -347,12 +376,13 @@ export function OpCard({
           </span>
           {summary && !open && <span className="mt-0.5 block text-[11px] leading-snug text-muted">{summary}</span>}
         </span>
-        <span className={`mt-0.5 shrink-0 text-[11px] text-muted transition ${open ? 'rotate-90' : ''}`} aria-hidden>
-          ›
-        </span>
+        <ChevronDownIcon
+          size={11}
+          className={`mt-1 shrink-0 text-muted transition ${open ? '' : '-rotate-90'}`}
+        />
       </button>
       {open && (
-        <div id={bodyId} className="space-y-3 px-3 pb-3.5">
+        <div ref={body} id={bodyId} onKeyDown={submitKeyHandler(run)} className="space-y-3 px-3 pb-3.5">
           {children}
         </div>
       )}

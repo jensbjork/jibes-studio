@@ -1,49 +1,61 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { Edit, EditVersion } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { FILE_MANAGER } from '../../lib/platform'
+import { GridIcon } from '../feed/icons'
 import FolderIcon from '../library/FolderIcon'
 import Popover from '../pickers/Popover'
-import { MoreIcon } from '../sequences/icons'
-import { menuRow, onMenuKeyDown, secondaryButton, SubView } from '../storyboards/ui'
+import { buttonClass } from '../ui/button'
+import MoreMenu, { MenuDivider, MenuItem } from '../ui/MoreMenu'
+import NameInput from '../ui/NameInput'
 import { DELETE_EDIT_TEXT, originLabel } from './editorUtils'
-import { BackIcon, CameraIcon, ChevronDownIcon } from './icons'
+import { CameraIcon, ChevronDownIcon } from './icons'
 import SendMenu, { type SentTo } from './SendMenu'
 import { PruneConfirm, usePrune } from './VersionsPanel'
 
-// The edit's header, in the window's drag bar: back to the list, the name (click to rename), where the film came
-// from, Show in Finder, Send to ▾ and the rarer actions under ⋯.
+// The edit's header, in the window's drag bar, laid out like the other document views: "All edits" (the overview),
+// the name (click to rename), where the film came from, Send to ▾, and the rarer actions under ⋯ – Rename, Clean up
+// versions…, Open folder and Delete…, which asks inside the menu.
 
 interface Props {
   edit: Edit
   current: EditVersion
-  hasTranscript: boolean
-  onBack: () => void
+  /** "All edits": the overview of every edit, in place of this one. */
+  onShowAll: () => void
   onRename: (name: string) => void
   onSent: (sent: SentTo) => void
-  onDeleted: () => void
+  /** After the question in ⋯; the view lets go of the edit and opens its neighbour. */
+  onDelete: () => Promise<void>
   onError: (message: string) => void
   onChanged: () => void
-  onSubtitlesSaved: (path: string) => void
 }
 
-export default function EditHeader({
-  edit,
-  current,
-  hasTranscript,
-  onBack,
-  onRename,
-  onSent,
-  onDeleted,
-  onError,
-  onChanged,
-  onSubtitlesSaved
-}: Props) {
+export default function EditHeader({ edit, current, onShowAll, onRename, onSent, onDelete, onError, onChanged }: Props) {
   const [renaming, setRenaming] = useState(false)
   const sendAnchor = useRef<HTMLButtonElement>(null)
   const [sendOpen, setSendOpen] = useState(false)
+  // "Clean up versions…" counts first, then asks in a popover of its own under ⋯ (it has more to say than a delete),
+  // and gives the focus back to ⋯ when it closes.
+  const moreAnchor = useRef<HTMLSpanElement>(null)
+  const focusMore = () => moreAnchor.current?.querySelector<HTMLElement>('button')?.focus()
+  const prune = usePrune(
+    edit.id,
+    (message) => {
+      prune.reset()
+      focusMore()
+      onError(message)
+    },
+    () => {
+      focusMore()
+      onChanged()
+    }
+  )
+  const closePrune = () => {
+    prune.reset()
+    focusMore()
+  }
 
-  const reveal = async () => {
+  const openFolder = async () => {
     try {
       await window.studio.revealLibraryFolder('edits', edit.id)
     } catch (e) {
@@ -55,15 +67,21 @@ export default function EditHeader({
     <div className="drag flex h-12 shrink-0 items-center gap-2 border-b border-line pl-2 pr-3">
       <button
         type="button"
-        onClick={onBack}
+        onClick={onShowAll}
         title="All edits"
-        aria-label="Back to the edits"
-        className="no-drag flex h-8 shrink-0 items-center gap-1 rounded-md px-1.5 text-muted transition hover:bg-raised hover:text-text"
+        aria-label="All edits"
+        className="no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
       >
-        <BackIcon size={14} />
-        <span className="hidden text-[12px] @min-[67rem]/main:inline">Edits</span>
+        <GridIcon size={14} />
       </button>
-      <NameInput name={edit.name} onRename={onRename} focus={renaming} onFocused={() => setRenaming(false)} />
+      <NameInput
+        value={edit.name}
+        onRename={onRename}
+        placeholder="Untitled edit"
+        ariaLabel="Edit name"
+        autoFocus={renaming}
+        onAutoFocused={() => setRenaming(false)}
+      />
       <span
         title={edit.origin.missing ? 'The film this edit was made from is gone' : undefined}
         className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line px-2 py-0.5 text-[11px] text-muted @min-[51rem]/main:flex"
@@ -75,22 +93,13 @@ export default function EditHeader({
 
       <div className="no-drag ml-auto flex shrink-0 items-center gap-2">
         <button
-          type="button"
-          onClick={() => void reveal()}
-          title={`Show the edit’s folder with its versions in ${FILE_MANAGER}`}
-          className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-muted transition hover:bg-raised hover:text-text"
-        >
-          <FolderIcon size={13} />
-          <span className="hidden @min-[67rem]/main:inline">Show in {FILE_MANAGER}</span>
-        </button>
-        <button
           ref={sendAnchor}
           type="button"
           onClick={() => setSendOpen((o) => !o)}
           aria-haspopup="menu"
           aria-expanded={sendOpen}
           title={`Send v${current.number} to a sequence`}
-          className={secondaryButton}
+          className={buttonClass()}
         >
           Send to
           <ChevronDownIcon size={12} />
@@ -111,232 +120,43 @@ export default function EditHeader({
             />
           )}
         </Popover>
-        <MoreMenu
-          edit={edit}
-          current={current}
-          hasTranscript={hasTranscript}
-          onRename={() => setRenaming(true)}
-          onDeleted={onDeleted}
-          onError={onError}
-          onChanged={onChanged}
-          onSubtitlesSaved={onSubtitlesSaved}
-        />
+        <span ref={moreAnchor} className="flex">
+          <MoreMenu>
+            {(menu) => (
+              <>
+                <MenuItem onSelect={() => setRenaming(true)}>Rename</MenuItem>
+                <MenuItem
+                  disabled={edit.versions.length < 2 || prune.busy}
+                  onSelect={() => void prune.check()}
+                >
+                  Clean up versions…
+                </MenuItem>
+                <MenuItem
+                  icon={<FolderIcon size={13} />}
+                  title={`Open the folder in ${FILE_MANAGER}`}
+                  onSelect={() => void openFolder()}
+                >
+                  Open folder
+                </MenuItem>
+                <MenuDivider />
+                <MenuItem
+                  danger
+                  onSelect={() =>
+                    menu.confirm({ question: `Delete “${edit.name}”?`, note: DELETE_EDIT_TEXT, onConfirm: onDelete })
+                  }
+                >
+                  Delete…
+                </MenuItem>
+              </>
+            )}
+          </MoreMenu>
+        </span>
+        <Popover anchorRef={moreAnchor} open={!!prune.found} onClose={closePrune} align="end" width={300} label="Clean up versions">
+          {prune.found && (
+            <PruneConfirm found={prune.found} busy={prune.busy} onCancel={closePrune} onPrune={() => void prune.prune()} />
+          )}
+        </Popover>
       </div>
     </div>
-  )
-}
-
-function MoreMenu({
-  edit,
-  current,
-  hasTranscript,
-  onRename,
-  onDeleted,
-  onError,
-  onChanged,
-  onSubtitlesSaved
-}: {
-  edit: Edit
-  current: EditVersion
-  hasTranscript: boolean
-  onRename: () => void
-  onDeleted: () => void
-  onError: (message: string) => void
-  onChanged: () => void
-  onSubtitlesSaved: (path: string) => void
-}) {
-  const anchor = useRef<HTMLButtonElement>(null)
-  const [view, setView] = useState<'menu' | 'prune' | 'delete'>()
-  const [deleting, setDeleting] = useState(false)
-  const close = () => setView(undefined)
-  const prune = usePrune(
-    edit.id,
-    (message) => {
-      close()
-      onError(message)
-    },
-    () => {
-      close()
-      onChanged()
-    }
-  )
-
-  const saveSrt = async () => {
-    close()
-    try {
-      const path = await window.studio.saveSubtitles(current.id)
-      if (path) onSubtitlesSaved(path)
-    } catch (e) {
-      onError(ipcErrorMessage(e))
-    }
-  }
-
-  const remove = async () => {
-    setDeleting(true)
-    try {
-      await window.studio.deleteEdit(edit.id)
-      close()
-      onDeleted()
-    } catch (e) {
-      close()
-      onError(ipcErrorMessage(e))
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  return (
-    <>
-      <button
-        ref={anchor}
-        type="button"
-        onClick={() => setView((v) => (v ? undefined : 'menu'))}
-        aria-haspopup="menu"
-        aria-expanded={!!view}
-        aria-label="More options"
-        title="More options"
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
-      >
-        <MoreIcon size={14} />
-      </button>
-      <Popover anchorRef={anchor} open={!!view} onClose={close} align="end" width={300} label="More options">
-        {view === 'prune' && prune.found ? (
-          <SubView title="Clean up versions" onBack={() => setView('menu')}>
-            <PruneConfirm found={prune.found} busy={prune.busy} onCancel={close} onPrune={() => void prune.prune()} />
-          </SubView>
-        ) : view === 'delete' ? (
-          <div className="p-3">
-            <p className="mb-1 truncate">Delete “{edit.name}”?</p>
-            <p className="mb-3 text-[12px] leading-relaxed text-muted">{DELETE_EDIT_TEXT}</p>
-            <div className="flex justify-end gap-1.5">
-              <button
-                type="button"
-                onClick={() => setView('menu')}
-                className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                autoFocus
-                disabled={deleting}
-                onClick={() => void remove()}
-                className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-              >
-                {deleting ? 'Deleting…' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div role="menu" aria-label="More options" onKeyDown={onMenuKeyDown} className="p-1">
-            <button
-              type="button"
-              role="menuitem"
-              data-menu-item
-              autoFocus
-              onClick={() => {
-                close()
-                onRename()
-              }}
-              className={menuRow}
-            >
-              Rename
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-menu-item
-              disabled={!hasTranscript}
-              onClick={() => void saveSrt()}
-              title={hasTranscript ? undefined : 'Transcribe the film first (Voice → Transcribe)'}
-              className={menuRow}
-            >
-              Save subtitles (.srt)
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-menu-item
-              disabled={edit.versions.length < 2 || prune.busy}
-              onClick={() => void prune.check().then((ok) => ok && setView('prune'))}
-              className={menuRow}
-            >
-              Clean up versions…
-            </button>
-            <div className="mx-2 my-1 border-t border-line" />
-            <button
-              type="button"
-              role="menuitem"
-              data-menu-item
-              onClick={() => setView('delete')}
-              className={`${menuRow} text-muted hover:text-accent`}
-            >
-              Delete the edit…
-            </button>
-          </div>
-        )}
-      </Popover>
-    </>
-  )
-}
-
-function NameInput({
-  name,
-  onRename,
-  focus,
-  onFocused
-}: {
-  name: string
-  onRename: (name: string) => void
-  focus: boolean
-  onFocused: () => void
-}) {
-  const [value, setValue] = useState(name)
-  const [focused, setFocused] = useState(false)
-  const input = useRef<HTMLInputElement>(null)
-  const cancelled = useRef(false)
-
-  useEffect(() => {
-    if (!focused) setValue(name)
-  }, [name, focused])
-
-  useEffect(() => {
-    if (!focus) return
-    input.current?.focus()
-    input.current?.select()
-    onFocused()
-  }, [focus])
-
-  const commit = () => {
-    const next = value.trim()
-    if (!next || next === name) setValue(name)
-    else onRename(next)
-  }
-
-  return (
-    <input
-      ref={input}
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onFocus={() => setFocused(true)}
-      onBlur={() => {
-        setFocused(false)
-        if (cancelled.current) cancelled.current = false
-        else commit()
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') e.currentTarget.blur()
-        if (e.key === 'Escape') {
-          cancelled.current = true
-          setValue(name)
-          e.currentTarget.blur()
-        }
-      }}
-      spellCheck={false}
-      placeholder="Untitled edit"
-      title="Rename"
-      aria-label="The edit’s name"
-      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised @min-[67rem]/main:min-w-28"
-    />
   )
 }

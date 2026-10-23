@@ -3,9 +3,11 @@ import type { EditOrigin, SequenceSummary } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import { FilmIcon, PlusIcon } from '../sequences/icons'
-import { menuRow, onMenuKeyDown, SubView } from '../storyboards/ui'
+import { SubView } from '../storyboards/ui'
+import { buttonClass } from '../ui/button'
+import { menuRow, onMenuKeyDown } from '../ui/menu'
 
-// "Send to": a version into Sequences — as a new take of the clip the film came from (when it was a take), or as
+// "Send to": a version into Sequences – as a new take of the clip the film came from (when it was a take), or as
 // a new clip at the end of any sequence (or a new one). The version is used where it is; nothing is copied.
 
 export interface SentTo {
@@ -162,11 +164,7 @@ function SequenceChoice({
           aria-label="Name of the new sequence"
           className="min-w-0 flex-1 rounded-md border border-line bg-raised px-2 py-1 text-[12px] outline-none focus:border-muted"
         />
-        <button
-          type="submit"
-          disabled={creating || busy}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
-        >
+        <button type="submit" disabled={creating || busy} className={buttonClass('ghost', 'sm')}>
           <PlusIcon size={11} />
           Create
         </button>

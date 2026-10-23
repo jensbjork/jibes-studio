@@ -39,7 +39,7 @@ interface StoredSettings {
   /** Spending caps in USD (Settings → Spending); a cap left out means none. */
   budget?: BudgetSettings
   agent?: StoredAgentSettings
-  /** Look for a newer Studio once a day (Settings → About Studio); unset means on, only `false` turns it off. */
+  /** Look for a newer Studio once a day (Settings → About); unset means on, only `false` turns it off. */
   autoUpdateCheck?: boolean
   /** When Studio last got an answer from GitHub about its newest release (ISO): the daily check counts from it. */
   lastUpdateCheck?: string
@@ -164,6 +164,10 @@ export function getApiKey(): string | null {
 export function setApiKey(key: string): void {
   const s = load()
   const trimmed = key.trim()
+  // Electron's own message for this is about its internals; Settings shows this one.
+  if (trimmed && !safeStorage.isEncryptionAvailable()) {
+    throw new Error("The key can't be stored encrypted on this computer right now.")
+  }
   if (trimmed) s.apiKeyEncrypted = safeStorage.encryptString(trimmed).toString('base64')
   else delete s.apiKeyEncrypted
   save(s)

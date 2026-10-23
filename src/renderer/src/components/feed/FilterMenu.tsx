@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { CheckIcon } from '../icons'
 import Popover from '../pickers/Popover'
 import { CloseIcon } from '../sequences/icons'
+import { firstMenuItem, menuRow, onMenuKeyDown } from '../ui/menu'
 import { ChevronDownIcon } from './icons'
 
 export interface MenuOption<T> {
@@ -29,20 +31,6 @@ interface Props<T> {
   /** Called when the menu opens or closes. */
   onOpenChange?: (open: boolean) => void
 }
-
-/** Moves the focus between the rows of a menu with the arrow keys. */
-function onMenuKeyDown(e: KeyboardEvent<HTMLElement>): void {
-  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
-  const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-menu-item]')]
-  if (!items.length) return
-  e.preventDefault()
-  const at = items.indexOf(document.activeElement as HTMLElement)
-  const next = e.key === 'ArrowDown' ? (at + 1) % items.length : (at <= 0 ? items.length : at) - 1
-  items[next].focus()
-}
-
-const menuRow =
-  'flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left outline-none transition hover:bg-raised focus-visible:bg-raised'
 
 /**
  * A toolbar filter: a button that opens a short list of choices. Once something is chosen the button turns
@@ -79,10 +67,7 @@ export default function FilterMenu<T extends string | number>({
   useEffect(() => {
     if (!open) return
     const frame = requestAnimationFrame(() => {
-      const target =
-        headerRef.current?.querySelector<HTMLElement>('input') ??
-        menuRef.current?.querySelector<HTMLElement>('[data-menu-item][aria-checked="true"]') ??
-        menuRef.current?.querySelector<HTMLElement>('[data-menu-item]')
+      const target = headerRef.current?.querySelector<HTMLElement>('input') ?? firstMenuItem(menuRef.current)
       target?.focus()
     })
     return () => cancelAnimationFrame(frame)
@@ -162,6 +147,7 @@ export default function FilterMenu<T extends string | number>({
   )
 }
 
+/** The chosen row's check, as in the ⋯ menus' radio sections. */
 function Check({ on }: { on: boolean }) {
-  return <span className={`w-3 shrink-0 text-[11px] ${on ? 'text-accent' : 'text-transparent'}`}>✓</span>
+  return <CheckIcon size={12} className={`shrink-0 text-accent ${on ? '' : 'invisible'}`} />
 }

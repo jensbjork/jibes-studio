@@ -1,14 +1,16 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { agentDisplayName } from '@shared/agent-name'
 import type { AgentStatus } from '@shared/types'
 import { refreshAgentStatus, restartAgent, setAgentEnabled, setAgentPort, useAgentState } from '../../lib/agent'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { COMPUTER, THIS_COMPUTER } from '../../lib/platform'
-import ConfirmButton from '../sequences/ConfirmButton'
-import { MoreAbout, SettingsItem } from '../settings/SettingsLayout'
-import Switch from '../settings/Switch'
+import { MoreAbout, SaveActions, SettingsItem } from '../settings/SettingsLayout'
+import { SwitchRow } from '../settings/Switch'
+import { buttonClass } from '../ui/button'
+import ConfirmButton from '../ui/ConfirmButton'
+import Segmented from '../ui/Segmented'
 import { clientDetail, formatTime } from './agentText'
-import ClaudeDesktopCard from './ClaudeDesktopCard'
+import ClaudeDesktopCard, { ClaudeDesktopFile } from './ClaudeDesktopCard'
 import CopyButton from './CopyButton'
 
 const MASK = '•'.repeat(28)
@@ -16,8 +18,7 @@ const TOKEN_PLACEHOLDER = '••••••••'
 const MIN_PORT = 1024
 const MAX_PORT = 65535
 
-const secondary = 'shrink-0 rounded-md border border-line px-3 py-1.5 text-[12px] transition hover:bg-raised disabled:opacity-40'
-const code = 'rounded-md border border-line bg-bg px-3 py-2 font-mono text-xs select-text'
+const code = 'rounded-md border border-line bg-bg px-3 py-2 font-mono text-[12px] select-text'
 
 type EndpointId = 'tailscale' | 'dns' | 'local'
 
@@ -96,12 +97,22 @@ function hermesConfig(url: string, token: string): string {
   ].join('\n')
 }
 
-type SnippetId = 'claude-code' | 'hermes' | 'openclaw'
+/** Who is being connected: Claude Desktop in one click, the others with a configuration to paste. */
+type ClientId = 'claude-desktop' | 'claude-code' | 'hermes' | 'openclaw'
+
+const CLIENTS: { value: ClientId; label: string }[] = [
+  { value: 'claude-desktop', label: 'Claude Desktop' },
+  { value: 'claude-code', label: 'Claude Code' },
+  { value: 'hermes', label: 'Hermes' },
+  { value: 'openclaw', label: 'OpenClaw' }
+]
 
 /**
- * Settings → Agent connection (the section's heading and one-line description are SettingsView's): the MCP
- * server the user's own agents (e.g. Claude Code, Hermes Agent, OpenClaw) connect to. Off by default; reachable only
- * from this Mac and the tailnet, and only with the token shown here.
+ * Settings → Agent connection (the pane's heading and one-line description are SettingsView's): the MCP server the
+ * user's own agents (e.g. Claude Desktop, Claude Code, Hermes Agent, OpenClaw) connect to. Off by default; reachable
+ * only from this Mac and the tailnet, and only with the token. Off, the pane is the switch and what agents can do;
+ * on, how it runs, how to connect an agent, and – folded away under Advanced – the token, the addresses and the port
+ * (open by itself when the server couldn't start, since the fix is usually another port).
  */
 export default function AgentSettingsSection() {
   const { status, statusError } = useAgentState()
@@ -111,8 +122,12 @@ export default function AgentSettingsSection() {
   const [revealed, setRevealed] = useState(false)
   const [tokenNotice, setTokenNotice] = useState<string>()
   const [endpointId, setEndpointId] = useState<EndpointId>()
-  const [snippet, setSnippet] = useState<SnippetId>('claude-code')
-  const switchLabel = useId()
+  const [client, setClient] = useState<ClientId>('claude-desktop')
+  const failed = !!status?.enabled && !status.running && !!status.error
+  const [advancedOpen, setAdvancedOpen] = useState(failed)
+  useEffect(() => {
+    if (failed) setAdvancedOpen(true)
+  }, [failed])
 
   // Fresh status when Settings opens: Tailscale may have been started or stopped since.
   useEffect(() => {
@@ -152,247 +167,231 @@ export default function AgentSettingsSection() {
       const t = await window.studio.regenerateAgentToken()
       setToken(t)
       setRevealed(true)
-      setTokenNotice('New token created. Agents with the old one can no longer get in – give them the new configuration.')
+      setTokenNotice(
+        'New token created. Agents with the old one can no longer get in – give them the new configuration and add ' +
+          'Studio to Claude Desktop again.'
+      )
     })
 
   // Detects Tailscale again (or retries starting) without switching the connection off, which would let every
   // request waiting for the user lapse.
   const restart = () => void run(restartAgent)
 
-  const endpoints = status ? endpointsOf(status) : []
+  /** The port's own save: its outcome shows beside the field (PortField), so it isn't caught here. */
+  const savePort = async (port: number): Promise<AgentStatus> => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      return await setAgentPort(port)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!status) {
+    return statusError ? (
+      <p role="alert" className="text-danger">
+        {statusError}
+      </p>
+    ) : (
+      <p className="text-muted">Checking the connection…</p>
+    )
+  }
+
+  const endpoints = endpointsOf(status)
   const endpoint = endpoints.find((e) => e.id === endpointId) ?? endpoints[0]
   const shownToken = revealed && token ? token : TOKEN_PLACEHOLDER
   const withToken = (build: (url: string, token: string) => string) => async () =>
-    build(endpoint!.url, await loadToken())
+    build(endpoint.url, await loadToken())
 
-  if (!status) {
-    return <p className={statusError ? 'text-accent' : 'text-muted'}>{statusError ?? 'Checking the connection…'}</p>
-  }
+  const switchBox = (
+    <div>
+      <div className="rounded-lg border border-line bg-raised/40 p-3">
+        <SwitchRow
+          on={status.enabled}
+          disabled={busy}
+          onChange={(on) => void run(() => setAgentEnabled(on))}
+          label="Allow agents to connect"
+          description={`Only from ${THIS_COMPUTER} and your tailnet (Tailscale), with Studio’s token.`}
+        />
+        {status.enabled && <StatusLines status={status} busy={busy} onRestart={restart} />}
+      </div>
+      {error && (
+        <p role="alert" className="mt-2 text-[12px] text-danger select-text">
+          {error}
+        </p>
+      )}
+      <div className="mt-3">
+        <MoreAbout summary="More about what agents can do">
+          <p>
+            A connected agent can do almost everything you can: create characters, products and other assets, add
+            images and sound, write prompts and build sequences and storyboards.
+          </p>
+          <p>
+            Anything that costs money and anything that deletes something it never does on its own: every such
+            request waits for your OK here in Studio.
+          </p>
+          <p>
+            MCP is how the agent connects. Studio shows the agent’s name in the log and when it asks for permission –
+            or “The agent” when the client only calls itself something generic, like “mcp”.
+          </p>
+          <p>Other MCP clients send the token as “Authorization: Bearer &lt;token&gt;”.</p>
+        </MoreAbout>
+      </div>
+    </div>
+  )
+
+  // Off: nothing to connect to, so nothing about connecting.
+  if (!status.enabled) return switchBox
 
   return (
     <>
-      <div>
-        <div className="rounded-lg border border-line bg-raised/40 p-3">
-          <div className="flex items-start gap-3">
-            <Switch
-              on={status.enabled}
-              disabled={busy}
-              onChange={(on) => void run(() => setAgentEnabled(on))}
-              labelledBy={switchLabel}
-            />
-            <span className="min-w-0">
-              <span id={switchLabel} className="block">
-                Allow agents to connect
-              </span>
-              <span className="mt-0.5 block text-[12px] leading-snug text-muted">
-                Off by default. When it’s on, Studio can only be reached from {THIS_COMPUTER} and from computers in your
-                tailnet (Tailscale) – and only with the token below.
-              </span>
-            </span>
-          </div>
-          {status.enabled && <StatusLines status={status} busy={busy} onRestart={restart} />}
-        </div>
-        {error && <p className="mt-2 text-[12px] text-accent select-text">{error}</p>}
+      {switchBox}
+
+      <SettingsItem title="Connect an agent">
+        <Segmented role="tablist" ariaLabel="Agent" options={CLIENTS} value={client} onChange={setClient} />
         <div className="mt-3">
-          <MoreAbout summary="More about what agents can do">
-            <p>
-              A connected agent can do almost everything you can: create characters, products and other assets, add
-              images and sound, write prompts and build sequences and storyboards.
-            </p>
-            <p>
-              Anything that costs money and anything that deletes something it never does on its own: every such
-              request waits for your OK here in Studio.
-            </p>
-            <p>
-              MCP is how the agent connects. Studio shows the agent’s name in the log and when it asks for permission –
-              or “The agent” when the client only calls itself something generic, like “mcp”.
-            </p>
-          </MoreAbout>
-        </div>
-      </div>
-
-      <SettingsItem title="Token" help="The agent sends it as “Authorization: Bearer …”. Don’t share it with anyone else.">
-        <div className="flex items-center gap-2">
-          <code className={`min-w-0 flex-1 truncate ${code}`}>{revealed && token ? token : MASK}</code>
-          <button onClick={toggleReveal} disabled={busy} className={secondary}>
-            {revealed ? 'Hide' : 'Show'}
-          </button>
-          <CopyButton text={loadToken} title="Copy the token" className={secondary} />
-        </div>
-        <div className="mt-1.5">
-          <ConfirmButton
-            question="Change the token? Connected agents will need the new one."
-            confirmLabel="Change"
-            onConfirm={regenerate}
-            disabled={busy}
-            className="text-[11px] text-muted underline-offset-2 hover:text-text hover:underline disabled:opacity-40"
-          >
-            Change token…
-          </ConfirmButton>
-        </div>
-        {tokenNotice && <p className="mt-1.5 text-[12px] text-amber-300">{tokenNotice}</p>}
-      </SettingsItem>
-
-      <SettingsItem title="Addresses" help="Where the agent reaches Studio. Pick the one that fits where the agent runs.">
-        <ul className="space-y-2.5">
-          {endpoints.map((e) => (
-            <li key={e.id}>
-              <div className="flex items-center gap-2">
-                <code className={`min-w-0 flex-1 truncate ${code}`} title={e.url}>
-                  {e.url}
-                </code>
-                <CopyButton text={e.url} className={secondary} />
-              </div>
-              <p className="mt-0.5 text-[11px] text-muted">
-                <span className="text-text">{e.label}</span> – {e.hint}
-              </p>
-            </li>
-          ))}
-        </ul>
-        {!status.tailscaleAddress &&
-          (status.enabled && status.running ? (
-            <p className="mt-2 text-[12px] leading-relaxed text-amber-300">
-              Tailscale isn’t running on {THIS_COMPUTER}, so agents on other computers can’t reach Studio. Start Tailscale
-              and press Check again above.
-            </p>
+          {client === 'claude-desktop' ? (
+            <ClaudeDesktopCard status={status} />
           ) : (
-            !status.enabled && (
-              <p className="mt-2 text-[11px] text-muted">
-                The Tailscale address, which agents on other computers need, shows when the connection is on.
+            <>
+              {endpoints.length > 1 && (
+                <Segmented
+                  label="Address:"
+                  ariaLabel="Address"
+                  options={endpoints.map((e) => ({ value: e.id, label: e.label, title: e.hint }))}
+                  value={endpoint.id}
+                  onChange={setEndpointId}
+                  className="mb-2.5 text-[12px]"
+                />
+              )}
+              {client === 'claude-code' ? (
+                <Snippet
+                  hint="Run it in a terminal."
+                  text={claudeCodeCommand(endpoint.url, shownToken)}
+                  copy={withToken(claudeCodeCommand)}
+                />
+              ) : client === 'hermes' ? (
+                <Snippet
+                  hint="Goes in Hermes’ configuration under mcp_servers."
+                  text={hermesConfig(endpoint.url, shownToken)}
+                  copy={withToken(hermesConfig)}
+                />
+              ) : (
+                <Snippet
+                  hint="Goes in OpenClaw’s configuration under mcp.servers."
+                  text={openClawConfig(endpoint.url, shownToken)}
+                  copy={withToken(openClawConfig)}
+                />
+              )}
+              <p className="mt-3 text-[12px] leading-relaxed text-muted">
+                Then ask the agent to start with <span className="font-mono text-text">get_studio_guide</span>.
               </p>
-            )
-          ))}
-      </SettingsItem>
-
-      <ClaudeDesktopCard status={status} addresses={endpoints.map(({ id, label, host }) => ({ id, label, host }))} />
-
-      {endpoint && (
-        <SettingsItem
-          title="Configuration for the agent"
-          help="Paste it into the agent’s settings. Copy includes the real token."
-        >
-          <div className="mb-2.5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px]">
-            <Segmented
-              label="Agent"
-              options={[
-                { id: 'claude-code', label: 'Claude Code' },
-                { id: 'hermes', label: 'Hermes' },
-                { id: 'openclaw', label: 'OpenClaw' }
-              ]}
-              value={snippet}
-              onChange={setSnippet}
-            />
-            {endpoints.length > 1 && (
-              <Segmented
-                label="Address"
-                options={endpoints.map((e) => ({ id: e.id, label: e.label }))}
-                value={endpoint.id}
-                onChange={setEndpointId}
-              />
-            )}
-          </div>
-
-          {snippet === 'claude-code' ? (
-            <Snippet
-              hint="Run it in a terminal. The name in X-Studio-Agent-Name is what Studio shows in the log and when the agent asks for permission."
-              text={claudeCodeCommand(endpoint.url, shownToken)}
-              copy={withToken(claudeCodeCommand)}
-            />
-          ) : snippet === 'hermes' ? (
-            <Snippet
-              hint={
-                'Hermes Agent also connects over HTTP. Where MCP servers are set can differ between versions – see ' +
-                'the Hermes documentation.'
-              }
-              text={hermesConfig(endpoint.url, shownToken)}
-              copy={withToken(hermesConfig)}
-            />
-          ) : (
-            <Snippet
-              hint="Goes in OpenClaw’s configuration under mcp.servers."
-              text={openClawConfig(endpoint.url, shownToken)}
-              copy={withToken(openClawConfig)}
-            />
+            </>
           )}
-          <p className="mt-3 text-[12px] leading-relaxed text-muted">
-            Then ask the agent to start with the tool <span className="font-mono text-text">get_studio_guide</span> – it
-            explains how Studio works and how good video prompts are written.
-          </p>
-        </SettingsItem>
-      )}
-
-      <SettingsItem title="Port">
-        <PortField port={status.port} disabled={busy} onSave={(port) => run(() => setAgentPort(port))} />
+        </div>
       </SettingsItem>
-    </>
-  )
-}
 
-/** A row of choices with a quiet label in front: "Agent: [Claude Code] Hermes OpenClaw". */
-function Segmented<T extends string>({
-  label,
-  options,
-  value,
-  onChange
-}: {
-  label: string
-  options: { id: T; label: string }[]
-  value: T
-  onChange: (id: T) => void
-}) {
-  return (
-    <div role="group" aria-label={label} className="flex flex-wrap items-center gap-1">
-      <span aria-hidden className="mr-1 text-muted">
-        {label}:
-      </span>
-      {options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          onClick={() => onChange(o.id)}
-          aria-pressed={o.id === value}
-          className={`rounded-md px-2 py-1 transition ${
-            o.id === value ? 'bg-line text-text' : 'text-muted hover:bg-raised hover:text-text'
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
+      <MoreAbout summary="Advanced: token, addresses, port" plain open={advancedOpen} onToggle={setAdvancedOpen}>
+        <div className="space-y-8 pt-3">
+          <SettingsItem title="Token" help="Agents need it to connect. Keep it to yourself.">
+            <div className="flex items-center gap-2">
+              <code className={`min-w-0 flex-1 truncate ${code}`}>{revealed && token ? token : MASK}</code>
+              <button type="button" onClick={toggleReveal} disabled={busy} className={buttonClass('secondary', 'sm')}>
+                {revealed ? 'Hide' : 'Show'}
+              </button>
+              <CopyButton text={loadToken} title="Copy the token" />
+            </div>
+            <div className="mt-1.5">
+              <ConfirmButton
+                question="Change the token? Connected agents, Claude Desktop included, will need the new one."
+                confirmLabel="Change"
+                onConfirm={regenerate}
+                disabled={busy}
+                className="text-[12px] text-muted underline-offset-2 hover:text-text hover:underline disabled:opacity-40"
+                armedClassName="inline-flex flex-wrap items-center gap-1.5"
+              >
+                Change token…
+              </ConfirmButton>
+            </div>
+            {tokenNotice && (
+              <p role="status" className="mt-1.5 text-[12px] text-warning">
+                {tokenNotice}
+              </p>
+            )}
+          </SettingsItem>
+
+          <SettingsItem title="Addresses" help="Where an agent reaches Studio. Pick the one that fits where it runs.">
+            <ul className="space-y-2.5">
+              {endpoints.map((e) => (
+                <li key={e.id}>
+                  <div className="flex items-center gap-2">
+                    <code className={`min-w-0 flex-1 truncate ${code}`} title={e.url}>
+                      {e.url}
+                    </code>
+                    <CopyButton text={e.url} />
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-muted">
+                    <span className="text-text">{e.label}</span> – {e.hint}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </SettingsItem>
+
+          <ClaudeDesktopFile
+            status={status}
+            addresses={endpoints.map(({ id, label, host }) => ({ id, label, host }))}
+          />
+
+          <SettingsItem title="Port">
+            <PortField port={status.port} disabled={busy} onSave={savePort} />
+          </SettingsItem>
+        </div>
+      </MoreAbout>
+    </>
   )
 }
 
 function StatusLines({ status, busy, onRestart }: { status: AgentStatus; busy: boolean; onRestart: () => void }) {
   const restartButton = (label: string) => (
-    <button onClick={onRestart} disabled={busy} className={`ml-auto ${secondary}`}>
+    <button
+      type="button"
+      onClick={onRestart}
+      disabled={busy}
+      className={`ml-auto shrink-0 ${buttonClass('secondary', 'sm')}`}
+    >
       {label}
     </button>
   )
   return (
     <div className="mt-3 space-y-2 border-t border-line pt-3 text-[12px]">
       {status.running ? (
-        <p className="flex items-start gap-2">
-          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
-          <span className="min-w-0">
-            Running – listening on{' '}
-            <span className="font-mono text-[11px] text-muted select-text">{status.addresses.join(', ') || '–'}</span>
-          </span>
+        <p className="flex items-center gap-2">
+          <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+          Running
         </p>
       ) : (
         <div className="flex items-start gap-2">
-          <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${status.error ? 'bg-accent' : 'bg-amber-400'}`} />
-          <span className={`min-w-0 select-text ${status.error ? 'text-accent' : ''}`}>
+          <span
+            aria-hidden
+            className={`mt-1 h-2 w-2 shrink-0 rounded-full ${status.error ? 'bg-accent' : 'bg-amber-400'}`}
+          />
+          <span
+            role={status.error ? 'alert' : undefined}
+            className={`min-w-0 select-text ${status.error ? 'text-danger' : ''}`}
+          >
             {status.error ? `Couldn’t start: ${status.error}` : 'Starting…'}
           </span>
           {status.error && restartButton('Try again')}
         </div>
       )}
-      {status.running && status.error && <p className="text-amber-300 select-text">{status.error}</p>}
+      {status.running && status.error && <p className="text-warning select-text">{status.error}</p>}
 
       {status.running && !status.tailscaleAddress && (
         <div className="flex items-start gap-2">
-          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-400" />
-          <span className="min-w-0 text-amber-300">Tailscale isn’t running – only {THIS_COMPUTER} can connect.</span>
+          <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-400" />
+          <span className="min-w-0 text-warning">Tailscale isn’t running – only {THIS_COMPUTER} can connect.</span>
           {restartButton('Check again')}
         </div>
       )}
@@ -420,6 +419,10 @@ function StatusLines({ status, busy, onRestart }: { status: AgentStatus; busy: b
   )
 }
 
+/**
+ * The port, saved like every typed setting (SaveActions: Enter saves, Esc puts it back). What came of it shows beside
+ * the field – "Saved", or why the port couldn't be used (the server tried it at once).
+ */
 function PortField({
   port,
   disabled,
@@ -427,49 +430,62 @@ function PortField({
 }: {
   port: number
   disabled: boolean
-  onSave: (port: number) => Promise<void>
+  onSave: (port: number) => Promise<AgentStatus>
 }) {
   const [value, setValue] = useState(String(port))
+  const [saving, setSaving] = useState(false)
+  const [outcome, setOutcome] = useState<'saved' | string>()
   useEffect(() => setValue(String(port)), [port])
 
   const n = Number(value.trim())
   const valid = /^\d+$/.test(value.trim()) && n >= MIN_PORT && n <= MAX_PORT
-  const changed = valid && n !== port
-  const save = () => {
-    if (changed) void onSave(n)
+  const dirty = value !== String(port)
+  const revert = () => setValue(String(port))
+  const save = async () => {
+    if (!valid || saving) return
+    if (n === port) return revert()
+    setSaving(true)
+    setOutcome(undefined)
+    try {
+      const next = await onSave(n)
+      setOutcome(next.enabled && !next.running && next.error ? `Couldn’t use port ${n}: ${next.error}` : 'saved')
+    } catch (e) {
+      setOutcome(`Couldn’t use port ${n}: ${ipcErrorMessage(e)}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <input
           inputMode="numeric"
           value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') save()
-            if (e.key === 'Escape') setValue(String(port))
+          onChange={(e) => {
+            setValue(e.target.value)
+            setOutcome(undefined)
           }}
-          disabled={disabled}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void save()
+            if (e.key === 'Escape' && dirty) {
+              e.preventDefault()
+              revert()
+            }
+          }}
+          disabled={disabled || saving}
           aria-label="Port"
-          className="w-28 rounded-md border border-line bg-raised px-3 py-1.5 tabular-nums outline-none focus:border-muted disabled:opacity-60"
+          className="h-8 w-28 rounded-md border border-line bg-raised px-3 tabular-nums outline-none focus:border-muted disabled:opacity-60"
         />
-        {changed && (
-          <>
-            <button onClick={save} disabled={disabled} className={secondary}>
-              Save
-            </button>
-            <button onClick={() => setValue(String(port))} disabled={disabled} className="text-[12px] text-muted hover:text-text">
-              Undo
-            </button>
-          </>
-        )}
+        <SaveActions
+          dirty={dirty}
+          saving={saving}
+          onSave={() => void save()}
+          onRevert={revert}
+          status={valid ? outcome : `Enter a number between ${MIN_PORT} and ${MAX_PORT}.`}
+        />
       </div>
-      <p className={`mt-1 text-[11px] ${valid ? 'text-muted' : 'text-accent'}`}>
-        {valid
-          ? 'If you change the port, the agents need the new address.'
-          : `Enter a number between ${MIN_PORT} and ${MAX_PORT}.`}
-      </p>
+      <p className="mt-1 text-[11px] text-muted">If you change the port, the agents need the new address.</p>
     </>
   )
 }
@@ -482,7 +498,7 @@ function Snippet({ hint, text, copy }: { hint: string; text: string; copy: () =>
         <CopyButton
           text={copy}
           title="Copy the configuration with the token"
-          className={`absolute right-2 top-2 bg-panel ${secondary}`}
+          className={`absolute right-2 top-2 bg-panel ${buttonClass('secondary', 'sm')}`}
         />
       </div>
       <p className="mt-1.5 text-[11px] leading-relaxed text-muted">{hint}</p>

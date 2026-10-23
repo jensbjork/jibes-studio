@@ -1,4 +1,4 @@
-// The ready-made directors: generic ways of making a film that every library has, read-only ("Use a copy" copies one
+// The ready-made directors: generic ways of making a film that every library has, read-only ("Copy to edit" copies one
 // into the library as a director of its own, StudioApi.copyDirectorPreset). Their ids start with
 // DIRECTOR_PRESET_PREFIX and are never stored as assets; params, sequences and storyboards may name them directly.
 //

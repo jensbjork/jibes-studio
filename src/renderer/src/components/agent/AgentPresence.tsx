@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react'
 import type { AgentActivity } from '@shared/types'
-import { useAgentWorking } from '../../lib/agent'
+import { setAgentPillVisible, useAgentWorking } from '../../lib/agent'
 import { presenceText, workingLabel } from './agentText'
 
 interface Props {
-  /** The activity drawer is open: it shows the same thing, so the pill steps aside. */
+  /** A panel beside the sidebar is open: the Agent panel shows the same thing, and the pill would cover either. */
   hidden: boolean
   onOpen: () => void
 }
 
 /**
- * A small pill at the bottom of the window while an agent works: a pulsing dot, "The agent is working" (or the
+ * A small pill at the bottom of the work area while an agent works: a pulsing dot, "The agent is working" (or the
  * agent's own name, "Hermes is working") and what it just did, with the step before it fading above. It fades out a few
- * seconds after the agent goes quiet; a click opens the activity drawer.
+ * seconds after the agent goes quiet; a click opens the Agent panel. Centred on the work area like the seen toast,
+ * which (with the update notice) lifts above it while it shows.
  */
 export default function AgentPresence({ hidden, onOpen }: Props) {
   const working = useAgentWorking()
@@ -23,12 +24,17 @@ export default function AgentPresence({ hidden, onOpen }: Props) {
   }, [working])
 
   const visible = working.length > 0 && !hidden
+  useEffect(() => {
+    setAgentPillVisible(visible)
+  }, [visible])
+  useEffect(() => () => setAgentPillVisible(false), [])
+
   const [latest, previous] = shown
   if (!latest) return null
 
   return (
     <div
-      className={`pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center transition-all duration-500 ${
+      className={`pointer-events-none fixed right-0 bottom-5 left-[var(--sidebar-w)] z-40 flex justify-center px-4 transition-all duration-500 motion-reduce:transition-none ${
         visible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'
       }`}
       aria-hidden={!visible}
@@ -42,11 +48,11 @@ export default function AgentPresence({ hidden, onOpen }: Props) {
         }`}
       >
         <span className="relative flex h-2.5 w-2.5 shrink-0">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75 motion-reduce:animate-none" />
           <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
         </span>
         <span className="min-w-0">
-          {previous && <span className="block truncate text-xs text-muted/70">{presenceText(previous)}</span>}
+          {previous && <span className="block truncate text-[12px] text-muted">{presenceText(previous)}</span>}
           <span className="block truncate">
             <span className="font-medium text-text">{workingLabel(latest)}</span>
             <span className="text-muted"> · {presenceText(latest)}</span>

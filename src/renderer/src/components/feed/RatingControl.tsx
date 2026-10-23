@@ -106,7 +106,7 @@ export default function RatingControl({ value, onChange, size = 'sm', filledOnly
       onKeyDown={onKeyDown}
       onMouseLeave={() => setHover(undefined)}
       onClick={(e) => e.stopPropagation()}
-      className={`inline-flex shrink-0 items-center rounded leading-none outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60 ${SIZE[size]} ${className}`}
+      className={`inline-flex shrink-0 items-center rounded leading-none outline-none focus-visible:ring-1 focus-visible:ring-muted ${SIZE[size]} ${className}`}
     >
       <button
         type="button"

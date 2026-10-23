@@ -6,7 +6,7 @@ import { agentSummary, presenceText, TONE_DOT, workingLabel, type AgentSummary }
 interface Props {
   /** The collapsed sidebar's icon rail: the dot alone, with the number of waiting requests on its corner. */
   collapsed: boolean
-  /** The activity drawer is open. */
+  /** The Agent panel is open. */
   active: boolean
   onClick: () => void
 }
@@ -57,25 +57,29 @@ function Dot({ working, summary }: { working: boolean; summary: AgentSummary }) 
 }
 
 /**
- * The sidebar's status row of the agent connection: "Agent: off", "Agent: on – waiting" or "● Agent connected", with
- * the number of requests waiting for the user's OK as an accent pill. While the agent works it reads "The agent is
- * working" (or the agent's own name) with a pulsing dot, and what it just did is in the tooltip (and in the
- * presence pill at the bottom of the window). In the rail it is the dot, with the count on its corner.
+ * The sidebar's status row of the agent connection, shown while it says something: "Agent: on – waiting" or
+ * "● Agent connected", with the number of requests waiting for the user's OK as an accent pill. While the agent works
+ * it reads "The agent is working" (or the agent's own name) with a pulsing dot, and what it just did is in the tooltip
+ * (and in the presence pill at the bottom of the window). In the rail it is the dot, with the count on its corner.
+ * With the connection off and nothing to show it isn't there at all (the Agent panel is still ⌘K → Agent), unless its
+ * panel is open; that also covers the moment before the status has loaded, so it never flashes in.
  */
 export default function AgentIndicator({ collapsed, active, onClick }: Props) {
   const { summary, waiting, latest, label, status } = useIndicator()
+  if (summary.tone === 'off' && !waiting && !latest && !active) return null
 
   return (
     <StatusRow
       collapsed={collapsed}
       active={active}
       onClick={onClick}
+      dialog
       icon={<Dot working={!!latest} summary={summary} />}
       badge={
         waiting > 0 && (
           <span
             aria-hidden
-            className="absolute -right-2.5 -top-1.5 min-w-3.5 rounded-full bg-accent px-1 text-center text-[9px] font-semibold leading-3.5 text-white tabular-nums ring-2 ring-[var(--row-bg,var(--color-panel))]"
+            className="absolute -right-2.5 -top-1.5 min-w-3.5 rounded-full bg-accent-fill px-1 text-center text-[9px] font-semibold leading-3.5 text-white tabular-nums ring-2 ring-[var(--row-bg,var(--color-panel))]"
           >
             {waiting}
           </span>
@@ -87,7 +91,7 @@ export default function AgentIndicator({ collapsed, active, onClick }: Props) {
         waiting > 0 && (
           <span
             aria-hidden
-            className="shrink-0 rounded-full bg-accent px-1.5 text-[10px] font-semibold leading-4 text-white tabular-nums"
+            className="shrink-0 rounded-full bg-accent-fill px-1.5 text-[10px] font-semibold leading-4 text-white tabular-nums"
           >
             {waiting}
           </span>

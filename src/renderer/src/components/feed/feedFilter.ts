@@ -98,6 +98,16 @@ export function toGenerationFilter(f: FeedFilters, sort: SortKey, now: number): 
   return filter
 }
 
+/**
+ * Whether a filter can narrow the list: one of its choices matches some of the `total` items but not all of them.
+ * Media shows a filter only while it can (or while it is set), so a small library isn't faced with seven chips that
+ * have nothing to choose between. `counts` is how many items each choice matches.
+ */
+export function narrows(counts: ReadonlyMap<unknown, number>, total: number): boolean {
+  for (const n of counts.values()) if (n > 0 && n < total) return true
+  return false
+}
+
 export function hasFilters(f: FeedFilters): boolean {
   return !!(
     f.query.trim() ||
@@ -164,7 +174,7 @@ export function withoutFilter(f: FeedFilters, key: keyof FeedFilters): FeedFilte
 
 // ── Remembered choices ───────────────────────────────────────────────────────
 
-/** Cards or Table, remembered apart for Media's Videos ('library') and Generate's session list. */
+/** Cards or Table, remembered apart for Media's Clips ('library') and Generate's session list. */
 const VIEW_KEYS = { library: 'feed:view', session: 'feed:view:session' } as const
 const SORT_KEY = 'feed:sort'
 

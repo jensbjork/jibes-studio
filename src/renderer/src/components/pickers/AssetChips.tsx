@@ -3,6 +3,7 @@ import { ASSET_KINDS, type Asset, type PromptLanguage } from '@shared/types'
 import { ASSET_COPY, englishList } from '../../lib/assets'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
+import { ChevronDownIcon } from '../sequences/icons'
 import { KIND_TONE } from './assetKinds'
 import { outfitsWornBy, type AssetRef } from './assetRefs'
 import { audioIndicesOf, clipsOf, type FormAudio } from './audioRefs'
@@ -126,6 +127,8 @@ export default function AssetChips({
     )
   }
 
+  // Nothing to show without images: the drop zone above says what to do.
+  if (!refs.length) return null
   return (
     <div className="mt-2">
       {sorted.length > 0 && (
@@ -224,23 +227,21 @@ export default function AssetChips({
           })}
         </div>
       )}
-      <div className="mt-1.5 flex items-start gap-3 text-[11px] text-muted">
-        <span className="min-w-0 flex-1">
-          {sorted.length
-            ? 'Click a name to insert it in the prompt – or type @ in the prompt.'
-            : 'Refer to the images in the prompt, e.g. “@Image1 walks along the beach” – type @ to choose.'}
-        </span>
-        <span
-          className={`shrink-0 tabular-nums ${over ? 'text-accent' : ''}`}
-          title={
-            over
-              ? `${refs.length - max} of the images ${refs.length - max === 1 ? 'isn’t' : 'aren’t'} sent – the model takes at most ${max}.`
-              : `The model takes at most ${max} reference images.`
-          }
-        >
-          {refs.length}/{max} images
-        </span>
-      </div>
+      {/* The image budget, once there are images (the chips and the "@" menu say how to use them). */}
+      {refs.length > 0 && (
+        <div className="mt-1.5 flex justify-end text-[11px] text-muted">
+          <span
+            className={`tabular-nums ${over ? 'text-danger' : ''}`}
+            title={
+              over
+                ? `${refs.length - max} of the images ${refs.length - max === 1 ? 'isn’t' : 'aren’t'} sent – the model takes at most ${max}.`
+                : `${refs.length} of at most ${max} reference images`
+            }
+          >
+            {refs.length}/{max}
+          </span>
+        </div>
+      )}
     </div>
   )
 }
@@ -330,7 +331,7 @@ function AudioToggle({ asset, included, supported, fits, onToggle }: AudioToggle
       aria-label={label}
       title={title}
       className={`flex shrink-0 items-center rounded-full p-0.5 transition disabled:opacity-40 ${
-        on ? (supported ? KIND_TONE[asset.kind].text : 'text-accent') : 'text-muted hover:text-text'
+        on ? (supported ? KIND_TONE[asset.kind].text : 'text-danger') : 'text-muted hover:text-text'
       }`}
     >
       <MicIcon crossed={!on} />
@@ -468,7 +469,7 @@ function WearerSelect({ outfit, wearer, characters, onChange }: WearerSelectProp
     >
       <span>worn by</span>
       <span className={`max-w-20 truncate ${name ? 'text-text' : ''}`}>{name ?? 'nobody'}</span>
-      <span aria-hidden>▾</span>
+      <ChevronDownIcon size={10} className="shrink-0" />
       {/* The native select sits invisibly on top, so the chip keeps its own look but gets the system menu. */}
       <select
         value={wearer ?? ''}
@@ -509,7 +510,7 @@ function HolderSelect({ product, holder, characters, onChange }: HolderSelectPro
     >
       <span>held by</span>
       <span className={`max-w-20 truncate ${name ? 'text-text' : ''}`}>{name ?? 'nobody'}</span>
-      <span aria-hidden>▾</span>
+      <ChevronDownIcon size={10} className="shrink-0" />
       {/* The native select sits invisibly on top, so the chip keeps its own look but gets the system menu. */}
       <select
         value={holder ?? ''}
@@ -584,7 +585,7 @@ function PosePeopleSelect({ pose, characters, chosen, onChange }: PosePeopleSele
       >
         <span>applies to</span>
         <span className={`max-w-24 truncate ${selected.length ? 'text-text' : ''}`}>{summary}</span>
-        <span aria-hidden>▾</span>
+        <ChevronDownIcon size={10} className="shrink-0" />
       </button>
       <Popover anchorRef={button} open={open} onClose={close} width={240} maxHeight={320} label="Who the pose applies to">
         <div className="border-b border-line px-3 py-2">

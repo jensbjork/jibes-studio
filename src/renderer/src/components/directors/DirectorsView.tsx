@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import type { Asset } from '@shared/types'
-import { ASSET_COPY } from '../../lib/assets'
+import { ASSET_COPY, uniqueNewName } from '../../lib/assets'
 import { directorEntries, isPresetId } from '../../lib/directors'
 import { ipcErrorMessage, useAssetsState, useModels } from '../../lib/hooks'
 import { SELECTED_ASSET_KEYS } from '../../lib/library'
 import type { Intent, Navigate } from '../../lib/navigation'
-import AssetIcon from '../assets/AssetIcon'
 import { isFileDrag } from '../assets/imageUtils'
+import { FloatingBanner } from '../ui/Banner'
 import DirectorEditor from './DirectorEditor'
 import DirectorList from './DirectorList'
 import PresetView from './PresetView'
@@ -38,14 +38,6 @@ interface Overlaid {
   receivedAt: number
 }
 
-function uniqueNewName(assets: Asset[], base: string): string {
-  const taken = new Set(assets.map((a) => a.name.toLocaleLowerCase('en')))
-  if (!taken.has(base.toLocaleLowerCase('en'))) return base
-  let n = 2
-  while (taken.has(`${base} ${n}`.toLocaleLowerCase('en'))) n++
-  return `${base} ${n}`
-}
-
 interface Notice {
   id: number
   tone: 'error' | 'info'
@@ -60,7 +52,8 @@ interface Props {
 
 /**
  * Directors: the user's own and the ready-made ones in the shared side list, and the open one – an editor for an own
- * director, a read-only page with "Use a copy" for a ready-made one.
+ * director, a read-only page with "Copy to edit" for a ready-made one. The ready-made ones are always there, so the
+ * view has no empty state: a ready-made page says what a director is.
  */
 export default function DirectorsView({ intent, onIntentHandled, navigate }: Props) {
   const { assets: all, loaded } = useAssetsState()
@@ -112,12 +105,6 @@ export default function DirectorsView({ intent, onIntentHandled, navigate }: Pro
     onIntentHandled()
   }, [intent])
 
-  useEffect(() => {
-    if (!notice) return
-    const t = setTimeout(() => setNotice(undefined), notice.tone === 'error' ? 8000 : 5000)
-    return () => clearTimeout(t)
-  }, [notice])
-
   const notify = (text: string, tone: Notice['tone'] = 'error') => setNotice({ id: Date.now(), tone, text })
   const updated = (a: Asset) => setOverlay((o) => ({ ...o, [a.id]: { asset: a, receivedAt: Date.now() } }))
 
@@ -150,7 +137,8 @@ export default function DirectorsView({ intent, onIntentHandled, navigate }: Pro
       const a = await window.studio.copyDirectorPreset(presetId)
       updated(a)
       setSelectedId(a.id)
-      setCreatedId(undefined)
+      // Its name ready to retype, as a new one's is: "Noir (copy)" would otherwise head every prompt it directs.
+      setCreatedId(a.id)
       notify(`“${a.name}” is yours to change – the ready-made one stays as it was.`, 'info')
     } catch (e) {
       notify(ipcErrorMessage(e))
@@ -231,49 +219,16 @@ export default function DirectorsView({ intent, onIntentHandled, navigate }: Pro
             onUseCopy={() => useCopy(selected.id)}
           />
         ) : (
-          <EmptyState onCreate={create} creating={creating} />
+          // Never for long: the ready-made ones are always there once the library has loaded.
+          <div className="drag h-12" />
         )}
       </section>
 
       {notice && (
-        <div
-          key={notice.id}
-          role={notice.tone === 'error' ? 'alert' : 'status'}
-          className="absolute bottom-5 left-1/2 z-40 flex max-w-lg -translate-x-1/2 items-start gap-3 rounded-lg border border-line bg-raised px-4 py-2.5 shadow-2xl"
-        >
-          <span className={`select-text ${notice.tone === 'error' ? 'text-accent' : 'text-text'}`}>{notice.text}</span>
-          <button
-            onClick={() => setNotice(undefined)}
-            className="-mr-1 shrink-0 rounded px-1 text-muted hover:text-text"
-            title="Close"
-          >
-            ✕
-          </button>
-        </div>
+        <FloatingBanner key={notice.id} tone={notice.tone} onDismiss={() => setNotice(undefined)}>
+          {notice.text}
+        </FloatingBanner>
       )}
-    </div>
-  )
-}
-
-function EmptyState({ onCreate, creating }: { onCreate: () => void; creating: boolean }) {
-  const copy = ASSET_COPY.director
-  return (
-    <div className="flex h-full flex-col">
-      <div className="drag h-12 shrink-0" />
-      <div className="flex flex-1 flex-col items-center justify-center px-10 pb-12 text-center">
-        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-raised text-2xl text-muted">
-          <AssetIcon kind="director" />
-        </div>
-        <h2 className="text-base font-semibold">{copy.emptyTitle}</h2>
-        <p className="mt-2 max-w-md leading-relaxed text-muted">{copy.emptyText}</p>
-        <button
-          onClick={onCreate}
-          disabled={creating}
-          className="mt-6 rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
-        >
-          {copy.newName}
-        </button>
-      </div>
     </div>
   )
 }

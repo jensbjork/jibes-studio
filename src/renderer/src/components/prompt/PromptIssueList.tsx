@@ -32,12 +32,12 @@ export default function PromptIssueList({ id, issues, onFix, onReveal }: Props) 
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => onReveal(first)}
                   title="Show in the prompt"
-                  className={`text-left hover:underline ${error ? 'text-red-300' : 'text-amber-200'}`}
+                  className={`text-left hover:underline ${error ? 'text-danger' : 'text-warning'}`}
                 >
                   {issue.message}
                 </button>
               ) : (
-                <p className={error ? 'text-red-300' : 'text-amber-200'}>{issue.message}</p>
+                <p className={error ? 'text-danger' : 'text-warning'}>{issue.message}</p>
               )}
               {issue.detail && <p className="mt-0.5 text-[11px] text-muted">{issue.detail}</p>}
               {issue.fixes.length > 0 && (

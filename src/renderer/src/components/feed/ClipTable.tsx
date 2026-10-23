@@ -32,6 +32,8 @@ interface Props {
   bodyRef: RefObject<HTMLDivElement | null>
   /** Changes with the filters and the order: the list then starts over at its top (or at the selected row). */
   resetKey: string
+  /** ↑ on the first row: back to the search field above the list (Media; Generate's list has no search). */
+  onExitTop?: () => void
 }
 
 const ROW = 48
@@ -72,8 +74,8 @@ function visibleColumns(width: number): Column[] {
 
 /**
  * Every clip as one row: a table that stays fast with thousands of clips, since only the rows in view (plus a
- * few) are rendered. ↑/↓ move, Enter opens the clip in the drawer, space opens or closes it, Esc closes it;
- * while the drawer is open it follows the selected row.
+ * few) are rendered. ↑/↓ move (↑ from the first row goes back to the search), Enter opens the clip in the drawer,
+ * space opens or closes it, Esc closes it; while the drawer is open it follows the selected row.
  */
 export default function ClipTable({
   generations,
@@ -88,7 +90,8 @@ export default function ClipTable({
   onClose,
   onRate,
   bodyRef,
-  resetKey
+  resetKey,
+  onExitTop
 }: Props) {
   const [scrollTop, setScrollTop] = useState(0)
   const [size, setSize] = useState({ width: 900, height: 600 })
@@ -155,7 +158,8 @@ export default function ClipTable({
         break
       case 'ArrowUp':
         e.preventDefault()
-        go(at >= 0 ? at - 1 : droppedAt >= 0 ? droppedAt - 1 : 0)
+        if (at === 0 && onExitTop) onExitTop()
+        else go(at >= 0 ? at - 1 : droppedAt >= 0 ? droppedAt - 1 : 0)
         break
       case 'PageDown':
         e.preventDefault()
@@ -492,7 +496,7 @@ function StatusCell({ g }: { g: Generation }) {
   const progress = progressOf(g)
   return (
     <span
-      className={`flex min-w-0 items-center gap-1.5 text-[12px] ${g.status === 'failed' ? 'text-accent' : g.status === 'completed' ? 'text-muted' : ''}`}
+      className={`flex min-w-0 items-center gap-1.5 text-[12px] ${g.status === 'failed' ? 'text-danger' : g.status === 'completed' ? 'text-muted' : ''}`}
       title={g.status === 'failed' ? (g.error ?? 'Failed') : STATUS_LABEL[g.status]}
     >
       {isPending(g) ? (

@@ -241,8 +241,9 @@ export function stillParamsForSubmit(params: StillParams, model: ImageModel | un
 // ── Storyboard boards ─────────────────────────────────────────────────────────
 
 /**
- * "Use the previous image as a reference": the references with the previous board's image first (on) or without it
- * (off). The others keep their order; the previous image is never in the list twice.
+ * The previous board's image as a reference: the references with it first, as the base (on – the Create image
+ * dialog's "＋ Previous board's image"), or without it (off). The others keep their order; the previous image is
+ * never in the list twice.
  */
 export function withPreviousReference(references: readonly string[], previous: string, on: boolean): string[] {
   const rest = references.filter((p) => p !== previous)

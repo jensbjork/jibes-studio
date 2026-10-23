@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { kindOfModelId } from '@shared/models'
 import {
@@ -19,7 +19,7 @@ import { ImageDirectionNote } from '../directors/DirectedByNote'
 import { samePath } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
-import { FILE_MANAGER, shortcut } from '../../lib/platform'
+import { FILE_MANAGER, shortcut, submitKeyHandler } from '../../lib/platform'
 import { markSeen, newWorkToken, useUnseen } from '../../lib/work'
 import ConsentDialog from '../ConsentDialog'
 import Modal from '../pickers/Modal'
@@ -46,6 +46,9 @@ import {
   type ImageOptions
 } from './imageModels'
 import PromptField from '../prompt/PromptField'
+import { noticeTones } from '../ui/Banner'
+import { buttonClass } from '../ui/button'
+import Disclosure from '../ui/Disclosure'
 import ReferenceImages from './ReferenceImages'
 import StillThumb from './StillThumb'
 import StillViewer from './StillViewer'
@@ -74,9 +77,9 @@ export interface CreateImageDialogProps {
   /** Prefills the prompt (e.g. the board's note, the clip's notes or prompt); @ImageN tokens are taken out. */
   initialPrompt?: string
   /**
-   * The previous board's image (absolute). Offered as "Use the previous image as a reference", on from the start:
-   * it goes first among the references (the base the edit model works from), so people, clothes and place carry
-   * over from one milestone to the next.
+   * The previous board's image (absolute). It starts first among the references (the base the edit model works
+   * from), labelled Previous, so people, clothes and place carry over from one milestone to the next; its ✕ takes it
+   * out and "＋ Previous board's image" brings it back.
    */
   previousImagePath?: string
   /** Where a result goes besides the stills (see CreateImageTarget). */
@@ -107,7 +110,6 @@ export default function CreateImageDialog(props: CreateImageDialogProps) {
 const images = (n: number): string => `${n} ${n === 1 ? 'image' : 'images'}`
 
 const select = 'w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted'
-const field = 'w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted'
 
 /** Venice's consent request in an error message, if that is what it is. */
 function consentOf(message: string): ConsentRequest | undefined {
@@ -205,7 +207,8 @@ function CreateImageDialogBody({
   // ── Form ────────────────────────────────────────────────────────────────────
   const [prompt, setPrompt] = useState(() => plainImagePrompt(initialPrompt ?? ''))
   const [negativePrompt, setNegativePrompt] = useState('')
-  // The previous board's image starts as the first reference ("Use the previous image as a reference" is on).
+  const [negativeOpen, setNegativeOpen] = useState(false)
+  // The previous board's image starts as the first reference (the base), labelled Previous.
   const [references, setReferences] = useState<string[]>(() => (previousImagePath ? [previousImagePath] : []))
   const [referenceNote, setReferenceNote] = useState<string>()
   const [chosen, setChosen] = useState<Record<ImageMode, string | undefined>>(() => ({
@@ -235,13 +238,14 @@ function CreateImageDialogBody({
     return () => clearTimeout(t)
   }, [referenceNote])
 
-  // Derived from the list, so taking the picture out among the references unticks the box too.
+  // Derived from the list: its ✕ among the references takes it out, and "＋ Previous board's image" is offered.
   const usingPrevious = !!previousImagePath && references.includes(previousImagePath)
-  const togglePrevious = (on: boolean) => {
+  /** Puts the previous board's image back first among the references: the base, which the others are combined into. */
+  const restorePrevious = () => {
     if (!previousImagePath) return
-    const next = withPreviousReference(references, previousImagePath, on)
+    const next = withPreviousReference(references, previousImagePath, true)
     setReferenceNote(
-      on && next.length > maxReferences
+      next.length > maxReferences
         ? `The previous image went first. The model takes up to ${images(maxReferences)}, so the last one isn't sent.`
         : undefined
     )
@@ -381,8 +385,8 @@ function CreateImageDialogBody({
     }
   }
 
-  // A paid call: guarded by a ref too, since two quick presses (or ⌘+Enter) can both run before the
-  // disabled button has rendered.
+  // A paid call: guarded by a ref too, since two quick presses (or ⌘↵) can both run before the disabled button has
+  // rendered.
   const inFlight = useRef(false)
   const create = async (sent: StillParams | undefined = params) => {
     if (!sent || busy || missing || inFlight.current) return
@@ -488,7 +492,8 @@ function CreateImageDialogBody({
   // full-size viewer close on those themselves, and only they should go.
   const pickerOpen = useRef(false)
   const closeDialog = () => {
-    if (pickerOpen.current) return
+    // The terms dialog on top answers Escape itself (Cancel); the dialog under it stays.
+    if (consent || pickerOpen.current) return
     if (viewing) setViewing(undefined)
     else onClose()
   }
@@ -517,13 +522,15 @@ function CreateImageDialogBody({
   }
   const slotWord = (slot: SegmentImageSlot) => (slot === 'start' ? 'start image' : 'end image')
   const quoted = (name: string | undefined) => (name ? ` “${name}”` : '')
+  // One sentence: where the image is saved shows in the busy note and the result panel.
   const subtitle = slotTarget
     ? clipNumber
-      ? `For clip ${clipNumber} – ${slotWord(slotTarget.slot)}. The image is also saved among the sequence's images.`
-      : `For the clip's ${slotWord(slotTarget.slot)}. The image is also saved among the sequence's images.`
+      ? `For clip ${clipNumber} – ${slotWord(slotTarget.slot)}`
+      : `For the clip's ${slotWord(slotTarget.slot)}`
     : boardId
-      ? `${boardNumber ? `For board ${boardNumber}${ownerName ? ` in “${ownerName}”` : ''}` : 'For the board'}. ` +
-        "The image goes on the board and is saved among the storyboard's images."
+      ? boardNumber
+        ? `For board ${boardNumber}${ownerName ? ` in “${ownerName}”` : ''}`
+        : 'For the board'
       : isStoryboard
         ? `Saved among the images of the storyboard${quoted(ownerName)}.`
         : sequenceId
@@ -547,7 +554,13 @@ function CreateImageDialogBody({
   // Once the image is where it should go, finishing is the next step rather than making another.
   const placed = !!current && !busy && (slotTarget ? true : boardId ? inBoard : false)
   const priceText = pricePending ? '…' : formatImagePrice(price)
-  const createLabel = busy ? 'Creating…' : (missing ?? (results.length ? 'Create again' : 'Create'))
+  // The label never turns into the reason the button is blocked: that is the line under the prompt.
+  const createLabel = busy ? 'Creating…' : results.length ? 'Create again' : 'Create'
+  const createTitle =
+    missing ??
+    `${params?.referenceImages ? 'Combines the reference images as the prompt describes' : 'Creates the image'} ` +
+      `(${shortcut('⌘↵')})`
+  const helpId = useId()
 
   return (
     <>
@@ -558,32 +571,33 @@ function CreateImageDialogBody({
         maxWidth={980}
         footer={
           <>
-            <SafeModeNote onSettings={goTo ? () => goTo('settings') : undefined} />
+            <SafeModeNote />
             <button
+              type="button"
               onClick={onClose}
-              className={
-                boardId && placed
-                  ? 'rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-hover'
-                  : 'rounded-md border border-line px-4 py-2 hover:bg-raised'
-              }
+              className={boardId && placed ? buttonClass('primary') : buttonClass('secondary')}
             >
               {results.length ? 'Done' : 'Cancel'}
             </button>
             <button
+              type="button"
               onClick={() => void create()}
               disabled={!!missing || busy || !params}
-              title={missing ?? (params?.referenceImages ? 'Combine the reference images as the prompt describes' : undefined)}
-              className={`flex items-center gap-2 rounded-md px-4 py-2 font-medium disabled:opacity-40 ${
-                placed ? 'border border-line text-text hover:bg-raised' : 'bg-accent text-white hover:bg-accent-hover'
-              }`}
+              aria-describedby={helpId}
+              title={createTitle}
+              className={placed ? buttonClass('secondary') : buttonClass('primary')}
             >
-              <span>{createLabel}</span>
-              {!missing && !busy && <span className="opacity-80">({priceText})</span>}
+              {createLabel}
+              {!busy && <span className="opacity-80">· {priceText}</span>}
             </button>
           </>
         }
       >
-        <div className="grid gap-6 md:grid-cols-[minmax(0,400px)_minmax(0,1fr)]">
+        {/* ⌘↵ creates from any field (not from the pickers, which are portals of their own). */}
+        <div
+          onKeyDown={submitKeyHandler(() => void create())}
+          className="grid gap-6 md:grid-cols-[minmax(0,400px)_minmax(0,1fr)]"
+        >
           {/* Form */}
           <div className="space-y-4">
             <label className="block">
@@ -600,18 +614,14 @@ function CreateImageDialogBody({
                 focusHint="Describe the image like a film still: framing, composition, light and mood – English works best. Type / for a building block."
                 placeholder="Wide shot of a woman by a rainy window at dusk, warm lamp light, shallow depth of field"
               />
-              <span className="mt-1 block text-[11px] leading-relaxed text-muted">
-                English works best. Describe the image like a film still: framing, composition, light and mood.{' '}
-                {shortcut('⌘ + Enter')} creates the image.
+              {/* What stands in the way of Create, else its shortcut (how to write it is the focus hint). */}
+              <span id={helpId} className="mt-1 block text-[11px] leading-relaxed text-muted">
+                {missing ?? `${shortcut('⌘↵')} to create`}
               </span>
             </label>
 
             {director && (
               <ImageDirectionNote director={director} whose={storyboard ? 'the storyboard’s' : 'the sequence’s'} />
-            )}
-
-            {previousImagePath && (
-              <PreviousImageOption path={previousImagePath} checked={usingPrevious} onChange={togglePrevious} />
             )}
 
             <ReferenceImages
@@ -629,18 +639,26 @@ function CreateImageDialogBody({
               onPickerOpen={(open) => {
                 pickerOpen.current = open
               }}
+              offer={
+                previousImagePath && !usingPrevious
+                  ? {
+                      label: "＋ Previous board's image",
+                      title:
+                        "Puts the previous board's image first (the base image), so people, outfits and the place " +
+                        'stay consistent',
+                      onAdd: restorePrevious
+                    }
+                  : undefined
+              }
             />
-            {referenceNote && <p className="-mt-2 text-[12px] text-accent">{referenceNote}</p>}
+            {referenceNote && <p className="-mt-2 text-[12px] text-warning">{referenceNote}</p>}
 
             <label className="block">
-              <span className="mb-1.5 flex items-baseline justify-between gap-2 text-muted">
-                Model
-                <span className="text-[11px]">
-                  {mode === 'edit' ? 'Combines the reference images' : 'Creates the image from the prompt'}
-                </span>
-              </span>
+              <span className="mb-1.5 block text-muted">Model</span>
               {modelsError ? (
-                <p className="text-[12px] text-accent select-text">{modelsError}</p>
+                <p role="alert" className="text-[12px] text-danger select-text">
+                  {modelsError}
+                </p>
               ) : (
                 <select
                   value={model?.id ?? ''}
@@ -715,16 +733,32 @@ function CreateImageDialogBody({
             )}
             {aspectNote && <p className="-mt-2 text-[11px] leading-relaxed text-muted">{aspectNote}</p>}
 
+            {/* Only from a prompt alone: an edit of reference images takes no negative prompt (stillParamsForSubmit). */}
             {mode === 'text' && (
-              <label className="block">
-                <span className="mb-1.5 block text-muted">Avoid (negative prompt, optional)</span>
-                <input
+              <Disclosure
+                open={negativeOpen}
+                onToggle={setNegativeOpen}
+                plain
+                summary={
+                  <span>
+                    Negative prompt
+                    {negativePrompt && !negativeOpen && <span className="ml-1.5 text-[11px]">(filled in)</span>}
+                  </span>
+                }
+              >
+                <PromptField
                   value={negativePrompt}
-                  onChange={(e) => setNegativePrompt(e.target.value)}
-                  placeholder="text, watermark, extra fingers"
-                  className={field}
+                  onChange={setNegativePrompt}
+                  onSubmit={() => void create()}
+                  context="negative"
+                  minRows={2}
+                  maxRows={8}
+                  title="Avoid"
+                  ariaLabel="Negative prompt"
+                  focusHint="What the model should avoid, ideally in English and comma-separated. Type / for common things to avoid."
+                  placeholder="What you don’t want to see… (type / for suggestions)"
                 />
-              </label>
+              </Disclosure>
             )}
           </div>
 
@@ -773,43 +807,6 @@ function CreateImageDialogBody({
   )
 }
 
-/** "Use the previous image as a reference": the previous board's image as the first reference, for continuity. */
-function PreviousImageOption({
-  path,
-  checked,
-  onChange
-}: {
-  path: string
-  checked: boolean
-  onChange: (on: boolean) => void
-}) {
-  const [missing, setMissing] = useState(false)
-  return (
-    <label className="flex cursor-pointer items-center gap-3 rounded-md border border-line px-3 py-2 transition hover:bg-raised/50">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="accent-accent" />
-      <span className="h-9 w-16 shrink-0 overflow-hidden rounded bg-raised">
-        {!missing && (
-          <img
-            src={mediaUrl(path)}
-            alt=""
-            draggable={false}
-            onError={() => setMissing(true)}
-            className="h-full w-full object-cover"
-          />
-        )}
-      </span>
-      <span className="min-w-0">
-        <span className="block">Use the previous image as a reference</span>
-        <span className="mt-0.5 block text-[11px] leading-snug text-muted">
-          {missing
-            ? "The previous board's image is no longer where it was."
-            : "The previous board's image goes first among the references, so people, outfits and environment stay consistent."}
-        </span>
-      </span>
-    </label>
-  )
-}
-
 /** "Seedream V5 Pro Edit (up to 6 images)", "Flux 2 Pro (offline)". */
 function modelOptionLabel(m: ImageModel, mode: ImageMode): string {
   const extra = [mode === 'edit' ? `up to ${images(m.maxInputImages)}` : undefined, m.offline ? 'offline' : undefined]
@@ -839,9 +836,8 @@ interface ResultProps {
   onAssignBoard: (still: Still) => void
 }
 
-const primaryButton =
-  'rounded-md bg-accent px-3.5 py-1.5 font-medium text-white hover:bg-accent-hover disabled:opacity-40'
-const secondaryButton = 'rounded-md border border-line px-3.5 py-1.5 hover:bg-raised disabled:opacity-40'
+const primaryButton = buttonClass('primary')
+const secondaryButton = buttonClass('secondary')
 
 /** The latest image (or the one picked among this dialog's results), with where it can go. */
 function ResultPanel({
@@ -898,7 +894,10 @@ function ResultPanel({
       </div>
 
       {error && (
-        <p className="max-h-32 overflow-y-auto rounded-md border border-accent/40 bg-accent/5 px-3 py-2 text-[12px] leading-relaxed text-accent select-text">
+        <p
+          role="alert"
+          className={`max-h-32 overflow-y-auto rounded-md border px-3 py-2 text-[12px] leading-relaxed select-text ${noticeTones.error}`}
+        >
           {error}
         </p>
       )}
@@ -926,20 +925,21 @@ function ResultPanel({
           ))}
           {board &&
             (onBoard(current) ? (
-              <span className="flex items-center gap-1.5 text-emerald-300">
+              <span className="flex items-center gap-1.5 text-success">
                 <span aria-hidden>✓</span>
                 The image is on {boardName}
               </span>
             ) : assigning ? (
               <span className="text-muted">Putting it on {boardName}…</span>
             ) : (
-              <button onClick={() => onAssignBoard(current)} className={primaryButton}>
+              <button type="button" onClick={() => onAssignBoard(current)} className={primaryButton}>
                 Use on {boardName}
               </button>
             ))}
           <button
+            type="button"
             onClick={() => void window.studio.revealFile(current.path)}
-            className="rounded-md px-2.5 py-1.5 text-muted hover:bg-raised hover:text-text"
+            className={buttonClass('ghost')}
           >
             Show in {FILE_MANAGER}
           </button>
@@ -950,7 +950,7 @@ function ResultPanel({
       )}
 
       {current && !busy && board && (onBoard(current) || board.note) && (
-        <p className={`text-[11px] leading-relaxed ${onBoard(current) ? 'text-muted' : 'text-amber-300'}`}>
+        <p className={`text-[11px] leading-relaxed ${onBoard(current) ? 'text-muted' : 'text-warning'}`}>
           {onBoard(current)
             ? "Create another and it replaces the image on the board. The earlier ones stay among the storyboard's images."
             : board.note}
@@ -987,10 +987,10 @@ function ResultPanel({
 }
 
 /**
- * Whether Venice blurs adult content in the image ("Safe mode for images" in Settings), switchable here too
- * so the setting doesn't come as a surprise after paying for a blurred picture.
+ * Whether Venice blurs adult content in the image ("Safe mode for images" in Settings), in one line and switchable
+ * here too, so the setting doesn't come as a surprise after paying for a blurred picture. What it does is the tooltip.
  */
-function SafeModeNote({ onSettings }: { onSettings?: () => void }) {
+function SafeModeNote() {
   const [on, setOn] = useState<boolean>()
   const [error, setError] = useState<string>()
   useEffect(() => {
@@ -1024,25 +1024,19 @@ function SafeModeNote({ onSettings }: { onSettings?: () => void }) {
 
   if (on === undefined) return <span className="mr-auto" />
   return (
-    <p className="mr-auto max-w-md text-[11px] leading-relaxed text-muted">
-      {error ? (
-        <span className="text-accent">{error}</span>
-      ) : on ? (
-        <>Safe mode is on – Venice blurs adult content in the image. </>
-      ) : (
-        <>Safe mode is off – Venice doesn't blur adult content. </>
-      )}
-      <button onClick={() => void toggle()} className="text-text underline-offset-2 hover:underline">
+    <p
+      className="mr-auto max-w-md text-[11px] leading-relaxed text-muted"
+      title={
+        on
+          ? 'Safe mode for images: Venice blurs adult content in the image'
+          : 'Safe mode for images is off: Venice doesn’t blur adult content in the image'
+      }
+    >
+      {error ? <span className="text-danger">{error}</span> : `Safe mode ${on ? 'on' : 'off'}`}
+      {' · '}
+      <button type="button" onClick={() => void toggle()} className="text-text underline-offset-2 hover:underline">
         {on ? 'Turn off' : 'Turn on'}
       </button>
-      {onSettings && (
-        <>
-          {' · '}
-          <button onClick={onSettings} className="text-text underline-offset-2 hover:underline">
-            Settings
-          </button>
-        </>
-      )}
     </p>
   )
 }

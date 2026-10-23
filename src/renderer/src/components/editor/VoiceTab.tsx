@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import type {
   Asset,
   BackgroundChoice,
@@ -21,7 +21,6 @@ import { Check, Choice, Field, OpCard, PlanNotes, RunButton, TimeAt, fieldInput,
 const DEFAULT_ASR = 'elevenlabs/scribe-v2'
 const DEFAULT_SPEECH = 'elevenlabs-tts-multilingual-v2'
 const CLONE_MODEL = 'tts-chatterbox-hd'
-
 
 export const LANGUAGES: { code: string; label: string }[] = [
   { code: '', label: 'Automatic' },
@@ -77,6 +76,8 @@ function TranscribeCard({ open, onToggle }: CardProps) {
   const [model, setModel] = useState<string>()
   const [language, setLanguage] = useState('')
   const [nonce, setNonce] = useState(0)
+  const languageField = useId()
+  const modelField = useId()
   const modelId = model ?? (models.some((m) => m.id === DEFAULT_ASR) ? DEFAULT_ASR : models[0]?.id)
   const op: EditOperation = { op: 'transcribe', model: modelId, language: language || undefined }
   const { plan, planning, error: planError } = usePlan(edit.id, op, current.id, open, nonce)
@@ -100,8 +101,8 @@ function TranscribeCard({ open, onToggle }: CardProps) {
     >
       {status && <p className="text-[12px] text-muted">{status}</p>}
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Language">
-          <select value={language} onChange={(e) => setLanguage(e.target.value)} className={fieldInput}>
+        <Field label="Language" htmlFor={languageField}>
+          <select id={languageField} value={language} onChange={(e) => setLanguage(e.target.value)} className={fieldInput}>
             {LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>
                 {l.label}
@@ -110,8 +111,8 @@ function TranscribeCard({ open, onToggle }: CardProps) {
           </select>
         </Field>
         {models.length > 1 && (
-          <Field label="Model">
-            <select value={modelId} onChange={(e) => setModel(e.target.value)} className={fieldInput}>
+          <Field label="Model" htmlFor={modelField}>
+            <select id={modelField} value={modelId} onChange={(e) => setModel(e.target.value)} className={fieldInput}>
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
@@ -133,7 +134,7 @@ function TranscribeCard({ open, onToggle }: CardProps) {
         running={card.running}
         onClick={() => plan && void card.run({ op, plan, label: 'Transcribe' })}
       />
-      {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+      {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
     </OpCard>
   )
 }
@@ -196,6 +197,8 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
   const [background, setBackground, separated] = useBackground()
   const [noiseChoice, setNoiseChoice] = useState<boolean>()
   const [nonce, setNonce] = useState(0)
+  const modelField = useId()
+  const voiceField = useId()
 
   const voiceId = voice && model?.voices.includes(voice) ? voice : (model?.defaultVoice ?? model?.voices[0])
   const voiceChoice: VoiceChoice | undefined =
@@ -228,30 +231,9 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
   useReportRange(open, effectiveScope === 'range' ? selection : undefined)
   const card = useCardRun(() => setNonce((n) => n + 1))
 
-  if (!audio.catalog) {
-    return (
-      <OpCard title="Change voice" summary="Keep the performance, change the voice." open={open} onToggle={onToggle}>
-        <p className="text-[12px] text-muted">{audio.error ?? 'Loading Venice’s voice models…'}</p>
-      </OpCard>
-    )
-  }
-
-  if (!changers.length) {
-    return (
-      <OpCard title="Change voice" summary="Not available from Venice right now." open={open} onToggle={onToggle}>
-        <p className="text-[12px] leading-relaxed text-muted">
-          Venice doesn’t offer voice changing right now – use <span className="text-text">Re-record lines</span>.
-          Studio shows this card by itself once Venice starts offering it.
-        </p>
-        {!audio.catalog.keyed && (
-          <p className="text-[12px] leading-relaxed text-muted">Add the API key in Settings.</p>
-        )}
-        <button type="button" onClick={audio.refresh} disabled={audio.loading} className={linkButton}>
-          {audio.loading ? 'Checking…' : 'Check again'}
-        </button>
-      </OpCard>
-    )
-  }
+  // Only when Venice lists a voice changer (not while the list loads or failed): the catalog is fetched again now and
+  // then and when a key is added, and the card shows up by itself.
+  if (!changers.length) return null
 
   return (
     <OpCard title="Change voice" summary="Keep the performance, change the voice – for the whole film or a part." open={open} onToggle={onToggle}>
@@ -277,8 +259,8 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
         <LinePicker segments={transcript.segments} selected={lineIds} onChange={setLineIds} />
       )}
       {changers.length > 1 && (
-        <Field label="Model">
-          <select value={model?.id} onChange={(e) => setModelChoice(e.target.value)} className={fieldInput}>
+        <Field label="Model" htmlFor={modelField}>
+          <select id={modelField} value={model?.id} onChange={(e) => setModelChoice(e.target.value)} className={fieldInput}>
             {changers.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
@@ -287,8 +269,9 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
           </select>
         </Field>
       )}
-      <Field label="New voice">
+      <Field label="New voice" htmlFor={voiceField}>
         <select
+          id={voiceField}
           value={useCustom ? '__custom' : (voiceId ?? '')}
           onChange={(e) => {
             if (e.target.value === '__custom') setUseCustom(true)
@@ -312,6 +295,7 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
             onChange={(e) => setCustom(e.target.value)}
             placeholder="Voice ID from the provider"
             spellCheck={false}
+            aria-label="Voice ID"
             className={`${fieldInput} mt-1.5`}
           />
         )}
@@ -337,7 +321,7 @@ function ChangeVoiceCard({ open, onToggle }: CardProps) {
         disabledReason={effectiveScope === 'lines' ? 'Choose at least one line.' : 'Choose a voice.'}
         onClick={() => plan && op && void card.run({ op, plan, label: 'Change voice' })}
       />
-      {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+      {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
     </OpCard>
   )
 }
@@ -488,6 +472,7 @@ function SpeechVoiceField({
               <select
                 value={chosenClip}
                 onChange={(e) => onChange({ ...value, audioId: e.target.value })}
+                aria-label="Voice clip"
                 className={fieldInput}
               >
                 {clips.map((c) => (
@@ -515,6 +500,7 @@ function SpeechVoiceField({
               <select
                 value={model?.id ?? ''}
                 onChange={(e) => onChange({ ...value, model: e.target.value, voice: undefined })}
+                aria-label="Voice model"
                 className={fieldInput}
               >
                 {presets.map((m) => (
@@ -528,6 +514,7 @@ function SpeechVoiceField({
               <select
                 value={resolved.voice?.kind === 'custom' || value.voice === '__custom' ? '__custom' : resolved.voice?.kind === 'preset' ? resolved.voice.voice : ''}
                 onChange={(e) => onChange({ ...value, voice: e.target.value })}
+                aria-label="Ready-made voice"
                 className={fieldInput}
               >
                 {model.voices.map((v) => (
@@ -544,6 +531,7 @@ function SpeechVoiceField({
                 onChange={(e) => onChange({ ...value, custom: e.target.value })}
                 placeholder="Voice ID from the provider"
                 spellCheck={false}
+                aria-label="Voice ID"
                 className={fieldInput}
               />
             )}
@@ -731,7 +719,7 @@ function SpeakLinesCard({ open, onToggle, onTranscribe }: CardProps & { onTransc
             disabledReason={!lines.length ? 'Check at least one line.' : blocked}
             onClick={() => plan && op && void card.run({ op, plan, label: `Record ${lines.length} ${lines.length === 1 ? 'line' : 'lines'}` })}
           />
-          {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+          {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
         </>
       )}
     </OpCard>
@@ -747,6 +735,7 @@ function NewLineCard({ open, onToggle }: CardProps) {
   const [voiceValue, setVoiceValue] = useState<SpeechVoice>({ mode: 'preset' })
   const clone = useCloneConsent()
   const [nonce, setNonce] = useState(0)
+  const textField = useId()
   const resolved = useSpeechVoice(voiceValue, clone.consent)
 
   // Opening the card places the line where the playhead is.
@@ -773,8 +762,9 @@ function NewLineCard({ open, onToggle }: CardProps) {
 
   return (
     <OpCard title="New line" summary="A new line where the playhead is." open={open} onToggle={onToggle}>
-      <Field label="What should be said?">
+      <Field label="What should be said?" htmlFor={textField}>
         <textarea
+          id={textField}
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={2}
@@ -799,7 +789,7 @@ function NewLineCard({ open, onToggle }: CardProps) {
         disabledReason={!text.trim() ? 'Write the line.' : blocked}
         onClick={() => plan && op && void card.run({ op, plan, label: 'New line' })}
       />
-      {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+      {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
     </OpCard>
   )
 }

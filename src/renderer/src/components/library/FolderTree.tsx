@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { FILE_MANAGER, isMac } from '../../lib/platform'
+import Disclosure from '../ui/Disclosure'
 import FolderIcon from './FolderIcon'
 import type { RevealTarget } from './OpenFolderButton'
 
@@ -111,10 +112,15 @@ interface Props {
   detail: 'example' | 'explain'
   /** Makes the rows open their folder in Finder. */
   onOpen?: (target: RevealTarget) => void
+  /**
+   * Only the root row in view, the folders under it behind a closed disclosure with this summary ("What goes in the
+   * folder?"): the setup screen, where the actions under the tree must stay in view.
+   */
+  collapsible?: string
 }
 
 /** The library's folder layout as a small tree. */
-export default function FolderTree({ rootName, rootDetail, detail, onOpen }: Props) {
+export default function FolderTree({ rootName, rootDetail, detail, onOpen, collapsible }: Props) {
   const now = new Date()
   const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
   const time = `${pad(now.getHours())}.${pad(now.getMinutes())}`
@@ -140,37 +146,67 @@ export default function FolderTree({ rootName, rootDetail, detail, onOpen }: Pro
           </span>
         )}
       </Row>
-      <ul>
-        {rows.map((row, i) => {
-          const last = i === rows.length - 1
-          const hidden = !row.target
-          return (
-            <li key={row.key} className="relative pl-6">
-              {/* Tree lines: a vertical spine (ending at the last folder) and a tick to each folder. */}
-              <span
-                className="absolute left-[15px] w-px bg-line"
-                style={{ top: i === 0 ? -6 : 0, ...(last ? { height: TICK_TOP } : { bottom: 0 }) }}
-              />
-              <span className="absolute left-[15px] h-px w-3.5 bg-line" style={{ top: TICK_TOP }} />
-              <Row
-                onClick={onOpen && row.target ? () => onOpen(row.target!) : undefined}
-                title={`Open “${row.name}” in ${FILE_MANAGER}`}
-              >
-                <FolderIcon size={13} className={`mt-0.5 shrink-0 ${hidden ? 'text-muted/50' : 'text-muted'}`} />
-                <span className={`w-28 shrink-0 ${hidden ? 'text-muted' : 'text-text'}`}>{row.name}</span>
-                <span
-                  className={`min-w-0 flex-1 text-muted ${detail === 'example' ? 'font-mono text-[11px]' : ''} ${
-                    hidden ? 'opacity-70' : ''
-                  }`}
-                >
-                  {row.text}
-                </span>
-              </Row>
-            </li>
-          )
-        })}
-      </ul>
+      {collapsible ? (
+        <Disclosure summary={collapsible} plain className="mt-0.5 [&>summary]:ml-2">
+          <FolderRows rows={rows} detail={detail} onOpen={onOpen} reachRoot={false} />
+        </Disclosure>
+      ) : (
+        <FolderRows rows={rows} detail={detail} onOpen={onOpen} reachRoot />
+      )}
     </div>
+  )
+}
+
+interface FolderRow {
+  key: string
+  name: string
+  text: string
+  target?: RevealTarget
+}
+
+/** The folders under the root, joined to it by tree lines (`reachRoot`: the spine runs up to the root row). */
+function FolderRows({
+  rows,
+  detail,
+  onOpen,
+  reachRoot
+}: {
+  rows: FolderRow[]
+  detail: Props['detail']
+  onOpen?: (target: RevealTarget) => void
+  reachRoot: boolean
+}) {
+  return (
+    <ul>
+      {rows.map((row, i) => {
+        const last = i === rows.length - 1
+        const hidden = !row.target
+        return (
+          <li key={row.key} className="relative pl-6">
+            {/* Tree lines: a vertical spine (ending at the last folder) and a tick to each folder. */}
+            <span
+              className="absolute left-[15px] w-px bg-line"
+              style={{ top: i === 0 && reachRoot ? -6 : 0, ...(last ? { height: TICK_TOP } : { bottom: 0 }) }}
+            />
+            <span className="absolute left-[15px] h-px w-3.5 bg-line" style={{ top: TICK_TOP }} />
+            <Row
+              onClick={onOpen && row.target ? () => onOpen(row.target!) : undefined}
+              title={`Open “${row.name}” in ${FILE_MANAGER}`}
+            >
+              <FolderIcon size={13} className={`mt-0.5 shrink-0 ${hidden ? 'text-muted/50' : 'text-muted'}`} />
+              <span className={`w-28 shrink-0 ${hidden ? 'text-muted' : 'text-text'}`}>{row.name}</span>
+              <span
+                className={`min-w-0 flex-1 text-muted ${detail === 'example' ? 'font-mono text-[11px]' : ''} ${
+                  hidden ? 'opacity-70' : ''
+                }`}
+              >
+                {row.text}
+              </span>
+            </Row>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

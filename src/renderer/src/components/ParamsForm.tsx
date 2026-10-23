@@ -44,7 +44,7 @@ import {
   type SavedPrompt,
   type VideoModel
 } from '@shared/types'
-import { ASSET_COPY, ASSET_VIEW, englishList } from '../lib/assets'
+import { ASSET_COPY, ASSET_VIEW, englishList, isReferenceKind } from '../lib/assets'
 import { useAssets, usePrompts } from '../lib/hooks'
 import type { Navigate } from '../lib/navigation'
 import ImageInput, { type ImageCaption, type SwapChoice } from './ImageInput'
@@ -52,7 +52,7 @@ import AssetChips, { posePeopleOf, productHolderOf } from './pickers/AssetChips'
 import AssetPicker from './pickers/AssetPicker'
 import AudioChips from './pickers/AudioChips'
 import AudioPicker from './pickers/AudioPicker'
-import { KIND_TONE, PICKER_COPY } from './pickers/assetKinds'
+import { KIND_TONE } from './pickers/assetKinds'
 import {
   addAssetToForm,
   addPaths,
@@ -107,6 +107,8 @@ import PromptField from './prompt/PromptField'
 import PromptEditor, { type PromptEditorHandle } from './prompt/PromptEditor'
 import { promptReferences, type AssetGroup, type ReferenceGroup } from './prompt/promptText'
 import { usePromptLanguage } from './prompt/usePromptLanguage'
+import Disclosure from './ui/Disclosure'
+import Segmented from './ui/Segmented'
 
 interface Props {
   models: VideoModel[]
@@ -136,8 +138,15 @@ interface Props {
    * without the keyframe), where the Generate form just leaves the picture out. The note under it says which.
    */
   endImageRequired?: boolean
-  /** Called on ⌘/Ctrl+Enter in the prompt field. */
+  /** Called on ⌘↵ (Ctrl+Enter) in a prompt field; the view puts the same on its whole form (submitKeyHandler). */
   onSubmit?: () => void
+  /** The mode switch is shown elsewhere: Generate puts ModeTabs in its title band. */
+  hideTabs?: boolean
+  /**
+   * Duration, resolution, aspect ratio and sound: at the end of the form ('inline', the default), or left to the view
+   * ('none'), which shows OutputSettings right above the price they set.
+   */
+  outputSettings?: 'inline' | 'none'
   /** Lets the pickers link to the library views (characters, environments, products, outfits, poses, prompts). */
   navigate?: Navigate
   /** A sequence clip's sequence: the swap picker offers its saved pictures (else every saved picture). */
@@ -183,6 +192,9 @@ const SINGLE_IMAGE_KINDS: readonly ReferenceKind[] = ['environment', 'character'
 const SINGLE_IMAGE_KINDS_TEXT = englishList(
   ASSET_KINDS.filter((k) => SINGLE_IMAGE_KINDS.includes(k)).map((k) => ASSET_COPY[k].plural.toLowerCase())
 )
+
+/** Every kind ＋ From library offers (a tab each in the picker), for its title. */
+const REFERENCE_KINDS_TEXT = englishList(ASSET_KINDS.map((k) => ASSET_COPY[k].plural.toLowerCase()))
 
 const select = 'w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted'
 const smallButton =
@@ -283,6 +295,134 @@ export function modelForKind(models: VideoModel[], currentModel: string, kind: K
   return preferred ?? [...list].sort((a, b) => a.name.localeCompare(b.name))[0]?.id
 }
 
+/**
+ * Text | Start image | References: what the clip starts from. Choosing a mode picks the same family's model for it
+ * (modelForKind). ParamsForm shows it at the top; Generate puts it in its title band instead (hideTabs).
+ */
+export function ModeTabs({
+  models,
+  params,
+  setParams,
+  kinds = KINDS.map((k) => k.id),
+  className
+}: {
+  models: VideoModel[]
+  params: GenerationParams
+  setParams: Dispatch<SetStateAction<GenerationParams>>
+  /** Which modes to offer; default all three. One or none: no switch. */
+  kinds?: Kind[]
+  className?: string
+}) {
+  const tabs = KINDS.filter((k) => kinds.includes(k.id))
+  if (tabs.length < 2) return null
+  const kind = kindOfModelId(params.model)
+  const choose = (k: Kind) => {
+    if (k === kind) return
+    const id = modelForKind(models, params.model, k)
+    if (id) setParams((p) => ({ ...p, model: id }))
+  }
+  return (
+    <Segmented
+      fill
+      ariaLabel="Mode"
+      value={kind}
+      onChange={choose}
+      options={tabs.map((k) => ({ value: k.id, label: k.label }))}
+      className={className}
+    />
+  )
+}
+
+/**
+ * Duration, resolution, aspect ratio and sound in one row: they set the price, so Generate and a sequence clip show
+ * them right above the button (and ParamsForm at its end otherwise). The values say what they are ("8s", "720p",
+ * "16:9"); each field is named in its tooltip and for screen readers. ParamsForm snaps the values when the model
+ * changes.
+ */
+export function OutputSettings({
+  model,
+  params,
+  set,
+  durationFixed,
+  className = ''
+}: {
+  model: VideoModel | undefined
+  params: GenerationParams
+  set: <K extends keyof GenerationParams>(key: K, value: GenerationParams[K]) => void
+  /** The duration is set for the clip (a song clip's place): shown, not chosen, with this as its tooltip. */
+  durationFixed?: string
+  className?: string
+}) {
+  return (
+    <div
+      className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2 ${className}`}
+    >
+      {durationFixed ? (
+        <span
+          title={durationFixed}
+          aria-label={`Duration: ${durationFixed}`}
+          className={`${select} block cursor-default truncate text-muted`}
+        >
+          {params.duration.replace(/s$/, ' s')} · auto
+        </span>
+      ) : (
+        <select
+          value={params.duration}
+          onChange={(e) => set('duration', e.target.value)}
+          aria-label="Duration"
+          title="Duration"
+          className={select}
+        >
+          {(model?.durations ?? [params.duration]).map((d) => (
+            <option key={d}>{d}</option>
+          ))}
+        </select>
+      )}
+      {!!model?.resolutions.length && (
+        <select
+          value={params.resolution}
+          onChange={(e) => set('resolution', e.target.value)}
+          aria-label="Resolution"
+          title="Resolution"
+          className={select}
+        >
+          {model.resolutions.map((r) => (
+            <option key={r}>{r}</option>
+          ))}
+        </select>
+      )}
+      {!!model?.aspectRatios.length && (
+        <select
+          value={params.aspectRatio}
+          onChange={(e) => set('aspectRatio', e.target.value)}
+          aria-label="Aspect ratio"
+          title="Aspect ratio"
+          className={select}
+        >
+          {model.aspectRatios.map((r) => (
+            <option key={r}>{r}</option>
+          ))}
+        </select>
+      )}
+      {model?.audio && (
+        <label
+          className="flex items-center gap-1.5 whitespace-nowrap"
+          title={model.audioConfigurable ? 'Generate sound with the clip' : 'The model always makes the clip with sound'}
+        >
+          <input
+            type="checkbox"
+            checked={params.audio ?? true}
+            disabled={!model.audioConfigurable}
+            onChange={(e) => set('audio', e.target.checked)}
+            className="accent-accent"
+          />
+          <span>Sound</span>
+        </label>
+      )}
+    </div>
+  )
+}
+
 /** The params with these "worn by" choices (left out when there are none, as the params store them). */
 function withOutfitWearers(params: GenerationParams, wearers: GenerationParams['outfitWearers']): GenerationParams {
   if (params.outfitWearers === wearers) return params
@@ -303,6 +443,8 @@ export default function ParamsForm({
   continuationFrame,
   endImageRequired = false,
   onSubmit,
+  hideTabs = false,
+  outputSettings = 'inline',
   navigate,
   sequenceId,
   durationFixed,
@@ -311,7 +453,6 @@ export default function ParamsForm({
 }: Props) {
   const model = models.find((m) => m.id === params.model)
   const kind = kindOfModelId(params.model)
-  const tabs = KINDS.filter((k) => kinds.includes(k.id))
   const assets = useAssets()
   const prompts = usePrompts()
 
@@ -321,22 +462,16 @@ export default function ParamsForm({
   const startButton = useRef<HTMLButtonElement>(null)
   const endButton = useRef<HTMLButtonElement>(null)
   const libraryButton = useRef<HTMLButtonElement>(null)
-  const characterButton = useRef<HTMLButtonElement>(null)
-  const environmentButton = useRef<HTMLButtonElement>(null)
-  const productButton = useRef<HTMLButtonElement>(null)
-  const outfitButton = useRef<HTMLButtonElement>(null)
-  const poseButton = useRef<HTMLButtonElement>(null)
+  const referencesButton = useRef<HTMLButtonElement>(null)
   const audioButton = useRef<HTMLButtonElement>(null)
-  const kindButtons: Record<ReferenceKind, RefObject<HTMLButtonElement | null>> = {
-    character: characterButton,
-    environment: environmentButton,
-    product: productButton,
-    outfit: outfitButton,
-    pose: poseButton
-  }
   const referenceKind = picker?.startsWith('references:')
     ? (picker.slice('references:'.length) as ReferenceKind)
     : undefined
+  // The tab ＋ From library opens on: the kind last added from it, else the first kind (in the app's order) that has
+  // photos – characters first, since who is in the clip usually comes first.
+  const [lastReferenceKind, setLastReferenceKind] = useState<ReferenceKind>()
+  const openReferenceKind: ReferenceKind =
+    lastReferenceKind ?? ASSET_KINDS.find((k) => assets.some((a) => a.kind === k && a.images.length)) ?? 'character'
 
   const modelsByKind = useMemo(
     () =>
@@ -940,24 +1075,14 @@ export default function ParamsForm({
 
   return (
     <div className="space-y-5">
-      {tabs.length > 1 && (
-        <div className={`grid gap-1 rounded-lg bg-raised p-1`} style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}>
-          {tabs.map((k) => (
-            <button
-              key={k.id}
-              onClick={() => switchKind(k.id)}
-              className={`rounded-md py-1.5 transition ${kind === k.id ? 'bg-line text-text' : 'text-muted hover:text-text'}`}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {!hideTabs && <ModeTabs models={models} params={params} setParams={setParams} kinds={kinds} />}
 
       <label className="block">
         <span className="mb-1.5 block text-muted">Model</span>
         {modelsError ? (
-          <p className="text-accent">{modelsError}</p>
+          <p role="alert" className="text-danger">
+            {modelsError}
+          </p>
         ) : (
           <select value={params.model} onChange={(e) => set('model', e.target.value)} className={select}>
             {/* Without an option for it, the select would show the first model while quote and submit use this one. */}
@@ -1018,6 +1143,8 @@ export default function ParamsForm({
               <>
                 <ImageInput
                   label="End image (optional)"
+                  // Optional, so it takes one line until there is a picture: the prompt stays near the top.
+                  compact
                   value={params.endImage ? [params.endImage] : []}
                   onChange={(v) => set('endImage', v[0])}
                   caption={caption}
@@ -1026,7 +1153,7 @@ export default function ParamsForm({
                   action={libraryImageButton(endButton, 'end', `Choose an end image from ${SINGLE_IMAGE_KINDS_TEXT}`)}
                 />
                 {!endImagePossible && (
-                  <p className="-mt-2 text-[11px] leading-relaxed text-accent">
+                  <p className="-mt-2 text-[11px] leading-relaxed text-danger">
                     {endImageRequired
                       ? 'This model takes no end image, so the clip can’t be generated with it. Remove the image or pick a model that takes both a start and an end image.'
                       : 'This model takes no end image, so the image isn’t sent. Remove it or pick a model that takes both a start and an end image.'}
@@ -1054,27 +1181,22 @@ export default function ParamsForm({
             library={assets}
             sequenceId={sequenceId}
             action={
-              // Five kinds don't fit beside the label in the form's width: the buttons wrap onto a second row,
-              // right-aligned, rather than squeezing the label.
-              <span className="flex flex-wrap items-center justify-end gap-y-0.5">
-                {ASSET_KINDS.map((k) => (
-                  <button
-                    key={k}
-                    ref={kindButtons[k]}
-                    onClick={() => togglePicker(`references:${k}`)}
-                    className={`${smallButton} ${referenceKind === k ? 'bg-raised text-text' : ''}`}
-                    title={PICKER_COPY[k].addTitle}
-                  >
-                    ＋ {PICKER_COPY[k].add}
-                  </button>
-                ))}
-              </span>
+              // One button: the picker has a tab per kind (it opens on the kind added last).
+              <button
+                ref={referencesButton}
+                type="button"
+                onClick={() => togglePicker(`references:${openReferenceKind}`)}
+                className={`${smallButton} ${referenceKind ? 'bg-raised text-text' : ''}`}
+                title={`Add saved ${REFERENCE_KINDS_TEXT} as references`}
+              >
+                ＋ From library
+              </button>
             }
           />
-          {/* Keyed by kind: the panel re-anchors (and the picker starts on that tab) when another button opens it. */}
+          {/* Keyed by kind: the picker starts on that tab again when the "@" menu opens it on another one. */}
           <Popover
             key={referenceKind}
-            anchorRef={kindButtons[referenceKind ?? 'character']}
+            anchorRef={referencesButton}
             open={!!referenceKind}
             onClose={closePicker}
             align="end"
@@ -1084,7 +1206,7 @@ export default function ParamsForm({
           >
             <AssetPicker
               assets={assets}
-              initialKind={referenceKind ?? 'character'}
+              initialKind={referenceKind ?? openReferenceKind}
               title="Add as a reference"
               hint={
                 refs.length >= maxRefs
@@ -1096,10 +1218,12 @@ export default function ParamsForm({
               freeSlots={Math.max(0, maxRefs - refs.length)}
               withVoice={audioSupported}
               onPickAsset={(a) => {
+                if (isReferenceKind(a.kind)) setLastReferenceKind(a.kind)
                 addAssetRefs(a)
                 closePicker()
               }}
-              onPickImage={(path) => {
+              onPickImage={(path, a) => {
+                if (isReferenceKind(a.kind)) setLastReferenceKind(a.kind)
                 applyRefs(addPaths(refs, [path], maxRefs))
                 closePicker()
               }}
@@ -1130,7 +1254,7 @@ export default function ParamsForm({
             onSwapOutfit={swapOutfitOf}
             onManageOutfits={manageKind && (() => manageKind('outfit'))}
           />
-          {refNote && <p className="mt-1 text-[11px] text-accent">{refNote}</p>}
+          {refNote && <p className="mt-1 text-[11px] text-warning">{refNote}</p>}
           {framed && <p className="mt-1.5 text-[11px] leading-snug text-muted">{continuationFrame}</p>}
           {director && (
             <StyleFramesFromDirector
@@ -1146,6 +1270,8 @@ export default function ParamsForm({
         (videoLimits || videos.length > 0 ? (
           <div>
             <ReferenceVideos
+              // Optional: one header row until there is a video, so the prompt stays near the top.
+              collapsedWhenEmpty
               videos={videos}
               limits={videoLimits}
               onAdd={addVideoRefs}
@@ -1165,7 +1291,7 @@ export default function ParamsForm({
               />
             )}
             {!videoLimits && videos.length > 0 && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-accent">
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-danger">
                 <span>{model?.name ?? 'The model'} doesn’t take reference videos – the videos aren’t sent.</span>
                 {switchToVideoModel && videoModel && (
                   <button onClick={switchToVideoModel} className="text-text hover:underline">
@@ -1192,14 +1318,21 @@ export default function ParamsForm({
 
       {kind === 'reference-to-video' && (audioSupported || audios.length > 0) && (
         <div>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
+          {/* Empty, the section is this row alone: what it is for is the ＋ Sound tooltip. */}
+          <div
+            className={`flex items-center justify-between gap-2 ${audios.length > 0 || song?.audioNote ? 'mb-1.5' : ''}`}
+          >
             <span className="text-muted">Voices & sound</span>
             {audioSupported && (
               <button
                 ref={audioButton}
+                type="button"
                 onClick={() => togglePicker('audio')}
                 className={`${smallButton} ${picker === 'audio' ? 'bg-raised text-text' : ''}`}
-                title="Send a voice or a soundscape from the library"
+                title={
+                  'Send a voice or a soundscape from the library – a character with a voice brings it along when you ' +
+                  'add the character. Refer to it as @Audio1 … in the prompt.'
+                }
               >
                 ＋ Sound
               </button>
@@ -1231,7 +1364,7 @@ export default function ParamsForm({
               {song.audioNote}
             </p>
           )}
-          {audios.length > 0 ? (
+          {audios.length > 0 && (
             <>
               <AudioChips
                 audios={audios}
@@ -1240,34 +1373,23 @@ export default function ParamsForm({
                 onRemove={(index) => removeAudios([index])}
                 onMove={moveAudio}
               />
-              <div className="mt-1.5 flex items-start gap-3 text-[11px] text-muted">
-                <span className="min-w-0 flex-1">
-                  Click a sound to insert it in the prompt – ▶ plays the excerpt that is sent.
-                </span>
+              <div className="mt-1.5 flex justify-end text-[11px] text-muted">
                 <span
-                  className={`shrink-0 tabular-nums ${
-                    audioSeconds > MAX_REFERENCE_AUDIO_SECONDS || audios.length > maxAudios ? 'text-accent' : ''
+                  className={`tabular-nums ${
+                    audioSeconds > MAX_REFERENCE_AUDIO_SECONDS || audios.length > maxAudios ? 'text-danger' : ''
                   }`}
                   title={
                     `${audios.length} of at most ${maxAudios} sound clips, ${formatClipSeconds(audioSeconds)} of at most ` +
                     `${MAX_REFERENCE_AUDIO_SECONDS} s together. Venice takes 2–15 s per clip.`
                   }
                 >
-                  Sound {formatClipSeconds(audioSeconds).replace(/ s$/, '')}/{MAX_REFERENCE_AUDIO_SECONDS} s
+                  {formatClipSeconds(audioSeconds).replace(/ s$/, '')}/{MAX_REFERENCE_AUDIO_SECONDS} s
                 </span>
               </div>
             </>
-          ) : (
-            // Not while the song takes the voices' place (its note says what @Audio1 is).
-            !song?.audioNote && (
-              <p className="rounded-md border border-dashed border-line px-3 py-2 text-[11px] text-muted">
-                Send how someone sounds: a character with a voice brings it along when you add the character, or pick
-                one under ＋ Sound. Refer to the sound with @Audio1 … in the prompt.
-              </p>
-            )
           )}
           {!audioSupported && audios.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-accent">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-danger">
               <span>{model?.name ?? 'The model'} doesn’t take sound – the sound clips aren’t sent.</span>
               {switchToAudioModel && audioModel && (
                 <button onClick={switchToAudioModel} className="text-text hover:underline">
@@ -1287,19 +1409,9 @@ export default function ParamsForm({
           <label htmlFor={promptId} className="mr-auto text-muted">
             Prompt
           </label>
-          {model?.promptCharacterLimit && (
-            <span
-              className={`mr-1 text-[11px] ${
-                params.prompt.length > model.promptCharacterLimit ? 'text-accent' : 'text-muted'
-              }`}
-              // The text written here; descriptions appended when it is sent are counted under it.
-              title={`Your prompt: ${params.prompt.length} of at most ${model.promptCharacterLimit} characters`}
-            >
-              {params.prompt.length}/{model.promptCharacterLimit}
-            </span>
-          )}
           <button
             ref={libraryButton}
+            type="button"
             onClick={() => togglePicker('library')}
             className={`${smallButton} ${picker === 'library' ? 'bg-raised text-text' : ''}`}
             title="Load a saved prompt"
@@ -1307,9 +1419,10 @@ export default function ParamsForm({
             Library
           </button>
           <button
+            type="button"
             onClick={() => setSaveOpen(true)}
             disabled={!params.prompt.trim()}
-            className={`${smallButton} ${savedFlash ? 'text-emerald-400 hover:text-emerald-400' : ''}`}
+            className={`${smallButton} ${savedFlash ? 'text-success hover:text-success' : ''}`}
             title={linkedUnchanged ? 'Edit the saved prompt’s title and tags' : 'Save the prompt in the library'}
           >
             {savedFlash ? '✓ Saved' : 'Save'}
@@ -1332,6 +1445,8 @@ export default function ParamsForm({
           value={params.prompt}
           onChange={(prompt) => setPrompt(prompt, null)}
           onSubmit={onSubmit}
+          // The text written here (the count shows near the limit); what descriptions add is counted under it.
+          limit={promptLimit}
           rows={7}
           placeholder={
             kind === 'reference-to-video'
@@ -1352,7 +1467,7 @@ export default function ParamsForm({
           library={assets}
           onAddFromLibrary={kind === 'reference-to-video' ? addFromLibrary : undefined}
           onSwitchToReference={switchToReference}
-          onAddReferences={kind === 'reference-to-video' ? () => setPicker('references:character') : undefined}
+          onAddReferences={kind === 'reference-to-video' ? () => setPicker(`references:${openReferenceKind}`) : undefined}
           onRemoveAudio={audioRefs.length ? removeAudios : undefined}
           onUseAudioModel={switchToAudioModel}
           audioModelName={audioModel?.name}
@@ -1388,33 +1503,39 @@ export default function ParamsForm({
         />
       </div>
 
-      <details open={negativeOpen} onToggle={(e) => setNegativeOpen(e.currentTarget.open)} className="group">
-        <summary className="cursor-pointer text-muted hover:text-text">
-          Negative prompt
-          {!negativeOpen && negativeHasError && <span className="ml-1.5 text-[11px] text-accent">(has errors)</span>}
-          {!negativeOpen && !negativeHasError && params.negativePrompt && (
-            <span className="ml-1.5 text-[11px]">(filled in)</span>
-          )}
-          {!negativeOpen && director?.direction.avoid && (
-            <span className="ml-1.5 text-[11px]">+ {director.name}’s</span>
-          )}
-        </summary>
-        <div className="mt-2">
-          <PromptField
-            textareaRef={negativeRef}
-            value={params.negativePrompt ?? ''}
-            onChange={(v) => set('negativePrompt', v || undefined)}
-            context="negative"
-            minRows={2}
-            maxRows={8}
-            title="Avoid"
-            focusHint="What the model should avoid, ideally in English and comma-separated. Type / for common things to avoid."
-            placeholder="What you don’t want to see… (type / for suggestions)"
-            ariaLabel="Negative prompt"
-            ariaDescribedBy={negativeHasError ? negativeIssuesId : undefined}
-            invalid={negativeHasError}
-          />
-        </div>
+      <Disclosure
+        open={negativeOpen}
+        onToggle={setNegativeOpen}
+        plain
+        summary={
+          <span>
+            Negative prompt
+            {!negativeOpen && negativeHasError && <span className="ml-1.5 text-[11px] text-danger">(has errors)</span>}
+            {!negativeOpen && !negativeHasError && params.negativePrompt && (
+              <span className="ml-1.5 text-[11px]">(filled in)</span>
+            )}
+            {!negativeOpen && director?.direction.avoid && (
+              <span className="ml-1.5 text-[11px]">+ {director.name}’s</span>
+            )}
+          </span>
+        }
+      >
+        <PromptField
+          textareaRef={negativeRef}
+          value={params.negativePrompt ?? ''}
+          onChange={(v) => set('negativePrompt', v || undefined)}
+          // ⌘↵ sends from here as from the prompt.
+          onSubmit={onSubmit}
+          context="negative"
+          minRows={2}
+          maxRows={8}
+          title="Avoid"
+          focusHint="What the model should avoid, ideally in English and comma-separated. Type / for common things to avoid."
+          placeholder="What you don’t want to see… (type / for suggestions)"
+          ariaLabel="Negative prompt"
+          ariaDescribedBy={negativeHasError ? negativeIssuesId : undefined}
+          invalid={negativeHasError}
+        />
         {director?.direction.avoid && (
           <p className="mt-1 text-[11px] leading-snug text-muted">
             <span className="text-text/80">{director.name} adds:</span> {director.direction.avoid} – after yours,
@@ -1434,59 +1555,10 @@ export default function ParamsForm({
           onUseVideoModel={switchToVideoModel}
           videoModelName={videoModel?.name}
         />
-      </details>
+      </Disclosure>
 
-      <div className="grid grid-cols-3 gap-2">
-        {durationFixed ? (
-          <div title={durationFixed}>
-            <span className="mb-1.5 block text-muted">Duration</span>
-            <span className={`${select} block cursor-default truncate text-muted`}>
-              {params.duration.replace(/s$/, ' s')} · auto
-            </span>
-          </div>
-        ) : (
-          <label>
-            <span className="mb-1.5 block text-muted">Duration</span>
-            <select value={params.duration} onChange={(e) => set('duration', e.target.value)} className={select}>
-              {(model?.durations ?? [params.duration]).map((d) => (
-                <option key={d}>{d}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {!!model?.resolutions.length && (
-          <label>
-            <span className="mb-1.5 block text-muted">Resolution</span>
-            <select value={params.resolution} onChange={(e) => set('resolution', e.target.value)} className={select}>
-              {model.resolutions.map((r) => (
-                <option key={r}>{r}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {!!model?.aspectRatios.length && (
-          <label>
-            <span className="mb-1.5 block text-muted">Aspect ratio</span>
-            <select value={params.aspectRatio} onChange={(e) => set('aspectRatio', e.target.value)} className={select}>
-              {model.aspectRatios.map((r) => (
-                <option key={r}>{r}</option>
-              ))}
-            </select>
-          </label>
-        )}
-      </div>
-
-      {model?.audio && (
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={params.audio ?? true}
-            disabled={!model.audioConfigurable}
-            onChange={(e) => set('audio', e.target.checked)}
-            className="accent-accent"
-          />
-          <span>Generate audio</span>
-        </label>
+      {outputSettings === 'inline' && (
+        <OutputSettings model={model} params={params} set={set} durationFixed={durationFixed} />
       )}
 
       {saveOpen && (

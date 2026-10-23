@@ -49,7 +49,7 @@ export default function PromptLibraryPicker({ prompts, onPick, onManage }: Props
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Search title, text or tag…"
+          placeholder="Search title, text and tags…"
           className="w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted"
         />
       </div>
@@ -74,7 +74,7 @@ export default function PromptLibraryPicker({ prompts, onPick, onManage }: Props
               className={`block w-full rounded-md px-2.5 py-2 text-left ${i === active ? 'bg-raised' : ''}`}
             >
               <span className="flex items-center gap-1.5">
-                {p.favorite && <span className="text-accent">★</span>}
+                {p.favorite && <span className="text-amber-400">★</span>}
                 <span className="min-w-0 flex-1 truncate font-medium">{p.title}</span>
                 {p.useCount > 0 && (
                   <span className="shrink-0 text-[10px] text-muted" title="Times used">
@@ -103,7 +103,7 @@ export default function PromptLibraryPicker({ prompts, onPick, onManage }: Props
       </div>
 
       <div className="flex items-center justify-between border-t border-line px-3 py-2 text-[11px] text-muted">
-        <span>↑↓ choose · Enter use</span>
+        <span>↑ ↓ choose · Enter use</span>
         {onManage && (
           <button onClick={onManage} className="hover:text-text">
             Open the library →

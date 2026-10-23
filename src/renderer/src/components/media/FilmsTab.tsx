@@ -1,21 +1,27 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { workKey, type ExportSummary } from '@shared/types'
+import { useViewerKeys } from '../../lib/dialogs'
+import { focusedWithKeyboard, refocused } from '../../lib/focusOrigin'
 import { mediaUrl } from '../../lib/media'
 import type { Navigate } from '../../lib/navigation'
 import { FILE_MANAGER } from '../../lib/platform'
+import { nativeVideoControls } from '../../lib/video'
 import { markSeen, useIsUnseen } from '../../lib/work'
-import { fileName, formatLength } from '../editor/editorUtils'
+import { fileName } from '../editor/editorUtils'
 import { formatTotalLength } from '../feed/feedText'
+import { ScissorsIcon } from '../feed/icons'
 import { FilmIcon } from '../icons'
 import { formatStillTime } from '../images/imageModels'
 import { PlayIcon } from '../sequences/icons'
+import EmptyState from '../ui/EmptyState'
+import ViewerNavButton from '../ui/ViewerNavButton'
 import { NewChip } from '../work/StatusMark'
-import { CountLine, MediaToolbar, NoticeRow } from './ui'
+import { CountLine, MEDIA_CAPTION, MEDIA_CARD, MediaToolbar, NoticeRow } from './ui'
 
 // Films: every film exported from a sequence or a storyboard, newest first, as cards with the film's first frame.
-// A film plays in a player over the window, with the way on to the Editor, its sequence or storyboard, and Finder.
-// Films aren't deleted here.
+// A film plays in a player over the window, with the way on to the Editor, its sequence or storyboard, and the file
+// manager; it has the image viewer's keys (Esc, ← →) and Space to play. Films aren't deleted here.
 
 interface OpenRequest {
   exportId: string
@@ -81,11 +87,11 @@ function filmName(e: ExportSummary): string {
 
 const KIND_LABEL = { sequence: 'Sequence', storyboard: 'Storyboard' } as const
 
-/** "8 Oct 14:02 · 1:24 · 6 clips". */
+/** "8 Oct 14:02 · 1 min 24 s · 6 clips": lengths written as everywhere in Media. */
 function filmFacts(e: ExportSummary): string[] {
   return [
     formatStillTime(e.createdAt),
-    e.duration !== undefined ? formatLength(e.duration) : undefined,
+    e.duration !== undefined ? formatTotalLength(e.duration) : undefined,
     e.cuts ? `${e.cuts.length + 1} ${e.cuts.length ? 'clips' : 'clip'}` : undefined
   ].filter((f): f is string => !!f)
 }
@@ -122,14 +128,16 @@ export default function FilmsTab({ tabs, navigate, openRequest, onOpenRequestHan
   return (
     <div className="relative flex h-full min-w-0 flex-col">
       <MediaToolbar tabs={tabs} below={<CountLine text={loaded ? count : ''} />} />
-      {notice && <NoticeRow text={notice} onClose={() => setNotice(undefined)} />}
+      {notice && <NoticeRow onClose={() => setNotice(undefined)}>{notice}</NoticeRow>}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
         {!loaded ? null : exports.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted">
-            <p className="max-w-sm leading-relaxed">
-              No exported films yet. Export a sequence or a storyboard and the film ends up here.
-            </p>
+          <div className="flex h-full flex-col">
+            <EmptyState
+              icon={<FilmIcon size={24} />}
+              title="No films yet"
+              text="Export a sequence or a storyboard and the film ends up here."
+            />
           </div>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
@@ -166,15 +174,15 @@ const FilmCard = memo(function FilmCard({ film, onOpen }: { film: ExportSummary;
   const missing = !film.exists || broken
   const name = filmName(film)
   return (
-    <div className="group min-w-0 overflow-hidden rounded-lg border border-line bg-panel">
+    <div className={MEDIA_CARD}>
       <button
         type="button"
         onClick={() => onOpen(film)}
         title={missing ? `File missing: ${film.path}` : `Play “${name}”`}
-        className="relative block aspect-video w-full overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-muted"
+        className="relative block aspect-video w-full overflow-hidden bg-black outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-muted"
       >
         {missing ? (
-          <span className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-[12px] text-accent">
+          <span className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-[12px] text-danger">
             <FilmIcon size={18} className="text-muted" />
             File missing
           </span>
@@ -208,13 +216,13 @@ const FilmCard = memo(function FilmCard({ film, onOpen }: { film: ExportSummary;
           </span>
         )}
       </button>
-      <div className="px-3 py-2.5">
+      <div className={MEDIA_CAPTION}>
         <p className="truncate font-medium" title={name}>
           {name}
         </p>
         <p className="mt-0.5 truncate text-[11px] text-muted">
           {filmFacts(film).join(' · ')}
-          {missing && <span className="text-accent"> · File missing</span>}
+          {missing && <span className="text-danger"> · File missing</span>}
         </p>
       </div>
     </div>
@@ -227,6 +235,7 @@ const action =
 /**
  * A film over the window, playing, with what it is and where to take it. Opening a film, or stepping to one, is
  * looking at it (the playback rule marks it seen too); not one an agent opened, which also doesn't start playing.
+ * Esc closes, ← → step, Space plays and pauses; it takes the focus while open and gives it back when it closes.
  */
 function FilmPlayer({
   film,
@@ -252,22 +261,32 @@ function FilmPlayer({
   const [broken, setBroken] = useState(false)
   useEffect(() => setBroken(false), [film.id])
   const playable = film.exists && !broken
+  const videoRef = useRef<HTMLVideoElement>(null)
 
+  // The keys are the player's while it is open: the card behind it no longer takes Space or the arrows.
+  const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // A focused player seeks with the arrows itself.
-      const onMedia = e.target instanceof HTMLMediaElement
-      if (e.key === 'Escape') onClose()
-      else if (e.key === 'ArrowLeft' && !onMedia && onPrev) onPrev()
-      else if (e.key === 'ArrowRight' && !onMedia && onNext) onNext()
-      else return
-      // Captured and stopped here, so the view underneath doesn't act on the same key.
-      e.preventDefault()
-      e.stopPropagation()
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const byKeyboard = focusedWithKeyboard(before)
+    dialogRef.current?.focus({ preventScroll: true })
+    return () => {
+      // Only when the focus went down with the player: never taken from what the closing action focused.
+      const lost = !document.activeElement || document.activeElement === document.body
+      if (lost && before?.isConnected) refocused(before, byKeyboard)
     }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [onClose, onPrev, onNext])
+  }, [])
+
+  useViewerKeys({
+    onClose,
+    onPrev,
+    onNext,
+    onSpace: () => {
+      const video = videoRef.current
+      if (!video) return
+      if (video.paused) void video.play().catch(() => {})
+      else video.pause()
+    }
+  })
 
   const ownerLabel =
     film.sequenceKind === 'storyboard' ? 'Go to the storyboard' : film.sequenceKind === 'sequence' ? 'Go to the sequence' : undefined
@@ -284,10 +303,12 @@ function FilmPlayer({
   return createPortal(
     // no-drag: the overlay covers the views' title-bar drag regions.
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={filmName(film)}
-      className="no-drag fixed inset-0 z-[60] flex flex-col bg-black/85 backdrop-blur-sm"
+      tabIndex={-1}
+      className="no-drag fixed inset-0 z-[60] flex flex-col bg-black/85 outline-none backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
@@ -296,9 +317,10 @@ function FilmPlayer({
       >
         {playable ? (
           <video
+            ref={videoRef}
             key={film.id}
             src={mediaUrl(film.path)}
-            controls
+            {...nativeVideoControls}
             autoPlay={!byAgent}
             onError={() => setBroken(true)}
             className="max-h-full max-w-full rounded-md bg-black shadow-2xl"
@@ -312,8 +334,8 @@ function FilmPlayer({
         )}
         {(onPrev || onNext) && (
           <>
-            <NavButton side="left" onClick={onPrev} />
-            <NavButton side="right" onClick={onNext} />
+            <ViewerNavButton side="prev" label="Previous film" onClick={() => onPrev?.()} disabled={!onPrev} />
+            <ViewerNavButton side="next" label="Next film" onClick={() => onNext?.()} disabled={!onNext} />
           </>
         )}
       </div>
@@ -331,10 +353,15 @@ function FilmPlayer({
               markSeen([key])
               navigate('editor', { type: 'open-editor', exportId: film.id })
             }}
-            title={film.exists ? 'Edit the film (the export is left untouched)' : 'File missing'}
-            className={action}
+            title={
+              film.exists
+                ? 'Change the film with AI in the Editor. The original is left untouched – every change becomes a new version.'
+                : 'File missing'
+            }
+            className={`${action} flex items-center gap-1.5`}
           >
-            Open in the Editor
+            <ScissorsIcon size={12} />
+            Edit…
           </button>
           {ownerLabel && film.sequenceId && (
             <button type="button" onClick={goToOwner} className={action}>
@@ -352,29 +379,12 @@ function FilmPlayer({
           >
             Show in {FILE_MANAGER}
           </button>
-          <button type="button" onClick={onClose} className={action}>
+          <button type="button" onClick={onClose} title="Close (Esc)" className={action}>
             Close
           </button>
         </div>
       </div>
     </div>,
     document.body
-  )
-}
-
-function NavButton({ side, onClick }: { side: 'left' | 'right'; onClick?: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      aria-label={side === 'left' ? 'Previous film' : 'Next film'}
-      title={side === 'left' ? 'Previous (←)' : 'Next (→)'}
-      className={`absolute top-1/2 -translate-y-1/2 rounded-full bg-black/50 px-3 py-2 text-lg leading-none text-white/80 transition hover:bg-black/80 hover:text-white disabled:opacity-0 ${
-        side === 'left' ? 'left-3' : 'right-3'
-      }`}
-    >
-      {side === 'left' ? '‹' : '›'}
-    </button>
   )
 }

@@ -400,7 +400,7 @@ export function EditSummary({
                 />
               ) : (
                 <div key={id} className="relative h-16 w-16 shrink-0 overflow-hidden rounded bg-raised" title="Image missing">
-                  <span className="flex h-full items-center justify-center text-[10px] text-accent">Missing</span>
+                  <span className="flex h-full items-center justify-center text-[10px] text-danger">Missing</span>
                   <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">@Image{i + 1}</span>
                 </div>
               )
@@ -457,7 +457,7 @@ export function EditSummary({
       {state.plan && (state.plan.warnings.length > 0 || state.plan.notes.length > 0) && (
         <ul className="space-y-1 text-[12px]">
           {state.plan.warnings.map((w) => (
-            <li key={w} className="text-amber-300">
+            <li key={w} className="text-warning">
               {w}
             </li>
           ))}
@@ -473,7 +473,7 @@ export function EditSummary({
         a.priceUsd !== undefined &&
         state.plan.priceUsd !== undefined &&
         Math.abs(state.plan.priceUsd - a.priceUsd) > 0.01 && (
-          <p className="text-[12px] text-amber-300">
+          <p className="text-[12px] text-warning">
             Venice now quotes {formatUsd(state.plan.priceUsd)}. If that’s more than when the agent asked, the request
             won’t go through – then ask the agent to ask again.
           </p>
@@ -547,7 +547,7 @@ export function ResumeSummary({
             {stopped} after {job.stepsDone} of {job.stepsTotal} {job.stepsTotal === 1 ? 'part' : 'parts'}
             {job.costUsd > 0 ? ` · ${formatUsd(job.costUsd)} already paid` : ''}
           </p>
-          {job.error && <p className="text-[#ffb3b5] select-text">{job.error}</p>}
+          {job.error && <p className="text-danger select-text">{job.error}</p>}
           <p className="mt-1 text-muted">
             What’s already done is used. Only the parts that weren’t sent or that failed are sent again.
           </p>
@@ -586,7 +586,7 @@ export function VoiceDesignSummary({ request }: { request: ApprovalEditRequest }
           </p>
         </>
       ) : (
-        <p className="text-accent">The request doesn’t say anything about the voice.</p>
+        <p className="text-danger">The request doesn’t say anything about the voice.</p>
       )}
       <Steps request={request} />
     </section>

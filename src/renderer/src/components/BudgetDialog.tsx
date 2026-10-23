@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { overBudgetText, usdText } from '@shared/budget'
 import type { OverBudget } from '@shared/types'
 import { answerBudgetQuestion, useBudgetQuestion } from '../lib/budget'
+import { buttonClass } from './ui/button'
 
 /**
  * "Over your budget": something paid would take today's or this month's spending past the budget (Settings →
@@ -86,14 +87,14 @@ function Question({ over }: { over: OverBudget }) {
             ref={cancel}
             type="button"
             onClick={() => answerBudgetQuestion(false)}
-            className="rounded-md border border-line px-4 py-2 transition hover:bg-raised"
+            className={buttonClass('secondary')}
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={() => answerBudgetQuestion(true)}
-            className="rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover"
+            className={buttonClass('primary')}
           >
             Send anyway
           </button>
@@ -133,7 +134,7 @@ export function BudgetMeter({
       <div className="flex items-baseline justify-between gap-3 text-[11px] text-muted">
         <span>{label}</span>
         <span className="tabular-nums">
-          <span className={over ? 'text-[#ffb3b5]' : 'text-text'}>{usdText(total)}</span> of {usdText(capUsd)}
+          <span className={over ? 'text-danger' : 'text-text'}>{usdText(total)}</span> of {usdText(capUsd)}
         </span>
       </div>
       <div

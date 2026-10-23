@@ -91,8 +91,10 @@ export const DIRECTION_FIELDS: readonly DirectionField[] = [
 
 export interface FieldCopy {
   label: string
-  /** What the part is about, beside its label. */
+  /** What the part is about: its label's tooltip (and what a screen reader hears with the field). */
   hint: string
+  /** A short rule shown beside the label, where the part works differently from the others. */
+  note?: string
   placeholder: string
   /** The building-block group (shared/prompt-blocks.ts) its quick-add chip opens, where there is one. */
   blocks?: string
@@ -141,13 +143,15 @@ export const FIELD_COPY: Record<DirectionField, FieldCopy> = {
   },
   sound: {
     label: 'Sound',
-    hint: 'Music, ambience, silence – only for clips with sound',
+    hint: 'Music, ambience, silence',
+    note: 'Only for clips with sound',
     placeholder: 'Only natural ambient sound, no score…',
     blocks: 'sound'
   },
   avoid: {
     label: 'Avoid',
-    hint: 'What it never does – added to the negative prompt',
+    hint: 'What it never does',
+    note: 'Added to the negative prompt',
     placeholder: 'Shaky zooms, lens flares, oversaturated colours…',
     blocks: 'avoid'
   }
@@ -176,6 +180,11 @@ export function styleVideoCount(n: number): string {
   return `${n} style ${n === 1 ? 'video' : 'videos'}`
 }
 
+/** "3 style frames", "1 style video": what a director has of each, the ones it has none of left out. */
+export function directorMediaCounts(frames: number, videos: number): string[] {
+  return [frames ? styleFrameCount(frames) : '', videos ? styleVideoCount(videos) : ''].filter(Boolean)
+}
+
 /** What "between shots" is, in words: "Hard cuts", "Flows on", or nothing (the sequence's own). */
 export function continuityText(continuity: Direction['continuity']): string | undefined {
   return continuity === 'cut' ? 'Hard cuts' : continuity === 'flow' ? 'Each shot flows on' : undefined
@@ -186,9 +195,7 @@ export function continuityText(continuity: Direction['continuity']): string | un
  * light"), with its style frames and videos.
  */
 export function directorSummary(entry: DirectorEntry): string {
-  const frames = entry.asset?.images.length ?? 0
-  const videos = entry.direction.videos?.length ?? 0
-  const media = [frames ? styleFrameCount(frames) : '', videos ? styleVideoCount(videos) : ''].filter(Boolean)
+  const media = directorMediaCounts(entry.asset?.images.length ?? 0, entry.direction.videos?.length ?? 0)
   const description = entry.description.trim()
   if (description) return [description, ...media].join(' · ')
   const parts = writtenFields(entry.direction).map((f) => FIELD_COPY[f].label.toLowerCase())

@@ -9,7 +9,7 @@ import { ASSET_COPY } from '../lib/assets'
 import { withBudgetConfirm } from '../lib/budget'
 import { directedParams, directorOf } from '../lib/directors'
 import { getGenerateParams, useGenerateParams } from '../lib/generateStore'
-import { ipcErrorMessage, useAssetsState, useModels, useQuote } from '../lib/hooks'
+import { NO_API_KEY, ipcErrorMessage, useAssetsState, useHasApiKey, useModels, useQuote } from '../lib/hooks'
 import {
   assetImageIdsFor,
   followAssetImages,
@@ -19,16 +19,18 @@ import {
 } from '../lib/library'
 import { formatUsd } from '../lib/media'
 import type { Intent, Navigate } from '../lib/navigation'
-import { FILE_MANAGER, shortcut } from '../lib/platform'
-import { useVariantCount, withVariants } from '../lib/variants'
+import { FILE_MANAGER, submitKeyHandler } from '../lib/platform'
+import { useVariantCount } from '../lib/variants'
 import ConsentDialog from './ConsentDialog'
 import ClipFeed from './feed/ClipFeed'
 import { useGenerations } from './feed/useGenerations'
+import GenerateBar from './GenerateBar'
 import OpenFolderButton from './library/OpenFolderButton'
-import ParamsForm, { missingInput, modelForKind, unavailableModel } from './ParamsForm'
+import ParamsForm, { ModeTabs, OutputSettings, missingInput, modelForKind, unavailableModel } from './ParamsForm'
 import { addAssetToForm } from './pickers/assetRefs'
 import { stableJson } from './sequences/sequenceUtils'
-import VariantPicker from './VariantPicker'
+import { SETTINGS_SECTION, showSettingsSection } from './settings/SettingsLayout'
+import { Banner } from './ui/Banner'
 
 interface Props {
   intent?: Intent
@@ -66,18 +68,31 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
   // style videos raise it – and the checks are those of what Venice gets.
   const sentParams = useMemo(() => directedParams(params, assets), [params, assets])
   const quote = useQuote(sentParams, model)
-  // ×1–×4 beside Generate (⌘+Enter sends as many); the button shows what they cost together.
+  // ×1–×4 beside Generate (⌘↵ sends as many); the button shows what they cost together.
   const [count, setCount] = useVariantCount('generate')
   const total = variantsPrice(quote, count)
   // A wrong @ImageN would send the wrong picture (or none) in a paid generation, so missingInput blocks on it
-  // with the words main would refuse it with.
-  const missing = missingInput(sentParams) ?? unavailableModel(model)
-
-  useEffect(() => {
-    if (!folderError) return
-    const t = setTimeout(() => setFolderError(undefined), 6000)
-    return () => clearTimeout(t)
-  }, [folderError])
+  // with the words main would refuse it with. A missing API key comes first, as on every paid button.
+  const hasKey = useHasApiKey()
+  const inputMissing = missingInput(sentParams) ?? unavailableModel(model)
+  const missing = (hasKey ? undefined : NO_API_KEY) ?? inputMissing
+  const modelMissing = model
+    ? undefined
+    : modelsError
+      ? 'The models couldn’t be loaded'
+      : models.length
+        ? 'Choose a model'
+        : 'Loading models…'
+  // Every blocker under the button, the key first: on a first run that is the key and the empty prompt together.
+  const problems = [hasKey ? undefined : NO_API_KEY, inputMissing, modelMissing].filter((p): p is string => !!p)
+  // Only the key missing: the button stays clickable and opens Settings at it (⌘↵ still sends nothing).
+  const keyOnly = !hasKey && !inputMissing && !modelMissing
+  const openVeniceSettings = () => {
+    showSettingsSection(SETTINGS_SECTION.venice)
+    navigate('settings')
+  }
+  const set = <K extends keyof GenerationParams>(key: K, value: GenerationParams[K]) =>
+    setParams((p) => ({ ...p, [key]: value }))
 
   const imageIds = useRef<Record<string, string>>(readRememberedImageIds())
   useEffect(() => {
@@ -261,9 +276,15 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
           onCancel={() => setConsent(undefined)}
         />
       )}
-      {/* Form */}
-      <section className="flex w-[380px] shrink-0 flex-col border-r border-line">
-        <div className="drag h-12 shrink-0" />
+      {/* Form: ⌘↵ sends it from any field in it. */}
+      <section
+        onKeyDown={submitKeyHandler(() => void submit())}
+        className="flex w-[380px] shrink-0 flex-col border-r border-line"
+      >
+        {/* The title band holds the mode switch, which stays in view while the long References form scrolls. */}
+        <div className="drag flex h-12 shrink-0 items-center px-5">
+          <ModeTabs models={models} params={params} setParams={setParams} className="no-drag" />
+        </div>
         <div className="flex-1 overflow-y-auto px-5 pb-5">
           <ParamsForm
             models={models}
@@ -271,36 +292,41 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
             params={params}
             setParams={setParams}
             onSubmit={() => void submit()}
+            hideTabs
+            outputSettings="none"
             navigate={navigate}
           />
         </div>
 
         <div className="border-t border-line p-5">
-          {notice && (
-            <div className="mb-3 flex items-start gap-2 rounded-md bg-accent/10 px-3 py-2 text-[12px] text-accent">
-              <span className="min-w-0 flex-1">{notice}</span>
-              <button onClick={() => setNotice(undefined)} className="shrink-0 hover:text-text" title="Close">
-                ✕
-              </button>
-            </div>
-          )}
-          {error && <p className="mb-3 max-h-32 overflow-y-auto text-accent select-text">{error}</p>}
-          <div className="flex items-stretch gap-2">
-            <VariantPicker count={count} onChange={setCount} each={quote} />
-            <button
-              onClick={() => void submit()}
-              disabled={!!missing || submitting || !model}
-              className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md bg-accent px-4 py-2.5 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
-            >
-              <span className="min-w-0 truncate" title={missing}>
-                {submitting ? 'Sending…' : (missing ?? withVariants('Generate', count))}
-              </span>
-              <span className="shrink-0 text-white/80">{formatUsd(total)}</span>
-            </button>
-          </div>
-          <p className="mt-2 text-center text-[11px] text-muted">
-            {shortcut('⌘ + Enter')} to generate{count > 1 ? ` ${variantsText(count)}` : ''}
-          </p>
+          <GenerateBar
+            label="Generate"
+            count={count}
+            onCount={setCount}
+            total={total}
+            problems={problems}
+            onBlockedClick={keyOnly ? openVeniceSettings : undefined}
+            submitting={submitting}
+            error={error}
+            onDismissError={() => setError(undefined)}
+            above={
+              <>
+                {notice && (
+                  <Banner tone="warning" className="mb-3" onDismiss={() => setNotice(undefined)}>
+                    {notice}
+                  </Banner>
+                )}
+                {folderError && (
+                  <Banner tone="error" className="mb-3" onDismiss={() => setFolderError(undefined)}>
+                    {folderError}
+                  </Banner>
+                )}
+                {/* What sets the price, right above it. */}
+                <OutputSettings model={model} params={params} set={set} className="mb-3" />
+              </>
+            }
+            onSubmit={() => void submit()}
+          />
         </div>
       </section>
 
@@ -316,20 +342,14 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
           openRequest={intent?.type === 'open-generation' ? intent : undefined}
           onOpenRequestHandled={onIntentHandled}
           trailing={
-            <>
-              {folderError && (
-                <span className="no-drag min-w-0 max-w-64 truncate text-[12px] text-accent select-text" title={folderError}>
-                  {folderError}
-                </span>
-              )}
-              <OpenFolderButton
-                target="generations"
-                title={`Open the folder “Generations” in ${FILE_MANAGER}`}
-                onError={setFolderError}
-                compact
-                className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
-              />
-            </>
+            // Its error shows in full above Generate, with the form's other notices.
+            <OpenFolderButton
+              target="generations"
+              title={`Open the folder “Generations” in ${FILE_MANAGER}`}
+              onError={setFolderError}
+              compact
+              className="no-drag shrink-0 rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
+            />
           }
         />
       </section>

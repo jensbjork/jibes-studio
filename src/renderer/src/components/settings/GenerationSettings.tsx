@@ -1,13 +1,13 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Settings } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { refreshPromptLanguage } from '../prompt/usePromptLanguage'
 import { SettingsItem } from './SettingsLayout'
-import Switch from './Switch'
+import { SwitchRow } from './Switch'
 
 type PromptLanguage = Settings['promptLanguage']
 
-/** Settings → Generation: the prompt language and safe mode for pictures. */
+/** Settings → Generation: the prompt language and safe mode for images. */
 export default function GenerationSettings({ settings, onChanged }: { settings: Settings; onChanged: () => void }) {
   return (
     <>
@@ -41,7 +41,7 @@ function PromptLanguageSetting({ language, onChanged }: { language: PromptLangua
   return (
     <SettingsItem
       title="Prompt language"
-      help="The text Studio writes in when you insert a character, environment, product, outfit or pose. The video models understand English best, so write the whole prompt in English if you can."
+      help="The words Studio inserts with a character, environment, product, outfit or pose."
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <select
@@ -62,21 +62,23 @@ function PromptLanguageSetting({ language, onChanged }: { language: PromptLangua
           </span>
         </span>
       </div>
-      {error && <p className="mt-2 text-[12px] text-accent">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-2 text-[12px] text-danger">
+          {error}
+        </p>
+      )}
     </SettingsItem>
   )
 }
 
 /**
  * "Safe mode for images": Venice's safe_mode for the stills Studio creates (keyframes and other storyboard
- * images). On by default, as in Venice; the image dialog shows the same setting.
+ * images). On by default, as in Venice; the image dialog shows the same setting. One switch row, no title of its own.
  */
 function ImageSafeModeSetting({ on, onChanged }: { on: boolean; onChanged: () => void }) {
   const [value, setValue] = useState(on)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
-  const labelId = useId()
-  const stateId = useId()
   useEffect(() => setValue(on), [on])
 
   const change = async (next: boolean) => {
@@ -96,35 +98,19 @@ function ImageSafeModeSetting({ on, onChanged }: { on: boolean; onChanged: () =>
   }
 
   return (
-    <SettingsItem
-      title="Images"
-      help={
-        <>
-          Applies to the images you create with <span className="text-text">Create image</span> – start and end images
-          and other images for your storyboards. Videos aren’t affected.
-        </>
-      }
-    >
-      <div className="flex items-start gap-3">
-        <Switch
-          on={value}
-          disabled={saving}
-          onChange={(next) => void change(next)}
-          labelledBy={labelId}
-          describedBy={stateId}
-        />
-        <span className="min-w-0">
-          <span id={labelId} className="block">
-            Safe mode for images
-          </span>
-          <span id={stateId} className="mt-0.5 block text-[12px] leading-relaxed text-muted">
-            {value
-              ? 'On: Venice blurs adult content in the images. Turn it off if images get blurred for no reason.'
-              : 'Off: Venice doesn’t blur adult content in the images.'}
-          </span>
-        </span>
-      </div>
-      {error && <p className="mt-2 text-[12px] text-accent">{error}</p>}
+    <SettingsItem>
+      <SwitchRow
+        on={value}
+        disabled={saving}
+        onChange={(next) => void change(next)}
+        label="Safe mode for images"
+        description="Venice blurs adult content in the images you create – start, end and storyboard images. Videos aren’t affected."
+      />
+      {error && (
+        <p role="alert" className="mt-2 text-[12px] text-danger">
+          {error}
+        </p>
+      )}
     </SettingsItem>
   )
 }

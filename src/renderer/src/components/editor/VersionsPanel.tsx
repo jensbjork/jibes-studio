@@ -5,8 +5,10 @@ import { ipcErrorMessage } from '../../lib/hooks'
 import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { markSeen, useIsUnseen, useSeenWhenVisible } from '../../lib/work'
 import Popover from '../pickers/Popover'
-import { MoreIcon } from '../sequences/icons'
-import { menuRow, onMenuKeyDown, SubView } from '../storyboards/ui'
+import { CloseIcon, MoreIcon } from '../sequences/icons'
+import { SubView } from '../storyboards/ui'
+import { buttonClass } from '../ui/button'
+import { menuRow, onMenuKeyDown } from '../ui/menu'
 import { deleteVersionBlocked, formatBytes, formatPrice, jobProgressText, nextVersionNumber, PICTURE_JOB_OPS, priceCheck, priceText, relativeTime, versionName, versionTree, visibleJobs } from './editorUtils'
 import { ChevronDownIcon } from './icons'
 import SendMenu, { type SentTo } from './SendMenu'
@@ -14,7 +16,8 @@ import type { Runner } from './useEditOps'
 import { NewChip, Spinner } from '../work/StatusMark'
 
 // Versions: what is being made (jobs with progress, Cancel, Continue), and every version as a tree under the
-// original. Clicking a version shows it in the player (Compare); "Use" makes it the one operations work on.
+// original. Clicking a version shows it in the player (Compare); "Use" makes it the one operations work on – always
+// visible on the version in the player, on the others on hover. "Clean up versions…" is in the edit's ⋯ menu.
 
 const DISMISSED_KEY = 'editor:dismissedJobs'
 const EXPANDED_KEY = 'editor:versionsOpen'
@@ -130,7 +133,6 @@ export default function VersionsPanel({
             {busyCount} running
           </span>
         )}
-        {expanded && <PruneButton editId={edit.id} count={edit.versions.length} onError={onError} onDone={onChanged} />}
       </div>
       <div className={`min-h-0 flex-1 overflow-y-auto px-1.5 pb-2 ${expanded ? '' : 'hidden'}`}>
         {render && (
@@ -324,22 +326,18 @@ function JobRow({
             type="button"
             onClick={onDismiss}
             title="Hide"
-            className="shrink-0 rounded px-1 text-[11px] text-muted transition hover:bg-raised hover:text-text"
+            aria-label="Hide"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted transition hover:bg-raised hover:text-text"
           >
-            ✕
+            <CloseIcon size={9} />
           </button>
         )}
       </div>
-      {job.error && <p className="mt-1 text-[11px] leading-relaxed text-[#ffb3b5] select-text">{job.error}</p>}
+      {job.error && <p className="mt-1 text-[11px] leading-relaxed text-danger select-text">{job.error}</p>}
       {job.costUsd > 0 && <p className="mt-0.5 text-[11px] text-muted">Paid so far: {formatPrice(job.costUsd)}</p>}
       {job.canResume && (
         <div className="mt-2 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void resume()}
-            disabled={busy}
-            className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-          >
+          <button type="button" onClick={() => void resume()} disabled={busy} className={buttonClass('primary', 'sm')}>
             {busy
               ? picture
                 ? 'Putting in…'
@@ -456,7 +454,10 @@ function VersionRow({
               onSetCurrent()
             }}
             title="Make this the version the actions change"
-            className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-muted opacity-0 transition hover:bg-line hover:text-text focus:opacity-100 group-hover:opacity-100"
+            // Always there on the version in the player: looking at it and using it are two different things.
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] transition hover:bg-line hover:text-text focus:opacity-100 group-hover:opacity-100 ${
+              shown ? 'text-text opacity-100' : 'text-muted opacity-0'
+            }`}
           >
             Use
           </button>
@@ -498,26 +499,18 @@ function VersionRow({
             <p className="mb-3 text-[12px] leading-relaxed text-muted">
               The file goes to {TRASH}. Versions made from it move up one step in the tree.
               {pausedPaid && (
-                <span className="mt-1.5 block text-[#ffb3b5]">
+                <span className="mt-1.5 block text-danger">
                   The job “{pausedPaid.label}” starts from it and has already paid {formatPrice(pausedPaid.costUsd)}. It
                   can’t be continued once the version is gone.
                 </span>
               )}
             </p>
+            {/* Cancel first and with the focus, as in every question before a delete. */}
             <div className="flex justify-end gap-1.5">
-              <button
-                type="button"
-                onClick={() => setMenu('menu')}
-                className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
-              >
+              <button type="button" autoFocus onClick={() => setMenu('menu')} className={buttonClass('ghost', 'sm')}>
                 Cancel
               </button>
-              <button
-                type="button"
-                autoFocus
-                onClick={() => void remove()}
-                className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
-              >
+              <button type="button" onClick={() => void remove()} className={buttonClass('danger', 'sm')}>
                 Delete
               </button>
             </div>
@@ -560,7 +553,7 @@ function VersionRow({
               disabled={!!blocked}
               onClick={() => setMenu('delete')}
               title={blocked}
-              className={`${menuRow} flex-col items-start gap-0.5 text-muted hover:text-accent`}
+              className={`${menuRow} flex-col items-start gap-0.5 text-muted hover:text-danger focus-visible:text-danger`}
             >
               <span>Delete the version…</span>
               {blocked && <span className="text-[11px] leading-snug">{blocked}</span>}
@@ -626,12 +619,7 @@ export function PruneConfirm({
           sequence or by another edit.
         </p>
         <div className="flex justify-end">
-          <button
-            type="button"
-            autoFocus
-            onClick={onCancel}
-            className="rounded-md border border-line px-2.5 py-1 text-[12px] transition hover:bg-raised"
-          >
+          <button type="button" autoFocus onClick={onCancel} className={buttonClass('secondary', 'sm')}>
             OK
           </button>
         </div>
@@ -647,58 +635,15 @@ export function PruneConfirm({
         These go to {TRASH}. The original, the current version, the versions it builds on and those used in
         sequences or by other edits are kept.
       </p>
+      {/* Cancel first and with the focus, as before a delete: the versions go to the Trash. */}
       <div className="flex justify-end gap-1.5">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
-        >
+        <button type="button" autoFocus disabled={busy} onClick={onCancel} className={buttonClass('ghost', 'sm')}>
           Cancel
         </button>
-        <button
-          type="button"
-          autoFocus
-          disabled={busy}
-          onClick={onPrune}
-          className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover disabled:opacity-40"
-        >
+        <button type="button" disabled={busy} onClick={onPrune} className={buttonClass('danger', 'sm')}>
           {busy ? 'Cleaning up…' : 'Clean up'}
         </button>
       </div>
     </div>
-  )
-}
-
-function PruneButton({
-  editId,
-  count,
-  onError,
-  onDone
-}: {
-  editId: string
-  count: number
-  onError: (message: string) => void
-  onDone: () => void
-}) {
-  const anchor = useRef<HTMLButtonElement>(null)
-  const prune = usePrune(editId, onError, onDone)
-  return (
-    <>
-      <button
-        ref={anchor}
-        type="button"
-        onClick={() => void prune.check()}
-        disabled={prune.busy || count < 2}
-        title={`Move versions that aren’t needed to ${TRASH}`}
-        className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40 disabled:hover:bg-transparent"
-      >
-        Clean up versions…
-      </button>
-      <Popover anchorRef={anchor} open={!!prune.found} onClose={prune.reset} align="end" width={300} label="Clean up versions">
-        {prune.found && (
-          <PruneConfirm found={prune.found} busy={prune.busy} onCancel={prune.reset} onPrune={() => void prune.prune()} />
-        )}
-      </Popover>
-    </>
   )
 }

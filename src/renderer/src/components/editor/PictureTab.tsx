@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { PICTURE_EDIT_MODELS } from '@shared/edit-plan'
 import { DEFAULT_MODEL, supportsEndImage } from '@shared/models'
 import type { EditOperation, EditPlan, VideoModel } from '@shared/types'
@@ -19,10 +19,10 @@ import {
   PlanNotes,
   RunButton,
   Target,
+  actionButton,
   fieldInput,
   linkButton,
-  smallButton,
-  textArea
+  smallButton
 } from './ui'
 
 // Picture: the picture operations. Paid: Regenerate section (image-to-video between the frames around the range), Edit
@@ -96,12 +96,13 @@ function ModelSelect({
   hint?: string
 }) {
   const { modelsError } = useEditor()
+  const id = useId()
   return (
-    <Field label="Model" hint={hint}>
+    <Field label="Model" hint={hint} htmlFor={modelsError ? undefined : id}>
       {modelsError ? (
-        <p className="text-[12px] text-accent select-text">{modelsError}</p>
+        <p className="text-[12px] text-danger select-text">{modelsError}</p>
       ) : (
-        <select value={value} onChange={(e) => onChange(e.target.value)} className={fieldInput}>
+        <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={fieldInput}>
           {!models.some((m) => m.id === value) && <option value={value}>{value}</option>}
           {models.map((m) => (
             <option key={m.id} value={m.id}>
@@ -124,9 +125,10 @@ function ResolutionSelect({
   model?: VideoModel
 }) {
   const options = model?.resolutions ?? []
+  const id = useId()
   return (
-    <Field label="Resolution">
-      <select value={value} onChange={(e) => onChange(e.target.value)} className={fieldInput}>
+    <Field label="Resolution" htmlFor={id}>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={fieldInput}>
         <option value="">Same as the film (max 720p)</option>
         {options.map((r) => (
           <option key={r} value={r}>
@@ -267,7 +269,7 @@ function RegenerateCard({ open, onToggle }: CardProps) {
             disabledReason={missingPrompt}
             onClick={() => plan && void card.run({ op: op!, plan, label: 'Regenerate section' })}
           />
-          {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+          {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
         </>
       )}
     </OpCard>
@@ -393,7 +395,7 @@ function PromptEditCard({ open, onToggle }: CardProps) {
             disabledReason={missingPrompt}
             onClick={() => plan && void card.run({ op: op!, plan, label: 'Edit with prompt' })}
           />
-          {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+          {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
         </>
       )}
     </OpCard>
@@ -495,6 +497,7 @@ function ExtendCard({ open, onToggle }: CardProps) {
   const [resolution, setResolution] = useState('')
   const [audio, setAudio] = useState<'model' | 'silence'>('model')
   const [nonce, setNonce] = useState(0)
+  const lengthField = useId()
   const modelId = model ?? initialModel(DEFAULT_REGENERATE_MODEL, choices)
   const op: EditOperation = {
     op: 'extend',
@@ -526,8 +529,8 @@ function ExtendCard({ open, onToggle }: CardProps) {
         />
       </Field>
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Length">
-          <select value={seconds} onChange={(e) => setSeconds(Number(e.target.value))} className={fieldInput}>
+        <Field label="Length" htmlFor={lengthField}>
+          <select id={lengthField} value={seconds} onChange={(e) => setSeconds(Number(e.target.value))} className={fieldInput}>
             {EXTEND_SECONDS.map((s) => (
               <option key={s} value={s}>
                 {s} seconds
@@ -559,7 +562,7 @@ function ExtendCard({ open, onToggle }: CardProps) {
         disabledReason={missingPrompt}
         onClick={() => plan && void card.run({ op, plan, label: `Extend ${seconds} s` })}
       />
-      {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+      {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
     </OpCard>
   )
 }
@@ -607,7 +610,7 @@ function UpscaleCard({ open, onToggle }: CardProps) {
         running={card.running}
         onClick={() => plan && void card.run({ op, plan, label: `Upscale ${chosen}×` })}
       />
-      {card.sent && <p className="text-[11px] text-emerald-300/90">{card.sent}</p>}
+      {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
     </OpCard>
   )
 }
@@ -618,6 +621,7 @@ const FADE_SECONDS = [0.5, 1, 2, 3]
 function CutCard({ open, onToggle }: CardProps) {
   const { selection, duration } = useEditor()
   const [fade, setFade] = useState(1)
+  const fadeField = useId()
   const card = useCardRun()
   const [busy, setBusy] = useState<string>()
   useReportRange(open, selection)
@@ -645,25 +649,32 @@ function CutCard({ open, onToggle }: CardProps) {
             disabled={!selection || !!busy}
             onClick={() => selection && void go('cut', { op: 'cut', range: selection }, 'Cut out the selection')}
             title={selection ? 'Removes the selection from the film' : 'Mark a section first'}
-            className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
+            className={actionButton}
           >
-            {busy === 'cut' ? 'Cutting…' : 'Cut out the selection'}
+            {busy === 'cut' ? 'Creating version…' : 'Cut out the selection'}
           </button>
           <button
             type="button"
             disabled={!selection || !!busy}
             onClick={() => selection && void go('trim', { op: 'trim', keep: selection }, 'Keep only the selection')}
             title={selection ? 'Everything outside the selection is removed' : 'Mark a section first'}
-            className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
+            className={actionButton}
           >
-            {busy === 'trim' ? 'Trimming…' : 'Keep only the selection'}
+            {busy === 'trim' ? 'Creating version…' : 'Keep only the selection'}
           </button>
         </div>
       </div>
       <div className="border-t border-line pt-3">
         <div className="flex items-center gap-2">
-          <span className="text-muted">Fade</span>
-          <select value={fade} onChange={(e) => setFade(Number(e.target.value))} className={`${fieldInput} w-auto`}>
+          <label htmlFor={fadeField} className="text-muted">
+            Fade
+          </label>
+          <select
+            id={fadeField}
+            value={fade}
+            onChange={(e) => setFade(Number(e.target.value))}
+            className={`${fieldInput} w-auto`}
+          >
             {FADE_SECONDS.map((s) => (
               <option key={s} value={s}>
                 {s} s
@@ -676,22 +687,22 @@ function CutCard({ open, onToggle }: CardProps) {
             type="button"
             disabled={!!busy || fadeTooLong}
             onClick={() => void go('fade-in', { op: 'fade', inSeconds: fade }, 'Fade in from black')}
-            className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
+            className={actionButton}
           >
-            {busy === 'fade-in' ? 'Fading…' : 'Fade in from black'}
+            {busy === 'fade-in' ? 'Creating version…' : 'Fade in from black'}
           </button>
           <button
             type="button"
             disabled={!!busy || fadeTooLong}
             onClick={() => void go('fade-out', { op: 'fade', outSeconds: fade }, 'Fade out to black')}
-            className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
+            className={actionButton}
           >
-            {busy === 'fade-out' ? 'Fading…' : 'Fade out to black'}
+            {busy === 'fade-out' ? 'Creating version…' : 'Fade out to black'}
           </button>
         </div>
         {fadeTooLong && <p className="mt-1.5 text-[11px] text-muted">A fade can be at most half the film.</p>}
       </div>
-      <p className="text-[11px] leading-relaxed text-muted">Free. Every change becomes a new version – {shortcut('⌘Z')} goes back.</p>
+      <p className="text-[11px] leading-relaxed text-muted">Every change becomes a new version – {shortcut('⌘Z')} goes back.</p>
       <PlanNotes error={card.error} />
     </OpCard>
   )

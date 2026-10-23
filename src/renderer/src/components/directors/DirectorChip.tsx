@@ -57,7 +57,7 @@ export default function DirectorChip({ directorId, what, intro, exceptions, onCh
         </span>
         {/* Only the clapperboard while the main area is narrow: the header's actions need the room. */}
         <span
-          className={`hidden truncate @min-[75rem]/main:inline ${current ? '' : missing ? 'text-accent' : 'text-muted'}`}
+          className={`hidden truncate @min-[75rem]/main:inline ${current ? '' : missing ? 'text-danger' : 'text-muted'}`}
         >
           {current ? current.name : missing ? 'Director gone' : '+ Director'}
         </span>
@@ -171,7 +171,11 @@ function DirectorPanel({
       {exceptions && (
         <p className="border-t border-line px-3 py-2 text-[11px] leading-snug text-muted">{exceptions}</p>
       )}
-      {error && <p className="border-t border-line px-3 py-2 text-[11px] leading-snug text-accent select-text">{error}</p>}
+      {error && (
+        <p role="alert" className="border-t border-line px-3 py-2 text-[11px] leading-snug text-danger select-text">
+          {error}
+        </p>
+      )}
       <div className="flex items-center gap-3 border-t border-line px-3 py-2 text-[11px]">
         {current && (
           <button type="button" onClick={() => onOpen(current.id)} className="text-muted transition hover:text-text hover:underline">
@@ -192,6 +196,6 @@ function DirectorPanel({
 
 function Heading({ children }: { children: ReactNode }) {
   return (
-    <p className="px-2.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted/80">{children}</p>
+    <p className="section-label px-2.5 pb-1 pt-2">{children}</p>
   )
 }

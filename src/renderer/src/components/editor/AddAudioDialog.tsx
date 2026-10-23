@@ -4,6 +4,8 @@ import { ipcErrorMessage, useAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import Modal from '../pickers/Modal'
 import { PauseIcon, PlayIcon } from '../sequences/icons'
+import { buttonClass } from '../ui/button'
+import { rovingKeyDown } from '../ui/roving'
 import { useCardRun, useEditor } from './EditorContext'
 import { fileName, formatClock, formatLength } from './editorUtils'
 import { Check, GainSlider, PlanNotes, TimeAt } from './ui'
@@ -124,15 +126,10 @@ export default function AddAudioDialog({ replace, onClose }: { replace?: boolean
       maxWidth={520}
       footer={
         <>
-          <button type="button" onClick={onClose} className="rounded-md border border-line px-4 py-2 hover:bg-raised">
+          <button type="button" onClick={onClose} className={buttonClass()}>
             Cancel
           </button>
-          <button
-            type="button"
-            disabled={!op || card.running}
-            onClick={() => void submit()}
-            className="rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
-          >
+          <button type="button" disabled={!op || card.running} onClick={() => void submit()} className={buttonClass('primary')}>
             {card.running ? 'Creating version…' : replace ? 'Replace the sound' : 'Add'}
           </button>
         </>
@@ -157,12 +154,7 @@ export default function AddAudioDialog({ replace, onClose }: { replace?: boolean
               {label}
             </button>
           ))}
-          <button
-            type="button"
-            onClick={() => void fromFile()}
-            disabled={adding}
-            className="ml-auto rounded-md px-2 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
-          >
+          <button type="button" onClick={() => void fromFile()} disabled={adding} className={`${buttonClass('ghost', 'sm')} ml-auto`}>
             {adding ? 'Copying…' : 'From file…'}
           </button>
         </div>
@@ -171,13 +163,14 @@ export default function AddAudioDialog({ replace, onClose }: { replace?: boolean
           sources={list}
           chosen={chosen}
           onChoose={setChosen}
+          label={tab === 'library' ? 'Sounds from the library' : 'Sounds from the edit'}
           empty={
             tab === 'library'
               ? 'No voices or soundscapes in the library yet. Add them under Characters and Environments.'
               : 'No sound in this edit yet. Music, lines and files you add end up here and can be used again for free.'
           }
         />
-        {fileError && <p className="text-[12px] text-accent select-text">{fileError}</p>}
+        {fileError && <p className="text-[12px] text-danger select-text">{fileError}</p>}
 
         {source && (
           <div className="space-y-3 border-t border-line pt-4">
@@ -202,16 +195,20 @@ export default function AddAudioDialog({ replace, onClose }: { replace?: boolean
   )
 }
 
-/** The sounds to choose from, each with a play button. */
+/**
+ * The sounds to choose from, each with a play button: a radio group, one Tab stop, ↑ ↓ (Home, End) move and choose.
+ */
 function SourceList({
   sources,
   chosen,
   onChoose,
+  label,
   empty
 }: {
   sources: Source[]
   chosen?: string
   onChoose: (key: string) => void
+  label: string
   empty: string
 }) {
   const audio = useRef<HTMLAudioElement>(null)
@@ -234,52 +231,64 @@ function SourceList({
   }
 
   if (!sources.length) return <p className="py-3 text-[12px] leading-relaxed text-muted">{empty}</p>
+  const keys = sources.map((s) => s.key)
+  // The Tab stop: the chosen sound, else the first.
+  const stop = chosen !== undefined && keys.includes(chosen) ? chosen : keys[0]
   return (
-    <ul className="max-h-56 space-y-0.5 overflow-y-auto">
+    <>
       <audio ref={audio} onEnded={() => setPlaying(undefined)} onPause={() => setPlaying(undefined)} hidden />
-      {sources.map((s) => (
-        <li key={s.key}>
-          <div
-            role="radio"
-            aria-checked={chosen === s.key}
-            tabIndex={0}
-            onClick={() => onChoose(s.key)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                onChoose(s.key)
-              }
-            }}
-            className={`flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
-              chosen === s.key ? 'bg-raised' : 'hover:bg-raised/60'
-            }`}
-          >
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                toggle(s)
+      <ul
+        role="radiogroup"
+        aria-label={label}
+        onKeyDown={(e) => rovingKeyDown(e, keys, chosen ?? '', onChoose, { vertical: true })}
+        className="max-h-56 space-y-0.5 overflow-y-auto"
+      >
+        {sources.map((s) => (
+          <li key={s.key} role="none">
+            <div
+              role="radio"
+              aria-checked={chosen === s.key}
+              data-roving-id={s.key}
+              tabIndex={s.key === stop ? 0 : -1}
+              onClick={() => onChoose(s.key)}
+              onKeyDown={(e) => {
+                // Not from the play button inside, which Space and Enter press.
+                if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault()
+                  onChoose(s.key)
+                }
               }}
-              aria-label={playing === s.key ? 'Stop' : `Listen to ${s.label}`}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-raised text-text transition hover:bg-line"
-            >
-              {playing === s.key ? <PauseIcon size={10} /> : <PlayIcon size={10} className="translate-x-px" />}
-            </button>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">{s.label}</span>
-              {s.detail && <span className="block truncate text-[11px] text-muted">{s.detail}</span>}
-            </span>
-            {s.duration !== undefined && (
-              <span className="shrink-0 text-[11px] tabular-nums text-muted">{formatClock(s.duration)}</span>
-            )}
-            <span
-              className={`h-3.5 w-3.5 shrink-0 rounded-full border ${
-                chosen === s.key ? 'border-accent bg-accent shadow-[inset_0_0_0_2px_var(--color-raised)]' : 'border-line'
+              className={`flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
+                chosen === s.key ? 'bg-raised' : 'hover:bg-raised/60'
               }`}
-            />
-          </div>
-        </li>
-      ))}
-    </ul>
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggle(s)
+                }}
+                aria-label={playing === s.key ? 'Stop' : `Listen to ${s.label}`}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-raised text-text transition hover:bg-line"
+              >
+                {playing === s.key ? <PauseIcon size={10} /> : <PlayIcon size={10} className="translate-x-px" />}
+              </button>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{s.label}</span>
+                {s.detail && <span className="block truncate text-[11px] text-muted">{s.detail}</span>}
+              </span>
+              {s.duration !== undefined && (
+                <span className="shrink-0 text-[11px] tabular-nums text-muted">{formatClock(s.duration)}</span>
+              )}
+              <span
+                className={`h-3.5 w-3.5 shrink-0 rounded-full border ${
+                  chosen === s.key ? 'border-accent bg-accent shadow-[inset_0_0_0_2px_var(--color-raised)]' : 'border-line'
+                }`}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }

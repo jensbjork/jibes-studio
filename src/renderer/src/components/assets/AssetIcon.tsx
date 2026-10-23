@@ -11,7 +11,7 @@ interface Props {
 
 /**
  * The symbol of each kind (sidebar, picker tabs, chips, empty states), on the same 16-unit grid as the window's
- * other icons: a ringed dot for characters, a mountain for environments, a box for products, a shirt for outfits,
+ * other icons: a bust for characters, a mountain for environments, a box for products, a shirt for outfits,
  * a figure in mid-stride for poses and a clapperboard for directors. Every kind has its own branch, so a kind added
  * later can't silently take another kind's symbol.
  */
@@ -19,10 +19,11 @@ export default function AssetIcon({ kind, size = '1.05em' }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden className="shrink-0">
       {kind === 'character' ? (
-        // The circled dot the sidebar has always used for characters (◉), drawn so it lines up with the others.
+        // A head and shoulders, solid and without sleeves: apart from the pose's stroked figure and the outfit's shirt,
+        // and from the dots that mark a state elsewhere in the sidebar.
         <>
-          <circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" strokeWidth={1.5} />
-          <circle cx="8" cy="8" r="3.1" />
+          <circle cx="8" cy="4.6" r="3" />
+          <path d="M2.2 14.5c0-3.3 2.6-5.5 5.8-5.5s5.8 2.2 5.8 5.5c0 .3-.2.5-.5.5H2.7c-.3 0-.5-.2-.5-.5z" />
         </>
       ) : kind === 'environment' ? (
         <path d="M1 13L6 4l3 5 2-3 4 7z" />

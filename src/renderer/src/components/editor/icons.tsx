@@ -61,21 +61,12 @@ export function FrameForwardIcon(props: IconProps) {
   )
 }
 
-/** Spela markeringen (loops the marked range). */
+/** Loop the selection (plays the marked range over and over). */
 export function LoopIcon(props: IconProps) {
   return (
     <Icon {...props}>
       <path d="M3 8.5V7a2.5 2.5 0 012.5-2.5h7M10.5 2.5l2 2-2 2" />
       <path d="M13 7.5V9a2.5 2.5 0 01-2.5 2.5h-7M5.5 13.5l-2-2 2-2" />
-    </Icon>
-  )
-}
-
-/** Back to the list of edits. */
-export function BackIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M9.5 3.5L5 8l4.5 4.5" />
     </Icon>
   )
 }

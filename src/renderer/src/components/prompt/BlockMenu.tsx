@@ -88,7 +88,7 @@ export default function BlockMenu({ id, anchor, sections, active, onActive, onCh
         ) : (
           sections.map((section) => (
             <div key={section.key} role="group" aria-label={section.title}>
-              <p className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted">
+              <p className="section-label px-2 pb-1 pt-2">
                 {section.title}
               </p>
               {section.items.map((item) => {
@@ -119,7 +119,7 @@ export default function BlockMenu({ id, anchor, sections, active, onActive, onCh
         )}
       </div>
       <p className="border-t border-line px-3 py-1.5 text-[10px] text-muted">
-        ↑↓ choose · ↩ insert · esc close{search ? ' · tip: type / right in the text' : ''}
+        ↑ ↓ choose · ↵ insert · Esc close{search ? ' · tip: type / right in the text' : ''}
       </p>
     </div>,
     document.body

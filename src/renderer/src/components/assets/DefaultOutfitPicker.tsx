@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { Asset } from '@shared/types'
 import Popover from '../pickers/Popover'
+import { ChevronDownIcon } from '../sequences/icons'
 import AssetAvatar from './AssetAvatar'
 import AssetIcon from './AssetIcon'
 import { imageCountLabel } from './imageUtils'
@@ -95,7 +96,7 @@ export default function DefaultOutfitPicker({ outfits, loaded, value, onChange, 
             {current ? imageCountLabel(current.images.length) : loaded ? 'Choose from your outfits' : 'Loading outfits…'}
           </span>
         </span>
-        <span className="text-[10px] text-muted">▼</span>
+        <ChevronDownIcon size={12} className="shrink-0 text-muted" />
       </button>
       {current && (
         <button

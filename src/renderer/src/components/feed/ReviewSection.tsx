@@ -2,14 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { workKey, type Generation, type GenerationReview } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { markSeen } from '../../lib/work'
+import { DisclosureChevron } from '../icons'
 import { formatWhen } from '../prompts/prompt-utils'
-import ConfirmButton from '../sequences/ConfirmButton'
+import ConfirmButton from '../ui/ConfirmButton'
 import { REVIEW_TAGS, authorLabel, ratingWord, tagChipClass, tagLabel } from './feedText'
 import RatingControl from './RatingControl'
 
 const NOTE_DELAY = 700
 
-const sectionTitle = 'mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted'
+const sectionTitle = 'section-label mb-2'
 
 /**
  * The user's own verdict on a clip: a grade (thumbs down or one to three stars), a note and optional tags. Agents read
@@ -93,9 +94,10 @@ export function YourReview({
             type="button"
             onClick={() => setTagsOpen((o) => !o)}
             aria-expanded={tagsOpen}
-            className="text-[12px] text-muted transition hover:text-text"
+            className="flex items-center gap-1.5 text-[12px] text-muted transition hover:text-text"
           >
-            {tagsOpen ? '▾' : '▸'} Tags{shownTags.length ? ` (${shownTags.length})` : ' – optional'}
+            <DisclosureChevron open={tagsOpen} />
+            Tags{shownTags.length ? ` (${shownTags.length})` : ' – optional'}
           </button>
           {!tagsOpen && shownTags.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
@@ -130,7 +132,11 @@ export function YourReview({
             </div>
           )}
         </div>
-        {error && <p className="mt-2 text-[12px] text-accent select-text">{error}</p>}
+        {error && (
+          <p role="alert" className="mt-2 text-[12px] text-danger select-text">
+            {error}
+          </p>
+        )}
       </div>
     </section>
   )
@@ -243,7 +249,7 @@ export function AgentReviews({ reviews, onDelete }: { reviews: GenerationReview[
                   confirmLabel="Delete"
                   onConfirm={() => onDelete(r)}
                   title="Delete the review"
-                  className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-accent"
+                  className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-danger"
                 >
                   Delete
                 </ConfirmButton>

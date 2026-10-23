@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { UpdateInfo, UpdateProgress } from '@shared/types'
-import { useAgentWorking } from '../../lib/agent'
+import { useAgentPillVisible } from '../../lib/agent'
 import { ipcErrorMessage } from '../../lib/hooks'
 import {
   closeUpdateNotice,
@@ -13,6 +13,7 @@ import {
   useUpdateNotice
 } from '../../lib/updates'
 import { CloseIcon } from '../sequences/icons'
+import { buttonClass } from '../ui/button'
 
 /** An answer that needs nothing from the user (up to date, a development build) closes by itself after this long. */
 const ANSWER_MS = 10_000
@@ -21,11 +22,11 @@ const ANSWER_MS = 10_000
  * The update notice, in the bottom right corner of the window: "Studio 0.3.0 is available" with Update now, Release
  * notes and Later; then the install's progress, or why it failed. Check for Updates… in the app menu also shows its
  * answer here (up to date, a development build, a failed check). Calm: no sound, no badge, nothing in the way of work
- * – lifted above the agent's pill while an agent works.
+ * – lifted above the agent's pill while it shows.
  */
 export default function UpdateNotice() {
   const { info, progress } = useUpdateNotice()
-  const lifted = useAgentWorking().length > 0
+  const lifted = useAgentPillVisible()
   const quiet = !!info && !progress && !info.available && !info.error
   useEffect(() => {
     if (!quiet) return
@@ -197,11 +198,7 @@ function PrimaryButton({
   disabled?: boolean
 }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-50"
-    >
+    <button type="button" onClick={onClick} disabled={disabled} className={buttonClass('primary')}>
       {children}
     </button>
   )
@@ -217,11 +214,7 @@ function SecondaryButton({
   title?: string
 }) {
   return (
-    <button
-      onClick={onClick}
-      title={title}
-      className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text"
-    >
+    <button type="button" onClick={onClick} title={title} className={buttonClass('ghost')}>
       {children}
     </button>
   )
@@ -230,12 +223,7 @@ function SecondaryButton({
 /** Opens the release's page on GitHub in the browser (the window hands every link there). */
 function NotesLink({ href }: { href: string }) {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="rounded-md border border-line px-3 py-1.5 text-text transition hover:bg-raised"
-    >
+    <a href={href} target="_blank" rel="noreferrer" className={buttonClass('secondary')}>
       Release notes
     </a>
   )

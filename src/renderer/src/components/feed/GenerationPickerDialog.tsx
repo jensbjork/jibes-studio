@@ -1,6 +1,6 @@
-// Picks one finished clip from the library: the feed's clips (Venice's, the user's own, versions from the Editor) with
-// a search and a "Source" tab. Used by Sequences' "From the clip feed…" / "From the Editor…" and by the Editor's
-// "From the clip feed…".
+// Picks one finished clip from the library: Media's clips (Venice's, the user's own, versions from the Editor) with a
+// search and a "Source" switch. Used by Sequences' "From Media…" / "From the Editor…" and by the Editor's
+// "From Media…".
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { generationSource, generationTitle, sourceBadge, SOURCE_LABELS } from '@shared/generation-label'
@@ -9,6 +9,7 @@ import type { Generation, GenerationSource } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import Modal from '../pickers/Modal'
+import Segmented from '../ui/Segmented'
 import { formatClipLength } from './feedText'
 import { SearchIcon } from './icons'
 
@@ -106,35 +107,31 @@ export default function GenerationPickerDialog({ open, title, sources, onClose, 
             />
           </div>
           {tabs.length > 0 && (
-            <div
+            <Segmented
               role="tablist"
-              aria-label="Source"
-              className="flex h-7 items-center rounded-md border border-line bg-panel p-0.5"
-            >
-              {tabs.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === t}
-                  onClick={() => {
-                    setTab(t)
-                    setLimit(PAGE)
-                  }}
-                  className={`flex h-full items-center gap-1 rounded-[5px] px-2.5 text-[12px] transition ${
-                    tab === t ? 'bg-raised text-text shadow-sm shadow-black/40' : 'text-muted hover:text-text'
-                  }`}
-                >
-                  {tabLabel(t)}
-                  {t !== 'all' && <span className="text-[10px] text-muted">{counts.get(t) ?? 0}</span>}
-                </button>
-              ))}
-            </div>
+              ariaLabel="Source"
+              value={tab}
+              onChange={(t) => {
+                setTab(t)
+                setLimit(PAGE)
+              }}
+              options={tabs.map((t) => ({
+                value: t,
+                label: (
+                  <>
+                    {tabLabel(t)}
+                    {t !== 'all' && <span className="text-[10px] text-muted">{counts.get(t) ?? 0}</span>}
+                  </>
+                )
+              }))}
+            />
           )}
         </div>
 
         {error ? (
-          <p className="py-8 text-center text-accent select-text">{error}</p>
+          <p role="alert" className="py-8 text-center text-danger select-text">
+            {error}
+          </p>
         ) : !list ? (
           <p className="py-8 text-center text-muted">Loading the clips…</p>
         ) : shown.length === 0 ? (

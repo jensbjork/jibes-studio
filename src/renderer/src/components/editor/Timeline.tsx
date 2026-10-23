@@ -12,6 +12,7 @@ import type { EditRange, EditTimeline } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
 import { shortcut } from '../../lib/platform'
 import Popover from '../pickers/Popover'
+import { CloseIcon } from '../sequences/icons'
 import { useCardRun, useEditor } from './EditorContext'
 import {
   formatClock,
@@ -22,13 +23,14 @@ import {
   snapPoints,
   snapTime
 } from './editorUtils'
-import { ZoomInIcon, ZoomOutIcon } from './icons'
-import { usePlayhead, type PlayerController } from './playerController'
-import { GainSlider, PlanNotes } from './ui'
+import { LoopIcon, ZoomInIcon, ZoomOutIcon } from './icons'
+import { usePlayhead, usePlayerState, type PlayerController } from './playerController'
+import { actionButton, GainSlider, PlanNotes } from './ui'
 
 // The timeline under the player: Picture (a filmstrip with the cut markers), Sound (the waveform, muted stretches
-// shaded), Layers (added voices, music and effects as bars) and Text (the transcript's lines). Drag on any lane to
-// mark a range; it snaps to cut markers and line edges (hold ⌥ to snap to frames only). A click moves the playhead.
+// shaded), and once there is something on them Layers (added voices, music and effects as bars) and Text (the
+// transcript's lines). Drag on any lane to mark a range; it snaps to cut markers and line edges (hold ⌥ to snap to
+// frames only). A click moves the playhead. The marked range's chip above the lanes loops it or clears it.
 
 const LABEL_WIDTH = 56
 const DRAG_THRESHOLD_PX = 3
@@ -99,6 +101,18 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
     () => transcript?.segments ?? timeline?.transcript?.segments ?? [],
     [transcript, timeline?.transcript]
   )
+  // Layers and Text only when they have something on them. Each keeps its last known state while the next version's
+  // timeline or transcript loads (⌘Z, Compare, a new version), so the player above doesn't jump.
+  const hasLayers = timeline ? timeline.layers.length > 0 : undefined
+  const hasText = transcript !== undefined || timeline?.transcript ? lines.length > 0 : undefined
+  const [showLayers, setShowLayers] = useState(false)
+  const [showText, setShowText] = useState(false)
+  useEffect(() => {
+    if (hasLayers !== undefined) setShowLayers(hasLayers)
+  }, [hasLayers])
+  useEffect(() => {
+    if (hasText !== undefined) setShowText(hasText)
+  }, [hasText])
   // Edges snap to the cut markers and to where transcript lines start and end.
   const points = useMemo(
     () => snapPoints({ cuts: timeline?.cuts ?? [], transcript: transcript ?? timeline?.transcript }),
@@ -199,13 +213,15 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
         {selection ? (
           <span className="flex items-center gap-1.5">
             <span className="text-text">Selection</span> {formatRange(selection)}
+            <LoopToggle player={player} selection={selection} />
             <button
               type="button"
               onClick={() => setSelection(undefined)}
               title="Clear selection (Esc)"
-              className="rounded px-1 text-muted transition hover:bg-raised hover:text-text"
+              aria-label="Clear selection"
+              className="flex h-5 w-5 items-center justify-center rounded text-muted transition hover:bg-raised hover:text-text"
             >
-              ✕
+              <CloseIcon size={9} />
             </button>
           </span>
         ) : (
@@ -217,7 +233,7 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
             type="button"
             onClick={() => zoomBy(-1)}
             disabled={zoom === ZOOMS[0]}
-            title={`Zoom out (${shortcut('⌘ + scroll')})`}
+            title={`Zoom out (${shortcut('⌘-scroll')})`}
             aria-label="Zoom out"
             className="flex h-6 w-6 items-center justify-center rounded transition hover:bg-raised hover:text-text disabled:opacity-30 disabled:hover:bg-transparent"
           >
@@ -227,7 +243,7 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
             type="button"
             onClick={() => zoomBy(1)}
             disabled={zoom === ZOOMS[ZOOMS.length - 1]}
-            title={`Zoom in (${shortcut('⌘ + scroll')})`}
+            title={`Zoom in (${shortcut('⌘-scroll')})`}
             aria-label="Zoom in"
             className="flex h-6 w-6 items-center justify-center rounded transition hover:bg-raised hover:text-text disabled:opacity-30 disabled:hover:bg-transparent"
           >
@@ -241,8 +257,8 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
           <div className="h-5" />
           <LaneLabel height={48}>Picture</LaneLabel>
           <LaneLabel height={40}>Sound</LaneLabel>
-          <LaneLabel height={layerHeight}>Layers</LaneLabel>
-          <LaneLabel height={30}>Text</LaneLabel>
+          {showLayers && <LaneLabel height={layerHeight}>Layers</LaneLabel>}
+          {showText && <LaneLabel height={30}>Text</LaneLabel>}
         </div>
         <div ref={scroller} onWheel={onWheel} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden pr-3">
           <div
@@ -313,33 +329,37 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
             </Lane>
 
             {/* Layers */}
-            <Lane height={layerHeight} loading={false}>
-              {timeline?.layers.map((l) => (
-                <LayerBar
-                  key={l.id}
-                  layer={l}
-                  row={rows.row.get(l.id) ?? 0}
-                  left={pct(l.start)}
-                  width={pct(l.end - l.start)}
-                  player={player}
-                />
-              ))}
-            </Lane>
+            {showLayers && (
+              <Lane height={layerHeight} loading={false}>
+                {timeline?.layers.map((l) => (
+                  <LayerBar
+                    key={l.id}
+                    layer={l}
+                    row={rows.row.get(l.id) ?? 0}
+                    left={pct(l.start)}
+                    width={pct(l.end - l.start)}
+                    player={player}
+                  />
+                ))}
+              </Lane>
+            )}
 
             {/* Text */}
-            <Lane height={30} loading={false}>
-              {lines.map((s) => (
-                <span
-                  key={s.id}
-                  data-line-start={s.start}
-                  title={`${formatClock(s.start)} ${s.text}`}
-                  className="absolute inset-y-1 cursor-pointer overflow-hidden whitespace-nowrap rounded border border-line bg-raised px-1 text-[10px] leading-[20px] text-muted hover:text-text"
-                  style={span(s)}
-                >
-                  {s.text}
-                </span>
-              ))}
-            </Lane>
+            {showText && (
+              <Lane height={30} loading={false}>
+                {lines.map((s) => (
+                  <span
+                    key={s.id}
+                    data-line-start={s.start}
+                    title={`${formatClock(s.start)} ${s.text}`}
+                    className="absolute inset-y-1 cursor-pointer overflow-hidden whitespace-nowrap rounded border border-line bg-raised px-1 text-[10px] leading-[20px] text-muted hover:text-text"
+                    style={span(s)}
+                  >
+                    {s.text}
+                  </span>
+                ))}
+              </Lane>
+            )}
 
             {/* What the open card will use, as its plan snapped it. */}
             {opRange && (
@@ -358,8 +378,27 @@ export default function Timeline({ timeline, loading, error, opRange }: Props) {
           </div>
         </div>
       </div>
-      {error && <p className="px-3 pb-2 text-[11px] text-accent select-text">The timeline couldn’t be shown: {error}</p>}
+      {error && <p className="px-3 pb-2 text-[11px] text-danger select-text">The timeline couldn’t be shown: {error}</p>}
     </section>
+  )
+}
+
+/** "Loop" in the selection's chip: plays the marked range over and over, until pressed again. */
+function LoopToggle({ player, selection }: { player: PlayerController; selection: EditRange }) {
+  const { looping } = usePlayerState(player)
+  return (
+    <button
+      type="button"
+      onClick={() => player.loopRange(looping ? undefined : selection)}
+      aria-pressed={looping}
+      title="Play the selection over and over"
+      className={`flex items-center gap-1 rounded px-1.5 py-0.5 transition ${
+        looping ? 'bg-accent/15 text-text' : 'text-muted hover:bg-raised hover:text-text'
+      }`}
+    >
+      <LoopIcon size={11} />
+      Loop
+    </button>
   )
 }
 
@@ -417,7 +456,10 @@ function Playhead({ player, duration }: { player: PlayerController; duration: nu
 
 type LayerInfo = EditTimeline['layers'][number]
 
-/** A layer as a labelled bar; a click opens Volym / Flytta till spelhuvudet / Ta bort lagret (each a free version). */
+/**
+ * A layer as a labelled bar; a click opens Change the volume / Move to the playhead / Remove the layer (each a free
+ * version).
+ */
 function LayerBar({
   layer,
   row,
@@ -465,7 +507,7 @@ function LayerMenu({ layer, player, onDone }: { layer: LayerInfo; player: Player
     setBusy(undefined)
     if (outcome.ok) onDone()
   }
-  const row = 'w-full rounded-md border border-line px-3 py-1.5 text-left transition hover:bg-raised disabled:opacity-40'
+  const row = `${actionButton} w-full text-left`
   return (
     <div className="space-y-3 p-3">
       <div>
@@ -495,7 +537,7 @@ function LayerMenu({ layer, player, onDone }: { layer: LayerInfo; player: Player
         type="button"
         disabled={!!busy}
         onClick={() => void go('remove', { remove: true }, 'Remove the layer')}
-        className={`${row} text-muted hover:text-accent`}
+        className={`${row} text-muted hover:text-danger`}
       >
         {busy === 'remove' ? 'Creating version…' : 'Remove the layer'}
       </button>

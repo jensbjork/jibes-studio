@@ -4,7 +4,8 @@ import { FILE_MANAGER, TRASH, shortcut } from '../../lib/platform'
 import { ScissorsIcon } from '../feed/icons'
 import Popover from '../pickers/Popover'
 import { formatTakeTime } from '../sequences/sequenceUtils'
-import { menuRow, onMenuKeyDown } from '../storyboards/ui'
+import { buttonClass } from '../ui/button'
+import { menuRow, onMenuKeyDown } from '../ui/menu'
 import { hasReusablePrompt, isPlayable } from './takeText'
 
 /** Where the strip is: a sequence's clip or a storyboard's transition (the words differ a little). */
@@ -90,22 +91,18 @@ export default function TakeMenu({
                 </span>
               )}
             </p>
+            {/* Cancel has the focus: the question may have come from a stray ⌫ on the tile. */}
             <div className="flex justify-end gap-1.5">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
-              >
+              <button type="button" autoFocus onClick={onClose} className={buttonClass('ghost', 'sm')}>
                 Cancel
               </button>
               <button
                 type="button"
-                autoFocus
                 onClick={() => {
                   onClose()
                   onDelete()
                 }}
-                className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
+                className={buttonClass('danger', 'sm')}
               >
                 {kept ? 'Remove' : 'Delete'}
               </button>
@@ -184,7 +181,7 @@ export default function TakeMenu({
               data-menu-item
               onClick={() => onView('delete')}
               title={kept ? `The film stays in the Editor; it’s only removed from ${place}.` : undefined}
-              className={`${menuRow} text-muted hover:text-accent`}
+              className={`${menuRow} text-muted hover:text-danger focus-visible:text-danger`}
             >
               {removeLabel}
             </button>

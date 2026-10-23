@@ -5,11 +5,12 @@ import { FILE_MANAGER, shortcut } from '../../lib/platform'
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon } from '../sequences/icons'
 import { useEditor } from './EditorContext'
 import { formatClock, markedIn, markedOut, versionName } from './editorUtils'
-import { CompareIcon, FrameBackIcon, FrameForwardIcon, LoopIcon, RedoIcon, UndoIcon } from './icons'
+import { CompareIcon, FrameBackIcon, FrameForwardIcon, RedoIcon, UndoIcon } from './icons'
 import { usePlayhead, usePlayerState, type PlayerController } from './playerController'
 
-// The big player: the current version, or the version it is compared with (Compare ⇄) at the same playhead.
-// Transport, marking in and out, looping the marked range, and undo/redo between versions.
+// The big player: the current version, or the version it is compared with (Compare ⇄) at the same playhead – which
+// says which version the actions change, with a way to use the one on screen. Transport, marking in and out, and
+// undo/redo between versions, on one row at 1440 px (looping the marked range is in the timeline's selection chip).
 
 const EVENTS = ['play', 'playing', 'pause', 'ended', 'timeupdate', 'seeked', 'loadedmetadata'] as const
 
@@ -19,13 +20,25 @@ interface Props {
   other?: EditVersion
   comparing: boolean
   onCompare: () => void
+  /** "Use v2" while comparing: the version on screen becomes the one the actions change. */
+  onUseOther?: () => void
   canUndo: boolean
   canRedo: boolean
   onUndo: () => void
   onRedo: () => void
 }
 
-export default function Player({ current, other, comparing, onCompare, canUndo, canRedo, onUndo, onRedo }: Props) {
+export default function Player({
+  current,
+  other,
+  comparing,
+  onCompare,
+  onUseOther,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo
+}: Props) {
   const { player, duration, selection, setSelection } = useEditor()
   const state = usePlayerState(player)
   const shown = comparing && other ? other : current
@@ -45,10 +58,23 @@ export default function Player({ current, other, comparing, onCompare, canUndo, 
         {versions.map((v) => (
           <VideoOf key={v.id} version={v} player={player} visible={v.id === shown.id} />
         ))}
+        {/* Clicks on the video still play and pause: only the button takes the pointer. */}
         {comparing && other && (
-          <span className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/70 px-2 py-1 text-[12px] text-white">
-            Showing {versionName(other)}
-          </span>
+          <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-md bg-black/70 py-1 pl-2 pr-1 text-[12px] text-white">
+            <span>
+              Showing v{other.number} · actions change v{current.number}
+            </span>
+            {onUseOther && (
+              <button
+                type="button"
+                onClick={onUseOther}
+                title={`Make ${versionName(other)} the version the actions change`}
+                className="pointer-events-auto rounded px-1.5 py-0.5 font-medium transition hover:bg-white/15"
+              >
+                Use v{other.number}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -86,33 +112,20 @@ export default function Player({ current, other, comparing, onCompare, canUndo, 
           <TextButton title="Mark out at the playhead (O)" onClick={markOut}>
             Mark out
           </TextButton>
-          <TextButton
-            title={selection ? 'Plays the selection over and over' : 'Mark a section first'}
-            onClick={() => player.loopRange(state.looping ? undefined : selection)}
-            disabled={!selection}
-            active={state.looping}
-          >
-            <LoopIcon size={12} />
-            Play selection
-          </TextButton>
         </div>
 
         <div className="ml-auto flex items-center gap-1">
-          <TextButton
-            title={
-              other
-                ? comparing
-                  ? `Back to ${versionName(current)}`
-                  : `Show ${versionName(other)} at the same spot`
-                : 'There’s no other version to compare with yet'
-            }
-            onClick={onCompare}
-            disabled={!other}
-            active={comparing}
-          >
-            <CompareIcon size={12} />
-            {other ? `Compare${comparing ? '' : ` with v${other.number}`}` : 'Compare'}
-          </TextButton>
+          {/* Only once there is another version: a new edit has nothing to compare with. */}
+          {other && (
+            <TextButton
+              title={comparing ? `Back to ${versionName(current)}` : `Show ${versionName(other)} at the same spot`}
+              onClick={onCompare}
+              active={comparing}
+            >
+              <CompareIcon size={12} />
+              {`Compare${comparing ? '' : ` with v${other.number}`}`}
+            </TextButton>
+          )}
           <IconButton title={`Undo – go back to the version before (${shortcut('⌘Z')})`} onClick={onUndo} disabled={!canUndo}>
             <UndoIcon size={13} />
           </IconButton>

@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Generation, Learning } from '@shared/types'
+import { useCreateRequest } from '../../lib/createRequest'
 import { setGenerateParams } from '../../lib/generateStore'
-import { useAssetsState, useModels } from '../../lib/hooks'
+import { useAssetsState, useFindShortcut, useModels } from '../../lib/hooks'
+import { useListKeys } from '../../lib/listKeys'
 import type { Navigate } from '../../lib/navigation'
 import { shortcut } from '../../lib/platform'
 import ClipDrawer from '../feed/ClipDrawer'
 import { BulbIcon, PinIcon } from '../feed/icons'
 import { buildLibraryIndex } from '../feed/references'
 import { useGenerations } from '../feed/useGenerations'
+import { ListHeader } from '../library/SideList'
 import { CloseIcon } from '../sequences/icons'
+import { FloatingBanner } from '../ui/Banner'
+import EmptyState from '../ui/EmptyState'
 import LearningEditor from './LearningEditor'
 import LearningListItem, { type LearningRow } from './LearningListItem'
 import {
@@ -42,7 +47,8 @@ const COLLAPSED_TAGS = 8
 /**
  * Learnings: short insights about writing prompts that work, distilled from how clips actually turned out —
  * mostly by agents reviewing the clips over MCP, but the user can write and edit them too. Each can be pinned
- * (agents see pinned ones first), tied to a model, and backed by the clips it is based on.
+ * (agents see pinned ones first), tied to a model, and backed by the clips it is based on. The list has the side
+ * lists' header, search and keys, in the wider column Prompts has.
  */
 export default function LearningsView({ navigate, tabs, initialId }: Props) {
   const { learnings, loaded, error: loadError } = useLearnings()
@@ -97,42 +103,37 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
     else if (!draft && learnings[0]) editor.select(learnings[0])
   }, [loaded])
 
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.defaultPrevented && e.key.toLowerCase() === 'f') {
-        e.preventDefault()
-        searchRef.current?.focus()
-        searchRef.current?.select()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
   const set = (patch: Partial<LearningFilters>) => setFilters((f) => ({ ...f, ...patch }))
   const toggleTag = (key: string) =>
     set({ tags: filters.tags.includes(key) ? filters.tags.filter((k) => k !== key) : [...filters.tags, key] })
 
+  // A new learning inherits the model and pin filters, so it shows up where it was created.
+  const newLearning = () => {
+    autoSelected.current = true
+    editor.create({ model: filters.model, pinned: filters.pinnedOnly })
+  }
+
+  // "New learning" from ⌘K: as the header's button does, once the learnings have loaded.
+  useCreateRequest(loaded, newLearning, 'learnings')
+
   const remove = () => {
     const at = visible.findIndex((l) => l.id === draft?.id)
     const rest = visible.filter((l) => l.id !== draft?.id)
-    void editor.remove(rest[Math.min(Math.max(at, 0), rest.length - 1)])
+    return editor.remove(rest[Math.min(Math.max(at, 0), rest.length - 1)])
   }
 
-  const step = (direction: 1 | -1) => {
-    if (!visible.length) return
-    const at = visible.findIndex((l) => l.id === draft?.id)
-    const next = at === -1 ? 0 : Math.min(visible.length - 1, Math.max(0, at + direction))
-    editor.select(visible[next])
-  }
-
-  const onListKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault()
-      step(e.key === 'ArrowDown' ? 1 : -1)
-    }
-  }
+  // The side lists' keys: ↑ ↓ (Home, End) open a row; in the search ↓ goes to the rows, Enter opens the first match
+  // and Esc clears it. ⌘F goes to the search.
+  const { onSearchKeyDown, onListKeyDown } = useListKeys({
+    ids: visible.map((l) => l.id),
+    matchIds: visible.filter((l) => matchesLearningFilters(l, filters)).map((l) => l.id),
+    selectedId: draft?.id,
+    onSelect: (id) => editor.select(visible.find((l) => l.id === id)),
+    searchRef,
+    listRef,
+    onClearSearch: () => set({ query: '' })
+  })
+  useFindShortcut(searchRef)
 
   // ── The clip drawer, stepping through the open learning's evidence ──────────
 
@@ -153,36 +154,23 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
   return (
     <div className="relative flex h-full">
       <aside className="flex w-[340px] shrink-0 flex-col border-r border-line">
-        <div className="drag flex h-12 shrink-0 items-center justify-between pl-3 pr-3">
-          {tabs}
-          <button
-            type="button"
-            onClick={() => editor.create({ model: filters.model, pinned: filters.pinnedOnly })}
-            className="no-drag rounded-md px-2.5 py-1 text-muted transition hover:bg-raised hover:text-text"
-          >
-            ＋ New learning
-          </button>
-        </div>
+        <ListHeader title={tabs} createLabel="New learning" onCreate={newLearning} />
 
         {learnings.length > 0 && (
-          <div className="shrink-0 space-y-2.5 px-4 pb-2">
+          <div className="shrink-0 space-y-2.5 px-2 pb-2">
             <div className="relative">
               <input
                 ref={searchRef}
+                type="text"
+                role="searchbox"
                 value={filters.query}
                 onChange={(e) => set({ query: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape' && filters.query) {
-                    e.preventDefault()
-                    set({ query: '' })
-                  } else if (e.key === 'ArrowDown') {
-                    e.preventDefault()
-                    listRef.current?.focus()
-                    if (!visible.some((l) => l.id === draft?.id)) step(1)
-                  }
-                }}
+                onKeyDown={onSearchKeyDown}
                 placeholder="Search learnings…"
-                className="w-full rounded-md border border-line bg-raised py-1.5 pl-3 pr-8 outline-none focus:border-muted"
+                aria-label="Search learnings"
+                title={shortcut('Search learnings (⌘F)')}
+                spellCheck={false}
+                className="w-full rounded-md border border-line bg-raised py-1.5 pl-2.5 pr-7 outline-none focus:border-muted"
               />
               {filters.query && (
                 <button
@@ -191,7 +179,8 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
                     set({ query: '' })
                     searchRef.current?.focus()
                   }}
-                  title="Clear the search"
+                  title="Clear search"
+                  aria-label="Clear search"
                   className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted hover:bg-line hover:text-text"
                 >
                   <CloseIcon size={9} />
@@ -241,7 +230,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
                   value={filters.model ?? ''}
                   onChange={(e) => set({ model: e.target.value || undefined })}
                   aria-label="Model"
-                  className="min-w-0 max-w-44 cursor-pointer truncate rounded bg-transparent py-0.5 text-right text-muted outline-none hover:text-text"
+                  className="min-w-0 max-w-44 cursor-pointer truncate rounded bg-transparent py-0.5 text-right text-muted outline-none hover:text-text focus-visible:ring-1 focus-visible:ring-muted"
                 >
                   <option value="">All models</option>
                   {usedModels.map((id) => (
@@ -257,11 +246,9 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
 
         <div
           ref={listRef}
-          role="listbox"
           aria-label="Learnings"
-          tabIndex={0}
-          onKeyDown={onListKey}
-          className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-3 outline-none"
+          onKeyDown={onListKeyDown}
+          className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-3"
         >
           {showDraftRow && (
             <LearningListItem
@@ -269,7 +256,6 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
               selected
               unsaved={!draft.id}
               onSelect={() => undefined}
-              onTogglePin={() => undefined}
             />
           )}
           {visible.map((l) => {
@@ -277,46 +263,33 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
             return (
               <LearningListItem
                 key={l.id}
+                id={l.id}
                 row={selected && draft ? rowFromDraft(draft, modelName(draft.model)) : rowFromLearning(l, modelName(l.model))}
                 selected={selected}
                 onSelect={() => editor.select(l)}
-                onTogglePin={() => editor.togglePin(l)}
               />
             )
           })}
 
           {learnings.length > 0 && visible.length === 0 && filtering && (
-            <div className="px-3 py-8 text-center text-muted">
+            <div className="px-2 py-2 text-[12px] leading-relaxed text-muted">
               <p>No learnings match.</p>
               <button
                 type="button"
                 onClick={() => setFilters(NO_LEARNING_FILTERS)}
-                className="mt-2 text-text underline-offset-2 hover:underline"
+                className="mt-1 text-text underline-offset-2 hover:underline"
               >
                 Clear search and filters
               </button>
             </div>
           )}
-          {loaded && learnings.length === 0 && !draft && (
-            <p className="px-3 py-8 text-center text-muted">No learnings yet.</p>
+          {/* Loading the list failed: said where the list would be, until the next change loads it again. */}
+          {loadError && (
+            <p role="alert" className="px-2 py-2 text-[12px] leading-relaxed text-danger select-text">
+              {loadError}
+            </p>
           )}
         </div>
-
-        {(editor.error || feed.error || loadError) && (
-          <div className="flex items-start gap-2 border-t border-line px-4 py-3 text-accent">
-            <p className="min-w-0 flex-1 select-text">{editor.error ?? feed.error ?? loadError}</p>
-            {(editor.error || feed.error) && (
-              <button
-                type="button"
-                onClick={editor.error ? editor.clearError : feed.clearError}
-                title="Close"
-                className="text-muted hover:text-text"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        )}
       </aside>
 
       {draft ? (
@@ -338,7 +311,7 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
           onOpenClip={openClip}
         />
       ) : loaded ? (
-        <EmptyLearnings hasLearnings={learnings.length > 0} onNew={() => editor.create()} />
+        <EmptyLearnings hasLearnings={learnings.length > 0} onNew={newLearning} />
       ) : (
         <section className="flex min-w-0 flex-1 flex-col">
           <div className="drag h-12 shrink-0" />
@@ -367,6 +340,16 @@ export default function LearningsView({ navigate, tabs, initialId }: Props) {
             if (l) editor.select(l)
           }}
         />
+      )}
+
+      {(editor.error || feed.error) && (
+        <FloatingBanner
+          key={editor.error ?? feed.error}
+          tone="error"
+          onDismiss={editor.error ? editor.clearError : feed.clearError}
+        >
+          {editor.error ?? feed.error}
+        </FloatingBanner>
       )}
     </div>
   )
@@ -398,34 +381,22 @@ function EmptyLearnings({ hasLearnings, onNew }: { hasLearnings: boolean; onNew:
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       <div className="drag h-12 shrink-0" />
-      <div className="flex flex-1 items-center justify-center px-8 pb-12">
-        {hasLearnings ? (
+      {hasLearnings ? (
+        <div className="flex flex-1 items-center justify-center px-8 pb-12">
           <div className="text-center text-muted">
             <p>Pick a learning in the list, or write a new one.</p>
-            <p className="mt-1 text-[11px]">{shortcut('⌘ F')} to search · ↑ ↓ to browse</p>
+            <p className="mt-1 text-[11px]">{shortcut('⌘F')} to search · ↑ ↓ to browse</p>
           </div>
-        ) : (
-          <div className="max-w-md text-center">
-            <BulbIcon size={34} className="mx-auto mb-4 text-muted" />
-            <h2 className="mb-2 text-base font-semibold">Learnings</h2>
-            <p className="mb-5 leading-relaxed text-muted">
-              Short insights into what works when you write prompts – how a model handles clothes, voices or
-              camera moves. A connected agent can look at your clips, compare them with the prompt and save what
-              it learns here, and reads the learnings before it writes the next prompt. You can write your own too.
-            </p>
-            <button
-              type="button"
-              onClick={onNew}
-              className="rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover"
-            >
-              Write the first learning
-            </button>
-            <p className="mt-4 text-[11px] text-muted">
-              Rate the clips in Media – your ratings and notes help the agent draw the right conclusions.
-            </p>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <EmptyState
+          icon={<BulbIcon size={22} />}
+          title="Learnings"
+          text="Short insights into what works when you write prompts – how a model handles clothes, voices or camera moves. A connected agent can look at your clips, compare them with the prompt and save what it learns here, and reads the learnings before it writes the next prompt. You can write your own too."
+          action={{ label: 'Write the first learning', onClick: onNew }}
+          footnote="Rate the clips in Media – your ratings and notes help the agent draw the right conclusions."
+        />
+      )}
     </section>
   )
 }

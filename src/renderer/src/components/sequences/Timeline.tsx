@@ -11,19 +11,21 @@ import {
 import { generationTitle, sourceBadge } from '@shared/generation-label'
 import type { FinishedWork, RunningWork, Segment, Sequence } from '@shared/types'
 import { directorName } from '../../lib/directors'
+import { focusedWithKeyboard } from '../../lib/focusOrigin'
 import { useDirectorAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
+import { shortcut } from '../../lib/platform'
 import { useSeenWhenVisible } from '../../lib/work'
 import AssetIcon from '../assets/AssetIcon'
 import { carriesFiles, droppedVideoPaths, ImportCardView, type ImportCard } from '../feed/ownClips'
 import { KIND_TONE } from '../pickers/assetKinds'
 import Popover from '../pickers/Popover'
-import { menuRow, onMenuKeyDown } from '../storyboards/ui'
+import { useReorder } from '../pickers/useReorder'
 import { freshTakesLabel, newsBySegment, pendingPhase, type SegmentNews } from '../takes/takeText'
+import { menuRow, onMenuKeyDown } from '../ui/menu'
 import { NewChip, Spinner } from '../work/StatusMark'
-import { BridgeIcon, CameraIcon, ChevronDownIcon, LinkIcon, PlusIcon } from './icons'
+import { CameraIcon, ChevronDownIcon, LinkIcon, PlusIcon } from './icons'
 import {
-  bridgeDescription,
   clipLength,
   continuationMismatch,
   endMismatch,
@@ -71,14 +73,14 @@ interface Props {
   /** What runs in this sequence now (takes being sent show on their cards). */
   running: RunningWork[]
   onMove: (segmentId: string, toIndex: number) => void
-  /** "Redo between neighbours" on a card. */
-  onBridge: (segmentId: string) => void
 }
 
 /**
- * Horizontal strip of clips in cut order: select, insert, reorder by drag and drop, and drop own films onto. In a
- * sequence cut to a song the cards are as wide as their places, keep the song's order (no dragging: the boundaries
- * move in the song strip), and "+" splits a clip in two.
+ * Horizontal strip of clips in cut order: select, insert, reorder by drag and drop or ⌥← / ⌥→, and drop own films
+ * onto. ← / → move to the next clip and open it; Enter and Space open a card reached with the keyboard (on a clicked
+ * one Space plays the clip, as everywhere in the clip pane). "Add clip" stays at the strip's right edge while the
+ * clips scroll under it. In a sequence cut to a song the cards are as wide as their places, keep the song's order (no
+ * dragging or ⌥-arrows: the boundaries move in the song strip), and "+" splits a clip in two.
  */
 export default function Timeline({
   sequence,
@@ -91,8 +93,7 @@ export default function Timeline({
   importing,
   unseen,
   running,
-  onMove,
-  onBridge
+  onMove
 }: Props) {
   const segments = sequence.segments
   const song = !!sequence.song
@@ -108,6 +109,14 @@ export default function Timeline({
   const [dropGap, setDropGap] = useState<number>()
   // Files from Finder over the strip: where they would go.
   const [fileGap, setFileGap] = useState<number>()
+  // ⌥← / ⌥→ on a card, with the focus kept on it and a word for screen readers. Only the keys: dragging stays the
+  // strip's own, which also takes films dropped from Finder.
+  const reorder = useReorder({
+    type: SEGMENT_DRAG_TYPE,
+    keys: segments.map((s) => s.id),
+    onMove: song ? undefined : (from, to) => onMove(segments[from].id, to),
+    describeMove: (from, to) => `Clip ${from + 1} is now clip ${to + 1} of ${segments.length}.`
+  })
 
   useEffect(() => {
     if (selectedId) cards.current.get(selectedId)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
@@ -165,10 +174,13 @@ export default function Timeline({
     cards.current.get(s.id)?.focus()
   }
 
-  const cardKeys = (e: KeyboardEvent, i: number) => {
+  const cardKeys = (e: KeyboardEvent<HTMLDivElement>, i: number) => {
+    // ⌥← / ⌥→ move the clip (the reorder hook, first); ⌘ and ⌃ belong to the window.
+    if (e.altKey || e.metaKey || e.ctrlKey) return
     if (e.key === 'ArrowRight') focusCard(i + 1)
     else if (e.key === 'ArrowLeft') focusCard(i - 1)
-    else if (e.key === 'Enter' || e.key === ' ') onSelect(segments[i].id)
+    // Only on a card reached with the keyboard: on a clicked one Space plays the clip (SequencesView).
+    else if ((e.key === 'Enter' || e.key === ' ') && focusedWithKeyboard(e.currentTarget)) onSelect(segments[i].id)
     else return
     e.preventDefault()
   }
@@ -244,12 +256,13 @@ export default function Timeline({
   return (
     <div className="relative shrink-0 border-b border-line">
       {fileGap !== undefined && (
-        <span className="pointer-events-none absolute right-4 top-1 z-10 rounded bg-accent px-2 py-0.5 text-[11px] font-medium text-white shadow">
+        <span className="pointer-events-none absolute right-4 top-1 z-20 rounded bg-accent-fill px-2 py-0.5 text-[11px] font-medium text-white shadow">
           Drop to add as own clips
         </span>
       )}
+      {/* The scroll padding keeps a card brought into view (← →, a new or selected clip) clear of "Add clip". */}
       <div
-        className="overflow-x-auto"
+        className="overflow-x-auto scroll-pr-36"
         onDragOver={onDragOver}
         onDrop={onDrop}
         onDragLeave={(e) => {
@@ -261,54 +274,61 @@ export default function Timeline({
       >
         <div className="flex w-max items-stretch px-3 py-3">
           <EdgeGap active={marker === 0} />
-          {segments.map((s, i) => (
-            <Fragment key={s.id}>
-              {i > 0 && (
-                <Joint
+          {segments.map((s, i) => {
+            // Only the hook's ref (focus back on the card after a move) and its ⌥-arrows.
+            const item = reorder.itemProps(i)
+            const itemRef = item.ref as (el: HTMLElement | null) => void
+            return (
+              <Fragment key={s.id}>
+                {i > 0 && (
+                  <Joint
+                    segment={s}
+                    previous={segments[i - 1]}
+                    number={i + 1}
+                    song={song}
+                    dropHere={marker === i}
+                    adding={adding}
+                    onInsert={() => onAdd(segments[i - 1].id)}
+                    onInsertFrom={(source) => onAddFrom(source, segments[i - 1].id)}
+                  />
+                )}
+                <SegmentCard
                   segment={s}
-                  previous={segments[i - 1]}
                   number={i + 1}
+                  news={news.get(s.id)}
+                  sending={sending.has(s.id)}
+                  sequenceDirector={sequence.director}
+                  selected={s.id === selectedId}
+                  dragging={s.id === dragId}
                   song={song}
-                  dropHere={marker === i}
-                  adding={adding}
-                  onInsert={() => onAdd(segments[i - 1].id)}
-                  onInsertFrom={(source) => onAddFrom(source, segments[i - 1].id)}
+                  refCallback={(el) => {
+                    if (el) cards.current.set(s.id, el)
+                    else cards.current.delete(s.id)
+                    itemRef(el)
+                  }}
+                  onSelect={() => onSelect(s.id)}
+                  onKeyDown={(e) => {
+                    item.onKeyDown?.(e)
+                    if (!e.defaultPrevented) cardKeys(e, i)
+                  }}
+                  onDragStart={(e) => {
+                    if (song) {
+                      e.preventDefault()
+                      return
+                    }
+                    e.dataTransfer.effectAllowed = 'move'
+                    // A private type, so dropping a card on a text field doesn't paste anything.
+                    e.dataTransfer.setData(SEGMENT_DRAG_TYPE, s.id)
+                    setDragId(s.id)
+                  }}
+                  onDragEnd={() => {
+                    setDragId(undefined)
+                    setDropGap(undefined)
+                  }}
                 />
-              )}
-              <SegmentCard
-                segment={s}
-                number={i + 1}
-                news={news.get(s.id)}
-                sending={sending.has(s.id)}
-                sequenceDirector={sequence.director}
-                bridgeTitle={bridgeDescription(i, segments.length)}
-                onBridge={() => onBridge(s.id)}
-                selected={s.id === selectedId}
-                dragging={s.id === dragId}
-                song={song}
-                refCallback={(el) => {
-                  if (el) cards.current.set(s.id, el)
-                  else cards.current.delete(s.id)
-                }}
-                onSelect={() => onSelect(s.id)}
-                onKeyDown={(e) => cardKeys(e, i)}
-                onDragStart={(e) => {
-                  if (song) {
-                    e.preventDefault()
-                    return
-                  }
-                  e.dataTransfer.effectAllowed = 'move'
-                  // A private type, so dropping a card on a text field doesn't paste anything.
-                  e.dataTransfer.setData(SEGMENT_DRAG_TYPE, s.id)
-                  setDragId(s.id)
-                }}
-                onDragEnd={() => {
-                  setDragId(undefined)
-                  setDropGap(undefined)
-                }}
-              />
-            </Fragment>
-          ))}
+              </Fragment>
+            )
+          })}
           <EdgeGap active={marker === segments.length} />
           {importing.map((card) => (
             <div
@@ -319,9 +339,20 @@ export default function Timeline({
               <ImportCardView card={card} compact />
             </div>
           ))}
-          <AddSplitButton adding={adding} song={song} onAdd={() => onAdd()} onAddFrom={(source) => onAddFrom(source)} />
+          {/* Pinned to the strip's right edge once the clips overflow it (the padding under it covered), so there is
+              always a visible way to add one; the fade shows the clips going on under it. */}
+          <div className="sticky right-0 z-10 -mr-3 flex shrink-0 self-stretch bg-bg pr-3">
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 -left-4 w-4 bg-linear-to-l from-bg to-transparent"
+            />
+            <AddSplitButton adding={adding} song={song} onAdd={() => onAdd()} onAddFrom={(source) => onAddFrom(source)} />
+          </div>
         </div>
       </div>
+      <span className="sr-only" aria-live="polite">
+        {reorder.announcement}
+      </span>
     </div>
   )
 }
@@ -523,7 +554,7 @@ function Joint({
                   : description
               }
               className={`relative flex h-6 w-6 items-center justify-center rounded-full border ${
-                mismatch ? 'border-amber-500/60 bg-[#2a2113] text-amber-400' : 'border-line bg-raised text-text'
+                mismatch ? 'border-amber-500/60 bg-warning-soft text-warning' : 'border-line bg-raised text-text'
               }`}
             >
               <LinkIcon size={13} />
@@ -538,8 +569,9 @@ function Joint({
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         title={song ? `Split clip ${number - 1}, or insert a clip after it` : `Insert a clip between ${number - 1} and ${number}`}
+        // Faint at rest, so the places a clip can go in between are seen without hovering.
         className={`mt-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-line bg-raised text-muted transition hover:border-muted hover:text-text focus:opacity-100 group-hover/joint:opacity-100 disabled:opacity-0 ${
-          menuOpen ? 'border-muted text-text opacity-100' : 'opacity-0'
+          menuOpen ? 'border-muted text-text opacity-100' : 'opacity-40'
         }`}
       >
         <PlusIcon size={11} />
@@ -578,8 +610,6 @@ function SegmentCard({
   news,
   sending,
   sequenceDirector,
-  bridgeTitle,
-  onBridge,
   selected,
   dragging,
   song,
@@ -597,16 +627,13 @@ function SegmentCard({
   sending: boolean
   /** The sequence's director, which the clip follows unless it chooses its own (or none). */
   sequenceDirector?: string
-  /** What "Redo between neighbours" does here; undefined for a clip without neighbours. */
-  bridgeTitle?: string
-  onBridge: () => void
   selected: boolean
   dragging: boolean
   /** A clip of a sequence cut to a song: as wide as its place, not dragged. */
   song: boolean
   refCallback: (el: HTMLDivElement | null) => void
   onSelect: () => void
-  onKeyDown: (e: KeyboardEvent) => void
+  onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => void
   onDragStart: (e: DragEvent) => void
   onDragEnd: () => void
 }) {
@@ -632,9 +659,9 @@ function SegmentCard({
       onKeyDown={onKeyDown}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      title={place ? `Click to edit · ${placeText(place)} in the song` : 'Click to edit, drag to move'}
+      title={place ? `Click to edit · ${placeText(place)} in the song` : shortcut('Click to edit · drag or ⌥← / ⌥→ to move')}
       style={place ? { width: songCardWidth(place.end - place.start) } : undefined}
-      className={`group/card ${place ? '' : 'w-44'} shrink-0 cursor-pointer overflow-hidden rounded-lg border bg-panel outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
+      className={`${place ? '' : 'w-44'} shrink-0 cursor-pointer overflow-hidden rounded-lg border bg-panel outline-none transition focus-visible:ring-1 focus-visible:ring-muted ${
         selected ? 'border-accent ring-1 ring-accent/30' : 'border-line hover:border-muted/60'
       } ${dragging ? 'opacity-40' : ''}`}
     >
@@ -655,22 +682,6 @@ function SegmentCard({
           )}
         </span>
         <CardChip segment={segment} news={news} sending={sending} takes={takes} />
-        {bridgeTitle && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onBridge()
-            }}
-            onKeyDown={(e) => e.stopPropagation()}
-            title={`Redo between neighbours: ${bridgeTitle}`}
-            aria-label="Redo between neighbours"
-            className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] text-text opacity-0 transition hover:bg-black focus:opacity-100 group-hover/card:opacity-100"
-          >
-            <BridgeIcon size={11} />
-            Redo
-          </button>
-        )}
       </div>
       <div className="px-2 py-1.5">
         <p className={`truncate text-[12px] ${text ? '' : 'italic text-muted'}`} title={text || undefined}>
@@ -773,7 +784,7 @@ function FailedChip({ className, failedKey }: { className: string; failedKey: st
   return (
     <span
       ref={ref}
-      className={`${className} bg-black/75 font-medium text-accent`}
+      className={`${className} bg-black/75 font-medium text-danger`}
       title="A take failed. Open the clip to see why."
     >
       Failed
@@ -830,7 +841,7 @@ function CardPreview({ segment, sending }: { segment: Segment; sending: boolean 
   }
 
   if (selected?.status === 'failed' || latest?.status === 'failed') {
-    return <div className="flex h-full items-center justify-center text-[11px] text-accent">Failed</div>
+    return <div className="flex h-full items-center justify-center text-[11px] text-danger">Failed</div>
   }
 
   return (

@@ -1,10 +1,12 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Settings, UpdateInfo } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { INSTALLED_APP } from '../../lib/platform'
 import { updateNow } from '../../lib/updates'
+import { buttonClass } from '../ui/button'
 import { SettingsItem } from './SettingsLayout'
-import Switch from './Switch'
+import { SwitchRow } from './Switch'
+import ToolsSettings, { type FfmpegCheck } from './ToolsSettings'
 
 interface Versions {
   studio?: string
@@ -24,8 +26,19 @@ function readVersions(userAgent: string): Versions {
   return { studio, electron, chrome }
 }
 
-/** Settings → About Studio: the version, which profile this is, and updates. */
-export default function AboutSettings({ settings, onChanged }: { settings: Settings; onChanged: () => void }) {
+/**
+ * Settings → About: the version (and which profile this is) as plain text, updates, then the programs Studio uses
+ * (ToolsSettings). `ffmpeg` is SettingsView's check, which also puts the dot on the pane's tab.
+ */
+export default function AboutSettings({
+  settings,
+  onChanged,
+  ffmpeg
+}: {
+  settings: Settings
+  onChanged: () => void
+  ffmpeg: FfmpegCheck
+}) {
   const { devProfile, variant } = settings
   const versions = useMemo(() => readVersions(navigator.userAgent), [])
   const engine = [
@@ -37,7 +50,7 @@ export default function AboutSettings({ settings, onChanged }: { settings: Setti
 
   return (
     <>
-      <div className="rounded-md border border-line bg-raised/40 px-3 py-2.5">
+      <div>
         <p className="select-text">
           <span className="font-medium">JIBES Studio{variant && ` ${variant}`}</span>
           {versions.studio && <span className="tabular-nums"> {versions.studio}</span>}
@@ -51,6 +64,7 @@ export default function AboutSettings({ settings, onChanged }: { settings: Setti
         )}
       </div>
       <UpdateSettings settings={settings} onChanged={onChanged} />
+      <ToolsSettings ffmpeg={ffmpeg} />
     </>
   )
 }
@@ -79,8 +93,6 @@ function UpdateSettings({ settings, onChanged }: { settings: Settings; onChanged
   const [error, setError] = useState<string>()
   const [auto, setAuto] = useState(settings.autoUpdateCheck)
   const [saving, setSaving] = useState(false)
-  const labelId = useId()
-  const stateId = useId()
   useEffect(() => setAuto(settings.autoUpdateCheck), [settings.autoUpdateCheck])
 
   if (settings.developmentBuild) {
@@ -131,11 +143,7 @@ function UpdateSettings({ settings, onChanged }: { settings: Settings; onChanged
       help="Studio asks GitHub whether a newer version is out. Nothing is downloaded until you choose Update now."
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <button
-          onClick={() => void check()}
-          disabled={checking}
-          className="rounded-md border border-line px-4 py-2 hover:bg-raised disabled:opacity-40"
-        >
+        <button type="button" onClick={() => void check()} disabled={checking} className={buttonClass()}>
           {checking ? 'Checking…' : 'Check for updates'}
         </button>
         <span className="text-[12px] text-muted" role="status">
@@ -143,25 +151,19 @@ function UpdateSettings({ settings, onChanged }: { settings: Settings; onChanged
         </span>
       </div>
       {answer && <AnswerLine info={answer} />}
-      {error && <p className="mt-2.5 text-[12px] text-accent select-text">{error}</p>}
-      <div className="mt-5 flex items-start gap-3">
-        <Switch
+      {error && (
+        <p role="alert" className="mt-2.5 text-[12px] text-danger select-text">
+          {error}
+        </p>
+      )}
+      <div className="mt-5">
+        <SwitchRow
           on={auto}
           disabled={saving}
           onChange={(next) => void changeAuto(next)}
-          labelledBy={labelId}
-          describedBy={stateId}
+          label="Check for updates automatically"
+          description="Once a day, when Studio starts."
         />
-        <span className="min-w-0">
-          <span id={labelId} className="block">
-            Check for updates automatically
-          </span>
-          <span id={stateId} className="mt-0.5 block text-[12px] leading-relaxed text-muted">
-            {auto
-              ? 'On: once a day, when Studio starts. A new version shows up as a notice in the corner.'
-              : 'Off: Studio only checks when you ask.'}
-          </span>
-        </span>
       </div>
     </SettingsItem>
   )
@@ -170,7 +172,11 @@ function UpdateSettings({ settings, onChanged }: { settings: Settings; onChanged
 /** What Check for updates found. */
 function AnswerLine({ info }: { info: UpdateInfo }) {
   if (!info.available) {
-    return <p className="mt-2.5 text-[12px] text-emerald-400">Studio is up to date ({info.current} is the newest version).</p>
+    return (
+      <p role="status" className="mt-2.5 text-[12px] text-success">
+        Studio is up to date ({info.current} is the newest version).
+      </p>
+    )
   }
   return (
     <div className="mt-2.5 text-[12px] leading-relaxed">
@@ -181,10 +187,7 @@ function AnswerLine({ info }: { info: UpdateInfo }) {
       {info.installBlocked ? (
         <p className="mt-0.5 text-muted select-text">{info.installBlocked}</p>
       ) : (
-        <button
-          onClick={() => void updateNow()}
-          className="mt-2 rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:bg-accent-hover"
-        >
+        <button type="button" onClick={() => void updateNow()} className={`mt-2 ${buttonClass('primary')}`}>
           Update now
         </button>
       )}

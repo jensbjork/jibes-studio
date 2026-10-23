@@ -1,7 +1,7 @@
 // Updates from GitHub Releases: whether a newer Studio is out, and installing it in place of this one.
 //
 // A check is one GET of the repository's latest release (GitHub's API), compared with this Studio's version by semver.
-// It runs once a day when Studio starts (unless switched off in Settings → About Studio, and never in a development
+// It runs once a day when Studio starts (unless switched off in Settings → About, and never in a development
 // build, which is updated from git), and when the user asks: Check for Updates… in the macOS app menu, or Check for
 // updates in Settings. A newer release is offered by a notice in the window (updates:available).
 //
@@ -731,7 +731,7 @@ async function lookUp(): Promise<Found> {
   }
   try {
     setLastUpdateCheck(new Date())
-    // Settings → About Studio shows when Studio last checked.
+    // Settings → About shows when Studio last checked.
     sendToWindows('settings:change')
   } catch (err) {
     console.warn('Recording the update check failed:', err)
@@ -852,8 +852,8 @@ function resendTo(win: BrowserWindow): void {
   })
 }
 
-/** Sends to the window once it has loaded (it may have just been opened for Check for Updates…). */
-function sendWhenLoaded(win: BrowserWindow, channel: string, payload: unknown): void {
+/** Sends to the window once it has loaded (it may have just been opened for Check for Updates… or Settings…). */
+export function sendWhenLoaded(win: BrowserWindow, channel: string, payload?: unknown): void {
   const wc = win.webContents
   if (wc.isLoading()) wc.once('did-finish-load', () => wc.send(channel, payload))
   else wc.send(channel, payload)

@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { buttonClass } from '../ui/button'
 
 interface Props {
   /** "Prompt", "What happens?", "Avoid"… */
@@ -24,7 +25,9 @@ export default function FocusDialog({ title, subtitle, onClose, children }: Prop
   }, [onClose])
 
   return createPortal(
+    // data-focus-mode: ⌘↵ typed here still sends the form the field belongs to (lib/platform submitKeyHandler).
     <div
+      data-focus-mode
       className="no-drag fixed inset-0 z-50 flex items-stretch justify-center bg-black/70 px-8 py-10"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
@@ -39,11 +42,7 @@ export default function FocusDialog({ title, subtitle, onClose, children }: Prop
             <h2 className="text-base font-semibold">{title}</h2>
             {subtitle && <p className="mt-0.5 text-muted">{subtitle}</p>}
           </div>
-          <button
-            onClick={onClose}
-            title="Back (esc)"
-            className="shrink-0 rounded-md border border-line px-3 py-1.5 text-text transition hover:bg-raised"
-          >
+          <button type="button" onClick={onClose} title="Back (Esc)" className={`shrink-0 ${buttonClass('secondary')}`}>
             Done
           </button>
         </div>

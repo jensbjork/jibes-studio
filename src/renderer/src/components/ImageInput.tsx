@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, t
 import type { Asset, Still } from '@shared/types'
 import { fileName } from '../lib/library'
 import { mediaUrl } from '../lib/media'
-import { shortcut } from '../lib/platform'
 import { useSeenPictureWhenVisible } from '../lib/work'
 import { assetsByPath } from './pickers/assetRefs'
 import { possessive } from './pickers/audioRefs'
@@ -10,7 +9,7 @@ import Popover from './pickers/Popover'
 import { useTokenCard, type TokenCardContent } from './pickers/ReferenceCard'
 import { moveItem } from './pickers/reorder'
 import { SwapAssetPicker, SwapImagePicker } from './pickers/SwapPicker'
-import { occurrenceKeys, useReorder } from './pickers/useReorder'
+import { occurrenceKeys, reorderHint, useReorder } from './pickers/useReorder'
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i
 const NO_ASSETS: Asset[] = []
@@ -45,6 +44,11 @@ interface Props {
   caption?: (path: string) => ImageCaption | string | undefined
   /** Show "n/max" in the header (multiple only); off when the form shows the image budget elsewhere. */
   showCount?: boolean
+  /**
+   * An optional single image: while there is none, the drop zone is one line ("Drop an end image or click") instead
+   * of a thumbnail's height, so it doesn't push the rest of a long form down.
+   */
+  compact?: boolean
   /** Whether several images can be put in another order by dragging them (multiple only). Default true. */
   reorderable?: boolean
   /** The library: names a picture on its hover card and is what the swap picker offers. */
@@ -89,6 +93,7 @@ export default function ImageInput({
   action,
   caption,
   showCount = true,
+  compact = false,
   reorderable = true,
   library = NO_ASSETS,
   stills,
@@ -225,13 +230,14 @@ export default function ImageInput({
         count: asset?.images.length,
         ...(overflow ? { unsent: `Not sent – the model takes at most ${max} images` } : {})
       },
-      hint: `Click to swap ${what}${reorder.enabled ? ' – drag to move' : ''}`
+      hint: `Click to swap ${what}${reorder.enabled ? ` – ${reorderHint()}` : ''}`
     }
   }
 
   const full = value.length >= (multiple ? max : 1)
   const dragging = reorder.dragging !== -1
   const overflowCount = multiple ? Math.max(0, value.length - max) : 0
+  const oneLine = compact && !multiple && !value.length
 
   return (
     <div>
@@ -240,7 +246,7 @@ export default function ImageInput({
         <span className="flex items-center gap-2">
           {action}
           {multiple && showCount && (
-            <span className={`text-[11px] ${value.length > max ? 'text-accent' : 'text-muted'}`}>
+            <span className={`text-[11px] ${value.length > max ? 'text-danger' : 'text-muted'}`}>
               {value.length}/{max}
             </span>
           )}
@@ -250,9 +256,7 @@ export default function ImageInput({
         ref={list}
         role={multiple ? 'list' : undefined}
         aria-label={
-          multiple
-            ? `${label}${reorder.enabled ? shortcut(' – drag or press ⌥← / ⌥→ to change the order') : ''}`
-            : undefined
+          multiple ? `${label}${reorder.enabled ? ` – ${reorderHint()}` : ''}` : undefined
         }
         onDragOver={onDragOver}
         onDragLeave={(e) => {
@@ -260,7 +264,7 @@ export default function ImageInput({
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false)
         }}
         onDrop={onDrop}
-        className={`flex flex-wrap gap-2 rounded-md border border-dashed p-2 transition ${
+        className={`flex flex-wrap gap-2 rounded-md border border-dashed transition ${oneLine ? 'p-1' : 'p-2'} ${
           over ? 'border-accent bg-accent/5' : dragging ? 'border-muted/60' : 'border-line'
         }`}
       >
@@ -311,7 +315,7 @@ export default function ImageInput({
               aria-label={
                 multiple
                   ? `${overflow ? 'Not sent' : `@Image${at + 1}`}: ${shown}. Enter swaps it` +
-                    (reorder.enabled ? shortcut(', move it with ⌥← and ⌥→.') : '.')
+                    (reorder.enabled ? `; ${reorderHint()}.` : '.')
                   : `${label}: ${shown}. Enter swaps it.`
               }
               className={`group relative h-16 w-16 shrink-0 rounded bg-raised outline-none ring-offset-2 ring-offset-panel transition focus-visible:ring-2 focus-visible:ring-muted ${
@@ -320,13 +324,14 @@ export default function ImageInput({
             >
               <div className={`h-full w-full overflow-hidden rounded ${overflow ? 'opacity-40' : ''}`}>
                 {isMissing ? (
-                  <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-accent">
+                  <span className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-danger">
                     File missing
                   </span>
                 ) : (
                   <>
                     <img
                       src={mediaUrl(p)}
+                      alt=""
                       draggable={false}
                       onError={() => setMissing((s) => new Set(s).add(p))}
                       className="pointer-events-none h-full w-full object-cover"
@@ -346,7 +351,7 @@ export default function ImageInput({
               </div>
               {multiple &&
                 (overflow ? (
-                  <span className="absolute left-1 top-1 rounded bg-black/80 px-1 text-[9px] leading-[14px] text-accent">
+                  <span className="absolute left-1 top-1 rounded bg-black/80 px-1 text-[9px] leading-[14px] text-danger">
                     not sent
                   </span>
                 ) : (
@@ -381,15 +386,22 @@ export default function ImageInput({
         })}
         {!full && (
           <button
+            type="button"
             onClick={pick}
-            className="flex h-16 min-w-16 flex-1 items-center justify-center rounded text-muted hover:bg-raised hover:text-text"
+            className={`flex min-w-16 flex-1 items-center justify-center rounded text-muted hover:bg-raised hover:text-text ${
+              oneLine ? 'h-8 text-[12px]' : 'h-16'
+            }`}
           >
-            {value.length ? '+' : 'Drop an image here or click'}
+            {value.length
+              ? '+'
+              : oneLine
+                ? `Drop ${article(place)} ${place.toLocaleLowerCase('en')} or click`
+                : 'Drop an image here or click'}
           </button>
         )}
       </div>
       {overflowCount > 0 && (
-        <p className="mt-1 text-[11px] text-accent">
+        <p className="mt-1 text-[11px] text-danger">
           {overflowCount === 1 ? 'The last image isn’t' : `The last ${overflowCount} images aren’t`} sent – the model takes
           at most {max}.{reorder.enabled && ' Drag an image further forward to send it instead.'}
         </p>
@@ -522,6 +534,11 @@ function SwapPopover({
       {body}
     </Popover>
   )
+}
+
+/** "a" or "an" before a word (in English UI text): "an end image", "a start image". */
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? 'an' : 'a'
 }
 
 /**

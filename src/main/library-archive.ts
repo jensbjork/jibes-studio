@@ -1,5 +1,5 @@
 // Export of the whole library to one zip file, and import of such a file in another Studio installation
-// (Settings → Export & import).
+// (Settings → Library → Move to another computer).
 //
 // Export: a consistent copy of the database (SQLite's online backup, taken while the app runs) and every file in the
 // library's own folders are packed by macOS's /usr/bin/zip, which streams them from disk (media stored as they are,

@@ -399,7 +399,7 @@ function ImportDialog({
     >
       <div className="space-y-4 text-[12px] leading-relaxed">
         {refused.length > 0 && (
-          <ul className="space-y-1 text-[#ffb3b5]">
+          <ul className="space-y-1 text-danger">
             {refused.map((i) => (
               <li key={i.path}>{i.error ?? `${i.name}: The file can’t be read.`}</li>
             ))}

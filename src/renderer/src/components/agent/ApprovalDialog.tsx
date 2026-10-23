@@ -64,6 +64,8 @@ import { useVideoFacts } from '../pickers/videoFacts'
 import { videoCount, videoLabelParts } from '../pickers/videoRefs'
 import { markKey } from '../prompt/promptText'
 import { effectiveParams, needsTake, parseConsent, pendingTake } from '../sequences/sequenceUtils'
+import { noticeTones } from '../ui/Banner'
+import { buttonClass } from '../ui/button'
 import {
   agentInSentence,
   approvalHeading,
@@ -103,7 +105,7 @@ export default function ApprovalDialog() {
   // another request under their cursor. A replaced one says so, and they move on to the next themselves.
   const [shownId, setShownId] = useState<string>()
   const shown = shownId ? agent.approvals.find((a) => a.id === shownId) : undefined
-  // Opening a request from the activity drawer is the user's own choice, so that one may take the screen.
+  // Opening a request from the Agent panel is the user's own choice, so that one may take the screen.
   const focused = agent.focused ? queue.find((a) => a.id === agent.focused) : undefined
   const current = (focused && focused.id !== shownId ? focused : undefined) ?? shown ?? queue[0]
   const currentId = current?.id
@@ -163,9 +165,9 @@ function useArmed(key: string): boolean {
   return armed === key
 }
 
-const primary =
-  'rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40'
-const secondary = 'rounded-md border border-line px-4 py-2 transition hover:bg-raised disabled:opacity-40'
+// The dialog's buttons; a disabled Approve turns neutral (its tooltip says why), never a faded red.
+const primary = buttonClass('primary')
+const secondary = buttonClass('secondary')
 
 function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProps) {
   const { models } = useModels()
@@ -545,7 +547,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
                           ? 'Read through the request first'
                           : undefined
           }
-          className={`flex items-center gap-2 ${primary}`}
+          className={primary}
         >
           <span>
             {phase === 'submitting' && !declineSending
@@ -575,7 +577,10 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
     >
       <div className="space-y-5">
         {error && (
-          <p className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[12px] leading-relaxed text-[#ffb3b5] select-text">
+          <p
+            role="alert"
+            className={`rounded-md border px-3 py-2 text-[12px] leading-relaxed select-text ${noticeTones.error}`}
+          >
             {error}
           </p>
         )}
@@ -594,10 +599,10 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         )}
 
         {sequenceError && a.sequenceId && !storyboardId && (
-          <p className="text-[12px] text-accent">The sequence couldn’t be read: {sequenceError}</p>
+          <p className="text-[12px] text-danger">The sequence couldn’t be read: {sequenceError}</p>
         )}
         {storyboardError && storyboardId && (
-          <p className="text-[12px] text-accent">The storyboard couldn’t be read: {storyboardError}</p>
+          <p className="text-[12px] text-danger">The storyboard couldn’t be read: {storyboardError}</p>
         )}
 
         {image && (
@@ -614,7 +619,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
             }
           />
         )}
-        {image === null && <p className="text-accent">The request doesn’t say anything about the image.</p>}
+        {image === null && <p className="text-danger">The request doesn’t say anything about the image.</p>}
 
         {editRequest && a.kind === 'edit' && editRequest.resumeJobId && (
           <ResumeSummary approval={a} request={editRequest} state={editState} />
@@ -630,13 +635,13 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           />
         )}
         {editRequest && a.kind === 'voice-design' && <VoiceDesignSummary request={editRequest} />}
-        {editRequest === null && <p className="text-accent">The request doesn’t say anything about the change.</p>}
+        {editRequest === null && <p className="text-danger">The request doesn’t say anything about the change.</p>}
 
         {removal && <DeleteSummary approval={a} request={removal} check={deleteCheck} />}
-        {removal === null && <p className="text-accent">The request doesn’t say what should be deleted.</p>}
+        {removal === null && <p className="text-danger">The request doesn’t say what should be deleted.</p>}
 
         {songRequest && <SongLyricsSummary request={songRequest} />}
-        {songRequest === null && <p className="text-accent">The request doesn’t say which song.</p>}
+        {songRequest === null && <p className="text-danger">The request doesn’t say which song.</p>}
 
         {clips.map((clip) => (
           <ClipSummary
@@ -698,7 +703,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         )}
         {overBudget && removal === undefined && (
           <div className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2.5 text-[12px] leading-relaxed">
-            <p className="text-[#ffb3b5]">
+            <p className="text-danger">
               <span className="font-medium">Over your {overBudget.period === 'day' ? 'daily' : 'monthly'} budget.</span>{' '}
               {overBudgetText(overBudget, 'This takes')} Approving sends it anyway.
             </p>
@@ -717,7 +722,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
         )}
         {/* A removal says what changed at the top of its list (DeleteSummary). */}
         {blocking && removal === undefined && (
-          <p className="text-[12px] text-accent">
+          <p className="text-[12px] text-danger">
             {cannot} as it looks now: {blocking.replace(/\.$/, '')}. Ask {agentInSentence(a.client)} to{' '}
             {askAgain ? 'ask again' : 'fix it'}, or decline.
           </p>
@@ -1050,7 +1055,7 @@ function ClipSummary({
           className={`overflow-y-auto rounded-md border border-line bg-raised px-3 py-2 ${compact ? 'max-h-32' : 'max-h-60'}`}
         />
       ) : (
-        <p className="text-accent">The prompt is empty.</p>
+        <p className="text-danger">The prompt is empty.</p>
       )}
 
       {clip.legend && (
@@ -1154,7 +1159,7 @@ function ClipSummary({
             ) : p.startImage ? (
               <ImageTile path={p.startImage} badge="Start" photo={photos.get(p.startImage)} />
             ) : (
-              <p className="text-[12px] text-accent">No start image.</p>
+              <p className="text-[12px] text-danger">No start image.</p>
             )}
             {clip.endsAt ? (
               <AutoFrame
@@ -1172,16 +1177,16 @@ function ClipSummary({
 
       {(clip.blocking || clip.warnings.length > 0 || (frames?.problems.length ?? 0) > 0) && (
         <ul className="mt-3 space-y-1 text-[12px]">
-          {clip.blocking && <li className="text-accent">{clip.blocking}</li>}
+          {clip.blocking && <li className="text-danger">{clip.blocking}</li>}
           {frames?.problems
             .filter((problem) => problem !== clip.blocking)
             .map((problem) => (
-              <li key={problem} className="text-accent">
+              <li key={problem} className="text-danger">
                 {problem}
               </li>
             ))}
           {clip.warnings.map((w) => (
-            <li key={w} className="text-amber-300">
+            <li key={w} className="text-warning">
               {w}
             </li>
           ))}
@@ -1254,7 +1259,7 @@ function DescriptionLegend({
         className={`overflow-y-auto text-[12px] text-muted ${compact ? 'max-h-24' : 'max-h-40'}`}
       />
       {changed && (
-        <p className="mt-1.5 text-[11px] leading-snug text-accent">
+        <p className="mt-1.5 text-[11px] leading-snug text-warning">
           A description has changed since the agent asked – this is what would have been sent then.
         </p>
       )}
@@ -1304,6 +1309,7 @@ function MadeStill({ stillId, sequenceId, inStoryboard }: { stillId: string; seq
       <Label>The new image</Label>
       <img
         src={mediaUrl(path)}
+        alt=""
         draggable={false}
         className="max-h-72 w-full rounded-md border border-line bg-raised object-contain"
       />
@@ -1403,7 +1409,7 @@ function ImageSummary({
           {p.prompt}
         </p>
       ) : (
-        <p className="text-accent">The prompt is empty.</p>
+        <p className="text-danger">The prompt is empty.</p>
       )}
 
       {p.negativePrompt && (

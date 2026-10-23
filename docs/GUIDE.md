@@ -24,21 +24,26 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 
 ## Features
 
-- **Generate** with Venice's video models in three modes: text-to-video, image-to-video (start and optional end
-  image) and reference-to-video (up to 9 reference photos for Seedance, plus up to 3 voice or sound clips with the
-  models that take reference audio, and with Seedance 2.x up to 3 or 10 **reference videos** for motion, camera and
-  style, `@Video1` …). Price quote before you generate, *Use again* to reload a
-  generation's settings. **Variants:** *×1 ×2 ×3 ×4* beside *Generate* (and beside a sequence clip's *Generate take*
-  and a storyboard transition's *Generate*) sends that many takes of the same settings at once — each its own
-  generation, with its own seed, at the full price; the button shows the total (*Generate ×3 · $3.09*), ⌘ + Enter sends
-  as many, and each place remembers its choice. The list beside the form shows what you made there this session;
-  everything older is in Media.
-- **Media:** everything you've made in one place, in three tabs — *Videos*, *Images* and *Films* (see
-  [Media](#media)). *Videos* is a live clip feed built for many clips: queued, rendering and finished videos
+- **Generate** with Venice's video models in three modes: text-to-video, image-to-video (start and optional end image)
+  and reference-to-video (up to 9 reference photos for Seedance, plus up to 3 voice or sound clips with the models
+  that take reference audio, and with Seedance 2.x up to 3 or 10 **reference videos** for motion, camera and style,
+  `@Video1` …). The mode switch (*Text*, *Start image*, *References*) sits at the top, and what sets the price —
+  *Duration*, *Resolution*, *Aspect ratio* and *Sound* — in one row right above the button, which shows the price
+  before you generate; the line under it says what is still missing, or *⌘↵ to generate* (⌘↵ works from any field of
+  the form). Without an API key that line starts with *Add your Venice API key in Settings*, and when nothing else is
+  missing the button opens *Settings → Venice*. Empty optional sections (reference videos, voices and sound) are a
+  single row, and one *＋ From library* adds characters, places, products, outfits and poses. *Use again* reloads a
+  generation's settings. **Variants:** *×1 ×2 ×3 ×4* beside *Generate* (and beside a sequence clip's or a storyboard
+  transition's *Generate take*) sends that many takes of the same settings at once — each its own generation, with its
+  own seed, at the full price; the button shows the total (*Generate ×3 · $3.09*), ⌘↵ sends as many, and each place
+  remembers its choice. The list beside the form shows what you made there this session; everything older is in Media.
+- **Media:** everything you've made in one place, in three tabs — *Clips*, *Images* and *Films* (see
+  [Media](#media)). *Clips* is a live clip feed built for many clips: queued, rendering and finished videos
   as big cards or a compact table (*Cards* / *Table*, with keyboard navigation), search in the prompts, filters
-  (status, model, the asset whose photos or voice were used, rating (★★★, ★★ or more, ★ or more, *Thumbs down*),
-  unrated or reviewed, time, standalone or a take, *New* — not watched yet), sorting (newest, oldest, rating, cost,
-  length) and a summary of the filtered clips. A detail drawer shows the player, the prompt with its
+  (source, status with counts, model, the asset whose photos or voice were used, rating (★★★, ★★ or more, ★ or more,
+  *Thumbs down*), unrated or reviewed, time, standalone or a take, *New* — not watched yet; a filter shows only while
+  it is set or can narrow the list), sorting (newest, oldest, rating, cost, length) and a summary of the filtered
+  clips. A detail drawer shows the player, the prompt with its
   tokens (and the sent prompt, exactly as it went to Venice, when descriptions were appended) — hover a token
   to see its picture, or to play the part of the voice that was sent — the references
   and voices that were sent, the settings, and your own rating (👎 *thumbs down* or one to three stars), note and tags
@@ -57,7 +62,11 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   a timeline. A **product** is a specific item to show in the film — a package, a bottle, a gadget — with clear
   packshots and a description (brand, model, colours, what the packaging says); in the form a character can hold it
   (*Held by*). A **pose** is a photo or sketch of how people stand relative to each other, applied to the characters
-  in the shot.
+  in the shot. Every asset page has the name, a line with what it holds, then *Generate with …* and ⋯ (*Open folder*,
+  *Delete…*); *Copy* sits by the description. Drag a photo or focus it and press ⌥← / ⌥→ to change the order (the
+  first is the cover); removing one asks first. Of the voice or sound clips the first is the *Default* (*Make
+  default* picks another), and each row has *Start here* and *Exact times…* for the part that is sent; its grip moves
+  it with ⌥↑ / ⌥↓.
 - **Directors**: a way of making a film, reused wherever you choose it — how it is cut, its look, the camera, the
   light, the framing, the rhythm, the acting and the sound, what it never does, style frames and style videos, and
   the model and format it prefers. Eight ready-made ones (Documentary, Music video, Noir, Commercial, Dreamy, Action,
@@ -65,9 +74,11 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   choose another, or none) or for a storyboard, and Studio adds its *Direction* to every prompt it directs (see
   [Directors](#directors)).
 - **Prompt library** with titles, tags, favourites, a negative prompt and usage counts, and **Learnings**:
-  short insights about what works, recorded by you or your agents, with the clips they are based on.
+  short insights about what works, recorded by you or your agents, with the clips they are based on. Both lists work
+  like the side lists (↑ / ↓ open a row, Enter in the search opens the first match); ⌘↵ on a prompt — in the list or
+  in its editor — puts it in Generate (*Generate with the prompt*), and ⌘K has *New prompt* and *New learning*.
 - **Sequences:** films made of clips. Each clip has its own prompt, references, voices and settings,
-  notes on what happens, any number of takes in a strip under the player — **click a take and it becomes the clip's take** and plays,
+  *Notes* for yourself (never sent), any number of takes in a strip under the player — **click a take and it becomes the clip's take** and plays,
   with sound; ← / → choose with the keyboard, ⌥-click previews without choosing — and start/end trims that each take
   remembers for itself. A clip can start on the previous clip's last
   (trimmed) frame (*Start on the previous clip's last frame*) — by default with the reference photos and voices it
@@ -75,6 +86,7 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   on the next clip's first frame (*End on the next clip's first frame*), both taken out automatically with ffmpeg, or on start and
   end images of its own. *Generate missing*
   renders the clips in the order their frames allow; *Export* cuts the selected takes into one mp4 with ffmpeg.
+  Space plays and pauses the clip, I and O set where its take starts and ends, and ⌥← / ⌥→ move a clip card.
 - **Storyboards** (their own view, next to Sequences): mock up a film's milestones as pictures, one per board,
   then generate the clips between them. A board's picture is made with **Create image…** (Venice's image
   models, about $0.06, with characters, products, outfits, places, poses, other storyboard pictures — or the previous board's
@@ -84,18 +96,23 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   one, *Preview* plays them in order, *Export* cuts them into one film, and a menu command carries
   them over to Sequences as a sequence for further editing.
 - **Your own clips** (*Own clips*): bring your own video files into the library — *Import own clips…* in
-  Media's *Videos*, adding a clip or a take from a file in a sequence, or a drop on a sequence's timeline — and use
+  Media's *Clips*, adding a clip or a take from a file in a sequence, or a drop on a sequence's timeline — and use
   them like any clip: AI clips continue from their last frame, end on their first, or redo a clip between them.
   Files are copied into `Own clips/<day>/` as an APFS clone where the disk allows (no extra space); a phone or camera film that can't be used as it is (HDR, 10-bit, 4K, a variable frame
   rate, rotation, ProRes, spatial audio, non-square pixels, sound and picture starting apart) gets an H.264 SDR
   working copy next to the untouched original. A film already imported is reused. Agents can import video files
   they upload the same way.
-- **The Editor**: open a feed clip, a take, an exported film or your own film and change it. Every edit is
-  in the list on the left, as in Sequences; one opens beside it, and with none open (*‹ Edits* in its header)
-  an overview shows them all as cards or a table. Every change is a new **version** (*v1
-  Original*, *v2* …) in a tree you can go back and forth in, compare and send to a sequence; the
-  original is never touched. A player with in/out marks and frame stepping, and a timeline with
-  the picture, the sound's waveform, added sound layers and the transcript.
+- **The Editor**: open a clip from Media, a take, an exported film or your own film and change it (*＋ New* →
+  *Own film from file…*, *From Media…* or *From an export…*, or drop a film anywhere in the Editor). Every edit is
+  in the list on the left, as in Sequences, and the Editor always opens one — the one open last, else the most
+  recently changed; *All edits* (the grid button in its header) shows them all as cards or a table. Every change is a
+  new **version** (*v1 Original*, *v2* …) in a tree you can go back and forth in, compare and send to a sequence; the
+  original is never touched. Click a version to look at it in the player; *Use* (or *Use v2* on the player while
+  comparing) makes it the one the actions change. A player with in/out marks, frame stepping and *Loop* in the
+  selection's chip, and a timeline with the picture, the sound's waveform and — once they have something — the added
+  sound layers and the transcript. The actions are in four tabs, *Picture*, *Sound* (music and effects too), *Voice*
+  and *Text*, and ⌘↵ runs the card that has the focus; ⋯ in the header holds *Rename*, *Clean up versions…*, *Open
+  folder* and *Delete…*.
   - **Free, on your Mac:** keep or cut out a marked range, fade in and out, volume (the whole film, the marked
     range, or only the voice or the background), mute, removing the voice or keeping only the voice (voice and
     background separated with macOS's own sound isolation), noise reduction, even loudness (−14 / −16 / −23 LUFS), and adding
@@ -110,8 +127,9 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
     a paid AI take that couldn't be put into the film (a full disk) is put in again for free when you continue the job.
 - **New voices for characters:** *Design a voice with AI…* designs a voice from a description and adds it as a voice
   clip, and a character's voice clip can be cloned for new lines once you tick *May be cloned for new lines*.
-- **Export format** per sequence: automatic (the first clip's size) or 480p / 720p / 1080p, for films that mix
-  your own footage with AI clips. Every export records where its clips meet, which the Editor shows as cut markers.
+- **Export format** per sequence (⋯ in its header): automatic (the first clip's size) or 480p / 720p / 1080p, for
+  films that mix your own footage with AI clips. Every export records where its clips meet, which the Editor shows as
+  cut markers.
 - **Redo a clip between its neighbours** (*Redo between neighbours*): a clip in the middle that didn't turn out is
   set up to start exactly on the previous clip's last frame and end exactly on the next clip's first frame — both
   taken out automatically, with live previews — and a new take fits the cut without touching the neighbours.
@@ -127,25 +145,26 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   An optional daily and monthly budget: anything paid that would take the spending past one asks first (*Send
   anyway* / *Cancel*), and an agent's request shows the same warning in its approval dialog.
 - **The same list on the left** in Characters, Environments, Products, Outfits, Poses, Directors, Sequences,
-  Storyboards and the Editor: *＋ New …* at the top, a search field (⌘F) that looks in the names — and in the descriptions of the
-  library kinds and where a film came from in the Editor —, ↑ / ↓ to move between the rows and Enter to open one. **✕ on a row**
-  (on hover or keyboard focus) asks in the row itself — *Delete “Anna”?*, one line on what goes and what stays,
-  *Delete* / *Cancel* — and shows there what went wrong if it couldn't; the open one gives way to the row below (in
-  the Editor, to the overview).
+  Storyboards and the Editor: *＋ New* at the top, a search field (⌘F) that looks in the names — and in the
+  descriptions of the library kinds and where a film came from in the Editor —, ↑ / ↓ to move to a row and open it,
+  Enter in the search to open the first match and Esc to clear it. **✕ on a row** (on hover or keyboard focus, or ⌫
+  on a focused row) asks in the row itself — *Delete “Anna”?*, one line on what goes and what stays, *Cancel* /
+  *Delete* — and shows there what went wrong if it couldn't; the open one gives way to the row below.
 - **A grouped sidebar that folds away:** *Create* (Generate, Sequences, Storyboards, Editor) and *Library*
-  (Media, the five kinds, Directors and Prompts), one icon set, two slim status rows at the bottom — *Activity* and the agent
-  connection — above *Settings*, and a 72 px icon rail (⌃⌘S, or the button by the wordmark) that gives the
-  views more room.
+  (Media, the five kinds, Directors and Prompts), one icon set, slim status rows at the bottom — *Activity*, and the
+  agent while the connection is on or a request waits (otherwise ⌘K → *Agent*) — above *Settings* (with a dot until
+  there is an API key), and a 72 px icon rail (⌃⌘S, or the button by the wordmark) that gives the views more room.
 - **⌘K — search everywhere:** from any view, also while typing in a field (or with the search button by the
-  wordmark), one field finds the views and Settings' sections, actions such as *New sequence*, *New character* or
-  *New director*, and the library: assets and directors (the ready-made ones too) by name and description, saved prompts (Enter puts one in Generate's form), sequences and their
+  wordmark), one field finds the views and Settings' panes, actions such as *New sequence*, *New character*,
+  *New director*, *New prompt* or *New learning*, and the library: assets and directors (the ready-made ones too) by name and description, saved prompts (Enter puts one in Generate's form), sequences and their
   clips' notes, storyboards' boards and transitions, edits, clips (newest first), images by prompt and exported films.
   Case and accents don't matter and each word matches the start of a word; ↑ / ↓ and Enter (or a click) open the
-  result where Studio always shows it, Esc closes. It is for you only: agents search with their own list tools.
-- **Your own folder:** a base folder you choose, with human-readable folder and file names (the folder names are
-  Swedish). Paths in the
-  database are stored relative to it, so the library can be moved, switched or tidied up from Settings.
-- **Export & import** of the whole library as one zip, for moving it to another Mac.
+  result where Studio always shows it, Esc closes. With nothing typed it lists what you changed last and the
+  *New …* actions. It is for you only: agents search with their own list tools.
+- **Your own folder:** a base folder you choose, with human-readable folder and file names (in English). Paths in
+  the database are stored relative to it, so the library can be moved, switched or tidied up from Settings.
+- **Export & import** of the whole library as one zip, for moving it to another Mac (*Settings → Library → Move to
+  another computer*).
 - **Agent connection (MCP):** an optional Streamable HTTP MCP server (off by default, loopback + Tailscale only,
   bearer token) through which your own agents work much as you do: they create assets of every kind and give them
   photos and sound (sent as uploads or URLs Studio fetches — never paths on your Mac), set references, voices and
@@ -173,19 +192,21 @@ changes.
 Studio for Windows works like the Mac version; this guide is written for the Mac, so read it with Windows' keys and
 places:
 
-- **Ctrl instead of ⌘, Alt instead of ⌥, Shift for ⇧** — the app's own hints and tooltips say so. Ctrl+K searches
-  everywhere, Ctrl+F searches a list, Ctrl+Enter generates, Ctrl+Shift+F opens focus mode, Ctrl+Z goes back a
-  version in the Editor, Ctrl+scroll zooms its timeline, Alt+← / Alt+→ move a reference, a sound or a board, and
+- **Ctrl instead of ⌘, Alt instead of ⌥, Shift for ⇧** — the app's own hints and tooltips say so, and
+  [Keyboard shortcuts](#keyboard-shortcuts) lists them all. Ctrl+K searches everywhere, Ctrl+, opens Settings, Ctrl+F
+  searches a list, Ctrl+Enter generates, Ctrl+Shift+F opens the larger prompt window, Ctrl+Z goes back a version in
+  the Editor, Ctrl+scroll zooms its timeline, Alt+← / Alt+→ move a reference, a clip, a photo or a board, and
   Alt+click previews a take. Two are different: **Ctrl+Shift+S** folds the sidebar (⌃⌘S on a Mac) and **Ctrl+Y**
-  redoes in the Editor (Ctrl+Shift+Z works too). The menu bar is hidden; Alt shows it.
+  redoes in the Editor (Ctrl+Shift+Z works too). There is no menu bar; its shortcuts still work (Ctrl+0, Ctrl+Plus,
+  Ctrl+-, F11, and Ctrl+, for Settings).
 - **Voice separation is macOS only** (it is Apple's sound isolation). *Remove the voice*, *Only the voice*, keeping
   the background under a new voice and *Separate the vocals* of a song stay off and say why — where a voice changes,
   the original sound is lowered instead, and lyrics are transcribed from the whole song. Everything else works.
 - **Where things are:** *Show in File Explorer* wherever this guide says *Show in Finder*; deleted files go to the
-  **Recycle Bin**; the suggested library folder is *Studio* in your **Videos** folder; settings are in
+  **Recycle Bin**; the suggested library folder is *JIBES Studio* in your **Videos** folder; settings are in
   `%APPDATA%\Studio\settings.json`, the API key and the agent token encrypted for your Windows user account; new or
   failed results show as a dot on Studio's **taskbar** button (the Dock counts them on a Mac). ffmpeg comes with
-  Studio (*Settings → Tools* shows it); if it is ever missing, reinstall Studio.
+  Studio (*Settings → About* shows it); if it is ever missing, reinstall Studio.
 
 ## Requirements
 
@@ -249,7 +270,7 @@ Studio Dev. It never updates itself from GitHub – run the command again to bri
 ## Updates
 
 Studio asks GitHub once a day, when it starts, whether a newer version is out – and whenever you ask: **Check for
-Updates…** in the Studio menu (macOS) or **Check for updates** under **Settings → About Studio**. A newer version shows
+Updates…** in the Studio menu (macOS) or **Check for updates** under **Settings → About**. A newer version shows
 as a small notice in the bottom right corner: **Update now** downloads it, checks it and installs it, **Release notes**
 opens its page on GitHub, and **Later** hides that version until a newer one comes out.
 
@@ -266,7 +287,7 @@ opens its page on GitHub, and **Later** hides that version until a newer one com
   – Studio says what to wait for. If anything goes wrong, the Studio you have stays as it was.
 - **What it sends:** the check is one request to GitHub (`api.github.com`) for the newest release's details, the
   download only happens when you choose *Update now*, and nothing about you or your library goes with either. Turn the
-  daily check off with **Check for updates automatically** under **Settings → About Studio**; Studio then only asks
+  daily check off with **Check for updates automatically** under **Settings → About**; Studio then only asks
   when you do.
 - **Studio Dev**, **Studio Test** and other development builds (`npm run dev`, `npm run dev:real`) never look for
   updates: they come from git.
@@ -343,7 +364,7 @@ the whole library can be moved by moving its folders. Files of your own elsewher
 alone. A library from an earlier layout (`studio.db`, `generations/`, `thumbs/` … directly in the folder) is
 converted to this layout when it is opened.
 
-**Export & import.** *Settings → Export & import → Export library…* packs the whole library into one
+**Export & import.** *Settings → Library → Move to another computer → Export library…* packs the whole library into one
 zip (saved in `~/Downloads` by default, named with the date): a consistent copy of the database and every file in the
 library's folders. Caches Studio rebuilds by itself (posters, frames, stems, filmstrips, scratch) stay out, except a
 frame a take was started from; your own files elsewhere in the base folder, settings, the API key and the agent token
@@ -358,16 +379,21 @@ have to wait until it is done; an export and an import can both be cancelled (*C
 **Media**, first under *Library* in the sidebar, holds everything you've made, in three tabs (the one you
 used last opens again):
 
-- **Videos** — every video: generations, takes of sequence clips and storyboard transitions, your own films and
-  the Editor's versions. Cards or a table (*Cards* / *Table*), search, the filters and sorting described under
-  [Features](#features), *Import own clips…* (or drop video files on it), and the detail drawer with the player,
-  the prompt, the references, the settings and your rating, note and tags. *Use again* opens Generate with the
-  clip's settings in the form.
-- **Images** — every picture: made with *Create image…*, uploaded or dropped, frames saved from clips. Filters for
-  where it came from and where it belongs (the sequence or storyboard, or none); click one to see it
-  large.
-- **Films** — the films exported from sequences and storyboards. Play one, open it in the Editor
-  or go to the sequence or storyboard it came from.
+- **Clips** — every video: generations, takes of sequence clips and storyboard transitions, your own films and
+  the Editor's versions. Cards or a table (*Cards* / *Table*), search (⌘F; Enter opens the first match, ↑ from the
+  table's first row goes back to it), the filters and sorting described under [Features](#features) — a filter chip
+  shows only while it is set or can narrow the list, and *Status* counts what is done, in progress and failed
+  —, *Import own clips…* (or drop video files on it), and the detail drawer with the player, the prompt, the
+  references, the settings, *Show in Finder* and your rating, note and tags. *Use again* opens Generate with the
+  clip's settings in the form. Pointing at a card shows *Use again* and *Add to sequence*; its ⋯ has *Edit…* (open it
+  in the Editor), *Show in Finder* and *Delete…*, which asks in the menu.
+- **Images** — every picture, as framed cards: made with *Create image…*, your own (uploaded or dropped), frames
+  saved from clips. Filters for where it came from (*Source*: created, *Own images*, frames) and where it belongs
+  (*Placement*: a sequence, a storyboard, or *Reference images* — none); click one to see it large, ← / → for the
+  next.
+- **Films** — the films exported from sequences and storyboards, with their length (*1 min 24 s*) and number of
+  clips. Play one (Space, ← / → for the next, *Close (Esc)*), change it in the Editor (*Edit…*) or go to the
+  sequence or storyboard it came from.
 
 **Generate** shows only this session beside its form: what you made there since Studio started, and clips that were
 still being made when it started (they stay once they are done). Closing the window keeps the session; quitting Studio ends it, and next time the list starts
@@ -378,8 +404,9 @@ sequence or storyboard.
 ## Prompts, `@ImageN`, `@AudioN` and `@VideoN` references
 
 In **reference mode** the model receives the reference images in order, and the prompt refers to them as
-`@Image1`, `@Image2` … in that order. Picking a character, environment, product, outfit or pose adds its photos to
-the reference images, and a label for each asset inserts the right tokens, for example:
+`@Image1`, `@Image2` … in that order. Picking a character, environment, product, outfit or pose (*＋ From library*,
+which opens on the kind you added last) adds its photos to the reference images, and a label for each asset inserts
+the right tokens, for example:
 
 ```
 Anna (@Image1, @Image2) wearing Red dress (@Image3) walks along the beach promenade (@Image4) …
@@ -399,19 +426,19 @@ it doesn't come along (a note says so).
 
 **Reference videos.** With a Seedance 2.x reference model, **Reference videos** (under the reference images) takes
 videos whose motion, camera movement or style the clip should follow: *＋ Video* adds a clip from Media, a take of a
-sequence clip, an exported film, or a file (or drop one on the row). They are references only – never edited,
-extended or shown in the result – and the prompt refers to them as `@Video1`, `@Video2` … in order: `the camera
-moves as in @Video1`. Each tile shows the part that is sent and plays it while you point at it; click it to choose
-the part (drag the window or its edges, *Start here*, *Whole video*), drag it or press ⌥← / ⌥→ to change the order
-(the tokens follow, like the pictures'), ✕ removes it. A new video sends its first 5 s (or all of it when it is
-shorter). Seedance 2.0 takes at most 3 videos of 2–15 s, 15 s together; Seedance 2.5 at most 10 of 2–30 s, 30 s
-together – the row counts along and says what is over. The video seconds are priced too, so a clip with reference
-videos costs more; the price beside *Generate* follows the parts you choose. Studio cuts each part to a small MP4,
-sends it as `<Video 1>` …, and the legend tells the model what to take from it (`Refer to the action, camera
-movement and style in @Video1`). Other reference models take no videos: the row then offers the family's Seedance
-reference model. A sequence clip takes videos the same way (the cast doesn't: videos aren't library assets), and a
-clip that continues the previous one with references carries them along like its pictures – but references of its
-own, even a single video, replace everything it would carry (the clip editor says so).
+sequence clip, an exported film, or a file (or drop one on the row, which is a single line while it is empty). They
+are references only – never edited, extended or shown in the result – and the prompt refers to them as `@Video1`,
+`@Video2` … in order: `the camera moves as in @Video1`. Each tile shows the part that is sent and plays it while you
+point at it; click it to choose the part (drag the window or its edges, *Start here*, *Whole video*), drag it or press
+⌥← / ⌥→ to change the order (the tokens follow, like the pictures'), ✕ removes it. A new video sends its first 5 s (or
+all of it when it is shorter). Seedance 2.0 takes at most 3 videos of 2–15 s, 15 s together; Seedance 2.5 at most 10
+of 2–30 s, 30 s together – the row counts along and says what is over. The video seconds are priced too, so a clip
+with reference videos costs more; the price beside *Generate* follows the parts you choose. Studio cuts each part to a
+small MP4, sends it as `<Video 1>` …, and the legend tells the model what to take from it (`Refer to the action,
+camera movement and style in @Video1`). Other reference models take no videos: the row then offers the family's
+Seedance reference model. A sequence clip takes videos the same way (the cast doesn't: videos aren't library assets),
+and a clip that continues the previous one with references carries them along like its pictures – but references of
+its own, even a single video, replace everything it would carry (the clip editor says so).
 
 **Poses.** A pose chip applies to the characters you choose (all of them by default):
 `Anna (@Image1) and Erik (@Image3) posed as in Hug (@Image5)` (`… och … i posen …` in Swedish).
@@ -432,7 +459,8 @@ shows where it lands and every badge shows the number it will get — or focus i
 keeps pointing at the same picture or clip: with references [A, B, C] and `@Image1 hugs @Image3`, dragging C to
 the front gives [C, A, B] and `@Image2 hugs @Image1`. Pictures past the model's limit are marked *not sent*;
 dragging one forward sends it instead of the last one. This works in Generate and in the sequence clip editor, so
-photos can be renumbered without picking or uploading them again in another order.
+photos can be renumbered without picking or uploading them again in another order; *Create image…*'s references
+move the same way.
 
 **A closer look.** Rest the pointer on a reference thumbnail (or Tab to it) and a larger picture shows beside it,
 with what it is: `@Image2 · Anna · photo 2 of 3`, and *not sent* for one past the model's limit. It goes away
@@ -479,12 +507,14 @@ In the prompt editor:
 - each `@ImageN` and `@AudioN` is coloured like the asset it points at, `@VideoN` in a colour of its own; hover to
   see the photo, play the voice or watch the part of the video that is sent; wrong references turn red;
 - typing `@` opens a menu with the selected photos, sounds and videos and *Add from the library*;
-- the list under the editor shows every reference with its token, marks photos and clips the prompt never mentions
+- the list under the editor — folded behind *References in the prompt (N)*, and it remembers whether you opened it —
+  shows every reference with its token, marks photos and clips the prompt never mentions
   (*not mentioned*) — only those the legend doesn't explain: one whose description (or wearer) is appended is marked
   *described* instead, and isn't warned about — and offers quick fixes such as changing a token to `@Image3`,
   removing `@Image7`, removing `@Audio2` when the voices add up to more than 15 s, or switching to a model that
   takes reference videos;
-- **Generate** is disabled while a reference is wrong, and says why.
+- **Generate** is blocked while a reference is wrong, and the line under it says why;
+- the character count shows once the prompt nears the model's limit.
 
 The rules live in [`src/shared/prompt-refs.ts`](../src/shared/prompt-refs.ts) and are applied by the editor, by the
 main process before every paid submission (including *Generate missing* and agent requests) and by the agent
@@ -502,33 +532,38 @@ prompt. It lives in the library (*Directors*, after Poses in the sidebar), in th
 **Ready-made** directors at the bottom, your own above them under *Yours*.
 
 - **Ready-made** directors (Documentary, Music video, Noir, Commercial, Dreamy, Action, Vintage film, Minimal) can
-  direct as they are, but not be changed: **Use a copy** makes one of your own from one, to change and give style
-  frames and videos.
+  direct as they are, but not be changed: their page has *Generate with the director* and **Copy to edit**, which
+  makes one of your own from one — named “Noir (copy)”, its name ready to retype — to change and give style frames
+  and videos. Their settings are shown as text.
 - **Your own** (*＋ New* in the list, or ⌘K → *New director*) has a name, a line about what it is good for and a field
-  for each part, saved as you type: **Editing** (pace, cuts, long takes), **Look** (grade, contrast, grain,
-  palette), **Camera**, **Light**, **Framing** (shot sizes and their order), **Rhythm** (tempo, slow motion),
-  **Performance** (how the actors play), **Sound** (music, ambience, silence) and **Avoid** (what it never does).
-  Where the building blocks have phrases for a part, a chip beside it (*＋ Camera*, *＋ Light*, *＋ Style* …) puts one
-  in. Short, concrete phrases work best — what the camera does and what the light is, not how good the film is.
-- **In a sequence:** the **shot length** it aims for (2–15 s: new clips get the nearest duration the model offers,
-  and a song's clips are cut near it) and what happens **between shots** — *Cut* (new clips start fresh), *Flow*
-  (new clips continue from the previous clip's last frame) or *Sequence's own*. Only new clips get them; clips you
-  already have aren't changed.
+  for each part under **Direction**, saved as you type: **Editing** (pace, cuts, long takes), **Look** (grade,
+  contrast, grain, palette), **Camera**, **Light**, **Framing** (shot sizes and their order), **Rhythm** (tempo, slow
+  motion), **Performance** (how the actors play), **Sound** (music, ambience, silence; only sent with sound) and
+  **Avoid** (what it never does; added to the negative prompt). Each part is a prompt field like the others: `/` puts
+  in a building block, ⌘⇧F opens the larger window, and where the building blocks have phrases for a part a chip
+  beside it (*＋ Camera*, *＋ Light*, *＋ Style* …) puts one in; a part's label explains it when you point at it.
+  Short, concrete phrases work best — what the camera does and what the light is, not how good the film is.
+- Under the parts, **Added to the prompt** (*Show the text*) shows the *Direction* section exactly as a clip gets
+  it, in the prompt language, and what it adds to the negative prompt.
 - **Style frames** are its pictures (dropped or added like a character's photos, first one the cover): stills whose
   grade, light and texture the clips should match — never their people, places or objects. **Style videos** (from a
   file, Media, a take or an exported film, copied into the director's folder, each with the part that is sent, 2–15
   s) give the camera movement to follow.
-- **Defaults:** a model, an aspect ratio and a resolution that choosing the director sets, each only where the model
-  offers it.
-- Beside the fields, **Added to the prompt** shows the *Direction* section exactly as a clip gets it, in the prompt
-  language, and what it adds to the negative prompt.
+- **Shots and defaults**, folded at the bottom with a summary of what is set:
+  - **In a sequence:** the **shot length** it aims for (2–15 s: new clips get the nearest duration the model offers,
+    and a song's clips are cut near it) and what happens **between shots** — *Cut* (new clips start fresh), *Flow*
+    (new clips continue from the previous clip's last frame) or *Sequence's own*. Only new clips get them; clips you
+    already have aren't changed.
+  - **Defaults:** a model, an aspect ratio and a resolution that choosing the director sets, each only where the
+    model offers it.
+- At the top, *Generate with the director* opens Generate directed by it, and ⋯ holds *Open folder* and *Delete…*.
 
 **Where you choose one.**
 
 - **Generate:** *Director* under *Model* (none by default). Choosing one applies its defaults. *Added to the prompt*
   lists its lines after the descriptions of the references, and its style frames and videos are shown under the
   reference images and videos as *from the director* — they come after your own (`@Image4`, `@Video2` …) and can
-  only be changed in the director. *Generate with the director* in Directors opens Generate directed by it.
+  only be changed in the director.
 - **Sequences and music videos:** the **Director** chip in the header (beside *Cast* and *Song*) directs every clip.
   Choosing one sets the sequence's defaults for new clips; existing clips keep their settings. A clip's *Directed by*
   is *Follow the sequence* by default, or another director, or *None*; a clapperboard on the clip's card marks a clip
@@ -579,10 +614,25 @@ neighbours*) or has an end image of its own is always sent exactly. If the model
 clip carries 9, the 9th gives way for the frame (a note says so). A
 clip can likewise take its **end image from the next clip** (*End on the next clip's first frame*): the next clip's first
 frame after its start trim, sent as the end image to a model that takes one (Seedance's image-to-video models do;
-turning the switch on picks one). **Generate missing** generates every clip without a finished
+turning the switch on picks one). Each switch shows only where there is a neighbour to take a frame from.
+**Generate missing** generates every clip without a finished
 selected take, each after the clips whose frames it needs, waiting for each one; if two clips wait on each other's
-frames it says which switch to turn off before anything is paid for. **Export** renders the selected, trimmed
-takes into one H.264/AAC mp4 in the sequence's folder, showing a picture two clips share at a cut only once.
+frames it says which switch to turn off before anything is paid for. The button shows only while something is
+missing, always with the count (*Generate missing (3)*); the price, and the accent colour, only when the run can
+start. When it can't — no API key, a clip without a prompt, a missing frame — its tooltip says why, and a click
+shows the clip in the way (or *Settings → Venice* for the key). **Export** renders the selected, trimmed
+takes into one H.264/AAC mp4 in the sequence's folder, showing a picture two clips share at a cut only once. The
+rest is under ⋯ in the header: *Export format*, *Edit latest export*, *Open folder*, *Mark all as seen*, *Add a
+song…* and *Delete sequence…*, which asks in the menu.
+
+**Working on a clip.** Click a clip's card — or move along the cards with ← / → and press Enter — to open it in the
+clip editor beside the player. Drag a card, or focus it and press ⌥← / ⌥→, to move the clip (a song's clips keep the
+song's order). **Notes** at the top of the clip editor are for you — who is in the shot, the framing, ideas — and are
+never sent; the prompt is. Space plays and pauses the clip anywhere in the view (not while you type, and not on a
+button you reached with the keyboard, which Space presses), and I and O set where the chosen take starts and ends at
+the playhead; the trim fields read *Starts at* and *Ends at*. *Generate take* waits at the bottom of the clip editor
+with ×1–×4, the price and, right above it, *Duration*, *Resolution*, *Aspect ratio* and *Sound*; ⌘↵ sends it from any
+field. Lengths are written *6 s*, *7.4 s* or *1 min 23 s*.
 
 **The cast.** *Cast* in the sequence's header holds the characters, outfits (and who wears them), environments,
 products and poses of the whole sequence, chosen once instead of per clip: *+ Add* adds an asset at the end (a character
@@ -603,7 +653,8 @@ first), each keeping its place when it finishes. Click one and it becomes the cl
 with sound; click it again to start over. ← / → (and Home / End) choose takes at once without playing them, ⌥-click or
 the take's preview button plays one without choosing it (then choose it, or go back to the chosen one), hovering
 scrubs a silent preview, and the menu (right-click or ⋯) uses the take's prompt, opens the take in the Editor,
-shows it in Finder (*Show in Finder*) or deletes it. Each take keeps its own trims: trim A, choose B, choose A again, and A's trims are back. A new take
+shows it in Finder (*Show in Finder*) or deletes it. *＋ From file…* above the strip adds a film of your own as a
+take. Each take keeps its own trims: trim A, choose B, choose A again, and A's trims are back. A new take
 is chosen by itself only when the clip has no usable one; otherwise it waits in the strip, marked *New*. *×2*–*×4*
 beside *Generate take* makes that many takes at once (variants of the same settings, the total on the button): all
 of them land in the strip, and the first to finish is chosen only if the clip had no usable take.
@@ -614,8 +665,8 @@ start or end image is generated with the image-to-video model of its family: the
 its reference photos are dropped (and their `@` tokens taken out of the prompt), and the prompt describes what
 happens between them. Pictures made or saved for a sequence's clips are kept as stills in its `Storyboard/` folder.
 
-**Redo between neighbours.** When one clip in the middle came out badly, this button (on the timeline cards and in
-the clip editor) sets it to start on the previous clip's last frame and end on the next clip's first frame, with an
+**Redo between neighbours.** When one clip in the middle came out badly, this button (in the clip editor, under the
+frame switches) sets it to start on the previous clip's last frame and end on the next clip's first frame, with an
 image-to-video model that takes an end image, keeping its prompt, length and sound. The first or last clip only gets
 the one neighbour it has. The editor shows both frames and the price; the neighbours need finished selected takes.
 When the new take is ready, click it in the take strip — the old take stays selected until you choose, and stays
@@ -664,6 +715,8 @@ every singing take before you export — *In sync* means the voice lines up, not
 A **storyboard** is a different way to make a film: first the milestones as pictures, then the motion between them.
 It has a name, a format (16:9 by default; 9:16, 1:1, 4:3, 3:4 or 21:9) and an ordered row of **boards**,
 and it lives in its own view, **Storyboards** — storyboards never show up in Sequences, nor sequences here.
+*＋ New* asks only for the format; the new storyboard opens with its name field ready in the header, and the format
+can be changed later under ⋯ → *Format*.
 
 - **One picture per board**, with a short note under it (what the picture shows). Click the picture (or the empty
   board) to make one with **Create image…**, to take any photo of a character, place, product, outfit or pose from
@@ -673,38 +726,106 @@ and it lives in its own view, **Storyboards** — storyboards never show up in S
   needs ffmpeg). A picture whose shape differs from the storyboard's format is marked as another format: the clips
   to and from it get the picture's shape. A board may stay empty while you plan.
 - **Boards are reordered** by dragging them or with ⌥← / ⌥→, added with **+** before, between or after them (several
-  pictures dropped on the new-board button become one board each) and removed with a two-step confirmation.
+  pictures dropped on the new-board button become one board each) and removed with a two-step confirmation. ← / →
+  move along the row, board → transition → board.
 - **Transitions.** Between every two neighbouring boards there is a transition (*Transition N*): the clip from the
-  first board's picture (the start image) to the second's (the end image). Click it to edit what happens — what
-  moves and how the camera travels from one picture to the other; a suggestion button fills in a plain template from
-  the two boards' notes — and its length (5 s by default), resolution (480p), sound and model (only image-to-video models that
-  take an end image; Seedance by default). **Generate** shows the price first; every take is kept, and you choose the
-  one that is used. *×2*–*×4* beside it sends that many takes at once (the total on the button); the card's own
-  *Generate* on the board row sends one. Moving, inserting or removing a board removes the transitions between boards that are no longer
-  neighbours — their prompts go, their takes become ordinary clips in Media, nothing is deleted — and new
-  neighbours get a new, empty transition; Studio asks first when a move or a new board would remove a transition with
-  a prompt or takes. A take made before one of its boards got another picture is marked as made from an earlier picture; a new take
-  made from the pictures there now takes its place when it is done, and deleting the selected take selects another
-  finished one. A negative prompt an agent gave a transition is shown under its prompt, where it can be removed.
+  first board's picture (the start image) to the second's (the end image). Click it to edit what happens — what moves
+  and how the camera travels from one picture to the other; a suggestion button fills in a plain template from the two
+  boards' notes — and its length (5 s by default), resolution (480p), sound and model (only image-to-video models that
+  take an end image; Seedance by default). *Generate take* at the bottom of the editor shows the price first (⌘↵ sends
+  it from any field, Space plays the take); every take is kept, and you choose the one that is used. *×2*–*×4* beside
+  it sends that many takes at once (the total on the button); the card's own *Generate* on the board row, shown when
+  the transition can be sent, sends one. Moving, inserting or removing a board removes the transitions between boards
+  that are no longer neighbours — their prompts go, their takes become ordinary clips in Media, nothing is deleted —
+  and new neighbours get a new, empty transition; Studio asks first when a move or a new board would remove a
+  transition with a prompt or takes. A take made before one of its boards got another picture is marked as made from
+  an earlier picture; a new take made from the pictures there now takes its place when it is done, and deleting the
+  selected take selects another finished one. A negative prompt an agent gave a transition is shown under its prompt,
+  where it can be removed.
 - **Generate missing** sends every transition without a finished take, with the total price on the button. The
   transitions don't depend on each other, so they are sent one after another without waiting for each to render;
-  nothing is paid for while any of them can't be made (a board without a picture, a missing prompt) — the button then
-  shows no price, and a click shows the transition that stands in the way.
+  nothing is paid for while any of them can't be made (no API key, a board without a picture, a missing prompt) —
+  the button then shows no price, its tooltip says why, and a click shows the transition that stands in the way (or
+  *Settings → Venice* for the key).
 - **Preview** plays the selected takes back to back; **Export** cuts them into one mp4 in the storyboard's
   folder. Two neighbouring transitions both show the board between them (one ends on it, the next starts on it), so
   where both takes were made from the same picture the export drops the later one's first frame and the board is
   shown once.
-- **Making a sequence** of it (under ⋯) gives an ordinary sequence named after the storyboard, with one clip per
-  transition and a copy of its selected take, so the film can be trimmed, extended and redone in Sequences. The storyboard stays as
-  it is.
+- **Making a sequence** of it (⋯ → *Convert to sequence*) gives an ordinary sequence named after the storyboard,
+  with one clip per transition and a copy of its selected take, so the film can be trimmed, extended and redone in
+  Sequences. The storyboard stays as it is. ⋯ also holds *Format*, *Edit latest export*, *Open folder*, *Mark all as
+  seen* and *Delete…*.
 
 **Create image…** makes a picture with Venice's image models — from a prompt alone, or combining references (the first
 one is the base picture the model edits) — with model, format (the storyboard's by default), resolution and quality
-to choose, the price on the button and a button to try again. A switch to use the previous board's picture as a
-reference (on by default when the previous board has a picture) puts that picture first among the references, so place, light and
-people carry over from one milestone to the next. The finished picture goes onto the board, and every result is
-kept in the storyboard's `Images/` folder. **Safe mode for images** (Settings → Generation → Images, on by
-default, also switchable in the dialog) lets Venice blur adult content.
+to choose, the price on the button (*Create · $0.06*; ⌘↵ from any field) and a button to try again. The previous
+board's picture starts as the first reference, marked *Previous*, so place, light and people carry over from one
+milestone to the next; ✕ removes it and *＋ Previous board's image* brings it back. ⌥← / ⌥→ reorder the references,
+and the negative prompt is a *Negative prompt* fold with building blocks. The finished picture goes onto the board,
+and every result is kept in the storyboard's `Images/` folder. **Safe mode for images** (*Settings → Generation*, on
+by default; *Safe mode on · Turn off* in the dialog) lets Venice blur adult content.
+
+## Settings
+
+**Settings** (⌘, — or *Settings…* in the Studio menu, or the bottom of the sidebar) has six panes, shown one at a
+time: beside their list, or as tabs above them in a narrow window.
+
+- **Venice** — the API key. While there is none the field is ready to type in, with a link to Venice's key page,
+  Settings has a dot in the sidebar, and every paid form says *Add your Venice API key in Settings* under its button
+  (which then opens this pane).
+- **Spending** — today and this month, then the optional daily and monthly **budget**, then *Spending details*: the
+  last 30 days as a chart (*Show as a table*) and this month by kind, by place and by who asked.
+- **Generation** — *Prompt language* and *Safe mode for images*.
+- **Library** — *Folder* (where the library is, *Show in Finder*, *Change folder…* and *What's in the folder*), *Move
+  to another computer* (*Export library…*, *Import a library…*, see [Where things are
+  stored](#where-things-are-stored)) and *Tidy up*.
+- **Agent connection** — see [Connecting your own agent](#connecting-your-own-agent).
+- **About** — the version, updates (*Check for updates*, *Check for updates automatically*), ffmpeg and voice
+  separation.
+
+A field saved with a button (the key, the budget, the agent port) shows *Save* and *Undo* while it has changes —
+Enter saves, Esc undoes — and then *Saved*.
+
+## Keyboard shortcuts
+
+The same keys work the same way in every view. On Windows read Ctrl for ⌘ and Alt for ⌥ (see [On
+Windows](#on-windows)); the app's tooltips show them that way.
+
+| Where | Keys | What they do |
+| --- | --- | --- |
+| Anywhere (not while a dialog is open) | ⌘K | Search everywhere, also while typing in a field |
+| | ⌘, | Settings |
+| | ⌃⌘S | Fold or unfold the sidebar |
+| | ⌘F | The view's search, in the views that have one |
+| Dialogs, menus, viewers | Esc | Closes the topmost one only, and gives the focus back |
+| Forms | ⌘↵ | Sends the form from any of its fields: Generate, a sequence clip, a storyboard transition, *Create image…*, the Editor card that has the focus; in Prompts, *Generate with the prompt*. Plain Enter never sends anything paid |
+| | ⌘⇧F | Opens the prompt in a larger window |
+| | / | A building block at the caret |
+| | @ | A reference at the caret (reference mode) |
+| Lists (the side lists, Prompts, Learnings) | ↑ ↓, Home, End | Move to a row and open it |
+| | Enter, in the search | Opens the first match (also in Media) |
+| | ↓ in the search, ↑ on the first row | Between the search and the list (also in Media's table) |
+| | Esc, in the search | Clears it |
+| | ⌫ or Delete | Asks to delete the row (the side lists) |
+| | ⌘↵ on a row | Prompts: generates with the prompt |
+| Strips | ← → | Between clips (Sequences) and along the boards and transitions (Storyboards); Enter opens a clip or a transition |
+| | ⌥← / ⌥→ | Moves the focused item one place, wherever it can be dragged: references, voices and sounds, reference videos, clips, boards, an asset's photos |
+| | ⌥↑ / ⌥↓ | The same in a list that runs down: cast rows, voice and sound clips (by the grip) |
+| Take strip | ← → (Home, End) | Choose a take at once |
+| | ⌥← / ⌥→, ⌥-click | Preview the next or previous take (or the one clicked) without choosing it |
+| | Space, Enter | Play or pause; play from the start |
+| | ⌫ or Delete | Asks to delete the take |
+| Players | Space | Play or pause: the clip in Sequences, a transition, the Editor, Media's film player (not in a field, nor on a button reached with the keyboard) |
+| | I, O | Where the take starts and ends (Sequences); the selection's in and out (Editor) |
+| | ← → | The previous or next picture or film in Media's viewers |
+| Editor | ← → | One frame back or forward |
+| | ⇧← / ⇧→ | One second back or forward |
+| | J, K, L | Play backwards, pause, play (J or L again: faster) |
+| | Esc | Clears the selection |
+| | ⌘Z, ⌘⇧Z | The previous or next version (Ctrl+Y too on Windows) |
+| | ⌘-scroll | Zooms the timeline |
+| Tabs and choices | ← →, Home, End | Move between tabs or options and pick one; a row of them is one Tab stop |
+| Menus | ↑ ↓, Home, End, Enter | Move and choose |
 
 ## Connecting your own agent
 
@@ -731,15 +852,20 @@ light up together, whichever you hover. The tiles, start and end images, a neigh
 an edit's frames show a larger picture the same way when hovered or tabbed to. Nothing opens on a click — a request
 can be looked at there, not changed — and Esc closes a card before it closes the dialog.
 
-Turn it on under **Settings → Agent connection**; it listens on `http://127.0.0.1:8770/mcp` and on this Mac's
-Tailscale address. See **[docs/AGENTS.md](AGENTS.md)** for configuration examples, the full list of its 99
-tools, sending files, the review loop and troubleshooting.
+Turn it on under **Settings → Agent connection** (*Allow agents to connect*); it listens on
+`http://127.0.0.1:8770/mcp` and on this Mac's Tailscale address. Once it is on, **Connect an agent** has a tab per
+agent — *Claude Desktop*, *Claude Code* (a ready-made `claude mcp add` command), *Hermes* and *OpenClaw* (their
+configuration) — and **Advanced** (folded) holds the token, the addresses, Claude Desktop on another computer and the
+port. While the connection is on, the agent's row at the bottom of the sidebar shows what it does and opens the
+Agent panel; with it off, the row is gone and ⌘K → *Agent* opens the panel. See **[docs/AGENTS.md](AGENTS.md)** for
+configuration examples, the full list of its 99 tools, sending files, the review loop and troubleshooting.
 
-**Claude Desktop** needs no configuration: in the same section, **Add to Claude Desktop** makes a Claude Desktop
-extension with this Mac's address and the token and opens it in Claude Desktop, which asks you to install it. For
-Claude Desktop on another computer in your tailnet, choose the Tailscale address and save the file there instead. The
-file holds the token, so don't share it; after you change the token, add Studio to Claude Desktop again. If Claude
-Desktop starts before Studio, its Studio tools appear once Studio is running.
+**Claude Desktop** needs no configuration: under *Connect an agent → Claude Desktop*, **Add to Claude Desktop** makes
+a Claude Desktop extension with this Mac's address and the token and opens it in Claude Desktop, which asks you to
+install it. For Claude Desktop on another computer in your tailnet, open *Advanced → For Claude Desktop on another
+computer…*, choose the Tailscale address and save the file there instead. The file holds the token, so don't share
+it; after you change the token, add Studio to Claude Desktop again. If Claude Desktop starts before Studio, its
+Studio tools appear once Studio is running.
 
 ## Security
 
@@ -747,8 +873,8 @@ Studio is a local app. The agent connection is off by default, listens only on l
 interface (never on your LAN or `0.0.0.0`), requires a 256-bit bearer token, refuses browser requests, fetches
 agents' URLs only from public addresses (or the agent's own machine), and paid actions and removals always need your
 approval in the app. Secrets are encrypted with the macOS Keychain. Apart from Venice, the only thing Studio contacts
-on its own is GitHub, once a day, to see whether a newer Studio is out (switch it off under **Settings → About
-Studio**). Details, the threat
+on its own is GitHub, once a day, to see whether a newer Studio is out (switch it off under **Settings →
+About**). Details, the threat
 model and how to report a vulnerability: **[SECURITY.md](../SECURITY.md)**.
 
 ## Documentation

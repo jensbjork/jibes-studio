@@ -1,16 +1,16 @@
 import { useMemo, useState, type DragEvent } from 'react'
 import type { FinishedWork, RunningWork, SequenceSummary } from '@shared/types'
-import { formatSeconds } from '../../lib/media'
-import { TRASH } from '../../lib/platform'
 import { useOwnerWork, useRunning, useUnseen, useViewWork } from '../../lib/work'
 import { AUDIO_EXT, AUDIO_FORMATS } from '../assets/audioUtils'
 import { carriesFiles } from '../feed/ownClips'
 import SideList, { SideListRow, SideListThumb, type SideRowControl } from '../library/SideList'
-import { menuRow, onMenuKeyDown } from '../storyboards/ui'
 import MarkViewSeen from '../takes/MarkViewSeen'
 import { ownerStatusText } from '../takes/takeText'
+import { menuRow, onMenuKeyDown } from '../ui/menu'
 import { StatusMark } from '../work/StatusMark'
 import { FilmIcon, NoteIcon } from './icons'
+import { DELETE_SEQUENCE_TEXT } from './SequenceHeader'
+import { formatLength } from './sequenceUtils'
 
 interface Props {
   sequences?: SequenceSummary[]
@@ -135,11 +135,8 @@ export default function SequenceList({
       items={sequences}
       selectedId={selectedId}
       onSelect={onSelect}
-      searchPlaceholder="Search sequences"
-      emptyText="No sequences yet. A sequence puts several clips together into a longer video."
-      deleteNote={() =>
-        `The takes and exported films are kept; the sequence's images that nothing else uses are moved to ${TRASH}.`
-      }
+      // No empty text: the view beside the list says what a sequence is and how to start one.
+      deleteNote={() => DELETE_SEQUENCE_TEXT}
       onDelete={(s, next) => onDelete(s.id, next?.id)}
       renderRow={(s, control) => (
         <SequenceRow sequence={s} control={control} running={work.running.get(s.id)} unseen={work.unseen.get(s.id)} />
@@ -190,7 +187,7 @@ function SequenceRow({
       control={control}
       visual={<SideListThumb path={s.thumbPath} fallback={<FilmIcon size={16} className="text-muted/60" />} />}
       name={s.name}
-      meta={`${s.segmentCount} ${s.segmentCount === 1 ? 'clip' : 'clips'}${s.totalDuration > 0 ? ` · ${formatSeconds(s.totalDuration * 1000)}` : ''}`}
+      meta={`${s.segmentCount} ${s.segmentCount === 1 ? 'clip' : 'clips'}${s.totalDuration > 0 ? ` · ${formatLength(s.totalDuration)}` : ''}`}
       status={<StatusMark variant="inline" running={counts.running} fresh={counts.unseen} failed={counts.failed} />}
       title={ownerStatusText('sequence', running, unseen, counts)}
       deleteTitle="Delete sequence"

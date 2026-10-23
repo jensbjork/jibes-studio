@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS } from '@shared/models'
 import type { Asset, AssetAudio, AssetKind } from '@shared/types'
-import { ASSET_COPY, assetAudio, hasAudio } from '../../lib/assets'
+import { ASSET_COPY, assetAudio, hasAudio, uniqueNewName } from '../../lib/assets'
 import { ipcErrorMessage, useAssetsState } from '../../lib/hooks'
 import { SELECTED_ASSET_KEYS } from '../../lib/library'
 import type { Intent, Navigate } from '../../lib/navigation'
+import { FloatingBanner } from '../ui/Banner'
+import EmptyState from '../ui/EmptyState'
 import AssetEditor from './AssetEditor'
 import AssetIcon from './AssetIcon'
 import AssetList from './AssetList'
@@ -95,14 +97,6 @@ function longClipsNotice(clips: AssetAudio[], section: string): string | undefin
   )
 }
 
-function uniqueNewName(assets: Asset[], base: string): string {
-  const taken = new Set(assets.map((a) => a.name.toLocaleLowerCase('en')))
-  if (!taken.has(base.toLocaleLowerCase('en'))) return base
-  let n = 2
-  while (taken.has(`${base} ${n}`.toLocaleLowerCase('en'))) n++
-  return `${base} ${n}`
-}
-
 interface Props {
   kind: AssetKind
   intent?: Intent
@@ -185,13 +179,8 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
     onIntentHandled()
   }, [intent])
 
-  useEffect(() => {
-    if (!notice) return
-    const t = setTimeout(() => setNotice(undefined), notice.tone === 'error' ? 8000 : 5000)
-    return () => clearTimeout(t)
-  }, [notice])
-
-  // Advice never pushes an error off the screen before it has been read; it times out on its own.
+  // Advice never pushes an error off the screen before it has been read (the banner keeps an error until it is
+  // closed; advice goes by itself).
   const notify = (text: string, tone: Notice['tone'] = 'error') =>
     setNotice((current) => (current?.tone === 'error' && tone === 'info' ? current : { id: Date.now(), tone, text }))
 
@@ -319,51 +308,25 @@ export default function AssetsView({ kind, intent, onIntentHandled, navigate }: 
             onError={notify}
           />
         ) : loaded ? (
-          <EmptyState kind={kind} onCreate={create} creating={creating} />
+          <div className="flex h-full flex-col">
+            <div className="drag h-12 shrink-0" />
+            <EmptyState
+              icon={<AssetIcon kind={kind} />}
+              title={copy.emptyTitle}
+              text={copy.emptyText}
+              action={{ label: copy.newName, onClick: () => void create(), disabled: creating }}
+            />
+          </div>
         ) : (
           <div className="drag h-12" />
         )}
       </section>
 
       {notice && (
-        <div
-          key={notice.id}
-          role={notice.tone === 'error' ? 'alert' : 'status'}
-          className="absolute bottom-5 left-1/2 z-40 flex max-w-lg -translate-x-1/2 items-start gap-3 rounded-lg border border-line bg-raised px-4 py-2.5 shadow-2xl"
-        >
-          <span className={`select-text ${notice.tone === 'error' ? 'text-accent' : 'text-text'}`}>{notice.text}</span>
-          <button
-            onClick={() => setNotice(undefined)}
-            className="-mr-1 shrink-0 rounded px-1 text-muted hover:text-text"
-            title="Close"
-          >
-            ✕
-          </button>
-        </div>
+        <FloatingBanner key={notice.id} tone={notice.tone} onDismiss={() => setNotice(undefined)}>
+          {notice.text}
+        </FloatingBanner>
       )}
-    </div>
-  )
-}
-
-function EmptyState({ kind, onCreate, creating }: { kind: AssetKind; onCreate: () => void; creating: boolean }) {
-  const copy = ASSET_COPY[kind]
-  return (
-    <div className="flex h-full flex-col">
-      <div className="drag h-12 shrink-0" />
-      <div className="flex flex-1 flex-col items-center justify-center px-10 pb-12 text-center">
-        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-raised text-2xl text-muted">
-          <AssetIcon kind={kind} />
-        </div>
-        <h2 className="text-base font-semibold">{copy.emptyTitle}</h2>
-        <p className="mt-2 max-w-md leading-relaxed text-muted">{copy.emptyText}</p>
-        <button
-          onClick={onCreate}
-          disabled={creating}
-          className="mt-6 rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-hover disabled:opacity-40"
-        >
-          {copy.newName}
-        </button>
-      </div>
     </div>
   )
 }

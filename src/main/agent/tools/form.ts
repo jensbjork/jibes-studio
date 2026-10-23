@@ -246,7 +246,7 @@ const ASSET_VIEWS: Record<AssetKind, AssetViewId> = {
 }
 
 /**
- * open for Media: a tab (none: the one it last showed), and the clip (Videos' drawer), picture (Images) or
+ * open for Media: a tab (none: the one it last showed), and the clip (the Clips tab's drawer), picture (Images) or
  * film (Films) to open in it. The window answers with the tab on screen (agentBridge's applyOpen).
  */
 type MediaOpenArgs = AgentOpenArgs & { view: 'media' }
@@ -304,7 +304,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get workspace',
       description:
-        "What the user is looking at in Studio right now (the view – generate, media (Media: everything made, with media_tab – videos, pictures or films – the tab on screen), sequences, storyboards, editor, prompts, settings or a library view: characters, environments, products, outfits, poses – and the sequence and clip open in the sequence editor, the storyboard open in Storyboards, or the edit open in the Editor – view \"editor\", edit_id) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included), whether it is in composed_prompt now (sent) and for an outfit who wears it (worn_by); include_descriptions, excluded_description_asset_ids and who wears what are the form's choices, changed with set_form). Issues warn about references the prompt never mentions only when the legend doesn't explain them either. Start here to see what the user is working on.",
+        "What the user is looking at in Studio right now (the view – generate, media (Media: everything made, with media_tab – videos (the Clips tab), pictures or films – the tab on screen), sequences, storyboards, editor, prompts, settings or a library view: characters, environments, products, outfits, poses – and the sequence and clip open in the sequence editor, the storyboard open in Storyboards, or the edit open in the Editor – view \"editor\", edit_id) and the Generate form: mode, model, duration, resolution, aspect ratio, audio, prompt, negative prompt, the reference images as a token map ({token: \"@Image1\", asset_name, kind, photo_number}), the reference audio as a token map ({token: \"@Audio1\", asset_name, role: \"voice\", start, length}), what the model takes (max_reference_images, audio_input), the start image, validation issues for the @ImageN / @AudioN tokens, whether it is ready to generate, and Venice's price. composed_prompt is the prompt exactly as it would be sent: Studio appends the descriptions of the referenced assets as a References legend (description_entries lists them with their tokens, whether each is switched on (included), whether it is in composed_prompt now (sent) and for an outfit who wears it (worn_by); include_descriptions, excluded_description_asset_ids and who wears what are the form's choices, changed with set_form). Issues warn about references the prompt never mentions only when the legend doesn't explain them either. Start here to see what the user is working on.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'looked at the workspace'
@@ -919,7 +919,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Open in Studio',
       description:
-        "Brings a place in Studio to the front so the user sees it: the Generate view (with generation_id: that clip opened in its drawer – Generate's list only holds this session's clips, so an older one opens in Media instead and the answer says so), Media (view \"media\": everything made – tab \"videos\" with generation_id: that clip in its drawer, \"pictures\" with still_id: that picture, \"films\" with export_id: that exported film; an id picks its tab), a sequence (optionally with one clip selected), a storyboard (with transition_id: that transition opened in the transition editor), an edit in the Editor (view \"editor\" with edit_id; with version_id: that version in the player; without either the list of edits), an asset (view \"asset\" with asset_id: its library view – Characters, Environments, Products, Outfits or Poses – with the asset open) or the prompt library (view \"prompts\"). Use it when you want the user to look at something you prepared. Opening something doesn't count as the user having seen it.",
+        "Brings a place in Studio to the front so the user sees it: the Generate view (with generation_id: that clip opened in its drawer – Generate's list only holds this session's clips, so an older one opens in Media instead and the answer says so), Media (view \"media\": everything made – tab \"videos\" (the Clips tab) with generation_id: that clip in its drawer, \"pictures\" with still_id: that picture, \"films\" with export_id: that exported film; an id picks its tab), a sequence (optionally with one clip selected), a storyboard (with transition_id: that transition opened in the transition editor), an edit in the Editor (view \"editor\" with edit_id; with version_id: that version in the player; without either: the Editor with the edit it opens by itself – the one open last, else the most recently changed – named in the answer), an asset (view \"asset\" with asset_id: its library view – Characters, Environments, Products, Outfits or Poses – with the asset open) or the prompt library (view \"prompts\"). Use it when you want the user to look at something you prepared. Opening something doesn't count as the user having seen it.",
       input: {
         view: z.enum(['generate', 'media', 'sequence', 'storyboard', 'editor', 'asset', 'prompts']),
         sequence_id: z.string().optional().describe('For view "sequence".'),
@@ -937,7 +937,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         generation_id: z
           .string()
           .optional()
-          .describe('For view "generate" or "media": the clip to open in its drawer (in Media: its Videos tab).'),
+          .describe('For view "generate" or "media": the clip to open in its drawer (in Media: its Clips tab).'),
         asset_id: z.string().optional().describe('For view "asset": the asset to open.'),
         tab: z
           .enum(['videos', 'pictures', 'films'] as const satisfies readonly MediaTab[])
@@ -1068,7 +1068,7 @@ export function registerFormTools(server: McpServer, ctx: ToolContext): void {
         if (generation_id && !g) {
           throw new Error(`The generation ${generation_id} doesn't exist (any more). list_generations lists the ones there are.`)
         }
-        // Generate's list holds only this session's clips (shared/session.ts): any other is in Media's Videos.
+        // Generate's list holds only this session's clips (shared/session.ts): any other is in Media's Clips tab.
         if (g && !inGenerateSession(g, currentSession())) {
           return openMedia(
             { view: 'media', tab: 'videos', generationId: g.id },

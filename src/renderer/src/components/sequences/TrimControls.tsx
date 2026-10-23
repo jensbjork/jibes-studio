@@ -13,7 +13,10 @@ import {
 import { durationSeconds } from '@shared/models'
 import type { Generation, Segment } from '@shared/types'
 import { mediaUrl } from '../../lib/media'
+import { nativeVideoControls } from '../../lib/video'
 import { pauseOthers } from '../feed/playback'
+import { buttonClass } from '../ui/button'
+import DraftSaveState from '../ui/DraftSaveState'
 import { MIN_CLIP_SECONDS, formatLength, formatTakeTime, round2 } from './sequenceUtils'
 import { shortTakeNote, songCut } from '@shared/song-trims'
 import { songSeconds } from './song/songText'
@@ -25,12 +28,22 @@ interface Trims {
   trimEnd: number
 }
 
-/** What the take strip asks of the player: Space and Enter. */
+/** What the take strip and the clip pane's keys ask of the player: Space, Enter, I and O. */
 export interface TakePlayerHandle {
   /** Space: play or pause. */
   toggle: () => void
   /** Enter: from the kept start (a previewed take from its beginning). */
   playFromStart: () => void
+  /** I: the clip starts at the playhead (a song clip's take starts there). Nothing while previewing or choosing. */
+  markIn: () => void
+  /** O: the clip ends at the playhead. Nothing on a song clip, whose end follows its place in the song. */
+  markOut: () => void
+}
+
+/** I and O as the trim editor does them (it holds the trims); unset while it isn't there (a preview). */
+interface TrimMarks {
+  markIn: () => void
+  markOut: () => void
 }
 
 /** Play `takeId` from its kept start once it is in the player; a new `n` asks again (a click on the same take). */
@@ -149,6 +162,7 @@ export default function TrimControls({
 
   // A play that waits for the video to know its length (a take just put in the player).
   const pendingPlay = useRef(false)
+  const marks = useRef<TrimMarks>(null)
   const startPlaying = useCallback(() => {
     const el = video.current
     if (!el) return
@@ -171,7 +185,9 @@ export default function TrimControls({
         if (el.paused) void el.play().catch(() => undefined)
         else el.pause()
       },
-      playFromStart: startPlaying
+      playFromStart: startPlaying,
+      markIn: () => marks.current?.markIn(),
+      markOut: () => marks.current?.markOut()
     }),
     [startPlaying]
   )
@@ -236,16 +252,14 @@ export default function TrimControls({
                 </span>
               </>
             )}
-            <span className="ml-auto text-[11px] text-muted">
-              {trims.error ? <span className="text-accent">{trims.error}</span> : trims.status !== 'idle' && 'Saving…'}
-            </span>
+            <DraftSaveState status={trims.status} error={trims.error} className="ml-auto" />
           </div>
           <video
             key={shown.id}
             ref={video}
             src={mediaUrl(shown.filePath)}
             poster={shown.thumbPath ? mediaUrl(shown.thumbPath) : undefined}
-            controls
+            {...nativeVideoControls}
             preload="auto"
             onLoadedMetadata={(e) => {
               const el = e.currentTarget
@@ -280,18 +294,14 @@ export default function TrimControls({
 
       {previewing ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onChoosePreview}
-            className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover"
-          >
+          <button type="button" onClick={onChoosePreview} className={buttonClass('primary')}>
             Use this take
           </button>
           <button
             type="button"
             onClick={onLeavePreview}
             title="Back to the selected take (Esc)"
-            className="rounded-md px-3 py-1.5 text-muted transition hover:bg-raised hover:text-text"
+            className={buttonClass('ghost')}
           >
             {take ? 'Show selected' : 'Close preview'}
           </button>
@@ -317,6 +327,7 @@ export default function TrimControls({
             onlyTrimmed={onlyTrimmed}
             onOnlyTrimmed={setOnlyTrimmed}
             onReport={setReported}
+            marksRef={marks}
           />
         )
       )}
@@ -325,9 +336,10 @@ export default function TrimControls({
 }
 
 /**
- * The chosen take's trims: the bar, the two inputs with Here, Reset, "Play only what's used" and the notes
- * about seamless neighbours. Mounted per take (its draft belongs to that take), so a switch saves a pending trim
- * first – on unmount – while main still has the take it was made for.
+ * The chosen take's trims: the bar, where the clip starts and ends (with Here, or I and O anywhere in the clip pane),
+ * Reset, "Play only what's used" and the notes about seamless neighbours. The fields show points in the take, as the
+ * bar does; the end is stored as the amount cut off the end. Mounted per take (its draft belongs to that take), so a
+ * switch saves a pending trim first – on unmount – while main still has the take it was made for.
  */
 function TrimEditor({
   segment,
@@ -345,7 +357,8 @@ function TrimEditor({
   onTime,
   onlyTrimmed,
   onOnlyTrimmed,
-  onReport
+  onReport,
+  marksRef
 }: {
   segment: Segment
   takeId: string
@@ -363,6 +376,8 @@ function TrimEditor({
   onlyTrimmed: boolean
   onOnlyTrimmed: (on: boolean) => void
   onReport: (state: TrimState & { takeId: string }) => void
+  /** Filled with I and O (the take player passes them on to the clip pane's keys). */
+  marksRef: Ref<TrimMarks>
 }) {
   const segmentId = segment.id
   const songLength = song?.length
@@ -435,6 +450,24 @@ function TrimEditor({
     onTime(t)
   }
 
+  // What Here does, for I and O: not while another take is being chosen (the trims would land on the one before).
+  const playhead = () => video.current?.currentTime ?? time
+  useImperativeHandle(
+    marksRef,
+    () => ({
+      markIn: () => {
+        if (disabled) return
+        if (songLength !== undefined) setStart(playhead(), false)
+        else setTrim('trimStart', playhead(), false)
+      },
+      markOut: () => {
+        if (disabled || songLength !== undefined) return
+        setTrim('trimEnd', latest.current.duration - playhead(), false)
+      }
+    }),
+    [disabled, songLength, setStart, setTrim, time]
+  )
+
   if (songLength !== undefined) {
     const shortNote = shortTakeNote(songCut(duration, trimStart, { start: 0, end: songLength }).shortBy)
     const synced = song?.syncOffset
@@ -456,15 +489,16 @@ function TrimEditor({
           <SecondsInput
             label="Starts at"
             value={trimStart}
+            max={duration}
             onChange={(v) => setStart(v, true)}
-            onHere={() => setStart(video.current?.currentTime ?? time, false)}
-            hereTitle="Start the take at the playhead"
+            onHere={() => setStart(playhead(), false)}
+            hereTitle="Start the take at the playhead (I)"
           />
           <button
             onClick={() => setStart(back, true)}
             disabled={Math.abs(trimStart - back) < 0.005}
             title={synced !== undefined ? 'Back to where the measured singing put it' : 'Start at the beginning of the take'}
-            className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
+            className={buttonClass()}
           >
             {synced !== undefined ? 'Back to the sync' : 'Reset'}
           </button>
@@ -481,7 +515,7 @@ function TrimEditor({
         <p className="text-[11px] leading-relaxed text-muted">
           The cut keeps {songSeconds(songLength)} of the take – the clip's place in the song – from where it starts.
         </p>
-        {shortNote && <p className="text-[11px] leading-relaxed text-amber-300">{shortNote}</p>}
+        {shortNote && <p className="text-[11px] leading-relaxed text-warning">{shortNote}</p>}
       </div>
     )
   }
@@ -500,27 +534,31 @@ function TrimEditor({
       )}
 
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+        {/* Points in the take, as the bar shows them: the start is also the amount cut, the end is not. */}
         <SecondsInput
-          label="Trim start"
+          label="Starts at"
           value={trimStart}
+          max={duration}
           onChange={(v) => setTrim('trimStart', v, true)}
-          onHere={() => setTrim('trimStart', video.current?.currentTime ?? time, false)}
-          hereTitle="Start the clip at the playhead"
+          onHere={() => setTrim('trimStart', playhead(), false)}
+          hereTitle="Start the clip at the playhead (I)"
         />
         <SecondsInput
-          label="Trim end"
-          value={trimEnd}
-          onChange={(v) => setTrim('trimEnd', v, true)}
-          onHere={() => setTrim('trimEnd', duration - (video.current?.currentTime ?? time), false)}
-          hereTitle="End the clip at the playhead"
+          label="Ends at"
+          value={round2(duration - trimEnd)}
+          max={duration}
+          onChange={(v) => setTrim('trimEnd', latest.current.duration - v, true)}
+          onHere={() => setTrim('trimEnd', duration - playhead(), false)}
+          hereTitle="End the clip at the playhead (O)"
         />
         <button
+          type="button"
           onClick={() => {
             setTrim('trimStart', 0, false)
             setTrim('trimEnd', 0, false)
           }}
           disabled={trimStart === 0 && trimEnd === 0}
-          className="rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
+          className={buttonClass()}
         >
           Reset
         </button>
@@ -643,12 +681,15 @@ function TrimBar({
 function SecondsInput({
   label,
   value,
+  max,
   onChange,
   onHere,
   hereTitle
 }: {
   label: string
   value: number
+  /** The take's length: the arrows of the field stop there. */
+  max?: number
   onChange: (v: number) => void
   onHere: () => void
   hereTitle: string
@@ -669,6 +710,7 @@ function SecondsInput({
             type="number"
             inputMode="decimal"
             min={0}
+            max={max}
             step={0.1}
             value={text}
             onChange={(e) => {

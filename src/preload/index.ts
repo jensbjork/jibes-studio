@@ -46,6 +46,7 @@ const api: StudioApi = {
   getSpending: () => ipcRenderer.invoke('spending:get'),
   setImageSafeMode: (on) => ipcRenderer.invoke('settings:setImageSafeMode', on),
   onSettingsChange: (cb) => on<void>('settings:change', () => cb()),
+  onOpenSettings: (cb) => on<void>('app:open-settings', () => cb()),
 
   // Generation
   listModels: (force) => ipcRenderer.invoke('models:list', force),

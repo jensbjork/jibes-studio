@@ -22,9 +22,11 @@ const pad2 = (n: number) => String(n).padStart(2, '0')
 /** "0:41.0", "1:04:05.3": the player's and the timeline's times, to a tenth of a second (as plans write them). */
 export const formatClock = formatTimecode
 
-/** What deleting an edit does, for its question (in the edit's ⋯ menu and in the list). */
-export const DELETE_EDIT_TEXT =
-  `Versions used in sequences or by other edits, and the AI takes, are kept. The rest goes to ${TRASH}. The film you started from is left untouched.`
+/**
+ * What deleting an edit does, in one line under its question: the ✕ in the side list and Delete… in the edit's ⋯
+ * menu ask the same.
+ */
+export const DELETE_EDIT_TEXT = `The film you started from, the AI takes and versions used elsewhere are kept; the rest goes to ${TRASH}.`
 
 /** "1:04" (whole seconds), for lengths in lists and cards. */
 export function formatLength(seconds: number | undefined): string {

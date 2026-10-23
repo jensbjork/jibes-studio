@@ -3,7 +3,7 @@ import type { EditRange } from '@shared/types'
 import { useEditor } from './EditorContext'
 
 // Which operation card of a tab is open: one at a time, so the tab stays calm. Shared by everything in the window
-// (another tab's "Till Transkribera" opens a card here) and kept while the window is open.
+// (another tab's "Go to Transcribe" opens a card here) and kept while the window is open.
 
 const openCards = new Map<string, string | undefined>()
 const listeners = new Set<() => void>()

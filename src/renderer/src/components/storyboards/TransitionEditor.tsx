@@ -3,15 +3,17 @@ import { audioForModel, pickOption, PREFERRED, supportsEndImage } from '@shared/
 import { workKey, type Generation, type Storyboard, type StoryboardTransition, type VideoModel } from '@shared/types'
 import { variantsPrice } from '@shared/variants'
 import { resolveDirector } from '@shared/direction'
-import { ipcErrorMessage, useDirectorAssets } from '../../lib/hooks'
-import { formatSeconds, formatUsd, mediaUrl } from '../../lib/media'
-import { shortcut } from '../../lib/platform'
-import { useVariantCount, withVariants } from '../../lib/variants'
+import { isModalOpen, isTextTarget } from '../../lib/dialogs'
+import { focusedWithKeyboard, trackFocusOrigin } from '../../lib/focusOrigin'
+import { ipcErrorMessage, NO_API_KEY, useDirectorAssets, useHasApiKey } from '../../lib/hooks'
+import { formatSeconds, mediaUrl } from '../../lib/media'
+import { submitKeyHandler } from '../../lib/platform'
+import { useVariantCount } from '../../lib/variants'
+import { nativeVideoControls } from '../../lib/video'
 import { markSeen } from '../../lib/work'
-import VariantPicker from '../VariantPicker'
+import GenerateBar from '../GenerateBar'
 import { pauseOthers } from '../feed/playback'
 import DirectedByNote from '../directors/DirectedByNote'
-import ConfirmButton from '../sequences/ConfirmButton'
 import { ArrowRightIcon, CloseIcon } from '../sequences/icons'
 import { useDraft, useRegisterFlush, type FlushRegistry } from '../sequences/useDraft'
 import { useClipQuote } from '../sequences/useTotalQuote'
@@ -19,6 +21,9 @@ import TakeStrip, { type PickedBy } from '../takes/TakeStrip'
 import { pendingPhase } from '../takes/takeText'
 import { KEY_SELECT_DELAY, useTakeSelection } from '../takes/useTakeSelection'
 import PromptField from '../prompt/PromptField'
+import { noticeTones } from '../ui/Banner'
+import ConfirmButton from '../ui/ConfirmButton'
+import DraftSaveState from '../ui/DraftSaveState'
 import { Spinner } from '../work/StatusMark'
 import {
   aspectValue,
@@ -36,7 +41,6 @@ import {
   transitionProblems
 } from './storyboardUtils'
 import type { StoryboardStore } from './useStoryboard'
-import { primaryButton } from './ui'
 
 /** Width of the editor beside the boards. */
 export const EDITOR_WIDTH = 400
@@ -84,14 +88,17 @@ interface Props {
   onClose: () => void
   /** Opens the storyboard's director in Directors. */
   onOpenDirector?: (directorId: string) => void
+  /** Generate while the Venice API key is the only thing missing: Settings, at Venice. */
+  onAddApiKey?: () => void
 }
 
 /**
- * One transition in full, beside the boards: the two pictures it goes between, the take in use (or the one
- * being looked at) in a player with every take in a strip right under it – a click makes a take the one in use and
- * plays it –, "What happens?" with Suggest, length, resolution, sound and the model (only those that can end on a
- * picture), the price and Generate. Edits are saved by themselves; Generate saves first, so the take is made from
- * what is on screen.
+ * One transition in full, beside the boards: the two pictures it goes between (until there is a clip to play, or
+ * while the one in use was made from earlier pictures), the take in use (or the one being looked at) in a player with
+ * every take in a strip right under it – a click makes a take the one in use and plays it –, "What happens?" with
+ * Suggest, duration, resolution, sound and the model (only those that can end on a picture), and at the bottom,
+ * always in view, Generate with its price (⌘↵ from anywhere in the editor). Space plays and pauses. Edits are saved
+ * by themselves; Generate saves first, so the take is made from what is on screen.
  */
 export default function TransitionEditor({
   storyboard,
@@ -109,7 +116,8 @@ export default function TransitionEditor({
   onEditTake,
   onError,
   onClose,
-  onOpenDirector
+  onOpenDirector,
+  onAddApiKey
 }: Props) {
   const { mutate } = store
   const transitionId = t.id
@@ -181,12 +189,19 @@ export default function TransitionEditor({
   // ── Price and what stands in the way ───────────────────────────────────────
 
   const params = { ...t.params, ...value }
-  const problems = transitionProblems(storyboard, t, value.prompt)
+  // A missing API key first, as on every paid button; the button keeps its words and price, the reasons go under it.
+  const hasKey = useHasApiKey()
+  const problems = [...(hasKey ? [] : [NO_API_KEY]), ...transitionProblems(storyboard, t, value.prompt)]
   if (model?.offline) problems.push('The model is offline – choose another')
   const blocked = problems[0]
   const quote = useClipQuote(t.ready ? params : undefined)
-  // ×1–×4 beside Generate (⌘+Enter in the prompt sends as many): each variant becomes a take of the transition.
+  // ×1–×4 beside Generate (⌘↵ sends as many): each variant becomes a take of the transition.
   const [count, setCount] = useVariantCount('transition')
+  const submit = () => {
+    if (!blocked && !submitting) onGenerate(count)
+  }
+  // ⌘↵ from any field of the editor (the prompt field's own ⌘↵ marks the key handled, so it isn't sent twice).
+  const submitKeys = submitKeyHandler(submit)
 
   // ── "Suggest" ──────────────────────────────────────────────────────────────
 
@@ -266,10 +281,39 @@ export default function TransitionEditor({
 
   const aspect = aspectValue(storyboard.aspectRatio)
 
+  // Space plays and pauses the clip anywhere while the editor is open, as in Sequences and the Editor. Left alone: a
+  // key something else handled (a take tile, a card), with a modifier, in a field, menu, dialog or open question, on
+  // the native player (Space is its own), on a button or disclosure reached with the keyboard (Space presses it), and
+  // under a dialog or the preview.
+  const togglePlay = useCallback(() => {
+    const el = video.current
+    if (!el) return
+    if (el.paused) void el.play().catch(() => undefined)
+    else el.pause()
+  }, [])
+  useEffect(() => {
+    trackFocusOrigin()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      const target = e.target
+      if (isTextTarget(target) || isModalOpen() || !video.current) return
+      if (target instanceof Element) {
+        if (target.closest('[role="menu"], [role="dialog"], [role="alertdialog"], [data-confirm], video')) return
+        const pressable = target.closest('button, a[href], summary, [role="button"], [role="tab"]')
+        if (pressable && focusedWithKeyboard(target)) return
+      }
+      e.preventDefault()
+      togglePlay()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [togglePlay])
+
   return (
     <div
       className="flex h-full min-h-0 flex-col"
       onKeyDown={(e) => {
+        submitKeys(e)
         const inField = (e.target as HTMLElement).closest('textarea, input, select')
         if (e.key === 'Escape' && !e.defaultPrevented && !inField) {
           e.preventDefault()
@@ -284,17 +328,7 @@ export default function TransitionEditor({
         <span className="text-[12px] text-muted">
           board {fromNumber} → {toNumber}
         </span>
-        <span className="ml-auto text-[11px] text-muted" aria-live="polite">
-          {draft.error ? (
-            <span className="text-accent" title={draft.error}>
-              Couldn’t save
-            </span>
-          ) : draft.status !== 'idle' ? (
-            'Saving…'
-          ) : (
-            ''
-          )}
-        </span>
+        <DraftSaveState status={draft.status} error={draft.error} className="ml-auto" />
         <button
           type="button"
           onClick={onClose}
@@ -307,94 +341,100 @@ export default function TransitionEditor({
       </div>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-        {/* From one picture to the next. */}
-        <div className="flex items-center gap-2">
-          <BoardThumb path={from?.imagePath} label={`Board ${fromNumber}`} aspect={aspect} />
-          <ArrowRightIcon size={14} className="shrink-0 text-muted" />
-          <BoardThumb path={to?.imagePath} label={`Board ${toNumber}`} aspect={aspect} />
-        </div>
-
-        {/* The take in use, or the one being previewed. */}
-        <section>
-          <div className="overflow-hidden rounded-lg bg-black" style={{ aspectRatio: aspect }}>
-            {viewing?.filePath ? (
-              <video
-                key={viewing.id}
-                ref={video}
-                src={mediaUrl(viewing.filePath)}
-                poster={viewing.thumbPath ? mediaUrl(viewing.thumbPath) : undefined}
-                controls
-                preload="metadata"
-                onLoadedMetadata={(e) => {
-                  if (!pendingPlay.current) return
-                  pendingPlay.current = false
-                  void e.currentTarget.play().catch(() => undefined)
-                }}
-                onPlay={(e) => pauseOthers(e.currentTarget)}
-                className="h-full w-full object-contain"
-              />
-            ) : pending ? (
-              <PendingView take={pending} />
-            ) : (
-              <div className="flex h-full items-center justify-center px-6 text-center text-[12px] leading-relaxed text-muted">
-                {t.ready
-                  ? 'No clip yet. Write what happens and generate.'
-                  : 'Add an image to both boards, and the clip between them can be generated.'}
-              </div>
+        {/* From one picture to the next – until a clip shows the same, or while the one in use was made from earlier
+            pictures (to compare). */}
+        {(!viewing || t.staleTake) && (
+          <div>
+            <div className="flex items-center gap-2">
+              <BoardThumb path={from?.imagePath} label={`Board ${fromNumber}`} aspect={aspect} />
+              <ArrowRightIcon size={14} className="shrink-0 text-muted" />
+              <BoardThumb path={to?.imagePath} label={`Board ${toNumber}`} aspect={aspect} />
+            </div>
+            {!viewing && !pending && (
+              <p className="mt-2 text-[12px] text-muted">
+                {t.ready ? 'No clip yet.' : 'Add an image to both boards to generate the clip.'}
+              </p>
             )}
           </div>
-          {viewing && (
-            <p className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-muted">
-              {viewing.id === selection.activeId ? (
-                <span>Selected clip · {formatLength(takeSeconds(viewing))}</span>
+        )}
+
+        {/* The take in use, or the one being previewed; the progress of one being made. */}
+        {(viewing || pending) && (
+          <section>
+            <div className="overflow-hidden rounded-lg bg-black" style={{ aspectRatio: aspect }}>
+              {viewing?.filePath ? (
+                <video
+                  key={viewing.id}
+                  ref={video}
+                  src={mediaUrl(viewing.filePath)}
+                  poster={viewing.thumbPath ? mediaUrl(viewing.thumbPath) : undefined}
+                  {...nativeVideoControls}
+                  preload="metadata"
+                  onLoadedMetadata={(e) => {
+                    if (!pendingPlay.current) return
+                    pendingPlay.current = false
+                    void e.currentTarget.play().catch(() => undefined)
+                  }}
+                  onPlay={(e) => pauseOthers(e.currentTarget)}
+                  className="h-full w-full object-contain"
+                />
               ) : (
-                <>
-                  <span>Take from {formatTakeTime(viewing.createdAt)} – not selected</span>
-                  <span aria-hidden>·</span>
-                  <button
-                    type="button"
-                    onClick={() => chooseShown(viewing)}
-                    className="rounded px-1 py-0.5 text-text transition hover:bg-raised"
-                  >
-                    Use this take
-                  </button>
-                  {preview && ready && (
-                    <>
-                      <span aria-hidden>·</span>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewId(undefined)}
-                        title="Back to the selected take (Esc)"
-                        className="rounded px-1 py-0.5 text-text transition hover:bg-raised"
-                      >
-                        Show selected
-                      </button>
-                    </>
-                  )}
-                </>
+                pending && <PendingView take={pending} />
               )}
-            </p>
-          )}
-          {t.staleTake && ready && (
-            <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-200">
-              The selected clip was made with an earlier image on one of the boards.{' '}
-              {currentTake ? (
-                <>
-                  There is a take with the images that are there now.{' '}
-                  <button
-                    type="button"
-                    onClick={() => chooseShown(currentTake)}
-                    className="rounded px-1 font-medium text-amber-100 underline underline-offset-2 hover:text-white"
-                  >
-                    Use this take
-                  </button>
-                </>
-              ) : (
-                'Generate again if the clip should follow the images there now – the new clip is selected when it’s done.'
-              )}
-            </p>
-          )}
-        </section>
+            </div>
+            {viewing && (
+              <p className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-muted">
+                {viewing.id === selection.activeId ? (
+                  <span>Selected take · {formatLength(takeSeconds(viewing))}</span>
+                ) : (
+                  <>
+                    <span>Take from {formatTakeTime(viewing.createdAt)} – not selected</span>
+                    <span aria-hidden>·</span>
+                    <button
+                      type="button"
+                      onClick={() => chooseShown(viewing)}
+                      className="rounded px-1 py-0.5 text-text transition hover:bg-raised"
+                    >
+                      Use this take
+                    </button>
+                    {preview && ready && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewId(undefined)}
+                          title="Back to the selected take (Esc)"
+                          className="rounded px-1 py-0.5 text-text transition hover:bg-raised"
+                        >
+                          Show selected
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </p>
+            )}
+            {t.staleTake && ready && (
+              <p className={`mt-2 rounded-md border px-3 py-2 text-[12px] leading-relaxed ${noticeTones.warning}`}>
+                The selected take was made with an earlier image on one of the boards.{' '}
+                {currentTake ? (
+                  <>
+                    There is a take with the images that are there now.{' '}
+                    <button
+                      type="button"
+                      onClick={() => chooseShown(currentTake)}
+                      className="rounded px-1 font-medium underline underline-offset-2 hover:text-text"
+                    >
+                      Use this take
+                    </button>
+                  </>
+                ) : (
+                  'Generate again if it should follow the images there now – the new take is selected when it’s done.'
+                )}
+              </p>
+            )}
+          </section>
+        )}
 
         {/* Every take, right under the player: a click makes one the transition's and plays it. */}
         {t.takes.length > 0 && (
@@ -413,12 +453,7 @@ export default function TransitionEditor({
             onChoose={chooseTake}
             onPreview={previewTake}
             onLeavePreview={() => setPreviewId(undefined)}
-            onTogglePlay={() => {
-              const el = video.current
-              if (!el) return
-              if (el.paused) void el.play().catch(() => undefined)
-              else el.pause()
-            }}
+            onTogglePlay={togglePlay}
             onPlayFromStart={playFromStart}
             onDelete={(take) => {
               if (take.id === previewId) setPreviewId(undefined)
@@ -466,9 +501,7 @@ export default function TransitionEditor({
             value={value.prompt}
             onChange={(v) => set('prompt', v)}
             onBlur={() => void draft.flush()}
-            onSubmit={() => {
-              if (!blocked && !submitting) onGenerate(count)
-            }}
+            onSubmit={submit}
             context="video"
             minRows={4}
             maxRows={14}
@@ -477,8 +510,7 @@ export default function TransitionEditor({
             placeholder="The camera slowly pushes in as she turns from the window and walks towards the door."
           />
           <p className="mt-1 text-[11px] leading-relaxed text-muted">
-            Describe the motion from the first image to the second – ideally in English. The clip starts exactly on
-            board {fromNumber} and ends exactly on board {toNumber}.
+            Starts on board {fromNumber}, ends on board {toNumber}. Write in English if you can.
           </p>
           {director && (
             <DirectedByNote
@@ -498,20 +530,20 @@ export default function TransitionEditor({
                 type="button"
                 onClick={() => void clearNegative()}
                 title="Remove the text, so it isn’t sent with the next take"
-                className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-accent"
+                className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-muted transition hover:bg-raised hover:text-danger"
               >
                 Remove
               </button>
             </div>
           )}
-          {negativeError && <p className="mt-1 text-[11px] text-accent select-text">{negativeError}</p>}
+          {negativeError && <p className="mt-1 text-[11px] text-danger select-text">{negativeError}</p>}
         </section>
 
-        {/* Length, resolution, sound, model. */}
+        {/* Duration, resolution, sound, model: the words Generate and Sequences use for the same settings. */}
         <section className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <label>
-              <span className="mb-1.5 block text-muted">Length</span>
+              <span className="mb-1.5 block text-muted">Duration</span>
               <select value={value.duration} onChange={(e) => set('duration', e.target.value)} className={select}>
                 {(model?.durations.length ? model.durations : [value.duration]).map((d) => (
                   <option key={d} value={d}>
@@ -546,7 +578,7 @@ export default function TransitionEditor({
                 onChange={(e) => set('audio', e.target.checked)}
                 className="accent-accent"
               />
-              <span>Generate sound</span>
+              <span>Sound</span>
             </label>
           )}
           <label className="block">
@@ -555,7 +587,7 @@ export default function TransitionEditor({
               <span className="text-[11px]">only models that can end on an image</span>
             </span>
             {modelsError ? (
-              <p className="text-[12px] text-accent select-text">{modelsError}</p>
+              <p className="text-[12px] text-danger select-text">{modelsError}</p>
             ) : (
               <select value={value.model} onChange={(e) => chooseModel(e.target.value)} className={select}>
                 {/* The current model stays listed while the list loads (or if Venice no longer offers it). */}
@@ -572,52 +604,23 @@ export default function TransitionEditor({
             )}
           </label>
         </section>
+      </div>
 
-        {/* Generate. */}
-        <section className="space-y-2">
-          {/* The first reason is on the button; any others are listed above it. */}
-          {problems.length > 1 && (
-            <ul className="space-y-1 text-[12px] leading-snug text-amber-200">
-              {problems.slice(1).map((p) => (
-                <li key={p}>{p}</li>
-              ))}
-            </ul>
-          )}
-          <div className="flex items-stretch gap-2">
-            <VariantPicker count={count} onChange={setCount} each={quote} />
-            <button
-              type="button"
-              onClick={() => onGenerate(count)}
-              disabled={!!blocked || submitting}
-              title={
-                blocked ??
-                (count > 1
-                  ? `Sends ${count} takes of the clip to Venice at once (${shortcut('⌘ + Enter')} in the prompt)`
-                  : `Sends the clip to Venice (${shortcut('⌘ + Enter')} in the prompt)`)
-              }
-              className={`${primaryButton} min-w-0 flex-1 py-2`}
-            >
-              {submitting ? (
-                'Sending…'
-              ) : blocked ? (
-                <span className="truncate">{blocked}</span>
-              ) : (
-                <>
-                  {withVariants(ready || t.takes.length ? 'Generate again' : 'Generate', count)}
-                  <span className="opacity-80">· {formatUsd(variantsPrice(quote, count))}</span>
-                </>
-              )}
-            </button>
-          </div>
-          {error && (
-            <p className="flex items-start gap-2 text-[12px] leading-relaxed text-accent select-text">
-              <span className="min-w-0 flex-1">{error}</span>
-              <button type="button" onClick={onDismissError} title="Close" className="mt-1 shrink-0 opacity-60 hover:opacity-100">
-                <CloseIcon size={10} />
-              </button>
-            </p>
-          )}
-        </section>
+      {/* Generate, pinned under the scrolling part: always in view, as in the clip editor of Sequences. */}
+      <div className="shrink-0 border-t border-line p-4">
+        <GenerateBar
+          label={t.takes.length ? 'Generate new take' : 'Generate take'}
+          count={count}
+          onCount={setCount}
+          total={variantsPrice(quote, count)}
+          problems={problems}
+          // The key alone stands in the way: the button opens Settings, where it is added.
+          onBlockedClick={problems.length === 1 && problems[0] === NO_API_KEY ? onAddApiKey : undefined}
+          submitting={submitting}
+          error={error}
+          onDismissError={onDismissError}
+          onSubmit={submit}
+        />
       </div>
     </div>
   )

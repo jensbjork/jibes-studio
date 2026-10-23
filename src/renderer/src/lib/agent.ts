@@ -5,7 +5,7 @@ import { ipcErrorMessage } from './hooks'
 
 // Live state of the agent connection (the MCP server in main): its status, the activity log and the approval
 // requests (paid generations, and removals an agent asks for). One subscription for the whole window, shared by the
-// sidebar indicator, the activity drawer, the approval dialog and Settings.
+// sidebar indicator, the Agent panel, the approval dialog and Settings.
 
 /** Main keeps the same number of entries in its ring buffer. */
 const MAX_ACTIVITY = 200
@@ -20,7 +20,7 @@ export interface AgentState {
   approvals: ApprovalRequest[]
   /** Pending approvals put off with "Senare": the dialog leaves them until they're opened again. */
   deferred: string[]
-  /** The approval to show before any other (opened from the drawer). */
+  /** The approval to show before any other (opened from the Agent panel or Activity). */
   focused?: string
 }
 
@@ -82,6 +82,32 @@ export function useAgentWorking(): AgentActivity[] {
     return burst
     // `tick` makes it look again once the working window has passed.
   }, [activity, latest, tick])
+}
+
+// ── The presence pill ───────────────────────────────────────────────────────
+
+// Whether the pill at the bottom of the work area is showing (AgentPresence sets it): the other bottom notices – the
+// seen toast, the update notice – lift above it then, and only then (not while a panel hides it).
+
+let pillVisible = false
+const pillListeners = new Set<() => void>()
+
+export function setAgentPillVisible(visible: boolean): void {
+  if (visible === pillVisible) return
+  pillVisible = visible
+  for (const listener of [...pillListeners]) listener()
+}
+
+function subscribePill(listener: () => void): () => void {
+  pillListeners.add(listener)
+  return () => {
+    pillListeners.delete(listener)
+  }
+}
+
+/** Whether the agent's pill is on screen at the bottom of the work area. */
+export function useAgentPillVisible(): boolean {
+  return useSyncExternalStore(subscribePill, () => pillVisible)
 }
 
 // ── Merging what main sends ─────────────────────────────────────────────────

@@ -12,7 +12,7 @@ import type {
 import { variantsPrice, variantsText } from '@shared/variants'
 import { ASSET_VIEW } from '../../lib/assets'
 import { withBudgetConfirm } from '../../lib/budget'
-import { ipcErrorMessage, useAssets, useModels } from '../../lib/hooks'
+import { ipcErrorMessage, NO_API_KEY, useAssets, useHasApiKey, useModels } from '../../lib/hooks'
 import { LAST_STORYBOARD_KEY } from '../../lib/library'
 import { formatUsd } from '../../lib/media'
 import type { Intent, Navigate } from '../../lib/navigation'
@@ -24,10 +24,13 @@ import FramePickerDialog from '../images/FramePickerDialog'
 import StillViewer from '../images/StillViewer'
 import { useStills } from '../images/imageModels'
 import PreviewPlayer from '../sequences/PreviewPlayer'
+import { SETTINGS_SECTION, showSettingsSection } from '../settings/SettingsLayout'
 import type { FlushRegistry } from '../sequences/useDraft'
 import { useExportStatus } from '../sequences/useExportStatus'
 import { useClipQuote, useTotalQuote } from '../sequences/useTotalQuote'
 import { newsBySegment } from '../takes/takeText'
+import { buttonClass } from '../ui/button'
+import EmptyState from '../ui/EmptyState'
 import BoardRow from './BoardRow'
 import CreateStoryboardForm from './CreateStoryboardForm'
 import { StoryboardIcon } from './icons'
@@ -262,14 +265,14 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
 
   // ── Storyboards ────────────────────────────────────────────────────────────
 
-  const createStoryboard = async (name: string, aspectRatio: string): Promise<boolean> => {
+  /** "New storyboard": only the format is asked; main names it, and the header's name has the cursor to rename it. */
+  const createStoryboard = async (aspectRatio: string): Promise<boolean> => {
     setCreating(true)
     setNotice(undefined)
     try {
-      const created = await window.studio.createStoryboard(name, aspectRatio)
+      const created = await window.studio.createStoryboard('', aspectRatio)
       gone.current.delete(created.id)
-      // Without a name main gave it one; put the cursor there so it can be named right away.
-      if (!name) setFocusNameFor(created.id)
+      setFocusNameFor(created.id)
       setSelectedId(created.id)
       void reload()
       return true
@@ -443,7 +446,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
 
   // ── Transitions ────────────────────────────────────────────────────────────
 
-  // A paid call: guarded by a ref too, since two quick clicks (or ⌘+Enter) can both run before the disabled
+  // A paid call: guarded by a ref too, since two quick clicks (or ⌘↵) can both run before the disabled
   // button has rendered. `count`: the variants the editor asked for (the card's own Generate sends one).
   const inFlight = useRef(new Set<string>())
   const generate = async (transitionId: string, count = 1, overBudgetOk = false) => {
@@ -531,8 +534,10 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
     store.refresh()
   }
 
+  /** A click on a transition's card: its editor opens (the card scrolled into view beside it) or closes. */
   const openTransition = (transitionId: string) => {
-    setEditorId((cur) => (cur === transitionId ? undefined : transitionId))
+    if (editorId === transitionId) setEditorId(undefined)
+    else showTransition(transitionId)
   }
 
   const showTransition = (transitionId: string) => {
@@ -543,9 +548,21 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   // ── Storyboard-wide actions ────────────────────────────────────────────────
 
   const plan = useMemo(() => (storyboard ? runPlan(storyboard) : undefined), [storyboard])
+  // What stands in the way of "Generate missing": the API key first, then the first transition that can't be made.
+  const hasKey = useHasApiKey()
+  const runBlocked = !hasKey ? NO_API_KEY : plan?.blocked?.message
   // Priced only when the run could start: while one of them can't be made, nothing would be paid for.
-  const runParams = useMemo(() => (plan && !plan.blocked ? plan.toGenerate.map((t) => t.params) : []), [plan])
+  const runParams = useMemo(
+    () => (plan && !runBlocked ? plan.toGenerate.map((t) => t.params) : []),
+    [plan, runBlocked]
+  )
   const runQuote = useTotalQuote(runParams)
+
+  /** Where a missing key is added: Settings, at Venice. */
+  const openVeniceSettings = () => {
+    showSettingsSection(SETTINGS_SECTION.venice)
+    navigate('settings')
+  }
 
   /** `expected`: only start when every transition it would pay for is among these (see runKeys). */
   const startRun = async (expected?: ReadonlySet<string>) => {
@@ -731,8 +748,9 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 Generate missing stopped: the model needs you to accept the provider’s terms.
                 <button
+                  type="button"
                   onClick={() => storyboard && setRunConsentOpen(new Set(runKeys(storyboard)))}
-                  className="rounded bg-accent px-2 py-0.5 font-medium text-white hover:bg-accent-hover"
+                  className={buttonClass('primary', 'inline')}
                 >
                   Review and continue
                 </button>
@@ -807,7 +825,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               doneCount={doneCount}
               toGenerate={plan?.toGenerate.length ?? 0}
               generating={plan?.generating ?? 0}
-              runBlocked={plan?.blocked?.message}
+              runBlocked={runBlocked}
               runQuote={runQuote}
               stopping={stopping}
               runDetail={runWork?.detail}
@@ -819,7 +837,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               onAutoFocused={() => setFocusNameFor(undefined)}
               onRename={rename}
               onAspectRatio={setAspectRatio}
-              onGenerateAll={() => void startRun()}
+              onGenerateAll={() => (hasKey ? void startRun() : openVeniceSettings())}
               onStop={() => void stopRun()}
               onPreview={() => void openPreview()}
               onExport={() => void exportFilm()}
@@ -900,6 +918,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
                     onError={(text) => setNotice({ text, storyboardId: storyboard.id })}
                     onClose={() => setEditorId(undefined)}
                     onOpenDirector={(id) => navigate('directors', { type: 'open-asset', assetId: id })}
+                    onAddApiKey={openVeniceSettings}
                   />
                 </section>
               )}
@@ -914,7 +933,11 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               </Banner>
             )}
             {storyboards?.length === 0 && !selectedId ? (
-              <EmptyState creating={creating} onCreate={(name, aspect) => void createStoryboard(name, aspect)} />
+              <StoryboardsEmptyState
+                creating={creating}
+                onCreate={(aspect) => void createStoryboard(aspect)}
+                navigate={navigate}
+              />
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted">
                 {selectedId && !store.error ? 'Loading storyboard…' : ''}
@@ -969,12 +992,13 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
             return (
               number > 0 && (
                 <button
+                  type="button"
                   onClick={() => {
                     const boardId = viewingStill!.boardId
                     setViewingStill(undefined)
                     void setBoardImage(boardId, { kind: 'still', stillId: still.id })
                   }}
-                  className="rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover"
+                  className={buttonClass('primary')}
                 >
                   Use on board {number}
                 </button>
@@ -1029,28 +1053,38 @@ function SeenWhenVisible({ seenKey, children }: { seenKey?: string; children: Re
   return <div ref={ref}>{children}</div>
 }
 
-function EmptyState({
+/** No storyboard yet: what a storyboard is, the format to start one in, and Sequences as the other way to build. */
+function StoryboardsEmptyState({
   creating,
-  onCreate
+  onCreate,
+  navigate
 }: {
   creating: boolean
-  onCreate: (name: string, aspectRatio: string) => void
+  onCreate: (aspectRatio: string) => void
+  navigate: Navigate
 }) {
   return (
-    <div className="flex flex-1 items-center justify-center overflow-y-auto p-8">
-      <div className="w-full max-w-md">
-        <div className="mb-6 text-center">
-          <StoryboardIcon className="mx-auto mb-4 text-[30px] text-muted" />
-          <h2 className="mb-2 text-base font-semibold">Plan the film image by image</h2>
-          <p className="leading-relaxed text-muted">
-            Lay out the film’s key moments as images – create them, or use images you already have. Studio then
-            generates the clips between the images, so the film goes from one to the next.
-          </p>
-        </div>
-        <div className="rounded-xl border border-line bg-panel p-5">
-          <CreateStoryboardForm creating={creating} onCreate={onCreate} />
-        </div>
+    <EmptyState
+      icon={<StoryboardIcon />}
+      title="Plan the film image by image"
+      text="Lay out the film’s key moments as images – create them, or use images you already have. Studio then generates the clips between the images, so the film goes from one to the next."
+      footnote={
+        <>
+          Rather build it clip by clip? Use{' '}
+          <button
+            type="button"
+            onClick={() => navigate('sequences')}
+            className="underline decoration-muted/50 underline-offset-2 hover:text-text"
+          >
+            Sequences
+          </button>
+          .
+        </>
+      }
+    >
+      <div className="w-72 text-left">
+        <CreateStoryboardForm creating={creating} onCreate={onCreate} />
       </div>
-    </div>
+    </EmptyState>
   )
 }

@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import type { FinishedWork, RunningWork, StoryboardSummary } from '@shared/types'
-import { TRASH } from '../../lib/platform'
 import { useOwnerWork, useRunning, useUnseen, useViewWork } from '../../lib/work'
 import SideList, { SideListRow, SideListThumb, type SideRowControl } from '../library/SideList'
 import MarkViewSeen from '../takes/MarkViewSeen'
@@ -8,22 +7,17 @@ import { ownerStatusText } from '../takes/takeText'
 import { StatusMark } from '../work/StatusMark'
 import CreateStoryboardForm from './CreateStoryboardForm'
 import { StoryboardIcon } from './icons'
-import { boardCountLabel, clipProgressLabel } from './storyboardUtils'
+import { boardCountLabel, clipProgressShort, DELETE_STORYBOARD_TEXT } from './storyboardUtils'
 
 interface Props {
   storyboards?: StoryboardSummary[]
   selectedId?: string
   creating: boolean
   onSelect: (id: string) => void
-  onCreate: (name: string, aspectRatio: string) => Promise<boolean>
+  /** "New storyboard": only the format is asked; the name is given in the header afterwards. */
+  onCreate: (aspectRatio: string) => Promise<boolean>
   /** After the row's question (with the row that takes its place); throws to show the error there. */
   onDelete: (id: string, nextId: string | undefined) => Promise<void>
-}
-
-/** "2 of 3 clips done", "3 clips", or nothing while there are no transitions. */
-function progressLabel(s: StoryboardSummary): string | undefined {
-  if (!s.transitionCount) return undefined
-  return clipProgressLabel(s.doneCount, s.transitionCount)
 }
 
 // Module-level, so the store's selectors keep one identity (and re-render only on a real change).
@@ -44,8 +38,8 @@ function useStoryboardsWork(): { running: Map<string, RunningWork[]>; unseen: Ma
 }
 
 /**
- * The storyboards, newest change first, in the shared side list, with "New storyboard" (name and format). Every row
- * shows what is being made there and what is new, not only the open storyboard's.
+ * The storyboards, newest change first, in the shared side list, with "New storyboard" (the format; the name follows
+ * in the header). Every row shows what is being made there and what is new, not only the open storyboard's.
  */
 export default function StoryboardList({ storyboards, selectedId, creating, onSelect, onCreate, onDelete }: Props) {
   const work = useStoryboardsWork()
@@ -65,8 +59,8 @@ export default function StoryboardList({ storyboards, selectedId, creating, onSe
             <CreateStoryboardForm
               creating={creating}
               autoFocus
-              onCreate={(name, aspect) =>
-                void onCreate(name, aspect).then((ok) => {
+              onCreate={(aspect) =>
+                void onCreate(aspect).then((ok) => {
                   if (ok) close()
                 })
               }
@@ -78,11 +72,8 @@ export default function StoryboardList({ storyboards, selectedId, creating, onSe
       items={storyboards}
       selectedId={selectedId}
       onSelect={onSelect}
-      searchPlaceholder="Search storyboards"
-      emptyText="No storyboards yet. Lay out a film’s key moments as images and generate the clips between them."
-      deleteNote={() =>
-        `The clips and exported films stay; the storyboard’s images that nothing else uses are moved to ${TRASH}.`
-      }
+      // No empty text: the view beside the list says what a storyboard is and how to start one.
+      deleteNote={() => DELETE_STORYBOARD_TEXT}
       onDelete={(s, next) => onDelete(s.id, next?.id)}
       renderRow={(s, control) => (
         <StoryboardRow storyboard={s} control={control} running={work.running.get(s.id)} unseen={work.unseen.get(s.id)} />
@@ -106,13 +97,13 @@ function StoryboardRow({
   unseen?: FinishedWork[]
 }) {
   const counts = useOwnerWork(s.id)
-  const progress = progressLabel(s)
   return (
     <SideListRow
       control={control}
       visual={<SideListThumb path={s.coverPath} fallback={<StoryboardIcon className="text-[16px] text-muted/60" />} />}
       name={s.name}
-      meta={`${boardCountLabel(s.boardCount)}${progress ? ` · ${progress}` : ''}`}
+      // One number, to fit the row: the clips once there are any (one fewer than the boards), else the boards.
+      meta={s.transitionCount ? clipProgressShort(s.doneCount, s.transitionCount) : boardCountLabel(s.boardCount)}
       status={<StatusMark variant="inline" running={counts.running} fresh={counts.unseen} failed={counts.failed} />}
       title={ownerStatusText('storyboard', running, unseen, counts)}
       deleteTitle="Delete storyboard"

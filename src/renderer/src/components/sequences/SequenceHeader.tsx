@@ -1,17 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AssetKind, ExportSummary, Sequence } from '@shared/types'
-import { ipcErrorMessage } from '../../lib/hooks'
-import { formatSeconds, formatUsd } from '../../lib/media'
+import { ipcErrorMessage, NO_API_KEY } from '../../lib/hooks'
+import { formatUsd } from '../../lib/media'
 import { FILE_MANAGER, TRASH } from '../../lib/platform'
 import { markAllSeen, useOwnerWork } from '../../lib/work'
-import { ScissorsIcon } from '../feed/icons'
-import OpenFolderButton from '../library/OpenFolderButton'
-import Popover from '../pickers/Popover'
-import { menuRow, onMenuKeyDown } from '../storyboards/ui'
-import { Spinner } from '../work/StatusMark'
 import DirectorChip from '../directors/DirectorChip'
+import { ScissorsIcon } from '../feed/icons'
+import FolderIcon from '../library/FolderIcon'
+import { buttonClass } from '../ui/button'
+import MoreMenu, { MenuDivider, MenuHeading, MenuItem, MenuRadio } from '../ui/MoreMenu'
+import NameInput from '../ui/NameInput'
+import { Spinner } from '../work/StatusMark'
 import CastButton, { type CastPatch } from './CastPanel'
-import { CheckAllIcon, MoreIcon, NoteIcon, PlayIcon } from './icons'
+import { CheckAllIcon, NoteIcon, PlayIcon } from './icons'
+import { formatLength } from './sequenceUtils'
 import SongChip from './song/SongChip'
 import type { TranscribeOptions } from './song/TranscribeLyrics'
 
@@ -23,6 +25,11 @@ interface Props {
   toGenerate: number
   /** Segments still waiting on a take that is already generating. */
   generating: number
+  /**
+   * Why "Generate missing" can't start now ("Add your Venice API key in Settings", "Clip 2: write a prompt"): it then
+   * pays for nothing, so it shows no price and a click shows what stands in the way.
+   */
+  runBlocked?: string
   runQuote?: number
   stopping: boolean
   /** Where "Generate missing" is ("Clip 2 of 5"), from Activity. */
@@ -76,18 +83,28 @@ function exportFormatLabel(height: number | null | undefined): string {
   return EXPORT_FORMATS.find((f) => f.height === (height ?? null))?.label ?? 'Automatic'
 }
 
-const primary =
-  'flex items-center gap-1.5 whitespace-nowrap rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-40'
-const secondary =
-  'flex items-center gap-1.5 whitespace-nowrap rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent'
+/**
+ * "Generate missing"'s tooltip while there is something to send, the same in the Sequences and Storyboards headers:
+ * what stands in the way (a click shows it, or opens Settings for the missing key), else what it does.
+ */
+export function runTitle(runBlocked: string | undefined, does: string): string {
+  if (runBlocked === NO_API_KEY) return `${NO_API_KEY} – click to open Settings`
+  if (runBlocked) return `${runBlocked}. Nothing is sent until every missing clip can be generated – click to show it.`
+  return does
+}
 
-/** Name, length and the sequence-wide actions, inside the window's drag bar. */
+/**
+ * Name, length and the sequence-wide actions, inside the window's drag bar, in the order every film header has:
+ * the name, the Song, Cast and Director chips, then Generate missing, Preview and Export (the next step in the accent
+ * colour) and ⋯ with the rarer ones.
+ */
 export default function SequenceHeader({
   sequence,
   totalSeconds,
   readyCount,
   toGenerate,
   generating,
+  runBlocked,
   runQuote,
   stopping,
   runDetail,
@@ -117,14 +134,23 @@ export default function SequenceHeader({
   const count = sequence.segments.length
   const exporting = exportProgress !== undefined
   // The button for the next sensible step gets the accent colour.
-  const exportIsNext = toGenerate === 0 && generating === 0 && count > 0
+  const exportIsNext = count > 0 && toGenerate === 0 && generating === 0 && !exportBlocked
+  // Counted always, but priced and in the accent colour only when it can start; until then a click shows why not.
+  const runReady = toGenerate > 0 && !runBlocked
 
   return (
     <div className="drag flex h-12 shrink-0 items-center gap-3 border-b border-line pl-3 pr-4">
-      <NameInput name={sequence.name} onRename={onRename} autoFocus={autoFocusName} onAutoFocused={onAutoFocused} />
+      <NameInput
+        value={sequence.name}
+        onRename={onRename}
+        placeholder="Untitled sequence"
+        ariaLabel="Sequence name"
+        autoFocus={autoFocusName}
+        onAutoFocused={onAutoFocused}
+      />
       {/* Only when the main area is wide: the list beside it shows the same, and the actions need the room. */}
       <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted @min-[83rem]/main:inline">
-        {formatSeconds(totalSeconds * 1000)}
+        {formatLength(totalSeconds)}
         <span className="mx-1.5">·</span>
         {readyCount === count
           ? `${count} ${count === 1 ? 'clip' : 'clips'}`
@@ -154,14 +180,6 @@ export default function SequenceHeader({
           onChange={onDirectorChange}
           onOpen={onOpenDirector}
         />
-        <OpenFolderButton
-          target="sequences"
-          id={sequence.id}
-          compact
-          title={`Show the sequence's folder with takes and exports in ${FILE_MANAGER}`}
-          onError={onError}
-          className="rounded-md px-2 py-1.5 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40"
-        />
         {sequence.running ? (
           <>
             <span className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-muted" aria-live="polite">
@@ -169,29 +187,43 @@ export default function SequenceHeader({
               Generating missing…
               {runDetail && <span className="tabular-nums">{runDetail}</span>}
             </span>
-            <button onClick={onStop} disabled={stopping} className={secondary} title="Stops after the clip being generated now">
+            <button
+              type="button"
+              onClick={onStop}
+              disabled={stopping}
+              className={buttonClass()}
+              title="Stops after the clip being generated now"
+            >
               {stopping ? 'Stopping…' : 'Stop'}
             </button>
           </>
         ) : (
-          <button
-            onClick={onGenerateAll}
-            disabled={toGenerate === 0}
-            className={exportIsNext || toGenerate === 0 ? secondary : primary}
-            title={
-              toGenerate > 0
-                ? 'Generates a take for every clip that has none, in order'
-                : generating > 0
-                  ? 'The missing takes are already being generated'
-                  : 'Every clip has a finished selected take'
-            }
-          >
-            Generate missing{toGenerate > 0 && ` (${toGenerate})`}
-            {toGenerate > 0 && <span className="opacity-75">· {formatUsd(runQuote)}</span>}
-          </button>
+          // Only while something is missing: with every clip done, Export is the one next step.
+          (toGenerate > 0 || generating > 0) && (
+            <button
+              type="button"
+              onClick={onGenerateAll}
+              disabled={toGenerate === 0}
+              className={buttonClass(runReady ? 'primary' : 'secondary')}
+              title={
+                toGenerate > 0
+                  ? runTitle(runBlocked, 'Generates a take for every clip that has none, in order')
+                  : 'The missing takes are already being generated'
+              }
+            >
+              Generate missing{toGenerate > 0 && ` (${toGenerate})`}
+              {runReady && <span className="tabular-nums opacity-80">· {formatUsd(runQuote)}</span>}
+            </button>
+          )
         )}
 
-        <button onClick={onPreview} disabled={!!previewDisabled} title={previewDisabled ?? 'Play the clips in order'} className={secondary}>
+        <button
+          type="button"
+          onClick={onPreview}
+          disabled={!!previewDisabled}
+          title={previewDisabled ?? 'Play the clips in order'}
+          className={buttonClass()}
+        >
           <PlayIcon size={11} />
           <span className="hidden @min-[67rem]/main:inline">Preview</span>
         </button>
@@ -210,19 +242,20 @@ export default function SequenceHeader({
           </div>
         ) : (
           <button
+            type="button"
             onClick={onExport}
             disabled={!!exportBlocked}
             title={
               exportBlocked ??
-              `Renders the whole sequence to an mp4 file (Export format: ${exportFormatLabel(sequence.exportHeight)})`
+              `Joins the clips into one MP4 file (Export format: ${exportFormatLabel(sequence.exportHeight)})`
             }
-            className={exportIsNext ? primary : secondary}
+            className={buttonClass(exportIsNext ? 'primary' : 'secondary')}
           >
             Export
           </button>
         )}
 
-        <MoreMenu
+        <SequenceMenu
           sequence={sequence}
           exporting={exporting}
           onExportHeight={onExportHeight}
@@ -264,23 +297,118 @@ export function directorExceptions(sequence: Sequence): string | undefined {
   return text.charAt(0).toUpperCase() + text.slice(1) + '.'
 }
 
-/** The newest export of the sequence whose film is still there, if any. */
-async function latestExport(sequenceId: string): Promise<ExportSummary | undefined> {
+/** The newest export of a sequence or storyboard whose film is still there, if any. */
+async function latestExport(ownerId: string): Promise<ExportSummary | undefined> {
   const exports = await window.studio.listExports()
   return exports
-    .filter((e) => e.sequenceId === sequenceId && e.exists)
+    .filter((e) => e.sequenceId === ownerId && e.exists)
     .sort((a, b) => b.createdAt - a.createdAt)[0]
 }
 
-/** What deleting a sequence does, for its question (also asked from the list's ✕). */
-export const DELETE_SEQUENCE_TEXT =
-  `The clips leave the sequence. The takes stay in Media, and exported films stay in the folder. The sequence's images that nothing else uses are moved to ${TRASH}.`
+/** What deleting a sequence does, for its question in ⋯ and in the list's row alike. */
+export const DELETE_SEQUENCE_TEXT = `The takes stay in Media and exported films in their folder; the sequence's images that nothing else uses are moved to ${TRASH}.`
 
 /**
- * ⋯: the Export format, the latest export into the Editor, a song for a sequence without one, marking what is new
- * here as seen, and deleting it.
+ * ⋯ → "Edit latest export", shared by the film headers: the newest export still on disk, looked up each time the menu
+ * opens (it mounts with the menu) – an export may have finished, or its film been deleted, since.
  */
-function MoreMenu({
+export function LatestExportItem({
+  ownerId,
+  exporting,
+  untouched,
+  onEdit,
+  onError
+}: {
+  ownerId: string
+  exporting: boolean
+  /** "The sequence isn't touched." */
+  untouched: string
+  onEdit: (exportId: string) => void
+  onError?: (message: string) => void
+}) {
+  // undefined while looking, null when there is no export (yet).
+  const [latest, setLatest] = useState<ExportSummary | null>()
+  useEffect(() => {
+    let current = true
+    setLatest(undefined)
+    latestExport(ownerId).then(
+      (e) => current && setLatest(e ?? null),
+      (e: unknown) => {
+        if (!current) return
+        setLatest(null)
+        onError?.(ipcErrorMessage(e))
+      }
+    )
+    return () => {
+      current = false
+    }
+  }, [ownerId, exporting])
+  return (
+    <MenuItem
+      icon={<ScissorsIcon size={13} />}
+      disabled={!latest}
+      onSelect={() => latest && onEdit(latest.id)}
+      hint={
+        latest === undefined
+          ? 'Looking for the export…'
+          : latest === null
+            ? 'Export first.'
+            : `Change the finished film with AI in the Editor. ${untouched}`
+      }
+    >
+      Edit latest export
+    </MenuItem>
+  )
+}
+
+/** ⋯ → "Open folder", shared by the film headers: the sequence's or storyboard's own folder in Finder. */
+export function OpenFolderItem({
+  target,
+  id,
+  onError
+}: {
+  target: 'sequences' | 'storyboards'
+  id: string
+  onError: (message: string) => void
+}) {
+  return (
+    <MenuItem
+      icon={<FolderIcon size={13} />}
+      title={`Open the folder in ${FILE_MANAGER}`}
+      onSelect={() => {
+        window.studio.revealLibraryFolder(target, id).catch((e: unknown) => onError(ipcErrorMessage(e)))
+      }}
+    >
+      Open folder
+    </MenuItem>
+  )
+}
+
+/** ⋯ → "Mark all as seen", shared by the film headers: the New marks of everything in the sequence or storyboard. */
+export function MarkAllSeenItem({ ownerId, what }: { ownerId: string; what: 'sequence' | 'storyboard' }) {
+  const news = useOwnerWork(ownerId)
+  const count = news.unseen + news.failed
+  return (
+    <MenuItem
+      icon={<CheckAllIcon size={13} />}
+      disabled={count === 0}
+      onSelect={() => void markAllSeen({ ownerId })}
+      hint={
+        count === 0
+          ? `Nothing new to look at in the ${what}.`
+          : `Removes the New mark from ${count === 1 ? 'the new item' : `${count} items`} in the ${what}.`
+      }
+    >
+      Mark all as seen
+    </MenuItem>
+  )
+}
+
+/**
+ * ⋯: the Export format, then the latest export into the Editor, the folder, marking what is new here as seen, a song
+ * for a sequence without one, and deleting it (asked in the menu).
+ */
+function SequenceMenu({
   sequence,
   exporting,
   onExportHeight,
@@ -297,250 +425,55 @@ function MoreMenu({
   onDelete: () => void
   onAddSong: () => void
 }) {
-  const anchor = useRef<HTMLButtonElement>(null)
-  const [open, setOpen] = useState(false)
-  const [confirming, setConfirming] = useState(false)
-  const close = () => {
-    setOpen(false)
-    setConfirming(false)
-  }
-  // undefined while looking, null when the sequence has no export (yet).
-  const [latest, setLatest] = useState<ExportSummary | null>()
-  const news = useOwnerWork(sequence.id)
-  const newCount = news.unseen + news.failed
-  const newWhat = newCount === 1 ? "what's new" : `${newCount} things`
-
-  // Looked up each time the menu opens: an export may have finished (or its film been deleted) since.
-  useEffect(() => {
-    if (!open) return
-    let current = true
-    setLatest(undefined)
-    latestExport(sequence.id).then(
-      (e) => current && setLatest(e ?? null),
-      (e: unknown) => {
-        if (!current) return
-        setLatest(null)
-        onError(ipcErrorMessage(e))
-      }
-    )
-    return () => {
-      current = false
-    }
-  }, [open, sequence.id, exporting])
-
   const height = sequence.exportHeight ?? null
-
   return (
-    <>
-      <button
-        ref={anchor}
-        type="button"
-        onClick={() => (open ? close() : setOpen(true))}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="More options"
-        title="More options"
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
-      >
-        <MoreIcon size={14} />
-      </button>
-      <Popover anchorRef={anchor} open={open} onClose={close} align="end" width={290} label="More options">
-        {confirming ? (
-          <div className="p-3">
-            <p className="mb-1 truncate">Delete “{sequence.name}”?</p>
-            <p className="mb-3 text-[12px] leading-relaxed text-muted">{DELETE_SEQUENCE_TEXT}</p>
-            <div className="flex justify-end gap-1.5">
-              <button
-                type="button"
-                onClick={() => setConfirming(false)}
-                className="rounded-md px-2.5 py-1 text-[12px] text-muted transition hover:bg-raised hover:text-text"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                autoFocus
-                onClick={() => {
-                  close()
-                  onDelete()
-                }}
-                className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-accent-hover"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        ) : (
-        <div role="menu" aria-label="More options" onKeyDown={onMenuKeyDown} className="p-1">
-          <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
-            Export format
-          </p>
+    <MoreMenu width={290}>
+      {(menu) => (
+        <>
+          <MenuHeading>Export format</MenuHeading>
           {EXPORT_FORMATS.map((f) => (
-            <button
+            <MenuRadio
               key={f.label}
-              type="button"
-              role="menuitemradio"
-              aria-checked={height === f.height}
-              data-menu-item
-              autoFocus={height === f.height}
-              onClick={() => {
-                setOpen(false)
-                if (height !== f.height) onExportHeight(f.height)
-              }}
-              className={menuRow}
+              checked={height === f.height}
+              onSelect={() => onExportHeight(f.height)}
+              hint={f.text}
             >
-              <span className={`w-3 shrink-0 text-accent ${height === f.height ? '' : 'invisible'}`}>✓</span>
-              <span className="flex-1">{f.label}</span>
-              <span className="text-[11px] text-muted">{f.text}</span>
-            </button>
+              {f.label}
+            </MenuRadio>
           ))}
           <p className="px-2.5 pb-1.5 pt-0.5 text-[11px] leading-snug text-muted">
             The film gets the first clip's aspect ratio at that height.
           </p>
-          <div className="mx-2 my-1 border-t border-line" />
-          <button
-            type="button"
-            role="menuitem"
-            data-menu-item
-            disabled={!latest}
-            title={latest === null ? 'Export first' : undefined}
-            onClick={() => {
-              if (!latest) return
-              setOpen(false)
-              onEditExport(latest.id)
-            }}
-            className={`${menuRow} flex-col items-start gap-0.5`}
-          >
-            <span className="flex items-center gap-2">
-              <ScissorsIcon size={13} className="shrink-0 text-muted" />
-              Edit latest export
-            </span>
-            <span className="pl-[21px] text-[11px] leading-snug text-muted">
-              {latest === undefined
-                ? 'Looking for the export…'
-                : latest === null
-                  ? 'Export first.'
-                  : "Change the finished film with AI in the Editor. The sequence isn't touched."}
-            </span>
-          </button>
+          <MenuDivider />
+          <LatestExportItem
+            ownerId={sequence.id}
+            exporting={exporting}
+            untouched="The sequence isn't touched."
+            onEdit={onEditExport}
+            onError={onError}
+          />
+          <OpenFolderItem target="sequences" id={sequence.id} onError={onError} />
+          <MarkAllSeenItem ownerId={sequence.id} what="sequence" />
           {!sequence.song && (
-            <>
-              <div className="mx-2 my-1 border-t border-line" />
-              <button
-                type="button"
-                role="menuitem"
-                data-menu-item
-                onClick={() => {
-                  setOpen(false)
-                  onAddSong()
-                }}
-                className={`${menuRow} flex-col items-start gap-0.5`}
-              >
-                <span className="flex items-center gap-2">
-                  <NoteIcon size={13} className="shrink-0 text-muted" />
-                  Add a song…
-                </span>
-                <span className="pl-[21px] text-[11px] leading-snug text-muted">
-                  Cut the sequence to a song: every clip gets a place in it, and the film plays the song.
-                </span>
-              </button>
-            </>
+            <MenuItem
+              icon={<NoteIcon size={13} />}
+              onSelect={onAddSong}
+              hint="Cut the sequence to a song: every clip gets a place in it, and the film plays the song."
+            >
+              Add a song…
+            </MenuItem>
           )}
-          <div className="mx-2 my-1 border-t border-line" />
-          <button
-            type="button"
-            role="menuitem"
-            data-menu-item
-            disabled={newCount === 0}
-            onClick={() => {
-              setOpen(false)
-              void markAllSeen({ ownerId: sequence.id })
-            }}
-            className={`${menuRow} flex-col items-start gap-0.5`}
-          >
-            <span className="flex items-center gap-2">
-              <CheckAllIcon size={13} className="shrink-0 text-muted" />
-              Mark all as seen
-            </span>
-            <span className="pl-[21px] text-[11px] leading-snug text-muted">
-              {newCount === 0
-                ? 'Nothing new to look at in the sequence.'
-                : `Removes the New mark from ${newWhat} in the sequence.`}
-            </span>
-          </button>
-          <div className="mx-2 my-1 border-t border-line" />
-          <button
-            type="button"
-            role="menuitem"
-            data-menu-item
-            onClick={() => setConfirming(true)}
-            className={`${menuRow} text-muted hover:text-accent`}
+          <MenuDivider />
+          <MenuItem
+            danger
+            onSelect={() =>
+              menu.confirm({ question: `Delete “${sequence.name}”?`, note: DELETE_SEQUENCE_TEXT, onConfirm: onDelete })
+            }
           >
             Delete sequence…
-          </button>
-        </div>
-        )}
-      </Popover>
-    </>
-  )
-}
-
-function NameInput({
-  name,
-  onRename,
-  autoFocus,
-  onAutoFocused
-}: {
-  name: string
-  onRename: (name: string) => void
-  autoFocus: boolean
-  onAutoFocused: () => void
-}) {
-  const [value, setValue] = useState(name)
-  const [focused, setFocused] = useState(false)
-  const input = useRef<HTMLInputElement>(null)
-  const cancelled = useRef(false)
-
-  useEffect(() => {
-    if (!focused) setValue(name)
-  }, [name, focused])
-
-  useEffect(() => {
-    if (!autoFocus) return
-    input.current?.focus()
-    input.current?.select()
-    onAutoFocused()
-  }, [autoFocus])
-
-  const commit = () => {
-    const next = value.trim()
-    if (!next || next === name) setValue(name)
-    else onRename(next)
-  }
-
-  return (
-    <input
-      ref={input}
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onFocus={() => setFocused(true)}
-      onBlur={() => {
-        setFocused(false)
-        if (cancelled.current) cancelled.current = false
-        else commit()
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') e.currentTarget.blur()
-        if (e.key === 'Escape') {
-          cancelled.current = true
-          setValue(name)
-          e.currentTarget.blur()
-        }
-      }}
-      spellCheck={false}
-      placeholder="Untitled sequence"
-      title="Rename"
-      className="no-drag min-w-0 max-w-sm flex-1 truncate rounded-md @min-[67rem]/main:min-w-28 border border-transparent bg-transparent px-2 py-1 text-[15px] font-semibold outline-none transition hover:border-line focus:border-muted focus:bg-raised"
-    />
+          </MenuItem>
+        </>
+      )}
+    </MoreMenu>
   )
 }

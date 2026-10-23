@@ -21,12 +21,15 @@ interface Props {
   onError: (message: string) => void
 }
 
-/** Opens a folder of the library in Finder. */
+/**
+ * "Open folder": opens a folder of the library in Finder (File Explorer). Revealing one file is "Show in Finder"
+ * instead.
+ */
 export default function OpenFolderButton({
   target,
   id,
   label = 'Open folder',
-  title = `Show the folder in ${FILE_MANAGER}`,
+  title = `Open the folder in ${FILE_MANAGER}`,
   className = '',
   compact,
   onError

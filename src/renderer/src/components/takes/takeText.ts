@@ -6,7 +6,7 @@ import { canUseAgain, generationTitle, sourceBadge } from '@shared/generation-la
 import type { FinishedWork, Generation, RunningWork, WorkCounts } from '@shared/types'
 import { formatUsd } from '../../lib/media'
 import { FILE_MANAGER } from '../../lib/platform'
-import { formatClock, formatTakeTime, isPending, takeDuration, takeProgress } from '../sequences/sequenceUtils'
+import { formatClock, formatLength, formatTakeTime, isPending, takeDuration, takeProgress } from '../sequences/sequenceUtils'
 
 /** A take that can be played and chosen: finished, with its file on disk. */
 export function isPlayable(take: Generation): boolean {
@@ -32,11 +32,9 @@ export function tileWidth(height: number, aspect: number): number {
   return Math.round(Math.min(height * (16 / 9), Math.max(height * 0.78, height * ratio)))
 }
 
-const oneDecimal = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-
-/** "5.0 s": a take's length, always with one decimal, so lengths line up in the strip. */
+/** "5 s", "7.4 s", "1 min 23 s": a take's length, in the app's one way of writing a length (formatLength). */
 export function formatTakeLength(seconds: number): string {
-  return `${oneDecimal.format(Math.max(0, seconds))} s`
+  return formatLength(Math.max(0, seconds))
 }
 
 /** "Generating 40%", "Queued", "Generating" – the short phase on a pending tile. */
@@ -62,7 +60,7 @@ export function takeKind(take: Pick<Generation, 'source' | 'editId'>): TakeKind 
 
 /**
  * The line under the strip for one take (hovered, else focused, else the active one), without its buttons:
- * "14:02 · 5.0 s · $0.35 · Seedance 2.5 · “A woman walks along the pier…”", "Own clip · IMG_2041.mov · 0:31",
+ * "14:02 · 5 s · $0.35 · Seedance 2.5 · “A woman walks along the pier…”", "Own clip · IMG_2041.mov · 31 s",
  * "Edited film · “Interview” v3", "Queued…", "Generating 40% · 1:12 of ~3:00", or the error of a failed one
  * (`tone: 'error'`).
  */
@@ -85,7 +83,7 @@ export function takeInfo(take: Generation, modelName: string): { text: string; t
   }
   if (kind === 'own') {
     const parts = ['Own clip', title]
-    if (take.videoDuration) parts.push(formatClock(take.videoDuration))
+    if (take.videoDuration) parts.push(formatTakeLength(take.videoDuration))
     return { text: parts.join(' · '), tone: 'muted' }
   }
   if (kind === 'version') return { text: `Edited film · ${quotedVersion(title)}`, tone: 'muted' }
@@ -101,7 +99,7 @@ export function hasReusablePrompt(take: Generation): boolean {
 }
 
 /**
- * What a screen reader hears for a tile: "Take 14:02, 5.0 seconds, selected, new" (only the parts that apply);
+ * What a screen reader hears for a tile: "Take 14:02, 5 seconds, selected, new" (only the parts that apply);
  * "Take, generating 40 percent" while it is being made.
  */
 export function takeAriaLabel(

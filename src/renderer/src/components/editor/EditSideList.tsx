@@ -1,18 +1,17 @@
 import type { EditSummary } from '@shared/types'
-import { TRASH } from '../../lib/platform'
 import { useViewWork } from '../../lib/work'
 import SideList, { SideListRow, SideListThumb, type SideRowControl } from '../library/SideList'
 import { FilmIcon } from '../sequences/icons'
-import { menuRow, onMenuKeyDown } from '../storyboards/ui'
 import MarkViewSeen from '../takes/MarkViewSeen'
+import { menuRow, onMenuKeyDown } from '../ui/menu'
 import { StatusMark } from '../work/StatusMark'
 import { useEditStatus } from './EditList'
-import { originLabel, summaryLine } from './editorUtils'
+import { DELETE_EDIT_TEXT, originLabel, summaryLine } from './editorUtils'
 import { CameraIcon } from './icons'
 
 // The Editor's list on the left, always there: the edits, newest change first, in the shared side list. A click opens
-// one on the right (with none open the right side is the overview, EditList); "＋ New edit" offers the three
-// ways to start one.
+// one on the right; "＋ New edit" offers the three ways to start one (the same names as in Sequences). With no edits
+// the list stays quiet: the overview beside it explains.
 
 interface Props {
   edits?: EditSummary[]
@@ -24,8 +23,8 @@ interface Props {
   onOwnFilm: () => void
   onFromFeed: () => void
   onFromExport: () => void
-  /** After the row's question; throws to show the error there. */
-  onDelete: (edit: EditSummary) => Promise<void>
+  /** After the row's question; throws to show the error there. `next` is the row that takes its place. */
+  onDelete: (edit: EditSummary, next: EditSummary | undefined) => Promise<void>
 }
 
 export default function EditSideList({
@@ -54,8 +53,8 @@ export default function EditSideList({
           <div role="menu" aria-label="New edit" onKeyDown={onMenuKeyDown} className="p-1">
             {(
               [
-                ['Open your own film…', onOwnFilm],
-                ['From the clip feed…', onFromFeed],
+                ['Own film from file…', onOwnFilm],
+                ['From Media…', onFromFeed],
                 ['From an export…', onFromExport]
               ] as const
             ).map(([label, action], i) => (
@@ -81,12 +80,8 @@ export default function EditSideList({
       items={edits}
       selectedId={selectedId}
       onSelect={onSelect}
-      searchPlaceholder="Search name or origin"
       searchText={(e) => originLabel(e.origin)}
-      emptyText="No edits yet. An edit changes a finished film – every change becomes a new version, and the original is left untouched."
-      deleteNote={() =>
-        `The original, the AI takes and versions used elsewhere are kept; the rest goes to ${TRASH}.`
-      }
+      deleteNote={() => DELETE_EDIT_TEXT}
       onDelete={onDelete}
       renderRow={(e, control) => <EditRow edit={e} control={control} />}
     />

@@ -1,19 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import {
-  DEFAULT_MODEL,
-  MAX_AUDIO_CLIP_SECONDS,
-  MAX_REFERENCE_AUDIO_SECONDS,
-  MIN_AUDIO_CLIP_SECONDS,
-  maxReferenceAudios
-} from '@shared/models'
+import { DEFAULT_MODEL, MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS, maxReferenceAudios } from '@shared/models'
 import { workKey, type Asset, type AssetAudio, type EditJob, type FinishedWork } from '@shared/types'
-import { ASSET_COPY, ASSET_FOLDER, assetAudio, originText, type AudioCopy } from '../../lib/assets'
+import { ASSET_COPY, assetAudio, originText, type AudioCopy } from '../../lib/assets'
 import { ipcErrorMessage } from '../../lib/hooks'
-import { FILE_MANAGER, TRASH } from '../../lib/platform'
+import { TRASH } from '../../lib/platform'
 import { markSeen, useIsUnseen, useSeenWhenVisible, useUnseen } from '../../lib/work'
-import OpenFolderButton from '../library/OpenFolderButton'
-import ConfirmButton from '../sequences/ConfirmButton'
-import { PauseIcon, PlayIcon } from '../sequences/icons'
+import SectionTitle from '../library/SectionTitle'
+import { reorderHint } from '../pickers/useReorder'
+import { CloseIcon, PauseIcon, PlayIcon, PlusIcon } from '../sequences/icons'
+import { buttonClass } from '../ui/button'
+import ConfirmButton from '../ui/ConfirmButton'
 import { NewChip, Spinner } from '../work/StatusMark'
 import ClipWindowTrack from './ClipWindowTrack'
 import {
@@ -70,9 +66,9 @@ interface Props {
 }
 
 /**
- * A character's voice ("Voice") or an environment's sound ("Soundscape"): the clips in order, each with a
- * player and the window that is sent to Venice. Add (drop or pick), remove, reorder, and preview exactly
- * what is sent.
+ * A character's voice ("Voice") or an environment's sound ("Soundscape"): the clips in order, the first the default,
+ * each with a player and the window that is sent to Venice. Add (drop or pick), remove, reorder, and preview exactly
+ * what is sent. The folder they are in opens from the editor's ⋯.
  */
 export default function AssetSounds({
   asset,
@@ -300,48 +296,46 @@ export default function AssetSounds({
 
   return (
     <div>
-      <div className="mb-3 flex items-end justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="font-medium">{copy.title}</h2>
-          <p className="mt-0.5 max-w-2xl text-[11px] leading-relaxed text-muted">{copy.intro}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <OpenFolderButton
-            target={ASSET_FOLDER[asset.kind]}
-            id={asset.id}
-            title={`Show the folder with the ${copy.clips} in ${FILE_MANAGER}`}
-            onError={onError}
-            className="rounded-md px-2.5 py-1 text-muted hover:bg-raised hover:text-text disabled:opacity-40"
-          />
-          {voices && (
-            <button
-              onClick={() => setDesigning(true)}
-              className="rounded-md px-2.5 py-1 text-muted hover:bg-raised hover:text-text"
-              title="Describe a voice – Venice creates it and it is saved as a new voice clip"
-            >
-              Design a voice with AI…
-            </button>
-          )}
-          {!empty && (
-            <button
-              onClick={() => void pick()}
-              className="rounded-md px-2.5 py-1 text-muted hover:bg-raised hover:text-text"
-              title={`Choose audio files (${AUDIO_FORMATS})`}
-            >
-              ＋ Add
-            </button>
-          )}
-        </div>
-      </div>
+      <SectionTitle
+        title={copy.title}
+        hint={copy.intro}
+        hintTitle={copy.introMore}
+        actions={
+          <>
+            {voices && (
+              <button
+                type="button"
+                onClick={() => setDesigning(true)}
+                className={buttonClass('ghost', 'sm')}
+                title="Describe a voice – Venice creates it and it is saved as a new voice clip"
+              >
+                Design a voice with AI…
+              </button>
+            )}
+            {!empty && (
+              <button
+                type="button"
+                onClick={() => void pick()}
+                className={buttonClass('ghost', 'sm')}
+                title={`Choose audio files (${AUDIO_FORMATS})`}
+              >
+                <PlusIcon size={12} />
+                Add
+              </button>
+            )}
+          </>
+        }
+      />
 
       {empty ? (
         <button
+          type="button"
           onClick={() => void pick()}
           className={`flex h-32 w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed transition ${
             fileOver ? 'border-accent bg-accent/5 text-text' : 'border-line text-muted hover:border-muted hover:text-text'
           }`}
         >
-          <span className="text-xl">＋</span>
+          <PlusIcon size={18} />
           <span className="text-sm">
             {fileOver ? 'Drop to add' : 'Drop an audio file here or click to choose'}
           </span>
@@ -412,11 +406,16 @@ export default function AssetSounds({
         <VoiceDesignDialog asset={asset} onClose={() => setDesigning(false)} onStarted={designStarted} />
       )}
 
-      {!empty && (
+      {/* Only what applies, one line each (Generate shows the seconds against its limit itself). */}
+      {clips.length > MAX_AUDIOS && (
         <p className="mt-3 text-[11px] leading-relaxed text-muted">
-          Only the excerpt is sent. Venice takes at most {MAX_AUDIOS} {MAX_AUDIOS === 1 ? 'sound clip' : 'sound clips'}{' '}
-          and {MAX_REFERENCE_AUDIO_SECONDS} seconds in total per generation, and only together with at least one
-          reference image. The clip sets how things sound – write what is said or happens in the prompt.
+          Venice takes at most {MAX_AUDIOS} {MAX_AUDIOS === 1 ? 'sound clip' : 'sound clips'} per generation – the first
+          ones come along.
+        </p>
+      )}
+      {!empty && asset.images.length === 0 && (
+        <p className="mt-3 text-[11px] leading-relaxed text-muted">
+          Sound is sent only together with a reference image – add one above.
         </p>
       )}
     </div>
@@ -455,17 +454,17 @@ function DesignFailureRow({
       }`}
     >
       <span className="min-w-0 flex-1 select-text">
-        <span className="font-medium text-accent">Couldn't create the voice.</span>{' '}
-        <span className="text-[#ffb3b5]">{work.error ?? 'The job failed.'}</span>
+        <span className="font-medium text-danger">Couldn't create the voice.</span>{' '}
+        <span className="text-danger">{work.error ?? 'The job failed.'}</span>
       </span>
       <button
         type="button"
         onClick={onClose}
         title="Close"
-        aria-label="Close the error"
-        className="shrink-0 rounded px-1 text-muted transition hover:bg-raised hover:text-text"
+        aria-label="Close"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted transition hover:bg-raised hover:text-text"
       >
-        ✕
+        <CloseIcon size={11} />
       </button>
     </li>
   )
@@ -495,7 +494,10 @@ interface RowProps {
   onDragEnd: () => void
 }
 
-/** One clip: grip, play/pause, name and length, the window on a track, and the window as numbers. */
+/**
+ * One clip: grip, play/pause, name and length, the window on a track with a way to hear it and to start it at the
+ * playhead; the window as numbers only on request ("Exact times…"), since the track already shows them.
+ */
 function ClipRow({
   clip,
   index,
@@ -527,6 +529,7 @@ function ClipRow({
   // A voice made with AI that hasn't been played yet (Activity); playing a second of it clears it.
   const fresh = useIsUnseen(workKey.audio(clip.id))
   const origin = originText(clip.origin)
+  const [exact, setExact] = useState(false)
 
   // Pointed out from elsewhere: scrolled into view and outlined for a moment.
   const rowRef = useRef<HTMLLIElement>(null)
@@ -545,11 +548,22 @@ function ClipRow({
   // A preview that is playing follows the window while it is dragged or typed.
   useEffect(() => player.windowChanged(clip.id, w), [w.start, w.length])
 
+  // ↑ ↓ on the grip, or ⌥↑ / ⌥↓ as everywhere else an item moves; the grip keeps the focus as its row moves.
+  const gripRef = useRef<HTMLButtonElement>(null)
+  const refocusGrip = useRef(false)
+  useEffect(() => {
+    if (!refocusGrip.current) return
+    refocusGrip.current = false
+    gripRef.current?.focus()
+  }, [index])
   const gripKeys = (e: KeyboardEvent) => {
-    if (e.key === 'ArrowUp' && index > 0) onMove(index - 1)
-    else if (e.key === 'ArrowDown' && index < count - 1) onMove(index + 1)
-    else return
+    if (e.metaKey || e.ctrlKey || e.shiftKey) return
+    const to = e.key === 'ArrowUp' ? index - 1 : e.key === 'ArrowDown' ? index + 1 : undefined
+    if (to === undefined) return
     e.preventDefault()
+    if (to < 0 || to >= count) return
+    refocusGrip.current = true
+    onMove(to)
   }
 
   const startHere = () => {
@@ -573,14 +587,15 @@ function ClipRow({
         <div className="flex items-center gap-2">
           {count > 1 && (
             <button
+              ref={gripRef}
               type="button"
               draggable
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onKeyDown={gripKeys}
-              aria-label={`Move ${name} – drag, or use ↑ and ↓`}
-              title="Drag to reorder"
-              className="-ml-1 flex h-7 w-4 shrink-0 cursor-grab items-center justify-center rounded text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 active:cursor-grabbing"
+              aria-label={`Move ${name}: ${reorderHint('y')}`}
+              title={reorderHint('y').replace(/^./, (c) => c.toUpperCase())}
+              className="-ml-1 flex h-7 w-4 shrink-0 cursor-grab items-center justify-center rounded text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-muted active:cursor-grabbing"
             >
               <GripIcon />
             </button>
@@ -620,7 +635,7 @@ function ClipRow({
               title={copy.firstBadge ? copy.firstBadge.title : 'Move the clip to the top of the list'}
               className="shrink-0 rounded-md px-2 py-1 text-[11px] text-muted hover:bg-raised hover:text-text"
             >
-              Move to top
+              Make default
             </button>
           )}
           <ConfirmButton
@@ -628,9 +643,9 @@ function ClipRow({
             confirmLabel="Remove"
             onConfirm={onRemove}
             title={`Remove ${copy.clipDefinite} – the file is moved to ${TRASH}, or to “Reference images” if generations have used it`}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-accent"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-danger"
           >
-            <span aria-hidden>✕</span>
+            <CloseIcon size={11} />
             <span className="sr-only">Remove</span>
           </ConfirmButton>
         </div>
@@ -647,47 +662,37 @@ function ClipRow({
             onChange={draft.change}
           />
 
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
-            <div className="flex items-center gap-1.5">
-              <TimeField
-                label="From"
-                value={w.start}
-                format={formatPosition}
-                onCommit={(t) => draft.change(moveWindow(w, t, clip.duration), 'now')}
-                title="Where the excerpt starts, in minutes and seconds (e.g. 0:05.5) or seconds"
-                clamp={(t) => moveWindow(w, t, clip.duration).start}
-              />
-              <button
-                type="button"
-                onClick={startHere}
-                disabled={!loaded}
-                title={loaded ? 'Start the excerpt at the playhead' : 'Play or click in the sound first'}
-                className="rounded-md border border-line px-2 py-1 text-muted transition hover:bg-raised hover:text-text disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted"
-              >
-                Here
-              </button>
-            </div>
-            <TimeField
-              label="Length"
-              value={w.length}
-              format={formatSecondsField}
-              suffix="s"
-              onCommit={(t) => draft.change(withLength(w, t, clip.duration), 'now')}
-              title={`How long a part is sent, ${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} seconds`}
-              clamp={(t) => withLength(w, t, clip.duration).length}
-            />
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               onClick={() => player.toggleWindow(clip, w)}
               disabled={failed}
-              className="flex items-center gap-1.5 rounded-md border border-line px-3 py-1 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent"
+              className={buttonClass('secondary', 'sm')}
             >
               {playingWindow ? <PauseIcon size={11} /> : <PlayIcon size={11} />}
               {playingWindow ? 'Stop' : 'Listen to the excerpt'}
             </button>
+            <button
+              type="button"
+              onClick={startHere}
+              disabled={!loaded}
+              title={loaded ? 'Start the excerpt at the playhead' : 'Play or click in the sound first'}
+              className={buttonClass('secondary', 'sm')}
+            >
+              Start here
+            </button>
+            <button
+              type="button"
+              onClick={() => setExact((on) => !on)}
+              aria-expanded={exact}
+              title="Type where the excerpt starts and how long it is"
+              className={buttonClass('ghost', 'sm')}
+            >
+              {exact ? 'Hide exact times' : 'Exact times…'}
+            </button>
             <span className="ml-auto text-[11px] text-muted">
               {draft.error ? (
-                <span className="text-accent select-text" title={draft.error}>
+                <span className="text-danger select-text" title={draft.error}>
                   Couldn't save: {draft.error}
                 </span>
               ) : (
@@ -696,10 +701,32 @@ function ClipRow({
             </span>
           </div>
 
+          {exact && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <TimeField
+                label="From"
+                value={w.start}
+                format={formatPosition}
+                onCommit={(t) => draft.change(moveWindow(w, t, clip.duration), 'now')}
+                title="Where the excerpt starts, in minutes and seconds (e.g. 0:05.5) or seconds"
+                clamp={(t) => moveWindow(w, t, clip.duration).start}
+              />
+              <TimeField
+                label="Length"
+                value={w.length}
+                format={formatSecondsField}
+                suffix="s"
+                onCommit={(t) => draft.change(withLength(w, t, clip.duration), 'now')}
+                title={`How long a part is sent, ${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} seconds`}
+                clamp={(t) => withLength(w, t, clip.duration).length}
+              />
+            </div>
+          )}
+
           {voice && (
             <label
               className="mt-2.5 flex w-fit cursor-pointer items-center gap-2 text-[12px]"
-              title="The Editor may then clone the voice for new lines (Re-record lines). Only tick this if you have the right to use the voice."
+              title="The Editor may then clone the voice for new lines (Re-record lines)."
             >
               <input
                 type="checkbox"
@@ -707,15 +734,14 @@ function ClipRow({
                 onChange={(e) => onConsent(e.target.checked)}
                 className="accent-accent"
               />
-              <span>May be cloned for new lines</span>
-              <span className="text-[11px] text-muted">– I have the right to use this voice</span>
+              <span>I have the right to use this voice</span>
             </label>
           )}
 
           {(tooShort || long || failed) && (
             <div className="mt-2 space-y-1 text-[11px] leading-relaxed">
               {tooShort && (
-                <p className="text-amber-400">
+                <p className="text-warning">
                   ⚠ The recording is only {formatDuration(clip.duration)} – Venice needs at least{' '}
                   {MIN_AUDIO_CLIP_SECONDS} seconds. Choose a longer recording.
                 </p>

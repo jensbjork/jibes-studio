@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { buttonClass, type ButtonSize } from '../ui/button'
 import { copyText } from './prompt-utils'
 
-const buttonBase = 'rounded-md px-2.5 py-1.5 transition hover:bg-raised disabled:pointer-events-none disabled:opacity-40'
-
-export const secondaryButton = `${buttonBase} text-muted hover:text-text`
+/** The quiet button of the prompt editors (Discard): buttonClass('ghost'). */
+export const secondaryButton = buttonClass('ghost')
 
 export function FavoriteButton({
   active,
@@ -32,7 +32,24 @@ export function FavoriteButton({
   )
 }
 
-export function CopyButton({ text, disabled }: { text: string; disabled?: boolean }) {
+/**
+ * "Copy" (bordered), "Copied ✓" for a moment after: the prompt editors' "Copy prompt" and "Copy learning", and the
+ * prompt in Media's clip details.
+ */
+export function CopyButton({
+  text,
+  disabled,
+  label = 'Copy',
+  title = 'Copy the prompt to the clipboard',
+  size = 'sm'
+}: {
+  text: string
+  disabled?: boolean
+  label?: string
+  title?: string
+  /** sm beside a heading (Media), md in an editor's row of actions. */
+  size?: ButtonSize
+}) {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -51,53 +68,26 @@ export function CopyButton({ text, disabled }: { text: string; disabled?: boolea
       type="button"
       onClick={copy}
       disabled={disabled}
-      title="Copy the prompt to the clipboard"
-      className={`${buttonBase} ${copied ? 'text-emerald-400' : 'text-muted hover:text-text'}`}
+      title={title}
+      className={`${buttonClass('secondary', size)} ${copied ? 'text-success' : ''}`}
     >
-      {copied ? 'Copied ✓' : 'Copy'}
+      {copied ? 'Copied ✓' : label}
     </button>
   )
 }
 
-/** Two-step delete: the first click arms it, the second deletes. Disarms itself after a few seconds. */
-export function ConfirmDeleteButton({
-  onConfirm,
-  confirmLabel = 'Delete prompt'
-}: {
-  onConfirm: () => void
-  /** The second step's button. */
-  confirmLabel?: string
-}) {
-  const [armed, setArmed] = useState(false)
-
-  useEffect(() => {
-    if (!armed) return
-    const t = setTimeout(() => setArmed(false), 4000)
-    return () => clearTimeout(t)
-  }, [armed])
-
-  if (!armed) {
-    return (
-      <button type="button" onClick={() => setArmed(true)} className={`${buttonBase} text-muted hover:text-accent`}>
-        Delete
-      </button>
-    )
-  }
+/** A field's label in the prompt editors: medium weight, with a short muted hint on the right ("Optional"). */
+export function FieldLabel({ htmlFor, hint, children }: { htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
   return (
-    <span className="flex items-center gap-1">
-      <button type="button" onClick={() => setArmed(false)} className={secondaryButton}>
-        Cancel
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          setArmed(false)
-          onConfirm()
-        }}
-        className="rounded-md bg-accent/15 px-2.5 py-1.5 font-medium text-accent transition hover:bg-accent hover:text-white"
-      >
-        {confirmLabel}
-      </button>
-    </span>
+    <div className="mb-1.5 flex items-baseline justify-between gap-4">
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className="font-medium">
+          {children}
+        </label>
+      ) : (
+        <span className="font-medium">{children}</span>
+      )}
+      {hint && <span className="text-[11px] text-muted">{hint}</span>}
+    </div>
   )
 }

@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { workKey, type EditRange, type VideoModel } from '@shared/types'
+import { isModalOpen } from '../../lib/dialogs'
+import { focusedWithKeyboard, trackFocusOrigin } from '../../lib/focusOrigin'
 import { ipcErrorMessage, useAudioCatalog, useSeparationStatus } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
-import { FILE_MANAGER, isMac } from '../../lib/platform'
+import { isMac, isModKey } from '../../lib/platform'
 import { markSeen } from '../../lib/work'
 import { useReportOpenEdit } from '../../lib/workspace'
 import ConsentDialog from '../ConsentDialog'
-import { Banner, ConfirmDialog } from '../storyboards/ui'
+import { ConfirmDialog } from '../storyboards/ui'
+import { Banner } from '../ui/Banner'
 import ActionsPanel from './ActionsPanel'
 import EditHeader from './EditHeader'
 import { EditorContext, type EditorContextValue, type EditorTab } from './EditorContext'
-import { clampRange, fileName, formatPrice, markedIn, markedOut, newestChild, priceText } from './editorUtils'
-import { focusedWithKeyboard, trackFocusOrigin } from './focusOrigin'
+import { clampRange, formatPrice, markedIn, markedOut, newestChild, priceText } from './editorUtils'
 import { PlayerController } from './playerController'
 import Player from './Player'
 import Timeline from './Timeline'
@@ -21,9 +23,11 @@ import VersionsPanel from './VersionsPanel'
 
 // One edit open, beside the Editor's list: the header, the player and the timeline, and Actions above Versions on the
 // right. Operations work on the current version; the player can show another one beside it (Compare ⇄). Keys: space,
-// J/K/L, ← → (frames, with ⇧ seconds), I/O, Esc, ⌘Z/⌘⇧Z (Ctrl+Z, Ctrl+Y on Windows).
+// J/K/L, ← → (frames, with ⇧ seconds), I/O, Esc, ⌘Z/⌘⇧Z (Ctrl+Z, Ctrl+Y on Windows). Its notices (sent, an error)
+// float at the bottom of the Editor, where the view shows them all (onNotice).
 
-interface Notice {
+/** A notice from the open edit, for the view to show. */
+export interface EditorNotice {
   tone: 'error' | 'success'
   text: ReactNode
 }
@@ -33,7 +37,9 @@ const TAB_KEY = 'editor:tab'
 function loadTab(): EditorTab {
   try {
     const t = localStorage.getItem(TAB_KEY)
-    return t === 'bild' || t === 'ljud' || t === 'rost' || t === 'musik' || t === 'text' ? t : 'bild'
+    // Music & effects was a tab of its own; its cards are under Sound now.
+    if (t === 'musik') return 'ljud'
+    return t === 'bild' || t === 'ljud' || t === 'rost' || t === 'text' ? t : 'bild'
   } catch {
     return 'bild'
   }
@@ -52,9 +58,13 @@ interface Props {
   modelsError?: string
   hasApiKey: boolean
   navigate: Navigate
-  onBack: () => void
-  /** The edit is gone (deleted here or elsewhere). */
+  /** "All edits" in the header: the overview in place of this edit. */
+  onShowAll: () => void
+  /** Delete… in the header's ⋯, after its question. */
+  onDelete: () => Promise<void>
+  /** The edit is gone (deleted elsewhere, or a remembered one from before). */
   onClosed: (editId: string) => void
+  onNotice: (notice: EditorNotice) => void
   showVersion?: ShowVersionRequest
 }
 
@@ -64,8 +74,10 @@ export default function EditWorkspace({
   modelsError,
   hasApiKey,
   navigate,
-  onBack,
+  onShowAll,
+  onDelete,
   onClosed,
+  onNotice,
   showVersion
 }: Props) {
   const { edit, error, progress, refresh, setEdit } = useEdit(editId, onClosed)
@@ -73,7 +85,6 @@ export default function EditWorkspace({
   useEffect(() => () => player.destroy(), [player])
   const audio = useAudioCatalog()
   const separation = useSeparationStatus()
-  const [notice, setNotice] = useState<Notice>()
   const [tab, setTabState] = useState<EditorTab>(loadTab)
   const [selection, setSelectionState] = useState<EditRange>()
   const [opRange, setOpRange] = useState<EditRange>()
@@ -119,13 +130,7 @@ export default function EditWorkspace({
   }, [])
 
   const setSelection = useCallback((range: EditRange | undefined) => setSelectionState(range), [])
-
-  // Good news (sent, saved) goes away by itself; errors stay until dismissed.
-  useEffect(() => {
-    if (notice?.tone !== 'success') return
-    const t = setTimeout(() => setNotice(undefined), 8000)
-    return () => clearTimeout(t)
-  }, [notice])
+  const onError = (text: string) => onNotice({ tone: 'error', text })
 
   // A new current version: comparing starts over (against its parent), and a marking stays only while the film
   // keeps its length (a cut or an extension moves everything after it).
@@ -149,15 +154,21 @@ export default function EditWorkspace({
       try {
         setEdit(await window.studio.setCurrentVersion(editId, versionId))
       } catch (e) {
-        setNotice({ tone: 'error', text: ipcErrorMessage(e) })
+        onNotice({ tone: 'error', text: ipcErrorMessage(e) })
       }
     },
-    [editId, setEdit]
+    [editId, setEdit, onNotice]
   )
   const parentId = current?.parentId && edit?.versions.some((v) => v.id === current.parentId) ? current.parentId : undefined
   const redoTarget = edit && current ? newestChild(edit.versions, current.id) : undefined
   const undo = () => parentId && void setCurrent(parentId)
   const redo = () => redoTarget && void setCurrent(redoTarget.id)
+  // Making a version the one operations work on is choosing it on purpose: it is seen from then on (as Use under
+  // Versions).
+  const chooseVersion = (versionId: string) => {
+    markSeen([workKey.generation(versionId)])
+    void setCurrent(versionId)
+  }
 
   const show = (versionId: string) => {
     if (versionId === currentId) setComparing(false)
@@ -184,16 +195,14 @@ export default function EditWorkspace({
     try {
       setEdit(await window.studio.renameEdit(editId, name))
     } catch (e) {
-      setNotice({ tone: 'error', text: ipcErrorMessage(e) })
+      onError(ipcErrorMessage(e))
     }
   }
 
   // ── Keyboard ──
 
-  // The consent dialog has no aria-modal of its own, so open dialogs of this view are named here too.
-  const dialogOpen = !!runner.confirm || !!runner.consent
-  const keys = useRef({ undo, redo, selection, duration, dialogOpen })
-  keys.current = { undo, redo, selection, duration, dialogOpen }
+  const keys = useRef({ undo, redo, selection, duration })
+  keys.current = { undo, redo, selection, duration }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return
@@ -209,10 +218,10 @@ export default function EditWorkspace({
       ) {
         return
       }
+      // A dialog over the view (the price question, consent, a picker) has the keys.
+      if (isModalOpen()) return
       const k = keys.current
-      if (k.dialogOpen || document.querySelector('[aria-modal="true"], [role="alertdialog"]')) return
-      const mod = e.metaKey || e.ctrlKey
-      if (mod && e.key.toLowerCase() === 'z') {
+      if (isModKey(e) && !e.altKey && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         if (e.shiftKey) k.redo()
         else k.undo()
@@ -224,7 +233,7 @@ export default function EditWorkspace({
         k.redo()
         return
       }
-      if (mod || e.altKey) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
       switch (e.key.toLowerCase()) {
         case ' ':
           e.preventDefault()
@@ -301,7 +310,7 @@ export default function EditWorkspace({
   }
 
   const onSent = (sent: { sequenceId: string; segmentId: string; where: string }) =>
-    setNotice({
+    onNotice({
       tone: 'success',
       text: (
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -317,47 +326,20 @@ export default function EditWorkspace({
       )
     })
 
-  const onSubtitlesSaved = (path: string) =>
-    setNotice({
-      tone: 'success',
-      text: (
-        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>
-            Subtitles saved: <span className="font-mono">{fileName(path)}</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => window.studio.revealFile(path)}
-            className="rounded border border-emerald-400/40 px-2 py-0.5 font-medium hover:bg-emerald-400/10"
-          >
-            Show in {FILE_MANAGER}
-          </button>
-        </span>
-      )
-    })
-
-  const onError = (text: string) => setNotice({ tone: 'error', text })
-
   return (
     <EditorContext.Provider value={context}>
       <div className="flex h-full flex-col">
         <EditHeader
           edit={edit}
           current={current}
-          hasTranscript={!!transcript?.segments.length}
-          onBack={onBack}
+          onShowAll={onShowAll}
           onRename={(name) => void rename(name)}
           onSent={onSent}
-          onDeleted={() => onClosed(editId)}
+          onDelete={onDelete}
           onError={onError}
           onChanged={() => void refresh()}
-          onSubtitlesSaved={onSubtitlesSaved}
         />
-        {notice && (
-          <Banner tone={notice.tone} onDismiss={() => setNotice(undefined)}>
-            {notice.text}
-          </Banner>
-        )}
+        {/* The state of the edit, not a passing notice: it stays under the header. */}
         {error && (
           <Banner tone="error">
             The edit couldn’t be reloaded: {error}
@@ -370,6 +352,7 @@ export default function EditWorkspace({
               other={other}
               comparing={comparing && !!other}
               onCompare={() => setComparing((c) => !c)}
+              onUseOther={() => other && chooseVersion(other.id)}
               canUndo={!!parentId}
               canRedo={!!redoTarget}
               onUndo={undo}

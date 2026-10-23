@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SavedPrompt } from '@shared/types'
-import { usePromptsState } from '../../lib/hooks'
+import { pendingCreateTarget, requestCreate, useCreateRequest } from '../../lib/createRequest'
+import { useFindShortcut, usePromptsState } from '../../lib/hooks'
+import { useListKeys } from '../../lib/listKeys'
 import type { Navigate } from '../../lib/navigation'
 import { shortcut } from '../../lib/platform'
+import { QuoteIcon } from '../icons'
+import { ListHeader } from '../library/SideList'
+import { FloatingBanner } from '../ui/Banner'
+import EmptyState from '../ui/EmptyState'
 import { loadTab, saveTab, type PromptsTab } from './learning-utils'
 import LearningsView from './LearningsView'
 import PromptEditor from './PromptEditor'
@@ -10,7 +16,6 @@ import PromptFilters from './PromptFilters'
 import PromptListItem, { type PromptRow } from './PromptListItem'
 import {
   collectTags,
-  fold,
   hasTags,
   isSortKey,
   matchesQuery,
@@ -44,18 +49,42 @@ function rowFromDraft(draft: Draft, useCount: number): PromptRow {
   }
 }
 
+/** The tab a "New prompt" or "New learning" from ⌘K is for, while it waits for its list. */
+function requestedTab(): PromptsTab | undefined {
+  const target = pendingCreateTarget()
+  return target === 'prompts' || target === 'learnings' ? target : undefined
+}
+
 /** Prompts: the prompt library, and (second tab) the learnings about what works in prompts. */
 export default function PromptsView({ navigate }: { navigate: Navigate }) {
-  // A clip's "Learnings from this clip" link opens the Learnings tab on that learning.
+  // A clip's "Learnings from this clip" link opens the Learnings tab on that learning; ⌘K's "New …" opens its tab.
   const [requested] = useState(takeRequestedLearning)
-  const [tab, setTabState] = useState<PromptsTab>(() => (requested ? 'learnings' : loadTab()))
+  const [tab, setTabState] = useState<PromptsTab>(() => (requested ? 'learnings' : (requestedTab() ?? loadTab())))
   const setTab = (next: PromptsTab) => {
     setTabState(next)
     saveTab(next)
   }
-  useEffect(() => {
-    if (requested) saveTab('learnings')
-  }, [])
+  // Remembered as if chosen: the tab a link or ⌘K opened is the one to come back to.
+  useEffect(() => saveTab(tab), [])
+
+  // "New prompt" or "New learning" from ⌘K while the other tab is open: that tab opens, and the request is passed on
+  // to its list, which takes it once it has loaded.
+  useCreateRequest(
+    tab === 'learnings',
+    () => {
+      setTab('prompts')
+      requestCreate('prompts')
+    },
+    'prompts'
+  )
+  useCreateRequest(
+    tab === 'prompts',
+    () => {
+      setTab('learnings')
+      requestCreate('learnings')
+    },
+    'learnings'
+  )
 
   const tabs = <ViewTabs tab={tab} onTab={setTab} />
   return tab === 'learnings' ? (
@@ -65,6 +94,10 @@ export default function PromptsView({ navigate }: { navigate: Navigate }) {
   )
 }
 
+/**
+ * The prompt library: its list (the side lists' header, search and keys, in a wider column for the text previews and
+ * the filter chips) and the open prompt's editor.
+ */
 function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode }) {
   const { prompts, loaded } = usePromptsState()
   const editor = usePromptDraft(prompts)
@@ -83,12 +116,10 @@ function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode
   const filtering = query.trim() !== '' || activeTags.length > 0 || favoritesOnly
 
   const sorted = useMemo(() => sortPrompts(prompts, sort), [prompts, sort])
+  const matches = (p: SavedPrompt) =>
+    matchesQuery(p, query) && hasTags(p, activeTags) && (!favoritesOnly || p.favorite)
   // The open prompt stays listed even if an edit makes it stop matching the filters.
-  const visible = sorted.filter(
-    (p) =>
-      p.id === draft?.id ||
-      (matchesQuery(p, query) && hasTags(p, activeTags) && (!favoritesOnly || p.favorite))
-  )
+  const visible = sorted.filter((p) => p.id === draft?.id || matches(p))
   const stored = draft?.id ? prompts.find((p) => p.id === draft.id) : undefined
   const showDraftRow = !!draft && !stored
 
@@ -108,18 +139,6 @@ function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode
     if (!draft) editor.select(sorted[0])
   }, [sorted])
 
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.defaultPrevented && e.key.toLowerCase() === 'f') {
-        e.preventDefault()
-        searchRef.current?.focus()
-        searchRef.current?.select()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
   const toggleTag = (key: string) =>
     setTagFilter((list) =>
       list.includes(key) ? list.filter((k) => k !== key) : [...list.filter((k) => activeTags.includes(k)), key]
@@ -133,9 +152,13 @@ function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode
 
   // A new prompt inherits the active filters, so it shows up where it was created.
   const newPrompt = () => {
+    autoSelected.current = true
     const labels = activeTags.map((k) => tags.find((t) => t.key === k)?.label ?? k)
     editor.create(labels, favoritesOnly)
   }
+
+  // "New prompt" from ⌘K: as the header's button does, once the prompts have loaded.
+  useCreateRequest(loaded, newPrompt, 'prompts')
 
   // Saved right away (not debounced) so the list re-sorts the favourite immediately.
   const toggleOpenFavorite = () => {
@@ -152,50 +175,36 @@ function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode
   const remove = () => {
     const index = visible.findIndex((p) => p.id === draft?.id)
     const rest = visible.filter((p) => p.id !== draft?.id)
-    void editor.remove(rest[Math.min(Math.max(index, 0), rest.length - 1)])
+    return editor.remove(rest[Math.min(Math.max(index, 0), rest.length - 1)])
   }
 
-  const step = (direction: 1 | -1) => {
-    if (!visible.length) return
-    const index = visible.findIndex((p) => p.id === draft?.id)
-    const next = index === -1 ? 0 : Math.min(visible.length - 1, Math.max(0, index + direction))
-    editor.select(visible[next])
-  }
+  const byId = (id: string) => visible.find((p) => p.id === id)
 
-  const onListKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault()
-      step(e.key === 'ArrowDown' ? 1 : -1)
-    } else if (e.key === 'Enter' && draft?.id) {
-      e.preventDefault()
-      void use()
-    }
-  }
+  // The side lists' keys: ↑ ↓ (Home, End) open a row, ⌘↵ generates with it; in the search ↓ goes to the rows,
+  // Enter opens the first match and Esc clears it. ⌘F goes to the search.
+  const { onSearchKeyDown, onListKeyDown } = useListKeys({
+    ids: visible.map((p) => p.id),
+    matchIds: visible.filter(matches).map((p) => p.id),
+    selectedId: draft?.id,
+    onSelect: (id) => editor.select(byId(id)),
+    searchRef,
+    listRef,
+    onClearSearch: () => setQuery(''),
+    onModEnter: (id) => void use(byId(id))
+  })
+  useFindShortcut(searchRef)
 
   return (
-    <div className="flex h-full">
+    <div className="relative flex h-full">
       <aside className="flex w-[340px] shrink-0 flex-col border-r border-line">
-        <div className="drag flex h-12 shrink-0 items-center justify-between pl-3 pr-3">
-          {tabs}
-          <button
-            type="button"
-            onClick={newPrompt}
-            className="no-drag rounded-md px-2.5 py-1 text-muted transition hover:bg-raised hover:text-text"
-          >
-            ＋ New prompt
-          </button>
-        </div>
+        <ListHeader title={tabs} createLabel="New prompt" onCreate={newPrompt} />
 
         {prompts.length > 0 && (
           <PromptFilters
             query={query}
             onQuery={setQuery}
             searchRef={searchRef}
-            onSearchArrowDown={() => {
-              listRef.current?.focus()
-              if (!visible.some((p) => p.id === draft?.id)) step(1)
-            }}
+            onSearchKeyDown={onSearchKeyDown}
             tags={tags}
             activeTags={activeTags}
             onToggleTag={toggleTag}
@@ -211,60 +220,35 @@ function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode
 
         <div
           ref={listRef}
-          role="listbox"
           aria-label="Prompts"
-          tabIndex={0}
-          onKeyDown={onListKey}
-          className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-3 outline-none"
+          onKeyDown={onListKeyDown}
+          className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-3"
         >
           {showDraftRow && (
-            <PromptListItem
-              row={rowFromDraft(draft, 0)}
-              selected
-              unsaved={!draft.id}
-              activeTags={activeTags}
-              onSelect={() => undefined}
-              onToggleFavorite={toggleOpenFavorite}
-              onTagClick={(tag) => toggleTag(fold(tag))}
-            />
+            <PromptListItem row={rowFromDraft(draft, 0)} selected unsaved={!draft.id} onSelect={() => undefined} />
           )}
           {visible.map((p) => {
             const selected = p.id === draft?.id
             return (
               <PromptListItem
                 key={p.id}
+                id={p.id}
                 row={selected ? rowFromDraft(draft, p.useCount) : p}
                 selected={selected}
-                activeTags={activeTags}
                 onSelect={() => editor.select(p)}
-                onToggleFavorite={() => editor.toggleFavorite(p.id)}
-                onUse={() => void use(p)}
-                onTagClick={(tag) => toggleTag(fold(tag))}
               />
             )
           })}
 
           {prompts.length > 0 && visible.length === 0 && filtering && (
-            <div className="px-3 py-8 text-center text-muted">
+            <div className="px-2 py-2 text-[12px] leading-relaxed text-muted">
               <p>No prompts match.</p>
-              <button type="button" onClick={clearFilters} className="mt-2 text-text underline-offset-2 hover:underline">
+              <button type="button" onClick={clearFilters} className="mt-1 text-text underline-offset-2 hover:underline">
                 Clear search and filters
               </button>
             </div>
           )}
-          {loaded && prompts.length === 0 && !draft && (
-            <p className="px-3 py-8 text-center text-muted">No saved prompts yet.</p>
-          )}
         </div>
-
-        {editor.error && (
-          <div className="flex items-start gap-2 border-t border-line px-4 py-3 text-accent">
-            <p className="min-w-0 flex-1 select-text">{editor.error}</p>
-            <button type="button" onClick={editor.clearError} title="Close" className="text-muted hover:text-text">
-              ✕
-            </button>
-          </div>
-        )}
       </aside>
 
       {draft ? (
@@ -288,6 +272,12 @@ function PromptLibrary({ navigate, tabs }: { navigate: Navigate; tabs: ReactNode
           <div className="drag h-12 shrink-0" />
         </section>
       )}
+
+      {editor.error && (
+        <FloatingBanner key={editor.error} tone="error" onDismiss={editor.clearError}>
+          {editor.error}
+        </FloatingBanner>
+      )}
     </div>
   )
 }
@@ -296,33 +286,24 @@ function EmptyEditor({ hasPrompts, onNew }: { hasPrompts: boolean; onNew: () => 
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       <div className="drag h-12 shrink-0" />
-      <div className="flex flex-1 items-center justify-center px-8 pb-12">
-        {hasPrompts ? (
+      {hasPrompts ? (
+        <div className="flex flex-1 items-center justify-center px-8 pb-12">
           <div className="text-center text-muted">
             <p>Pick a prompt in the list, or create a new one.</p>
-            <p className="mt-1 text-[11px]">{shortcut('⌘ F')} to search · ↑ ↓ to browse · Enter to open in Generate</p>
-          </div>
-        ) : (
-          <div className="max-w-md text-center">
-            <div className="mb-4 text-4xl text-muted">❝</div>
-            <h2 className="mb-2 text-base font-semibold">Your prompt library</h2>
-            <p className="mb-5 leading-relaxed text-muted">
-              Save the prompts that work and reuse them with a click. Tag them to find the right one, and star
-              your favourites to keep them on top – in the library in Generate too.
-            </p>
-            <button
-              type="button"
-              onClick={onNew}
-              className="rounded-md bg-accent px-4 py-2 font-medium text-white transition hover:bg-accent-hover"
-            >
-              Create your first prompt
-            </button>
-            <p className="mt-4 text-[11px] text-muted">
-              You can also save straight from Generate with the Save button by the prompt.
+            <p className="mt-1 text-[11px]">
+              {shortcut('⌘F')} to search · ↑ ↓ to browse · {shortcut('⌘↵')} to generate with it
             </p>
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <EmptyState
+          icon={<QuoteIcon size={22} />}
+          title="Your prompt library"
+          text="Save the prompts that work and reuse them with a click. Tag them to find the right one, and star your favourites to keep them on top – in the library in Generate too."
+          action={{ label: 'Create your first prompt', onClick: onNew }}
+          footnote="You can also save straight from Generate with the Save button by the prompt."
+        />
+      )}
     </section>
   )
 }

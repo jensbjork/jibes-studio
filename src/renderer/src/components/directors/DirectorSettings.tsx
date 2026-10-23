@@ -1,9 +1,11 @@
-import { useMemo } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { KINDS, PREFERRED } from '@shared/models'
 import type { Direction, VideoModel } from '@shared/types'
-import { continuityText } from '../../lib/directors'
+import { continuityText, defaultsText } from '../../lib/directors'
+import Disclosure from '../ui/Disclosure'
+import Segmented from '../ui/Segmented'
 
-const select = 'w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted disabled:opacity-60'
+const select = 'w-full rounded-md border border-line bg-raised px-2.5 py-1.5 outline-none focus:border-muted'
 
 /** The shortest and longest shot a director may aim for, in seconds (Direction.shotSeconds). */
 export const SHOT_SECONDS = { min: 2, max: 15 } as const
@@ -11,19 +13,23 @@ export const SHOT_SECONDS = { min: 2, max: 15 } as const
 /** The middle of the range, where the slider starts when a length is first set. */
 const SHOT_SECONDS_START = 5
 
+/** What a new clip's duration aims for: the Shot length label's tooltip. */
+const SHOT_LENGTH_HINT = 'What a new clip’s duration aims for'
+
 interface ShotsProps {
   shotSeconds: number | undefined
   continuity: Direction['continuity']
-  /** Read-only (a ready-made director). */
-  readOnly?: boolean
-  onShotSeconds?: (seconds: number | undefined, now: boolean) => void
-  onContinuity?: (continuity: Direction['continuity']) => void
+  onShotSeconds: (seconds: number | undefined, now: boolean) => void
+  onContinuity: (continuity: Direction['continuity']) => void
 }
 
-const CONTINUITY: { value: Direction['continuity']; label: string; text: string }[] = [
+/** "Between shots" as a choice: the sequence's own is no continuity of the director's. */
+type Between = 'cut' | 'flow' | 'own'
+
+const CONTINUITY: { value: Between; label: string; text: string }[] = [
   { value: 'cut', label: 'Cut', text: 'New clips start fresh – hard cuts between the shots.' },
   { value: 'flow', label: 'Flow', text: 'New clips continue from the last frame of the clip before them.' },
-  { value: undefined, label: 'Sequence’s own', text: 'New clips do as the sequence does without a director.' }
+  { value: 'own', label: 'Sequence’s own', text: 'New clips do as the sequence does without a director.' }
 ]
 
 /**
@@ -31,31 +37,32 @@ const CONTINUITY: { value: Direction['continuity']; label: string; text: string 
  * nearest length the model offers) and what happens between shots (Cut, Flow or the sequence's own). Only new clips
  * get them; existing clips aren't changed.
  */
-export function ShotSettings({ shotSeconds, continuity, readOnly = false, onShotSeconds, onContinuity }: ShotsProps) {
+export function ShotSettings({ shotSeconds, continuity, onShotSeconds, onContinuity }: ShotsProps) {
   const on = typeof shotSeconds === 'number'
   const value = on ? shotSeconds : SHOT_SECONDS_START
-  const chosen = CONTINUITY.find((c) => c.value === continuity) ?? CONTINUITY[2]
+  const between: Between = continuity ?? 'own'
+  const chosen = CONTINUITY.find((c) => c.value === between) ?? CONTINUITY[2]
   return (
     <div className="grid gap-x-5 gap-y-4 @min-[34rem]/fields:grid-cols-2">
       <div>
         <div className="mb-1.5 flex items-center gap-2">
-          <span className="font-medium">Shot length</span>
-          <span className="min-w-0 flex-1 truncate text-[11px] text-muted">What a new clip’s duration aims for</span>
-          {!readOnly && (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={on}
-              aria-label="Aim for a shot length"
-              onClick={() => onShotSeconds?.(on ? undefined : SHOT_SECONDS_START, true)}
-              className={`relative h-4 w-7 shrink-0 rounded-full transition ${on ? 'bg-accent' : 'bg-line'}`}
-              title={on ? 'Leave the length to the sequence' : 'Aim for a shot length'}
-            >
-              <span
-                className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-[left] ${on ? 'left-[14px]' : 'left-0.5'}`}
-              />
-            </button>
-          )}
+          <span title={SHOT_LENGTH_HINT} className="font-medium">
+            Shot length
+          </span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            role="switch"
+            aria-checked={on}
+            aria-label="Aim for a shot length"
+            onClick={() => onShotSeconds(on ? undefined : SHOT_SECONDS_START, true)}
+            className={`relative h-4 w-7 shrink-0 rounded-full transition ${on ? 'bg-accent' : 'bg-line'}`}
+            title={on ? 'Leave the length to the sequence' : `Aim for a shot length – ${SHOT_LENGTH_HINT.toLowerCase()}`}
+          >
+            <span
+              className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-[left] ${on ? 'left-[14px]' : 'left-0.5'}`}
+            />
+          </button>
         </div>
         <div className={`flex items-center gap-3 ${on ? '' : 'opacity-45'}`}>
           <input
@@ -64,9 +71,9 @@ export function ShotSettings({ shotSeconds, continuity, readOnly = false, onShot
             max={SHOT_SECONDS.max}
             step={1}
             value={value}
-            disabled={readOnly || !on}
+            disabled={!on}
             aria-label="Shot length in seconds"
-            onChange={(e) => onShotSeconds?.(Number(e.target.value), false)}
+            onChange={(e) => onShotSeconds(Number(e.target.value), false)}
             className="min-w-0 flex-1 accent-accent"
           />
           <span className="w-12 shrink-0 text-right tabular-nums">{on ? `${value} s` : 'Any'}</span>
@@ -76,23 +83,13 @@ export function ShotSettings({ shotSeconds, continuity, readOnly = false, onShot
         <div className="mb-1.5 flex items-center gap-2">
           <span className="font-medium">Between shots</span>
         </div>
-        <div role="radiogroup" aria-label="Between shots" className="grid grid-cols-[1fr_1fr_auto] gap-1 rounded-lg bg-raised p-1">
-          {CONTINUITY.map((c) => (
-            <button
-              key={c.label}
-              type="button"
-              role="radio"
-              aria-checked={c === chosen}
-              disabled={readOnly && c !== chosen}
-              onClick={() => onContinuity?.(c.value)}
-              className={`truncate rounded-md px-2.5 py-1 text-[12px] transition ${
-                c === chosen ? 'bg-line text-text' : 'text-muted hover:text-text disabled:hover:text-muted'
-              }`}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          value={between}
+          onChange={(v) => onContinuity(v === 'own' ? undefined : v)}
+          options={CONTINUITY.map((c) => ({ value: c.value, label: c.label, title: c.text }))}
+          ariaLabel="Between shots"
+          fill
+        />
         <p className="mt-1 text-[11px] leading-snug text-muted">{chosen.text}</p>
       </div>
     </div>
@@ -108,6 +105,11 @@ export function shotSettingsText(direction: Direction): string | undefined {
   return parts.length ? parts.join(' · ') : undefined
 }
 
+/** A model's name for the defaults line (its id while the list hasn't loaded or no longer has it). */
+export function modelNamer(models: readonly VideoModel[]): (id: string) => string {
+  return (id) => models.find((m) => m.id === id)?.name ?? id
+}
+
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
 type Defaults = NonNullable<Direction['defaults']>
@@ -115,8 +117,7 @@ type Defaults = NonNullable<Direction['defaults']>
 interface DefaultsProps {
   value: Defaults | undefined
   models: VideoModel[]
-  readOnly?: boolean
-  onChange?: (next: Defaults | undefined) => void
+  onChange: (next: Defaults | undefined) => void
 }
 
 /** The options for a setting: the model's own, else every model's (online), in the app's preferred order first. */
@@ -135,7 +136,7 @@ function optionsFor(models: VideoModel[], model: VideoModel | undefined, key: 'a
  * aspect ratio and a resolution, each optional ("Keep" leaves the form's own). Each is applied only where the model
  * offers it.
  */
-export function DefaultSettings({ value, models, readOnly = false, onChange }: DefaultsProps) {
+export function DefaultSettings({ value, models, onChange }: DefaultsProps) {
   const d = value ?? {}
   const model = models.find((m) => m.id === d.model)
   const byKind = useMemo(
@@ -150,7 +151,7 @@ export function DefaultSettings({ value, models, readOnly = false, onChange }: D
     const next: Defaults = { ...d }
     if (v) next[key] = v
     else delete next[key]
-    onChange?.(Object.keys(next).length ? next : undefined)
+    onChange(Object.keys(next).length ? next : undefined)
   }
   const ratios = optionsFor(models, model, 'aspectRatios')
   const resolutions = optionsFor(models, model, 'resolutions')
@@ -158,7 +159,7 @@ export function DefaultSettings({ value, models, readOnly = false, onChange }: D
     <div className="grid gap-2 @min-[34rem]/fields:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
       <label className="min-w-0">
         <span className="mb-1.5 block text-muted">Model</span>
-        <select value={d.model ?? ''} disabled={readOnly} onChange={(e) => set('model', e.target.value)} className={select}>
+        <select value={d.model ?? ''} onChange={(e) => set('model', e.target.value)} className={select}>
           <option value="">Keep the form’s</option>
           {d.model && !model && <option value={d.model}>{d.model}</option>}
           {byKind.map(
@@ -177,12 +178,7 @@ export function DefaultSettings({ value, models, readOnly = false, onChange }: D
       </label>
       <label className="min-w-0">
         <span className="mb-1.5 block text-muted">Aspect ratio</span>
-        <select
-          value={d.aspectRatio ?? ''}
-          disabled={readOnly}
-          onChange={(e) => set('aspectRatio', e.target.value)}
-          className={select}
-        >
+        <select value={d.aspectRatio ?? ''} onChange={(e) => set('aspectRatio', e.target.value)} className={select}>
           <option value="">Keep</option>
           {d.aspectRatio && !ratios.includes(d.aspectRatio) && <option value={d.aspectRatio}>{d.aspectRatio}</option>}
           {ratios.map((r) => (
@@ -192,12 +188,7 @@ export function DefaultSettings({ value, models, readOnly = false, onChange }: D
       </label>
       <label className="min-w-0">
         <span className="mb-1.5 block text-muted">Resolution</span>
-        <select
-          value={d.resolution ?? ''}
-          disabled={readOnly}
-          onChange={(e) => set('resolution', e.target.value)}
-          className={select}
-        >
+        <select value={d.resolution ?? ''} onChange={(e) => set('resolution', e.target.value)} className={select}>
           <option value="">Keep</option>
           {d.resolution && !resolutions.includes(d.resolution) && <option value={d.resolution}>{d.resolution}</option>}
           {resolutions.map((r) => (
@@ -206,5 +197,50 @@ export function DefaultSettings({ value, models, readOnly = false, onChange }: D
         </select>
       </label>
     </div>
+  )
+}
+
+// ── The section ──────────────────────────────────────────────────────────────
+
+/** Open or closed as it was last left while the window is open: it stays so from one director to the next. */
+let settingsOpen = false
+
+/**
+ * "Shots and defaults": the rarely changed settings of a director, folded into one row under its style frames and
+ * videos – what they are set to, in a line ("Hard cuts · 6 s shots · 16:9") – that opens to the shot settings and the
+ * defaults. Closed by default, also when something is set (every ready-made one sets something, so every copy would
+ * open otherwise).
+ */
+export function DirectorSettingsSection({
+  direction,
+  models,
+  children
+}: {
+  direction: Direction
+  models: readonly VideoModel[]
+  /** The settings: ShotSettings and DefaultSettings, each under its SectionTitle. */
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(settingsOpen)
+  const summary =
+    [shotSettingsText(direction), defaultsText(direction, modelNamer(models))].filter(Boolean).join(' · ') ||
+    'Not set – the sequence and the form decide'
+  return (
+    <Disclosure
+      open={open}
+      onToggle={(next) => {
+        settingsOpen = next
+        setOpen(next)
+      }}
+      plain
+      summary={
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="font-medium text-text">Shots and defaults</span>
+          <span className="truncate text-[11px]">{summary}</span>
+        </span>
+      }
+    >
+      <div className="mt-3 space-y-9">{children}</div>
+    </Disclosure>
   )
 }

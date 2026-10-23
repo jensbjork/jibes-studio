@@ -193,12 +193,13 @@ function BoardPicture({
       {path && !missing ? (
         <img
           src={mediaUrl(path)}
+          alt=""
           draggable={false}
           onError={() => setMissing(true)}
           className="h-full w-full object-contain"
         />
       ) : (
-        <span className="flex h-full w-full items-center justify-center p-2 text-center text-[11px] text-accent">
+        <span className="flex h-full w-full items-center justify-center p-2 text-center text-[11px] text-danger">
           {path ? 'Image missing' : 'No image'}
         </span>
       )}
@@ -293,7 +294,7 @@ export function TransitionSummary({
           {p.prompt}
         </p>
       ) : (
-        <p className="text-accent">The prompt is empty.</p>
+        <p className="text-danger">The prompt is empty.</p>
       )}
       {p.negativePrompt && (
         <>
@@ -301,7 +302,7 @@ export function TransitionSummary({
           <p className="whitespace-pre-wrap text-muted select-text">{p.negativePrompt}</p>
         </>
       )}
-      {view.problem && <p className="mt-2 text-[12px] text-accent">{view.problem}.</p>}
+      {view.problem && <p className="mt-2 text-[12px] text-danger">{view.problem}.</p>}
     </section>
   )
 }

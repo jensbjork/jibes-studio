@@ -5,20 +5,22 @@ import { THIS_COMPUTER, isMac } from '../../lib/platform'
 import { useOpenCard, useReportRange } from './cards'
 import AddAudioDialog from './AddAudioDialog'
 import { useCardRun, useEditor } from './EditorContext'
-import { Choice, CostTag, Field, GainSlider, OpCard, PlanNotes, Target } from './ui'
+import { EffectCard, MusicCard } from './MusicTab'
+import { Choice, Field, GainSlider, OpCard, PlanNotes, Target, actionButton } from './ui'
 
-// Sound: free, local changes to the sound. Each makes a new version with the picture copied as it is, so they take
-// seconds and lose nothing; the voice and the background can be handled apart where this Mac can separate them (never
-// on Windows: separation is Apple's).
-
-const actionButton =
-  'rounded-md border border-line px-3 py-1.5 transition hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent'
+// Sound: free, local changes to the sound first, then the paid ones – new music and sound effects (MusicTab.tsx). The
+// free ones make a new version with the picture copied as it is, so they take seconds and lose nothing; the voice and
+// the background can be handled apart where this Mac can separate them (never on Windows: separation is Apple's).
+// The tab says once that it is free; only the paid cards show a price, on their buttons.
 
 export default function SoundTab() {
   const [open, toggle] = useOpenCard('ljud')
   const { separation } = useEditor()
   return (
     <div className="space-y-1">
+      <p className="mx-3 mb-1 text-[11px] leading-relaxed text-muted">
+        Free and runs on {THIS_COMPUTER} unless a price is shown.
+      </p>
       {separation && !separation.available && (
         <p className="mx-3 mb-2 rounded-md border border-line px-3 py-2 text-[11px] leading-relaxed text-muted">
           {separation.message ?? NO_SEPARATION} The voice and the background can’t be changed separately – everything
@@ -29,6 +31,8 @@ export default function SoundTab() {
       <MuteCard open={open === 'mute'} onToggle={() => toggle('mute')} />
       <CleanCard open={open === 'clean'} onToggle={() => toggle('clean')} />
       <AddCard open={open === 'add'} onToggle={() => toggle('add')} />
+      <MusicCard open={open === 'music'} onToggle={() => toggle('music')} />
+      <EffectCard open={open === 'effect'} onToggle={() => toggle('effect')} />
     </div>
   )
 }
@@ -75,7 +79,7 @@ function VolumeCard({ open, onToggle }: CardProps) {
 
   const op: EditOperation = { op: 'volume', gainDb: gain, range, target: what }
   return (
-    <OpCard title="Volume" summary="Raise or lower the sound, the voice or the background." badge={<CostTag paid={false} />} open={open} onToggle={onToggle}>
+    <OpCard title="Volume" summary="Raise or lower the sound, the voice or the background." open={open} onToggle={onToggle}>
       <ScopeChoice value={scope} onChange={setScope} />
       <Field label="What">
         <Choice
@@ -123,7 +127,6 @@ function MuteCard({ open, onToggle }: CardProps) {
     <OpCard
       title="Mute and remove the voice"
       summary="Mute the selection, remove the voice or keep only the voice."
-      badge={<CostTag paid={false} />}
       open={open}
       onToggle={onToggle}
     >
@@ -192,7 +195,6 @@ function CleanCard({ open, onToggle }: CardProps) {
     <OpCard
       title="Noise and loudness"
       summary="Remove noise and even out the loudness of the whole film."
-      badge={<CostTag paid={false} />}
       open={open}
       onToggle={onToggle}
     >
@@ -244,8 +246,7 @@ function AddCard({ open, onToggle }: CardProps) {
   return (
     <OpCard
       title="Add sound"
-      summary="Music, a voice or a soundscape on top – or in place of the original sound."
-      badge={<CostTag paid={false} />}
+      summary="Your own music, a voice or a soundscape on top – or in place of the original sound."
       open={open}
       onToggle={onToggle}
     >

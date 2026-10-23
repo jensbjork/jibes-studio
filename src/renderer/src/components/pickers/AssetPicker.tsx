@@ -1,9 +1,10 @@
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { useMemo, useState } from 'react'
 import { ASSET_KINDS, type Asset, type AssetKind, type ReferenceKind } from '@shared/types'
 import { ASSET_COPY, englishList, isReferenceKind } from '../../lib/assets'
 import { mediaUrl } from '../../lib/media'
 import AssetAvatar from '../assets/AssetAvatar'
 import AssetIcon from '../assets/AssetIcon'
+import { rovingKeyDown } from '../ui/roving'
 import { KIND_TONE, PICKER_COPY } from './assetKinds'
 import { defaultOutfitOf } from './assetRefs'
 import { bringsVoice } from './audioRefs'
@@ -68,15 +69,6 @@ export default function AssetPicker({
     setQuery('')
   }
 
-  const onTabKeyDown = (e: KeyboardEvent) => {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
-    e.preventDefault()
-    const step = e.key === 'ArrowRight' ? 1 : -1
-    const next = ASSET_KINDS[(ASSET_KINDS.indexOf(kind) + step + ASSET_KINDS.length) % ASSET_KINDS.length]
-    showTab(next)
-    e.currentTarget.querySelector<HTMLElement>(`[data-kind="${next}"]`)?.focus()
-  }
-
   const pickRow = (a: Asset) => {
     if (!a.images.length) return
     if (onPickAsset) onPickAsset(a)
@@ -99,23 +91,26 @@ export default function AssetPicker({
         <p className="font-medium">{title}</p>
         {hint && <p className="mt-0.5 text-[11px] text-muted">{hint}</p>}
         {/* Five kinds share the popover's width: icon and count above, the name below, so no name is cut (the
-            longest, Environments, gets a wider column). */}
+            longest, Environments, gets a wider column). The track and the chosen tab look like every segmented
+            control (ui/Segmented); one Tab stop, ← → Home End move. */}
         <div
           role="tablist"
-          onKeyDown={onTabKeyDown}
-          className="mt-2 grid grid-cols-[1fr_1.25fr_1fr_1fr_1fr] gap-0.5 rounded-md bg-raised p-0.5"
+          aria-label="Kind"
+          onKeyDown={(e) => rovingKeyDown(e, ASSET_KINDS, kind, showTab)}
+          className="mt-2 grid grid-cols-[1fr_1.25fr_1fr_1fr_1fr] gap-0.5 rounded-md border border-line bg-panel p-0.5"
         >
           {ASSET_KINDS.map((k) => (
             <button
               key={k}
+              type="button"
               role="tab"
-              data-kind={k}
+              data-roving-id={k}
               aria-selected={k === kind}
               tabIndex={k === kind ? 0 : -1}
               onClick={() => showTab(k)}
               title={counts[k] ? `${ASSET_COPY[k].plural} (${counts[k]})` : ASSET_COPY[k].plural}
-              className={`flex min-w-0 flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 text-[10px] ${
-                k === kind ? 'bg-line text-text' : 'text-muted hover:text-text'
+              className={`flex min-w-0 flex-col items-center gap-0.5 rounded-[5px] px-0.5 pb-1 pt-1.5 text-[10px] outline-none focus-visible:ring-1 focus-visible:ring-muted ${
+                k === kind ? 'bg-raised text-text shadow-sm shadow-black/40' : 'text-muted hover:text-text'
               } leading-none transition`}
             >
               <span className="flex items-center gap-1">
@@ -270,7 +265,7 @@ function AssetRow({
           <span className="block truncate text-[11px] text-muted">
             {status}
             {extra && ` · ${extra}`}
-            {warning && <span className="text-accent"> · {warning}</span>}
+            {warning && <span className="text-warning"> · {warning}</span>}
           </span>
         </span>
         {all && <span className="pr-1 text-[11px] text-accent">✓</span>}
@@ -286,7 +281,13 @@ function AssetRow({
                 selected.has(img.path) ? 'border-accent' : 'border-transparent hover:border-muted'
               }`}
             >
-              <img src={mediaUrl(img.path)} draggable={false} decoding="async" className="h-full w-full object-cover" />
+              <img
+                src={mediaUrl(img.path)}
+                alt=""
+                draggable={false}
+                decoding="async"
+                className="h-full w-full object-cover"
+              />
             </button>
           ))}
         </div>

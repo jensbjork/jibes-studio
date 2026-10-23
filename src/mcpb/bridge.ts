@@ -152,11 +152,12 @@ export function describe(err: unknown, url: URL): string {
   if (status === 403) {
     return (
       `Studio at ${host} refused the connection (403 Forbidden). Studio only accepts agents on its own computer and ` +
-      "on computers in your tailnet: check the address against Studio's Settings → Agent connection → Addresses."
+      "on computers in your tailnet: check the address against Studio's " +
+      'Settings → Agent connection → Advanced → Addresses.'
     )
   }
   if (status === 404 || status === 405 || status === 406) {
-    return `Nothing at ${url.href} answers as Studio (${status}). Check the address against Studio's Settings → Agent connection → Addresses; it ends in /mcp.`
+    return `Nothing at ${url.href} answers as Studio (${status}). Check the address against Studio's Settings → Agent connection → Advanced → Addresses; it ends in /mcp.`
   }
   const code = networkCode(err)
   if (code && (NEVER_SENT.has(code) || code === 'ECONNRESET' || code.startsWith('UND_ERR'))) {

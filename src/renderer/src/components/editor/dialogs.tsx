@@ -4,7 +4,8 @@ import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import Modal from '../pickers/Modal'
 import { FilmIcon } from '../sequences/icons'
-import { fileName, formatLength, formatPrice, summaryLine } from './editorUtils'
+import { buttonClass } from '../ui/button'
+import { fileName, formatLength, summaryLine } from './editorUtils'
 
 // The Editor's two small dialogs: picking an exported film ("From an export…"), and choosing between the edits that
 // already exist for a film and a new one.
@@ -33,7 +34,7 @@ export function ExportPickerDialog({ onClose, onPicked }: { onClose: () => void;
       onClose={onClose}
       maxWidth={520}
     >
-      {error && <p className="mb-3 text-[12px] text-accent select-text">{error}</p>}
+      {error && <p className="mb-3 text-[12px] text-danger select-text">{error}</p>}
       {!exports ? (
         <p className="py-4 text-center text-muted">Loading exports…</p>
       ) : exports.length === 0 ? (
@@ -87,14 +88,10 @@ export function OpenChoiceDialog({
       maxWidth={480}
       footer={
         <>
-          <button type="button" onClick={onClose} className="rounded-md border border-line px-4 py-2 hover:bg-raised">
+          <button type="button" onClick={onClose} className={buttonClass()}>
             Cancel
           </button>
-          <button
-            type="button"
-            onClick={onNew}
-            className="rounded-md border border-line px-4 py-2 transition hover:bg-raised"
-          >
+          <button type="button" onClick={onNew} className={buttonClass()}>
             New edit
           </button>
         </>

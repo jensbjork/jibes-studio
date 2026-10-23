@@ -66,7 +66,7 @@ export const APPROVAL_TTL_MS = 30 * 60 * 1000
 /** More than this many unanswered requests and the agent is told to wait for the user. */
 const MAX_PENDING = 10
 
-/** Decided requests kept for the activity drawer and get_approval. */
+/** Decided requests kept for the Agent panel and get_approval. */
 const MAX_DECIDED = 50
 
 export interface ApprovalPlan {

@@ -13,56 +13,53 @@ export interface LearningRow {
 }
 
 interface Props {
+  /** The learning's id: the list's keys find the row by it. Left out for a new learning that hasn't been saved yet. */
+  id?: string
   row: LearningRow
   selected: boolean
   /** A new learning that hasn't been saved yet. */
   unsaved?: boolean
   onSelect: () => void
-  onTogglePin: () => void
 }
 
-export default function LearningListItem({ row, selected, unsaved, onSelect, onTogglePin }: Props) {
-  const ref = useRef<HTMLDivElement>(null)
+/**
+ * One learning in the list, display-only as the side lists' rows are: its title, the start of its text, a pin when it
+ * is pinned, its model, who wrote it and the clips it rests on. Pinning is the editor's.
+ */
+export default function LearningListItem({ id, row, selected, unsaved, onSelect }: Props) {
+  const ref = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ block: 'nearest' })
   }, [selected])
 
   return (
-    <div
+    <button
       ref={ref}
-      role="option"
-      aria-selected={selected}
+      type="button"
+      data-side-row={id}
       onClick={onSelect}
-      className={`group rounded-md px-3 py-2.5 transition-colors ${selected ? 'bg-raised' : 'hover:bg-raised/50'}`}
+      aria-current={selected || undefined}
+      className={`block w-full rounded-md px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-muted ${
+        selected ? 'bg-raised' : 'hover:bg-raised/50'
+      }`}
     >
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <div className={`truncate font-medium ${row.title ? '' : 'text-muted'}`}>{row.title || 'New learning'}</div>
-          <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted">
+      <span className="flex items-start gap-2">
+        <span className="min-w-0 flex-1">
+          <span className={`block truncate font-medium ${row.title ? '' : 'text-muted'}`}>
+            {row.title || 'New learning'}
+          </span>
+          <span className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted">
             {row.insight || (unsaved ? 'Write the learning on the right…' : '')}
-          </p>
-        </div>
-        {!unsaved && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onTogglePin()
-            }}
-            aria-pressed={row.pinned}
-            title={row.pinned ? 'Unpin – stop showing it at the top' : 'Pin to top – agents see pinned learnings first'}
-            className={`mt-0.5 shrink-0 transition ${
-              row.pinned
-                ? 'text-amber-400 hover:text-amber-300'
-                : `text-muted hover:text-text ${selected ? '' : 'opacity-0 group-hover:opacity-100'}`
-            }`}
-          >
-            <PinIcon size={13} filled={row.pinned} />
-          </button>
+          </span>
+        </span>
+        {row.pinned && !unsaved && (
+          <span role="img" aria-label="Pinned" title="Pinned" className="mt-0.5 shrink-0 text-amber-400">
+            <PinIcon size={13} filled />
+          </span>
         )}
-      </div>
-      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted">
+      </span>
+      <span className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted">
         {unsaved ? (
           <span>Not saved</span>
         ) : (
@@ -78,7 +75,7 @@ export default function LearningListItem({ row, selected, unsaved, onSelect, onT
             )}
           </>
         )}
-      </div>
-    </div>
+      </span>
+    </button>
   )
 }

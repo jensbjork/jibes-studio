@@ -1,4 +1,4 @@
-// Wording for the agent connection: the sidebar indicator, the activity drawer and the approval dialog.
+// Wording for the agent connection: the sidebar indicator, the Agent panel and the approval dialog.
 // An agent is named by agentDisplayName (shared/agent-name.ts): a generic MCP client name ("mcp", "mcp-remote")
 // reads "The agent", a real one ("Hermes") is kept. MCP is how the agent connects, not who it is.
 
@@ -39,7 +39,7 @@ export interface AgentSummary {
   tone: AgentTone
   /** Short, for the sidebar: "Agent: off", "Agent: on – waiting", "Agent connected". */
   label: string
-  /** A sentence for the drawer and tooltips. */
+  /** A sentence for the Agent panel and tooltips. */
   detail: string
 }
 
@@ -63,7 +63,7 @@ export function agentSummary(status: AgentStatus | undefined): AgentSummary {
     return { tone: 'waiting', label: 'Agent: on – waiting', detail: 'The connection is on and waiting for an agent.' }
   }
   // The sidebar says what is there, an agent, whatever its client calls itself ("mcp", "Hermes"…); a real name is
-  // in the detail and the drawer, a generic one reads "an agent".
+  // in the detail and the Agent panel, a generic one reads "an agent".
   const label = names.length === 1 ? 'Agent connected' : `${names.length} agents connected`
   return { tone: 'connected', label, detail: connectedDetail(names) }
 }
@@ -137,8 +137,8 @@ export function variantCount(a: Pick<ApprovalRequest, 'variants'>): number {
 }
 
 /**
- * A request's price as the dialog, the drawer and the approve button show it: "$1.03", "3 variants · $3.09", "Unknown
- * price". `shown`: how the amount itself is written (the Editor's "≈ $0.45 +").
+ * A request's price as the dialog, the Agent panel and the approve button show it: "$1.03", "3 variants · $3.09",
+ * "Unknown price". `shown`: how the amount itself is written (the Editor's "≈ $0.45 +").
  */
 export function approvalPriceText(a: ApprovalRequest, shown: (usd: number) => string = formatUsd): string {
   const price = a.priceUsd !== undefined ? shown(a.priceUsd) : 'Unknown price'

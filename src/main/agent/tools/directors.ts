@@ -236,7 +236,7 @@ export function registerDirectorTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Copy a ready-made director',
       description:
-        "Copies one of Studio's ready-made directors (list_directors, ready_made: true – e.g. \"preset:noir\") into the library as a director of the user's own, named after it (\"Noir\", or \"Noir (2)\" when taken), so it can be changed: update_asset({direction}), style frames with add_asset_images, style videos with add_director_videos. Returns the new director (its asset id is its director_id).",
+        "Copies one of Studio's ready-made directors (list_directors, ready_made: true – e.g. \"preset:noir\") into the library as a director of the user's own, named \"<name> (copy)\" (\"Noir (copy)\", or \"Noir (copy) 2\" when taken), so it can be changed: update_asset({direction}), style frames with add_asset_images, style videos with add_director_videos. Returns the new director (its asset id is its director_id).",
       input: {
         preset_id: z.string().describe('A ready-made director\'s id ("preset:…").')
       },

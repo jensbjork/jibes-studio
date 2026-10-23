@@ -17,6 +17,7 @@ import { markSeen, useIsUnseen, useSeenWhenVisible } from '../../lib/work'
 import { cancelImport, carriesFiles, DropHint, droppedVideoPaths, type ImportCard } from '../feed/ownClips'
 import { CameraIcon, CloseIcon, MoreIcon, PlusIcon } from '../sequences/icons'
 import { formatTakeTime, isPending, takeDuration, takeProgress } from '../sequences/sequenceUtils'
+import { buttonClass } from '../ui/button'
 import { NewChip, Spinner } from '../work/StatusMark'
 import TakeMenu, { type TakeMenuView, type TakeOwnerKind } from './TakeMenu'
 import {
@@ -73,7 +74,7 @@ interface Props {
   onEdit?: (take: Generation) => void
   /** Video files dropped on the strip: own films as takes. */
   onImport?: (paths: string[]) => void
-  /** "Add take from file…". */
+  /** "From file…" above the strip: own films as takes, from the file dialog. */
   onPickFile?: () => void
 }
 
@@ -330,15 +331,16 @@ export default function TakeStrip({
       <div className="mb-1 flex items-center gap-2">
         <h3 className="font-medium">Takes</h3>
         {takes.length > 0 && <span className="text-[12px] text-muted">{takes.length}</span>}
+        {/* The one way to add a film of your own by hand (a drop on the strip is the other), always in view. */}
         {onPickFile && (
           <button
             type="button"
             onClick={onPickFile}
-            title="Add take from file…"
-            aria-label="Add take from file"
-            className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-raised hover:text-text"
+            title="Add a film of your own as a take of this clip"
+            className={`${buttonClass('ghost', 'inline')} ml-auto`}
           >
             <PlusIcon size={12} />
+            From file…
           </button>
         )}
       </div>
@@ -394,18 +396,6 @@ export default function TakeStrip({
                   />
                 ))}
               </div>
-              {onPickFile && (
-                <button
-                  type="button"
-                  onClick={onPickFile}
-                  title="Add a film of your own as a take of the clip"
-                  className="flex shrink-0 flex-col items-center justify-center gap-1 rounded-md border border-dashed border-line px-2 text-center text-[11px] leading-tight text-muted transition hover:border-muted hover:text-text"
-                  style={{ width, height }}
-                >
-                  <PlusIcon size={12} />
-                  Add from file…
-                </button>
-              )}
             </div>
             {edges.left && (
               <span className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-linear-to-r from-bg to-transparent" aria-hidden />
@@ -554,7 +544,7 @@ function TakeTile({
   const surface = playable
     ? 'cursor-pointer bg-black'
     : failed
-      ? 'cursor-default bg-accent/10'
+      ? 'cursor-default bg-danger-soft'
       : 'cursor-default bg-raised'
   // The chosen take: the accent ring (with "Selected"); a previewed one: a quiet ring, so it is found in the row.
   const ring = active
@@ -602,7 +592,7 @@ function TakeTile({
         setScrub(f)
         seekTo(f)
       }}
-      className={`group/tile relative shrink-0 overflow-hidden rounded-md outline-none transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-muted ${surface} ${ring}`}
+      className={`group/tile relative shrink-0 overflow-hidden rounded-md outline-none transition-shadow focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-muted ${surface} ${ring}`}
       style={{ width, height }}
     >
       {take.status === 'completed' && take.thumbPath && !take.fileMissing && (
@@ -644,7 +634,7 @@ function TakeTile({
         </>
       )}
       {failed && (
-        <span className="absolute inset-0 flex items-center justify-center px-1 text-center text-[10px] font-medium text-accent">
+        <span className="absolute inset-0 flex items-center justify-center px-1 text-center text-[10px] font-medium text-danger">
           Failed
         </span>
       )}
@@ -656,7 +646,11 @@ function TakeTile({
 
       {(active || fresh || (own && badge)) && (
         <span className="pointer-events-none absolute left-1 top-1 flex max-w-[calc(100%-1.75rem)] flex-wrap items-center gap-0.5">
-          {active && <span className="rounded bg-accent px-1 py-px text-[10px] font-medium leading-none text-white">Selected</span>}
+          {active && (
+            <span className="rounded bg-accent-fill px-1 py-px text-[10px] font-medium leading-none text-white">
+              Selected
+            </span>
+          )}
           {fresh && <NewChip variant="overlay" title="New – you haven’t looked at it yet" />}
           {own && badge && (
             <span
@@ -671,7 +665,7 @@ function TakeTile({
       )}
       {stale && (
         <span
-          title="Made with an earlier image in one of the boards"
+          title="The take was made with an earlier image on one of the boards"
           className="pointer-events-none absolute bottom-1 left-1 rounded bg-amber-500/90 px-1 py-px text-[9px] font-medium leading-none text-black"
         >
           Earlier image
@@ -769,7 +763,7 @@ function InfoLine({
   const which = `take ${position.index + 1} of ${position.count} (${formatTakeTime(take.createdAt)})`
   return (
     <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] text-muted">
-      <span className={`max-w-full truncate select-text ${info.tone === 'error' ? 'text-[#ffb3b5]' : ''}`} title={info.text}>
+      <span className={`max-w-full truncate select-text ${info.tone === 'error' ? 'text-danger' : ''}`} title={info.text}>
         {info.text}
       </span>
       {take.status === 'failed' && (
@@ -777,7 +771,7 @@ function InfoLine({
           type="button"
           onClick={onDelete}
           aria-label={`${take.keptByEdit ? 'Remove' : 'Delete'} ${which}`}
-          className={`${link} hover:text-accent`}
+          className={`${link} hover:text-danger`}
         >
           {take.keptByEdit ? 'Remove' : 'Delete'}
         </button>

@@ -1040,8 +1040,8 @@ const MEDIA_ITEM_TABS = [
 
 /**
  * Shows Media on a tab – the one an item is in, the one asked for, or the one it last showed – with a clip in
- * the Videos drawer, a picture in Images or a film in Films (main has checked that it exists). The tab is set before
- * the view opens, so it opens on it.
+ * the Clips tab's drawer, a picture in Images or a film in Films (main has checked that it exists). The tab is set
+ * before the view opens, so it opens on it.
  */
 function openMediaView(args: Args, ctx: BridgeContext): AgentOpenResult {
   const asked = field(args, 'tab')
@@ -1142,12 +1142,18 @@ async function openStoryboardView(args: Args, ctx: BridgeContext): Promise<Agent
   }
 }
 
-/** Shows the Editor, with the edit asked for open (or its list of edits), on a version if named. */
+/**
+ * Shows the Editor, with the edit asked for open (or the edit it opens by itself: the remembered one, else the most
+ * recently changed), on a version if named.
+ */
 async function openEditorView(args: Args, ctx: BridgeContext): Promise<AgentOpenResult> {
   const editId = optionalId(field(args, 'edit_id'))
   const versionId = optionalId(field(args, 'version_id'))
   if (!editId) {
     ctx.show('editor')
+    // With any edits at all, the view opens one as soon as its list is in: report that one.
+    const edits = await window.studio.listEdits().catch(() => [])
+    if (edits.length) await settled(() => !!openEditInEditor().editId)
     const shown = openEditInEditor().editId
     return shown ? { view: 'editor', editId: shown } : { view: 'editor' }
   }

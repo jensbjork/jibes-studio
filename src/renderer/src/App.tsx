@@ -17,6 +17,7 @@ import SequencesView from './components/sequences/SequencesView'
 import SettingsView from './components/SettingsView'
 import Sidebar, { SIDEBAR_WIDTH } from './components/Sidebar'
 import StoryboardsView from './components/storyboards/StoryboardsView'
+import { buttonClass } from './components/ui/button'
 import UpdateNotice from './components/updates/UpdateNotice'
 import SeenToast from './components/work/SeenToast'
 import WorkPanel from './components/work/WorkPanel'
@@ -24,10 +25,11 @@ import WorkStillViewer from './components/work/WorkStillViewer'
 import { startAgentFeed } from './lib/agent'
 import { useAgentBridge } from './lib/agentBridge'
 import { assetKindOfView } from './lib/assets'
+import { isModalOpen } from './lib/dialogs'
 import { followEnglishFolders } from './lib/generateStore'
 import { ipcErrorMessage } from './lib/hooks'
 import type { Intent, Navigate, View } from './lib/navigation'
-import { isMac } from './lib/platform'
+import { isMac, isModOnly } from './lib/platform'
 import { startWorkFeed } from './lib/work'
 
 export default function App() {
@@ -127,11 +129,35 @@ function isSidebarShortcut(e: KeyboardEvent): boolean {
   return held && !e.altKey && e.code === 'KeyS' && !e.repeat
 }
 
-/** What slides out beside the sidebar; one at a time. */
+/** ⌘, (Ctrl+, on Windows): Settings, as everywhere on the platform. The menu's Settings… has it too. */
+function isSettingsShortcut(e: KeyboardEvent): boolean {
+  return isModOnly(e) && e.key === ','
+}
+
+/**
+ * Settings… in the app menu. Main sends it once, as the page has loaded: when it had to open the window for it (macOS,
+ * with none open), that is before the library status is in and Workspace has mounted. So it is heard from the start
+ * (this module loads before the first render) and kept until Workspace takes it as it mounts.
+ */
+let settingsRequested = false
+let openSettings: (() => void) | undefined
+window.studio.onOpenSettings(() => {
+  if (openSettings) openSettings()
+  else settingsRequested = true
+})
+
+/** For Workspace as it mounts: whether Settings… came before it was there (taken once), so it starts on Settings. */
+function takeSettingsRequest(): boolean {
+  const requested = settingsRequested
+  settingsRequested = false
+  return requested
+}
+
+/** What opens beside the sidebar (SidePanel); one at a time. */
 type Panel = 'agent' | 'work'
 
 function Workspace() {
-  const [view, setView] = useState<View>('generate')
+  const [view, setView] = useState<View>(() => (takeSettingsRequest() ? 'settings' : 'generate'))
   const [intent, setIntent] = useState<Intent>()
   const [settings, setSettings] = useState<Settings | null>(null)
 
@@ -183,23 +209,44 @@ function Workspace() {
   }, [collapsed])
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (!isSidebarShortcut(e)) return
-      e.preventDefault()
-      e.stopPropagation()
-      setCollapsed((c) => !c)
+      if (isSidebarShortcut(e)) {
+        e.preventDefault()
+        e.stopPropagation()
+        setCollapsed((c) => !c)
+      } else if (isSettingsShortcut(e) && !e.repeat && !isModalOpen()) {
+        // Not over a dialog waiting for an answer: it would navigate away underneath.
+        e.preventDefault()
+        e.stopPropagation()
+        setPanel(undefined)
+        navigate('settings')
+      }
     }
     // Capture phase on the window: a view's own key handling (the Editor's player keys …) never sees it first.
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [])
 
-  // The sidebar, the agent drawer, the panel and the toast all place themselves by this width.
+  // Settings… in the app menu (and its ⌘, when the menu has the key first); likewise not over a dialog.
+  useEffect(() => {
+    openSettings = () => {
+      if (isModalOpen()) return
+      setPanel(undefined)
+      navigate('settings')
+    }
+    return () => {
+      openSettings = undefined
+    }
+  }, [])
+
+  // The sidebar, the panels beside it, the agent's pill and the toast all place themselves by this width.
   const rootStyle = {
     '--sidebar-w': `${collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded}px`
   } as CSSProperties
 
+  // overflow-clip, not hidden: nothing that escapes a view can make the window scroll sideways, and unlike hidden it
+  // leaves nothing that scrollIntoView or focus() could scroll, so the sidebar never slides out of view.
   return (
-    <div className="flex h-full" style={rootStyle}>
+    <div className="flex h-full overflow-clip" style={rootStyle}>
       <Sidebar
         view={view}
         onChange={(v) => {
@@ -212,6 +259,7 @@ function Workspace() {
         onToggleCollapsed={toggleCollapsed}
         panel={panel}
         onTogglePanel={togglePanel}
+        settingsAttention={settings && !settings.hasApiKey ? 'No API key yet' : undefined}
       />
       {/* A size container: views lay out by the width they get, so collapsing the sidebar gives them room. */}
       <main className="@container/main min-w-0 flex-1">
@@ -246,7 +294,7 @@ function Workspace() {
       <WorkStillViewer />
       {/* The pill steps aside while either panel is open: it would cover the panel's bottom at narrow widths. */}
       <AgentPresence hidden={panel !== undefined} onOpen={() => setPanel('agent')} />
-      <SeenToast agentPillHidden={panel !== undefined} besideWorkPanel={panel === 'work'} />
+      <SeenToast besidePanel={panel !== undefined} />
       <ApprovalDialog />
       {/* Over the budget: asked above everything, also above the approval dialog. */}
       <BudgetDialog />
@@ -274,10 +322,7 @@ function Starting({ error, onRetry }: { error?: string; onRetry: () => void }) {
           <div className="max-w-sm text-center">
             <h1 className="text-base font-semibold">Studio couldn’t read the library</h1>
             <p className="mt-2 leading-relaxed text-muted select-text">{error}</p>
-            <button
-              onClick={onRetry}
-              className="mt-5 rounded-md border border-line px-4 py-2 transition hover:bg-raised"
-            >
+            <button type="button" onClick={onRetry} className={`mt-5 ${buttonClass()}`}>
               Try again
             </button>
           </div>

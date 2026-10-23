@@ -10,6 +10,7 @@ import { ipcErrorMessage } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import { formatClipLength } from '../feed/feedText'
 import { SearchIcon } from '../feed/icons'
+import Segmented from '../ui/Segmented'
 import Modal from './Modal'
 import { exportVideoFacts, generationVideoFacts } from './videoFacts'
 import type { VideoCandidate, VideoFacts } from './videoRefs'
@@ -221,25 +222,16 @@ export default function ReferenceVideoDialog({ open, tab: initialTab, sequenceId
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div role="tablist" aria-label="Where the video comes from" className="flex h-7 items-center rounded-md border border-line bg-panel p-0.5">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={tab === t.id}
-                onClick={() => {
-                  setTab(t.id)
-                  setLimit(PAGE)
-                }}
-                className={`flex h-full items-center rounded-[5px] px-2.5 text-[12px] transition ${
-                  tab === t.id ? 'bg-raised text-text shadow-sm shadow-black/40' : 'text-muted hover:text-text'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            role="tablist"
+            ariaLabel="Where the video comes from"
+            value={tab}
+            onChange={(t) => {
+              setTab(t)
+              setLimit(PAGE)
+            }}
+            options={TABS.map((t) => ({ value: t.id, label: t.label }))}
+          />
           {tab === 'takes' ? (
             sequences && sequences.length > 0 && (
               <select
@@ -265,7 +257,7 @@ export default function ReferenceVideoDialog({ open, tab: initialTab, sequenceId
                   setQuery(e.target.value)
                   setLimit(PAGE)
                 }}
-                placeholder={tab === 'films' ? 'Search by sequence…' : 'Search by prompt or name…'}
+                placeholder={tab === 'films' ? 'Search sequences…' : 'Search prompts and names…'}
                 aria-label={tab === 'films' ? 'Search films' : 'Search clips'}
                 className="h-7 w-full rounded-md border border-line bg-raised pl-7 pr-2 text-[12px] outline-none focus:border-muted"
               />

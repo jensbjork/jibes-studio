@@ -1,3 +1,4 @@
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { StudioPlatform } from '@shared/types'
 
 // What differs with the operating system the window runs on: the key shortcuts are pressed with (⌘ on macOS, Ctrl
@@ -57,21 +58,24 @@ const WINDOWS_MODIFIERS: [glyph: string, word: string][] = [
 
 /**
  * Shortcuts whose Windows keys aren't the glyphs read one by one: ⌃⌘ would be Ctrl twice, so the sidebar takes
- * Shift for the ⌃; redo is Ctrl+Y, as everywhere on Windows (Ctrl+Shift+Z works too).
+ * Shift for the ⌃; redo is Ctrl+Y, as everywhere on Windows (Ctrl+Shift+Z works too); ↵ is written Enter there.
  */
 const WINDOWS_SPECIAL: Record<string, string> = {
   '⌃⌘S': 'Ctrl+Shift+S',
-  '⌘⇧Z': 'Ctrl+Y'
+  '⌘⇧Z': 'Ctrl+Y',
+  '⌘↵': 'Ctrl+Enter'
 }
 
-// A run of glyphs and what it is pressed with: right after it ("⌘K", "⌥←"), after " + " or "-" ("⌘ + Enter",
-// "⌥-click"), or a lone capital after a space ("⌘ F"). A glyph on its own ("hold ⌥") is just the key.
-const GLYPHS = /([⌃⌘⌥⇧]+)(?:(?: \+ |-)([A-Za-z]+)|([A-Z][a-z]+|[A-Z0-9←→↑↓↵])|\s([A-Z0-9])(?![A-Za-z]))?/gu
+// A run of glyphs and what it is pressed with: right after it ("⌘K", "⌥←", "⌘,"), after "-" ("⌥-click",
+// "⌘-scroll"), or – the older spellings, still read – after " + " ("⌘ + Enter") or as a lone capital after a space
+// ("⌘ F"). A glyph on its own ("hold ⌥") is just the key.
+const GLYPHS = /([⌃⌘⌥⇧]+)(?:(?: \+ |-)([A-Za-z]+)|([A-Z][a-z]+|[A-Z0-9←→↑↓↵,])|\s([A-Z0-9])(?![A-Za-z]))?/gu
 
 /**
- * Shortcut text as the app shows it: written with the Mac glyphs ("⌘K", "⌘⇧F", "⌃⌘S", "⌘ + Enter", "⌥← / ⌥→",
- * "⌥-click"), it comes back unchanged on a Mac and in Windows' words elsewhere ("Ctrl+K", "Ctrl+Shift+F",
- * "Ctrl+Shift+S", "Ctrl+Enter", "Alt+← / Alt+→", "Alt+click"). Works on whole sentences: only the glyphs change.
+ * Shortcut text as the app shows it: written with the Mac glyphs, joined ("⌘K", "⌘F", "⌘↵", "⌘⇧F", "⌘,", "⌃⌘S",
+ * "⌥← / ⌥→", "⌥-click", "⌘-scroll"), it comes back unchanged on a Mac and in Windows' words elsewhere ("Ctrl+K",
+ * "Ctrl+F", "Ctrl+Enter", "Ctrl+Shift+F", "Ctrl+,", "Ctrl+Shift+S", "Alt+← / Alt+→", "Alt+click", "Ctrl+scroll").
+ * Works on whole sentences: only the glyphs change.
  */
 export function shortcut(mac: string): string {
   if (isMac) return mac
@@ -100,4 +104,43 @@ export function isModKey(e: Modifiers): boolean {
 /** The shortcut modifier and no other: ⌘ without ⌃ ⌥ ⇧ on macOS, Ctrl without Alt, Shift or the Windows key. */
 export function isModOnly(e: Modifiers): boolean {
   return isModKey(e) && !(isMac ? e.ctrlKey : e.metaKey) && !e.altKey && !e.shiftKey
+}
+
+/** A key press with its modifiers: a DOM keyboard event or React's. */
+type KeyPress = Modifiers & { key: string }
+
+/** ⌘F (Ctrl+F): the view's search. */
+export function isFindKey(e: KeyPress): boolean {
+  return isModOnly(e) && e.key.toLowerCase() === 'f'
+}
+
+/**
+ * ⌘↵ (Ctrl+Enter): send the form. Not while an input method is still composing, where Enter picks the word
+ * (React's event keeps that on its nativeEvent).
+ */
+export function isSubmitKey(e: KeyPress & { isComposing?: boolean; nativeEvent?: { isComposing?: boolean } }): boolean {
+  return e.key === 'Enter' && isModOnly(e) && !(e.nativeEvent?.isComposing ?? e.isComposing)
+}
+
+/** ⌘⇧F (Ctrl+Shift+F) in a prompt field: the larger window (focus mode). */
+export function isFocusModeKey(e: KeyPress): boolean {
+  return isModKey(e) && !(isMac ? e.ctrlKey : e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f'
+}
+
+/**
+ * onKeyDown for a whole form (Generate, a clip, a transition, an Editor card): ⌘↵ from any field in it runs `fn`.
+ * Only for keys from inside the form's own DOM, or from focus mode's larger window: React bubbles keys up through
+ * portals too, so a dialog opened from the form (a picker, a menu) never sends it. A field that handled the key
+ * itself (a prompt field's own onSubmit) marks it handled, and it isn't sent twice.
+ */
+export function submitKeyHandler(fn: () => void): (e: ReactKeyboardEvent) => void {
+  return (e) => {
+    if (!isSubmitKey(e) || e.defaultPrevented) return
+    const target = e.target as Node
+    const inside =
+      e.currentTarget.contains(target) || (target instanceof Element && !!target.closest('[data-focus-mode]'))
+    if (!inside) return
+    e.preventDefault()
+    fn()
+  }
 }
