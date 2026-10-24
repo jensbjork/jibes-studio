@@ -1,59 +1,116 @@
-# JIBES Studio
+<p align="center">
+  <img src="build/icon.png" width="112" height="112" alt="">
+</p>
 
-Make films with [Venice.ai](https://venice.ai)'s video models, on your Mac or Windows PC.
+<h1 align="center">JIBES Studio</h1>
 
-![JIBES Studio](docs/images/generate.png)
+<p align="center">
+  <strong>Make films with <a href="https://venice.ai">Venice.ai</a>'s video models</strong> – from a single clip to a
+  whole story,<br>with your own characters, places and style. On your Mac or Windows PC.
+</p>
+
+<p align="center">
+  <a href="https://github.com/jensbjork/jibes-studio/releases/latest"><img src="https://img.shields.io/github/v/release/jensbjork/jibes-studio?label=download&color=f2557a" alt="Download the latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-30303a" alt="macOS on Apple Silicon">
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-30303a" alt="Windows 10 and 11">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-30303a" alt="MIT license"></a>
+</p>
+
+<p align="center">
+  <a href="#install"><strong>Install</strong></a> ·
+  <a href="#your-first-film"><strong>Your first film</strong></a> ·
+  <a href="docs/GUIDE.md"><strong>Guide</strong></a>
+</p>
+
+![A character and a place picked from the library, pointed at in the prompt with @, and the Noir director chosen](docs/images/generate.gif)
+
+## What it does
+
+**Cast once, use everywhere.** Characters, places, products, outfits and poses live in your library – photos, a
+description and a voice. Add them to a generation and point at them in the prompt with `@`; their descriptions go
+along for you, so Mara looks like Mara in every clip.
+
+**From a clip to a film.** A sequence is your film, clip by clip. A clip can start on the last frame of the one
+before, keeps every take you make and is trimmed where you want the cut. Watch the whole film in **Preview**, then
+export it as one video.
+
+![A sequence: three clips, each with its take, then the whole film in Preview](docs/images/sequence.gif)
+
+**Plan it as a storyboard.** One picture per moment, a note under each. **Suggest** writes a first prompt for what
+happens between two pictures, and **Generate missing** makes every clip that joins them.
+
+![A storyboard: a transition between two boards gets its prompt suggested and refined](docs/images/storyboard.gif)
+
+**Give it a director.** A director is a way of making a film – editing, look, camera, light, framing, rhythm,
+performance and sound – that every prompt it directs carries. Start from eight ready-made ones (Noir, Documentary,
+Music video …) or write your own.
+
+**Finish it in the Editor.** Cut, fade, clean up the sound, replace a voice, add music or redo a stretch with AI.
+Every change is a new version; the original is never touched.
+
+**Bring your own agent.** Connect Claude or any other agent that speaks [MCP](https://modelcontextprotocol.io). It can
+do nearly everything you can – build characters, write prompts, plan sequences – but anything that costs money or
+deletes something waits for your OK.
+
+| **Library** – photos, a description and a voice | **Directors** – eight to start from, or your own |
+| --- | --- |
+| ![A character in the library](docs/images/library.png) | ![The Noir director](docs/images/directors.png) |
+| **Editor** – every change a new version | **Writing help** – type `/` for ready-made phrases |
+| ![The Editor](docs/images/editor.png) | ![Building blocks in the prompt](docs/images/prompt-blocks.png) |
 
 ## Install
+
+**Mac** (Apple Silicon, macOS 13 or later) – paste this into Terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jensbjork/jibes-studio/main/install.sh | bash
 ```
 
-Needs a Mac with Apple Silicon (macOS 13+) and a [Venice API key](https://venice.ai/settings/api). The script
-installs ffmpeg with Homebrew if it's missing, puts JIBES Studio in Applications and opens it.
+It installs ffmpeg with Homebrew if it's missing, puts JIBES Studio in Applications and opens it.
 
-Rather download it yourself? Get `JIBES-Studio-mac-arm64.dmg` from
-[Releases](https://github.com/jensbjork/jibes-studio/releases/latest). The app isn't notarized, so the first time macOS
-stops it: open **System Settings → Privacy & Security** and click **Open Anyway**.
+<details>
+<summary>Rather download it yourself?</summary>
 
-**Windows** (10 or 11, 64-bit): download `JIBES-Studio-win-x64-setup.exe` from the same Releases page and run it, or
-unzip `JIBES-Studio-win-x64.zip` anywhere. ffmpeg comes with it. The app isn't signed, so SmartScreen warns the first
-time: click **More info → Run anyway**.
+Get `JIBES-Studio-mac-arm64.dmg` from [Releases](https://github.com/jensbjork/jibes-studio/releases/latest). The app
+isn't notarized, so the first time macOS stops it: open **System Settings → Privacy & Security** and click
+**Open Anyway**.
 
-Studio tells you when a new version is out and updates itself when you choose **Update now**.
+</details>
 
-## Get started
+**Windows** (10 or 11, 64-bit) – download `JIBES-Studio-win-x64-setup.exe` from
+[Releases](https://github.com/jensbjork/jibes-studio/releases/latest) and run it, or unzip `JIBES-Studio-win-x64.zip`
+anywhere. ffmpeg comes with it. The app isn't signed, so SmartScreen warns the first time: click
+**More info → Run anyway**.
 
-1. Choose a folder for your library.
-2. **Settings** → paste your Venice API key.
-3. Write a prompt and press **Generate**.
+JIBES Studio tells you when a new version is out and updates itself when you choose **Update now**.
 
-You pay Venice per generation; the price is shown before you generate.
+## Your first film
 
-## How it works
+JIBES Studio is free. You need a [Venice](https://venice.ai) account with some credit: you pay Venice per generation,
+and the price is on the button before you press it.
 
-- **Generate** – a clip from text, a start image, or reference photos and voices you point at in the prompt
-  (`@Image1`, `@Audio1`).
-- **Media** – everything you've made in one place: videos, pictures and exported films.
-- **Library** – characters, environments, products, outfits and poses: photos, a description and a voice.
-  Their descriptions are added to the prompt for you.
-- **Sequences** – clips that continue from each other's last frame, exported as one film.
-- **Storyboards** – one picture per moment; the clips between them are generated.
-- **Directors** – a way of making a film (editing, look, camera, light, sound) that every prompt it directs carries.
-  Start from eight ready-made ones or make your own.
-- **Editor** – cut, clean up the sound, replace a voice, add music, redo a stretch with AI. Every change is a
-  new version; the original is never touched.
-- **Agents** – connect your own AI agent over [MCP](https://modelcontextprotocol.io). It can do what you can;
-  anything that costs money or deletes something waits for your OK.
+1. **Choose a library folder.** The first time it opens, Studio asks where to keep your work (suggested: *JIBES
+   Studio* in your Movies folder – Videos on Windows). Everything is stored there as plain files.
+2. **Add your Venice API key.** Create one at [venice.ai/settings/api](https://venice.ai/settings/api), then open
+   **Settings** (⌘, on a Mac, Ctrl+, on Windows) → **Venice** and paste it. Set a daily or monthly budget under
+   **Spending** if you like.
+3. **Make a clip.** **Generate** → **Text**: describe the scene, choose the length and resolution, press
+   **Generate**. The clip appears beside the form when Venice is done.
+4. **Cast someone.** **Characters** → **New**: a name, a photo or two and a short description. Back in Generate,
+   choose **References** → **＋ From library**, pick the character and type `@` in the prompt to point at it.
+5. **Make it a film.** **Sequences** → **New**. Write the first clip and generate a take, then add the next clip –
+   it can start on the last frame of the one before. **Preview** plays it all; **Export** makes one video.
 
-Everything is stored as plain files in the folder you chose.
+Stuck? ⌘K (Ctrl+K) finds anything in the app, and the [guide](docs/GUIDE.md) explains every view.
 
-| Sequences | Storyboards |
-| --- | --- |
-| ![Sequences](docs/images/sequences.png) | ![Storyboards](docs/images/storyboards.png) |
-| **Directors** | **Writing help** – type `/` for ready-made phrases |
-| ![Directors](docs/images/directors.png) | ![Building blocks](docs/images/prompt-blocks.png) |
+## Good to know
+
+- **Your files stay yours.** The library is a folder of ordinary files on your computer, and your API key is stored
+  encrypted by the system. Pictures, clips and prompts leave your computer only when you send them to Venice – or to
+  an agent you connect yourself.
+- **No surprise costs.** Every paid action shows its price first, the optional budget asks before going past it, and
+  an agent can never spend or delete on its own.
+- **Keyboard first.** The same keys work in every view – see [Keyboard shortcuts](docs/GUIDE.md#keyboard-shortcuts).
 
 ## More
 

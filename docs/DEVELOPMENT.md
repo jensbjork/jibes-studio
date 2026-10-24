@@ -66,7 +66,7 @@ differs):
 | `npm run app:install` | `npm run app`, then replaces `/Applications/Studio.app` with the new build. |
 | `npm run app:test` | Builds **Studio Test**, a variant with its own name, settings and library, into `dist/test/mac-arm64/` (`scripts/app-variant.mjs Test`). See [Profiles](#profiles). |
 | `npm run app:install:test` | `npm run app:test`, then replaces `/Applications/JIBES Studio Test.app` with the new build. |
-| `npm run screenshots` | Takes the README's screenshots into `docs/images/` from the built `out/` (run `npm run build` first), with a fresh, empty profile and library in a temporary folder. See [Screenshots](#screenshots). |
+| `npm run screenshots` | Takes the README's pictures and animated GIFs into `docs/images/` from the built `out/` (run `npm run build` first; needs ffmpeg), with a fresh profile and a library of made-up content in a temporary folder. See [Screenshots](#screenshots). |
 
 Because the dev app reloads on every save, keep the code compiling while you work: a broken save restarts a
 broken main process.
@@ -646,12 +646,26 @@ goes all the way, reopening with the same two variables.
 
 ## Screenshots
 
-`npm run screenshots` (after `npm run build`) starts the built app with `STUDIO_PROFILE_DIR` pointing at a new
-temporary folder, creates an empty library there, adds a little made-up structure (a sequence of text-to-video clips
-and a storyboard with short notes, both directed by the ready-made *Noir*; no media), fills in the Generate form as a
-user does, opens Generate, the `/` menu, Sequences, Storyboards and Directors at 1440 × 900 (2× pixels) over the
-DevTools protocol and saves `docs/images/*.png`. It never reads your own settings or library, generates
-nothing and uses no API key; the temporary folder is removed afterwards. Run it again when the UI changes.
+`npm run screenshots` (after `npm run build`; needs ffmpeg) starts the built app with `STUDIO_PROFILE_DIR` pointing at
+a new temporary folder and creates an empty library there. It fills the library with made-up content: the flat
+illustrations of an evening at a harbour in `scripts/demo-art.mjs` (SVG, rendered to PNG inside the app's window),
+six-second clips made from them with ffmpeg (a slow push-in with a quiet sound track, imported as own clips), three
+characters, two environments, a product, an outfit, a pose, saved prompts, a sequence of three clips and a storyboard,
+both directed by the ready-made *Noir*, and an edit. Then, over the DevTools protocol:
+
+- **Stills** at 1440 × 900 (2× pixels): the `/` menu in the Generate form, a character, the *Noir* director and the
+  Editor (`docs/images/*.png`).
+- **The social preview**, `docs/images/social-preview.png` (1280 × 640: the icon, the name and a sequence). GitHub
+  doesn't read it from the repository: upload it under the repository's *Settings → General → Social preview*.
+- **Animations** at 1180 × 740 (2× pixels, scaled down), recorded with `Page.startScreencast` while a script works the
+  app with a drawn pointer and typing, and encoded as GIFs with ffmpeg (GitHub plays GIFs in a README, not videos):
+  `generate.gif` (references from the library, `@` in the prompt, a director), `sequence.gif` (the clips and
+  *Preview*) and `storyboard.gif` (a transition's prompt from *Suggest*). Paid buttons are pointed at, never pressed.
+  `DEMO_ONLY=generate,sequence` records only those (`DEMO_ONLY=none` none), to try a change quickly.
+
+It never reads your own settings or library, generates nothing at Venice and uses no API key; the temporary folder is
+removed afterwards. The app runs with Chromium's background throttling off, so a window behind others still paints the
+frames a recording needs. Run it again when the UI changes, and keep the GIFs small (a few MB each).
 
 ## Database migrations
 

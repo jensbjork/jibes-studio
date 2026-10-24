@@ -13,7 +13,7 @@ a brand and a public name only.
 - Never add personal information: no people's names (beyond the copyright holder in `LICENSE`, `package.json`'s author
   and the copyright line), no e-mail addresses, private IP addresses, host names, paths from someone's computer, or
   content from anyone's own library (names of characters, sequences, prompts, pictures or films).
-- Examples, fixtures and screenshots are made up (`npm run screenshots` uses a fresh, empty library).
+- Examples, fixtures and screenshots are made up (`npm run screenshots` fills a fresh library with made-up content).
 
 ## Working rules
 

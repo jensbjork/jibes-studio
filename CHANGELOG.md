@@ -111,6 +111,10 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- **A new README**: what the app does with animated pictures of it at work (references and `@` in Generate, a sequence
+  in Preview, a storyboard's transition), clearer install steps and *Your first film* in five steps. `npm run
+  screenshots` now fills its throwaway library with made-up illustrations and clips (`scripts/demo-art.mjs`), records
+  the animations as GIFs and makes a social preview image for the repository; still nothing is generated or paid.
 - The program is now **JIBES Studio**: JIBES Studio.app (JIBES Studio.exe on Windows) in the window, the menu,
   Settings, the Dock, the installer and the disk image, the release files `JIBES-Studio-mac-arm64.zip` / `.dmg`,
   `JIBES-Studio-win-x64-setup.exe` / `.zip`, the Claude Desktop extension and the docs, and the repository is

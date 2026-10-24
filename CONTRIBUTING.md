@@ -187,7 +187,7 @@ request focused. Before asking for review, check that:
       library — and said in the description whether any paid Venice generations were used.
 - [ ] **No secrets or personal data**: no API keys, tokens, real names, personal paths, e-mail addresses or
       private library content in code, comments, commits, screenshots or logs. Never commit media files (videos,
-      photos) or a `studio.db`.
+      photos) or a `studio.db`; the README's pictures and GIFs in `docs/images/` come only from `npm run screenshots`.
 - [ ] **Docs are updated** when behaviour, settings, scripts or agent tools change (README, `docs/` incl. the guide,
       `CHANGELOG.md` under *Unreleased*).
 - [ ] **UI copy is in English**: short, plain and friendly, sentence case for buttons and headings; user-facing
