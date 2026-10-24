@@ -10,7 +10,7 @@ import { rovingKeyDown } from '../ui/roving'
 
 /** The panes' element ids, for the navigation and for opening Settings at one of them. */
 export const SETTINGS_SECTION = {
-  venice: 'settings-venice',
+  service: 'settings-service',
   spending: 'settings-spending',
   generation: 'settings-generation',
   library: 'settings-library',

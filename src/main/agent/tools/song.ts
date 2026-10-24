@@ -280,7 +280,7 @@ export function registerSongTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Request a song's lyrics (paid, needs approval)",
       description:
-        "💰 Asks the user to approve transcribing a song sequence's lyrics (Venice speech-to-text with the time of every word, about $0.01 a minute; from the separated vocals when there are any). Nothing is sent or paid for until they approve in Studio; approving starts the transcription, which replaces any lyrics the song has (corrections too). model: a transcription model that times every word (list_audio_models; default ElevenLabs Scribe); language: a hint (e.g. \"en\"), else it is detected. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval, then read the lines with suggest_song_sections and correct them with edit_song_lyrics.",
+        "💰 Asks the user to approve transcribing a song sequence's lyrics (speech-to-text at the active service with the time of every word, about $0.01 a minute; from the separated vocals when there are any). Nothing is sent or paid for until they approve in Studio; approving starts the transcription, which replaces any lyrics the song has (corrections too). model: a transcription model that times every word (list_audio_models; default ElevenLabs Scribe); language: a hint (e.g. \"en\"), else it is detected. Returns {approval_id, status: \"pending\", price_usd}; follow it with get_approval, then read the lines with suggest_song_sections and correct them with edit_song_lyrics.",
       input: {
         sequence_id: z.string(),
         model: z.string().optional(),

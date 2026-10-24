@@ -22,6 +22,7 @@ import type {
   VideoModel,
   WorkSummary
 } from '@shared/types'
+import { providerOf } from '@shared/provider'
 import { variantsPrice } from '@shared/variants'
 import { AgentService, recordIpcHandlers, registerAgentIpc } from './agent'
 import { isAgentCall } from './agent/local-ipc'
@@ -37,7 +38,7 @@ import { archiveBusyReason, archiveJobReason, registerArchiveIpc, stopLibraryArc
 import { prepareLibrary, registerLibraryRootIpc } from './library-root'
 import { isInsideRoot, libraryOperationSettled, removeDayFolderIfEmpty, toStoredPath } from './paths'
 import { handleMediaProtocol, registerMediaScheme } from './media-protocol'
-import { IS_MAC, IS_WINDOWS } from './platform'
+import { IS_MAC, IS_WINDOWS, QUIT } from './platform'
 import { directParams } from './directors'
 import { probeReferenceVideo } from './reference-videos'
 import { attachReviewSummary, registerReviewIpc } from './reviews'
@@ -49,7 +50,18 @@ import { registerSongIpc, type SongService } from './song'
 import { registerSongSyncIpc } from './song-sync'
 import { registerStoryboardIpc, type StoryboardService } from './storyboards'
 import { setTaskbarBadge, showTaskbarBadgeOn } from './taskbar'
-import { acceptConsent, getApiKey, getSettings, setApiKey, setImageSafeMode, setPromptLanguage } from './settings'
+import {
+  acceptConsent,
+  getApiKey,
+  getFalKey,
+  getProvider,
+  getSettings,
+  loadProvider,
+  setApiKey,
+  setImageSafeMode,
+  setPromptLanguage,
+  setProvider
+} from './settings'
 import { checkForUpdatesFromMenu, registerUpdateIpc, sendWhenLoaded, startUpdateChecks } from './updates'
 import {
   activeStills,
@@ -60,6 +72,9 @@ import {
   stillWorkBusy
 } from './stills'
 import { PUBLIC_NAME, VARIANT } from './variant'
+import { FalClient } from './fal'
+import { FalAudio } from './fal-audio'
+import { AudioService, VideoService } from './providers'
 import { VeniceClient } from './venice'
 import { VeniceAudio } from './venice-audio'
 import { sendOptionsOf, sendVariants } from './variants'
@@ -116,12 +131,18 @@ registerMediaScheme()
 // The agent connection's tools call the same handlers as the window; they are recorded as they are registered.
 recordIpcHandlers()
 
+// The service chosen in Settings, read into shared code before anything picks a default model.
+loadProvider()
 const venice = new VeniceClient(getApiKey)
-/** Venice's speech, music, transcription and voice endpoints (the Editor and voice design). */
-const audio = new VeniceAudio(getApiKey)
+/** fal.ai's queue, storage and price list. */
+const fal = new FalClient(getFalKey)
+/** Video on either service: each job goes to (and is fetched from) the service its model belongs to. */
+const video = new VideoService(venice, fal, getProvider)
+/** Speech, music, transcription and voices on either service (the Editor, voice design, a song's lyrics). */
+const audio = new AudioService(new VeniceAudio(getApiKey), new FalAudio(fal), getProvider)
 // Submits read the models' prompt limits (for the descriptions appended to a prompt) from main's cached list.
-const jobs = new JobManager(venice, () => loadVideoModels())
-let modelCache: { at: number; models: VideoModel[] } | undefined
+const jobs = new JobManager(video, () => loadVideoModels())
+let modelCache: { at: number; provider: string; models: VideoModel[] } | undefined
 /** Exports and "generate all" runs (of sequences and storyboards); set once their handlers are registered. */
 let sequencesBusy: () => string | undefined = () => undefined
 /** Imports of own clips; set once their handlers are registered. */
@@ -262,10 +283,16 @@ function libraryBusyReason(): string | undefined {
   )
 }
 
-/** The video model list, fetched at most every ten minutes unless forced (GET /models is free). */
+/**
+ * The active service's video models, fetched at most every ten minutes unless forced (Venice's GET /models is free;
+ * fal's list is Studio's own). A switch of service starts over.
+ */
 async function loadVideoModels(force = false): Promise<VideoModel[]> {
-  if (!force && modelCache && Date.now() - modelCache.at < 10 * 60_000) return modelCache.models
-  modelCache = { at: Date.now(), models: await venice.listVideoModels() }
+  const provider = getProvider()
+  if (!force && modelCache && modelCache.provider === provider && Date.now() - modelCache.at < 10 * 60_000) {
+    return modelCache.models
+  }
+  modelCache = { at: Date.now(), provider, models: await video.listVideoModels() }
   return modelCache.models
 }
 
@@ -325,7 +352,25 @@ function registerIpc(): void {
   jobs.on('sending', () => work?.touch('structure'))
   setStillWorkListener(() => work?.touch('structure'))
   ipcMain.handle('settings:get', () => getSettings())
-  ipcMain.handle('settings:setApiKey', (_e, key: string) => setApiKey(key))
+  ipcMain.handle('settings:setApiKey', (_e, key: string, provider?: unknown) => {
+    setApiKey(key, provider === 'fal' ? 'fal' : 'venice')
+    broadcast('settings:change')
+  })
+  // The window reads the service before anything else (lib/initProvider.ts), synchronously.
+  ipcMain.on('settings:providerSync', (e) => {
+    e.returnValue = getProvider()
+  })
+  ipcMain.handle('settings:setProvider', (_e, provider: unknown) => {
+    const before = getProvider()
+    setProvider(provider)
+    modelCache = undefined
+    broadcast('settings:change')
+    // Every list, default model and price follows the service: the windows start over with it (they read it first,
+    // lib/initProvider.ts). Main reloads them, as for a library switch: a window can't reload itself here.
+    if (getProvider() !== before) {
+      for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.reload()
+    }
+  })
   ipcMain.handle('settings:setPromptLanguage', (_e, lang: unknown) => setPromptLanguage(lang))
   ipcMain.handle('settings:setImageSafeMode', (_e, on: unknown) => {
     setImageSafeMode(on)
@@ -334,8 +379,12 @@ function registerIpc(): void {
   })
   // Settings → Spending: what was paid for (also get_spending) and the budget, which only the user sets.
   registerSpendingIpc(() => broadcast('settings:change'))
-  ipcMain.handle('settings:testApiKey', async () => {
+  ipcMain.handle('settings:testApiKey', async (_e, provider?: unknown) => {
     try {
+      if ((provider === 'fal' || provider === 'venice' ? provider : getProvider()) === 'fal') {
+        await fal.testKey()
+        return { ok: true, message: 'The key works. fal.ai shows your balance on its dashboard.' }
+      }
       const balances = await venice.balances()
       const summary = Object.entries(balances)
         .map(([k, v]) => `${k}: ${Number(v).toFixed(2)}`)
@@ -350,7 +399,7 @@ function registerIpc(): void {
   ipcMain.handle('models:list', (_e, force?: boolean) => loadVideoModels(force === true))
 
   // Directed as a submission sends it (idempotent): a director's style videos count in Seedance's price.
-  ipcMain.handle('video:quote', (_e, params: GenerationParams) => venice.quote(directParams(params)))
+  ipcMain.handle('video:quote', (_e, params: GenerationParams) => video.quote(directParams(params)))
   ipcMain.handle('referenceVideos:probe', (_e, path: unknown, at: unknown) => probeReferenceVideo(path, at))
   // `opts`: GenerateOptions – the variants (1–4 takes of the same form, each its own generation) and the
   // over-budget confirmation; resolves with the first take, the others reach the window as generation updates.
@@ -364,7 +413,7 @@ function registerIpc(): void {
       // Checked, canonicalised and its audio clips measured before the quote: a voice that turns out too long
       // is refused here rather than after a network round trip (submit checks again; it is idempotent).
       const p = await prepareSubmission(params)
-      const quote = await venice.quote(p).catch(() => undefined)
+      const quote = await video.quote(p).catch(() => undefined)
       // Every variant together, before any of them is sent.
       assertWithinBudget(variantsPrice(quote, count), { confirmed: confirmOverBudget })
       // An agent's approved request sends the composed prompt the user approved (and its check compared just
@@ -497,7 +546,7 @@ function registerIpc(): void {
   })
   const sequences = registerSequenceIpc({
     jobs,
-    venice,
+    venice: video,
     // A storyboard's takes, folder and export run here too; its view hears about them on its own channel.
     notify: (sequenceId: string) => broadcastSequenceChange(sequenceId),
     exportProgress: (p: ExportProgress) => broadcast('export:progress', p),
@@ -546,7 +595,7 @@ function registerIpc(): void {
   // The Editor: edits, their versions and paid jobs, transcripts, audio models, voice design and clone consent.
   editsService = registerEditIpc({
     jobs,
-    venice,
+    venice: video,
     audio,
     sequences,
     models: () => loadVideoModels(),
@@ -739,6 +788,55 @@ void app.whenReady().then(async () => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+/**
+ * Paid fal.ai work still running: videos and the Editor's queued audio sent to fal. fal keeps a finished result for
+ * an hour only (fal.ts: Studio asks it to store no request history), so it must be fetched within that hour.
+ */
+function falWorkRunning(): number {
+  if (!db.isDbOpen()) return 0
+  try {
+    const videos = db.listPendingGenerations().filter((g) => providerOf(g.model) === 'fal' && g.queueId).length
+    const steps = db
+      .getDb()
+      .prepare(`SELECT COUNT(*) FROM media_job_steps WHERE status = 'queued' AND model LIKE 'fal:%'`)
+      .pluck()
+      .get() as number
+    return videos + steps
+  } catch (err) {
+    console.warn('Could not count running fal.ai work:', err)
+    return 0
+  }
+}
+
+/** Set once the user chose to quit while fal.ai work ran. */
+let quitWhileFalRuns = false
+
+// Quitting while fal.ai work runs asks first: a result that finishes while Studio is closed is lost after an hour.
+app.on('before-quit', (e) => {
+  if (quitWhileFalRuns) return
+  const running = falWorkRunning()
+  if (!running) return
+  e.preventDefault()
+  const options = {
+    type: 'warning' as const,
+    buttons: ['Keep JIBES Studio open', `${QUIT} anyway`],
+    defaultId: 0,
+    cancelId: 0,
+    message:
+      running === 1
+        ? 'fal.ai is still working on something you paid for.'
+        : `fal.ai is still working on ${running} things you paid for.`,
+    detail:
+      'fal.ai keeps a finished result for an hour. If JIBES Studio is closed when it is done and not opened again within the hour, the result is lost. Keep Studio open until it is done.'
+  }
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  void (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)).then(({ response }) => {
+    if (response !== 1) return
+    quitWhileFalRuns = true
+    app.quit()
   })
 })
 

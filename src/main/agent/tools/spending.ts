@@ -10,7 +10,7 @@ import { READ_ONLY, defineTool, type ToolContext } from './kit'
 // the budget. A paid request that would go past it still only asks the user (see overBudgetAnswer).
 
 const COUNTS =
-  'What Studio recorded as paid: completed videos (Generate, sequence clips, storyboard transitions, the Editor’s picture operations) at their price, created images, and what the Editor’s sound jobs, transcriptions and voice designs sent. Failed generations cost nothing; work still rendering is on its way (on_its_way_usd), not spent, but counts against the budget. Days are the user’s local days; anything deleted from the library drops out. Venice’s own account is the record of what was billed.'
+  'What Studio recorded as paid: completed videos (Generate, sequence clips, storyboard transitions, the Editor’s picture operations) at their price, created images, and what the Editor’s sound jobs, transcriptions and voice designs sent. Failed generations cost nothing; work still rendering is on its way (on_its_way_usd), not spent, but counts against the budget. Days are the user’s local days; anything deleted from the library drops out. The service’s own account (Venice or fal.ai) is the record of what was billed.'
 
 /**
  * For a paid request's answer: when its price would take today's or this month's spending past the user's budget,
@@ -49,7 +49,7 @@ export function registerSpendingTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Get what Studio has spent',
       description:
-        "What Studio has spent at Venice, as Settings → Spending shows it: today_usd, this_month_usd and on_its_way_usd (work still rendering: not spent yet, but counted against the budget); the user's budget (daily_usd, monthly_usd; null = no cap) with the room it leaves today and this month (left_today_usd, left_this_month_usd); the last 30 days per day; and this month by kind (videos, images, Editor jobs, voices, transcripts), by place (Generate, each sequence, storyboard or edit, with its id) and by who asked (\"user\", or the agent whose approved request it was; is_you marks yours). Check it before asking for something expensive: a paid request that would go past a cap still only waits for the user's approval, and its answer says so (over_budget). Only the user sets the budget. Free; changes nothing.",
+        "What Studio has spent at the services (Venice and fal.ai), as Settings → Spending shows it: today_usd, this_month_usd and on_its_way_usd (work still rendering: not spent yet, but counted against the budget); the user's budget (daily_usd, monthly_usd; null = no cap) with the room it leaves today and this month (left_today_usd, left_this_month_usd); the last 30 days per day; and this month by kind (videos, images, Editor jobs, voices, transcripts), by place (Generate, each sequence, storyboard or edit, with its id) and by who asked (\"user\", or the agent whose approved request it was; is_you marks yours). Check it before asking for something expensive: a paid request that would go past a cap still only waits for the user's approval, and its answer says so (over_budget). Only the user sets the budget. Free; changes nothing.",
       input: {},
       annotations: { ...READ_ONLY, idempotentHint: true },
       summary: () => 'checked the spending'

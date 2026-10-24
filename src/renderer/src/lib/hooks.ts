@@ -9,6 +9,7 @@ import type {
   SeparationStatus,
   VideoModel
 } from '@shared/types'
+import { activeProvider, providerName } from '@shared/provider'
 import { isModalOpen } from './dialogs'
 import { directorAssets, rememberDirectors, subscribeDirectors } from './directors'
 import { isFindKey, isMac } from './platform'
@@ -163,12 +164,28 @@ export function useFindShortcut(ref: RefObject<HTMLInputElement | null>, enabled
   }, [ref, enabled])
 }
 
-/** The first thing every paid button names while there is no Venice API key (it opens Settings → Venice). */
-export const NO_API_KEY = 'Add your Venice API key in Settings'
+/**
+ * The first thing every paid button names while the active service has no API key (it opens Settings → Service). Main
+ * reloads the window when the service changes, so this is read once.
+ */
+export const NO_API_KEY = `Add your ${providerName(activeProvider())} API key in Settings`
+
+/** The active service's name ("Venice" / "fal.ai") for the window's text; read once, like NO_API_KEY. */
+export const SERVICE_NAME = providerName(activeProvider())
+
+/** What "Safe mode for images" does at the active service: Venice blurs, fal.ai's safety levels tighten. */
+export function safeModeEffect(on: boolean): string {
+  if (activeProvider() === 'fal') {
+    return on
+      ? 'fal.ai’s models that have a safety level use a stricter one'
+      : 'fal.ai’s models that have a safety level use the most permissive one'
+  }
+  return on ? 'Venice blurs adult content' : 'Venice doesn’t blur adult content'
+}
 
 /**
- * Whether a Venice API key is saved, live (a key added or removed in Settings). True until Settings has answered,
- * so no "add your key" flashes up on every view that opens.
+ * Whether the active service's API key is saved, live (a key added or removed in Settings). True until Settings has
+ * answered, so no "add your key" flashes up on every view that opens.
  */
 export function useHasApiKey(): boolean {
   const [hasKey, setHasKey] = useState(true)
@@ -225,8 +242,9 @@ export function useQuote(params: GenerationParams, model: VideoModel | undefined
 
 // ── Audio models and voice separation (Editor, voice design) ─────────────
 
-// Venice's audio models, shared like the video model list. Main caches the list for 10 minutes; the window asks again
-// after that, so a voice changer Venice starts listing (or one the API key unlocks) shows up without a restart.
+// The active service's audio models, shared like the video model list. Main caches the list for 10 minutes; the window
+// asks again after that, so a voice changer the service starts listing (or one the API key unlocks) shows up without a
+// restart.
 const AUDIO_CATALOG_MAX_AGE_MS = 10 * 60 * 1000
 let audioCatalog: { promise: Promise<AudioCatalog>; at: number; forced: boolean } | undefined
 const audioCatalogListeners = new Set<(catalog: AudioCatalog) => void>()
@@ -261,7 +279,7 @@ export function useAudioCatalog(): {
   error?: string
   /** A fetch is on its way. */
   loading: boolean
-  /** Fetches the list again from Venice ("Check again"). */
+  /** Fetches the list again from the service ("Check again"). */
   refresh: () => void
 } {
   const [catalog, setCatalog] = useState<AudioCatalog>()

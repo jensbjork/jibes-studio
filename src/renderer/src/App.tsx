@@ -27,6 +27,7 @@ import { useAgentBridge } from './lib/agentBridge'
 import { assetKindOfView } from './lib/assets'
 import { isModalOpen } from './lib/dialogs'
 import { followEnglishFolders } from './lib/generateStore'
+import { takeReturnToSettings } from './lib/initProvider'
 import { ipcErrorMessage } from './lib/hooks'
 import type { Intent, Navigate, View } from './lib/navigation'
 import { isMac, isModOnly } from './lib/platform'
@@ -157,7 +158,9 @@ function takeSettingsRequest(): boolean {
 type Panel = 'agent' | 'work'
 
 function Workspace() {
-  const [view, setView] = useState<View>(() => (takeSettingsRequest() ? 'settings' : 'generate'))
+  const [view, setView] = useState<View>(() =>
+    takeSettingsRequest() || takeReturnToSettings() ? 'settings' : 'generate'
+  )
   const [intent, setIntent] = useState<Intent>()
   const [settings, setSettings] = useState<Settings | null>(null)
 

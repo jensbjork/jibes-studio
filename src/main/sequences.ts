@@ -62,6 +62,7 @@ import {
 } from '@shared/models'
 import { outfitWearersAmong } from '@shared/outfits'
 import { knowsPromptLimit, rememberPromptLimits } from '@shared/prompt-compose'
+import { activeProvider, providerName } from '@shared/provider'
 import {
   blockingContinuationError,
   blockingPromptError,
@@ -144,7 +145,8 @@ import { reconcileSongTrims } from './song-sync'
 import { cachedSongAnalysis } from './song-analysis'
 import { assertAgentFiles } from './upload-paths'
 import { sendOptionsOf, sendVariants, type SendOptions } from './variants'
-import { ensureImagesExist, type VeniceClient } from './venice'
+import type { VideoBackend } from './providers'
+import { ensureImagesExist } from './venice'
 
 /**
  * What the sequence service needs from the stills service (stills.ts) to put images into keyframe slots. Both
@@ -160,7 +162,8 @@ export interface StillsAccess {
 
 interface Deps {
   jobs: JobManager
-  venice: VeniceClient
+  /** The video services' quotes (providers.ts). */
+  venice: Pick<VideoBackend, 'quote'>
   notify: (sequenceId: string) => void
   exportProgress: (p: ExportProgress) => void
   /**
@@ -181,7 +184,7 @@ interface Deps {
 
 /** What runs in the sequence service right now, for the status summary (work.ts). */
 export interface SequenceActiveWork {
-  /** Takes on their way to Venice (frames, quote, upload), by clip or transition. */
+  /** Takes on their way to the service (frames, quote, upload), by clip or transition. */
   sending: { segmentId: string; sequenceId: string; startedAt: number }[]
   /**
    * "Generate missing" runs: `total` clips were missing (done ones included), `done` have finished in this run, and
@@ -907,7 +910,7 @@ function keepSongPlace(params: GenerationParams, place: SongWindow | undefined):
 
 /** Why a song sequence's clip can't be removed to fit fewer places; undefined for one nothing has been put in. */
 function songClipKept(row: store.SegmentRow, sending: boolean): string | undefined {
-  if (sending) return 'is being sent to Venice'
+  if (sending) return 'is being sent'
   if (row.selected_generation_id || store.takeIdsForSegments([row.id]).length) return 'has takes'
   if (store.parseParams(row.params).prompt.trim()) return 'has a prompt'
   if ((row.notes ?? '').trim()) return 'has notes'
@@ -995,7 +998,7 @@ export class SequenceService {
   isBusy(): string | undefined {
     if (this.exports.size) return 'An export is running.'
     if (this.loops.size || [...this.runs.values()].some((r) => r.running)) return '“Generate missing” is running.'
-    if (this.submitting.size) return 'A take is being sent to Venice.'
+    if (this.submitting.size) return `A take is being sent to ${providerName(activeProvider())}.`
     if (this.fileTasks) return "The sequences' files are being moved right now."
     return undefined
   }
@@ -2329,7 +2332,9 @@ export class SequenceService {
     // E.g. "generate all" is uploading this very clip; a second submit would pay for it twice.
     if (this.submitting.has(segmentId)) {
       return Promise.reject(
-        new Error('A take for the clip is already being sent to Venice. Wait until it shows among the takes.')
+        new Error(
+          `A take for the clip is already being sent to ${providerName(activeProvider())}. Wait until it shows among the takes.`
+        )
       )
     }
     return this.submit(segmentId, typeof cancelled === 'function' ? cancelled : undefined, guard, variants)

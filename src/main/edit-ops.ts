@@ -39,6 +39,7 @@ import {
 import { blockingPromptError } from '@shared/prompt-refs'
 import {
   endImageVariant,
+  isLipSyncModel,
   isUpscaleModel,
   MAX_REQUEST_MEDIA_BYTES,
   supportsEndImage,
@@ -112,9 +113,11 @@ import {
 } from './paths'
 import { FILE_MANAGER, IS_MAC } from './platform'
 import { cloneInto, placeFile, serialized } from './references'
-import { getApiKey } from './settings'
-import { imageRequestBytes, type VeniceClient } from './venice'
-import type { VeniceAudio } from './venice-audio'
+import { activeServiceName, getActiveKey } from './settings'
+import type { AudioBackend, VideoBackend } from './providers'
+import { providerName, providerOf, type Provider } from '@shared/provider'
+import { activeServiceModels, type ServiceModels } from '@shared/service-models'
+import { imageRequestBytes } from './venice'
 import { separationStatus } from './voice-separation'
 
 // ── Limits and defaults ──────────────────────────────────────────────────────
@@ -143,27 +146,23 @@ const MAX_TEMPO = 1.15
 const CHUNK_MARGIN = 0.5
 const SAMPLE_RATE = MIX_RATE
 const MAX_PATCH_HEIGHT = 720
+/** A lip sync's selection (Sync's lipsync-2 takes any length; a minute keeps a mistake affordable). */
+const LIP_SYNC_MIN_SECONDS = 2
+const LIP_SYNC_MAX_SECONDS = 60
 const MAX_UPSCALE_SECONDS = 300
 const MAX_UPSCALE_LONG_SIDE = 3840
 const MAX_LINES = MAX_SPEAK_LINES
 const DEFAULT_MUSIC_GAIN_DB = -6
 const DEFAULT_MUSIC_FADE = 2
 
-export const DEFAULT_ASR = 'elevenlabs/scribe-v2'
-export const DEFAULT_SPEECH = 'elevenlabs-tts-multilingual-v2'
-export const CLONE_MODEL = 'tts-chatterbox-hd'
-export const DEFAULT_MUSIC = 'ace-step-15'
-export const DEFAULT_EFFECT = 'elevenlabs-sound-effects-v2'
-export const DEFAULT_I2V = 'seedance-2-5-image-to-video-basic'
-export const DEFAULT_EDIT_MODEL = 'seedance-2-5-reference-to-video-basic'
-export const DEFAULT_UPSCALE = 'topaz-video-upscale'
-export const DESIGN_MODEL = 'seed-audio-1-0'
+/** The models the cards start from: the active service's (shared/service-models.ts). */
+const serviceDefaults = (): ServiceModels => activeServiceModels()
 export const DESIGN_VOICE = 'Describe in prompt'
 
 // ── Messages ─────────────────────────────────────────────────────────
 
 export const LOST =
-  "Venice's answer never arrived – it may have been charged. Check your balance before you continue."
+  "The service's answer never arrived – it may have been charged. Check your balance before you continue."
 export const CLOSED = 'Studio was closed before all parts were sent. Continue to send the rest.'
 export const PRICE_CHANGED = 'The price has changed – check it and try again.'
 export const BUSY = 'An edit is in progress. Wait until it is done and try again.'
@@ -172,22 +171,24 @@ const NO_SEPARATION = IS_MAC
   ? "Voice separation isn't available on this Mac."
   : 'Voice separation is only available on macOS.'
 const NO_KEY = 'Add the API key in Settings.'
-const NO_VOICE_CHANGER = "Venice doesn't offer voice change right now — use Re-record lines instead."
+const noVoiceChanger = (): string =>
+  `${activeServiceName()} doesn't offer voice change right now — use Re-record lines instead.`
 const CONSENT_MISSING = 'Tick that you have the right to use the voice (Characters → Voice).'
 const SAMPLE_TOO_SHORT = 'The voice sample is shorter than 5 seconds and cannot be cloned.'
-const TOO_BIG = 'The input is too large for Venice (at most ~22 MB). Select a shorter part.'
+const TOO_BIG = 'The input is too large to send (at most ~22 MB). Select a shorter part.'
 const IMAGES_TOO_BIG =
-  'The images to start from make the input too large for Venice (at most ~22 MB together with the film). Choose fewer images or a shorter selection.'
+  'The images to start from make the input too large to send (at most ~22 MB together with the film). Choose fewer images or a shorter selection.'
 /** Room left beside the pictures for the request's rounding (base64 padding, JPEG sizes varying by a few kB). */
 const IMAGE_BYTES_MARGIN = 256 * 1024
 const UPSCALE_TOO_BIG =
-  'The film is too long to upscale in one go (Venice takes at most ~22 MB). Shorter films work.'
+  'The film is too long to upscale in one go (at most ~22 MB can be sent). Shorter films work.'
 const LIP_SYNC =
   "The mouth movements don't follow the new line. Best for a voice off screen — or regenerate the section afterwards."
 const REAL_PEOPLE = "Seedance often doesn't accept video with real people. If it is refused, try another model."
 const BASE_GONE = 'The version the operation started from no longer exists.'
-const NO_MODELS = 'The model list could not be fetched from Venice. Check your internet connection and try again.'
+const NO_MODELS = 'The model list could not be fetched. Check your internet connection and try again.'
 const CLONE_EXPIRED = 'The voice clone has expired. Continue to clone the voice again.'
+const CLONE_UNPRICED = 'Voice cloning: no price in advance'
 
 // ── Formatting ─────────────────────────────────────────────────────
 
@@ -216,6 +217,10 @@ export function fileLabel(label: string): string {
     return h ? `${h}h${m.padStart(2, '0')}m${s}${tenths}s` : `${m}m${s}${tenths}s`
   })
 }
+/** The service a model belongs to, by name; the active one when there is no model. */
+function serviceOf(model: string | undefined): string {
+  return model ? providerName(providerOf(model)) : activeServiceName()
+}
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -225,9 +230,9 @@ const sleep = (ms: number): Promise<void> =>
     t.unref?.()
   })
 
-// ── Venice errors ────────────────────────────────────────────────────────────
+// ── Service errors ───────────────────────────────────────────────────────────
 
-/** Venice answered (and charged) but the answer couldn't be kept: told as it is, not as a lost answer. */
+/** The service answered (and charged) but the answer couldn't be kept: told as it is, not as a lost answer. */
 class AfterSendError extends Error {}
 
 /** Keeps an answer that was paid for, or says so. */
@@ -235,23 +240,24 @@ async function keepAnswer(path: string, data: Buffer | string): Promise<void> {
   try {
     await writeFile(path, data)
   } catch (err) {
-    throw new AfterSendError(`Venice's answer could not be saved (${errorText(err)}). The part has been charged.`)
+    throw new AfterSendError(`The service's answer could not be saved (${errorText(err)}). The part has been charged.`)
   }
 }
 
-/** The HTTP status of a failed Venice call, or undefined when no response came (network, aborted, local). */
+/** The HTTP status of a failed service call, or undefined when no response came (network, aborted, local). */
 function statusOf(err: unknown): number | undefined {
   const status = (err as { status?: unknown } | undefined)?.status
   return typeof status === 'number' && Number.isFinite(status) ? status : undefined
 }
 
-/** A failed paid request, by status (the spec's wording where it has one). */
-export function veniceFailure(err: unknown): string {
+/** A failed paid request, by status (the spec's wording where it has one); `model` names the service it went to. */
+export function veniceFailure(err: unknown, model?: string): string {
   const status = statusOf(err)
   const message = errorText(err)
-  if (status === 402) return 'Your Venice balance is too low.'
+  const service = serviceOf(model)
+  if (status === 402) return `Your ${service} balance is too low.`
   if (status === 401 && /pro\b/i.test(message)) return 'The model requires Venice Pro.'
-  if (status === 422) return 'Venice refused the content.'
+  if (status === 422) return `${service} refused the content.`
   if (status === 413) return 'The input is too large.'
   return message
 }
@@ -260,8 +266,10 @@ export function veniceFailure(err: unknown): string {
 
 export interface OpsDeps {
   jobs: JobManager
-  venice: VeniceClient
-  audio: VeniceAudio
+  /** The video services' quotes (providers.ts). */
+  venice: Pick<VideoBackend, 'quote'>
+  /** The audio services (providers.ts). */
+  audio: AudioBackend
   models: () => Promise<VideoModel[]>
   notify: (editId: string) => void
   progress: (p: EditProgress) => void
@@ -458,8 +466,16 @@ export function designPrompt(description: string, sampleText: string): string {
   return `${description.trim()}\n${sampleText.trim()}`
 }
 
-/** A Seedance edit prompt: "Strictly edit <Video 1>, …" with the user's @ImageN as <Image N>. */
-export function seedanceEditPrompt(text: string): string {
+/**
+ * A Seedance edit prompt: "Strictly edit <Video 1>, …" with the user's @ImageN as <Image N> (Venice's way of naming
+ * them); on fal.ai "Strictly edit @Video1, …" with @ImageN as they are, as fal's Seedance names its inputs.
+ */
+export function seedanceEditPrompt(text: string, provider: Provider = 'venice'): string {
+  if (provider === 'fal') {
+    const body = text.trim().replace(/@image\s*(\d+)/gi, '@Image$1')
+    if (/^strictly edit\b/i.test(body)) return body
+    return `Strictly edit @Video1, ${body.charAt(0).toLowerCase()}${body.slice(1)}`
+  }
   const body = text.trim().replace(/@image\s*(\d+)/gi, '<Image $1>')
   if (/^strictly edit\b/i.test(body)) return body
   return `Strictly edit <Video 1>, ${body.charAt(0).toLowerCase()}${body.slice(1)}`
@@ -704,6 +720,7 @@ export class EditOps {
         case 'prompt-edit':
         case 'extend':
         case 'upscale':
+        case 'lip-sync':
           ;({ op, exec } = await this.planPicture(d, edit, base, info, raw))
           break
         default:
@@ -938,9 +955,9 @@ export class EditOps {
     raw: Record<string, unknown>
   ): Promise<{ op: EditOperation; exec: Exec }> {
     const catalog = await this.catalogOrProblem(d)
-    const wanted = str(raw.model, 200) || DEFAULT_ASR
+    const wanted = str(raw.model, 200) || serviceDefaults().transcription
     const model: AsrModel | undefined = catalog?.transcription.find((m) => m.id === wanted)
-    if (catalog && !model) d.problem("Venice doesn't have the transcription model.")
+    if (catalog && !model) d.problem(`${activeServiceName()} doesn't have the transcription model.`)
     const language = str(raw.language, 20) || undefined
     if (!info.hasAudio) d.problem('The film has no sound to transcribe.')
     if (info.duration > ASR_MAX_SECONDS) d.problem('The film is too long to transcribe (at most 50 minutes).')
@@ -971,7 +988,7 @@ export class EditOps {
     try {
       return await this.catalog()
     } catch (err) {
-      d.problem(`Venice's model list could not be fetched: ${errorText(err)}`)
+      d.problem(`${activeServiceName()}'s model list could not be fetched: ${errorText(err)}`)
       return undefined
     }
   }
@@ -1035,8 +1052,8 @@ export class EditOps {
     const wanted = str(raw.model, 200)
     const model: VoiceChangerModel | undefined =
       changers.find((m) => m.id === wanted) ?? (wanted ? undefined : changers[0])
-    if (catalog && !changers.length) d.problem(catalog.keyed || getApiKey() ? NO_VOICE_CHANGER : NO_KEY)
-    else if (catalog && !model) d.problem("Venice doesn't have the voice change model.")
+    if (catalog && !changers.length) d.problem(catalog.keyed || getActiveKey() ? noVoiceChanger() : NO_KEY)
+    else if (catalog && !model) d.problem(`${activeServiceName()} doesn't have the voice change model.`)
 
     // The new voice.
     const v = (raw.voice && typeof raw.voice === 'object' ? raw.voice : {}) as Record<string, unknown>
@@ -1184,10 +1201,13 @@ export class EditOps {
     const catalog = await this.catalogOrProblem(d)
     const v = (raw.voice && typeof raw.voice === 'object' ? raw.voice : {}) as Record<string, unknown>
     const cloning = v.kind === 'clone'
-    const wanted = cloning ? CLONE_MODEL : str(raw.model, 200) || DEFAULT_SPEECH
+    const wanted = cloning ? serviceDefaults().cloneSpeech : str(raw.model, 200) || serviceDefaults().speech
     const model: SpeechModel | undefined = catalog?.speech.find((m) => m.id === wanted)
     if (catalog && !model) {
-      d.problem(cloning ? "Venice doesn't offer voice cloning right now." : "Venice doesn't have the speech model.")
+      const service = activeServiceName()
+      d.problem(
+        cloning ? `${service} doesn't offer voice cloning right now.` : `${service} doesn't have the speech model.`
+      )
     }
     if (cloning && model && !model.cloning) d.problem('The model cannot clone voices.')
 
@@ -1291,15 +1311,23 @@ export class EditOps {
     if (cloning && clip && model && !store.validClone(clip.id, model.id)) {
       const min = model.cloning?.minSampleSeconds ?? 5
       const window = cloneWindow(clip, min)
+      // fal's "clone" uploads the sample, which is free; Venice's has no price in advance.
+      const free = providerOf(model.id) === 'fal'
       steps.push({
         endpoint: 'voice-clone',
         model: model.id,
         request: { audioId: clip.id, start: window.start, length: window.length },
-        label: 'Voice cloning'
+        label: 'Voice cloning',
+        ...(free ? { quote: 0 } : {})
       })
-      d.addPrice(undefined)
-      d.priceNote = 'Voice cloning: Venice gives no price'
-      d.steps.push({ label: `Voice cloning (${clip.asset_name})` })
+      if (free) {
+        d.addPrice(0)
+        d.steps.push({ label: `Voice cloning (${clip.asset_name})`, priceUsd: 0 })
+      } else {
+        d.addPrice(undefined)
+        d.priceNote = CLONE_UNPRICED
+        d.steps.push({ label: `Voice cloning (${clip.asset_name})` })
+      }
     }
     if (model) {
       const voiceValue =
@@ -1330,9 +1358,11 @@ export class EditOps {
         d.addPrice(prices[i])
         d.steps.push({ label: `Line ${slot.index + 1}: ${excerpt(slot.text, 30)}`, priceUsd: prices[i] })
       })
-      if (model.endpoint === 'speech' && !d.priceNote) d.priceNote = "Estimated from Venice's price list"
-      if (model.endpoint === 'speech' && d.priceNote === 'Voice cloning: Venice gives no price') {
-        d.priceNote = 'Voice cloning: Venice gives no price · lines estimated from the price list'
+      if (model.endpoint === 'speech' && !d.priceNote) {
+        d.priceNote = `Estimated from ${providerName(providerOf(model.id))}'s price list`
+      }
+      if (model.endpoint === 'speech' && d.priceNote === CLONE_UNPRICED) {
+        d.priceNote = `${CLONE_UNPRICED} · lines estimated from the price list`
       }
     }
     if (replacing) d.warn(LIP_SYNC)
@@ -1365,11 +1395,12 @@ export class EditOps {
     const D = info.duration
     const isMusic = raw.op === 'music'
     const catalog = await this.catalogOrProblem(d)
-    const wanted = str(raw.model, 200) || (isMusic ? DEFAULT_MUSIC : DEFAULT_EFFECT)
+    const wanted = str(raw.model, 200) || (isMusic ? serviceDefaults().music : serviceDefaults().effect)
     const list = isMusic ? catalog?.music : catalog?.effects
     const model = list?.find((m) => m.id === wanted)
     if (catalog && !model) {
-      d.problem(isMusic ? "Venice doesn't have the music model." : "Venice doesn't have the sound effect model.")
+      const service = activeServiceName()
+      d.problem(isMusic ? `${service} doesn't have the music model.` : `${service} doesn't have the sound effect model.`)
     }
     const prompt = str(raw.prompt, 4000)
     if (!prompt) d.problem(isMusic ? 'Describe the music.' : 'Describe the sound.')
@@ -1503,7 +1534,7 @@ export class EditOps {
     return job
   }
 
-  /** The bytes a picture adds to a Venice request (cached: plans are made again on every change of a form). */
+  /** The bytes a picture adds to a request (cached: plans are made again on every change of a form). */
   private async requestBytesOf(path: string): Promise<number> {
     const s = await stat(path)
     const key = `${s.size}:${s.mtimeMs}`
@@ -1549,7 +1580,7 @@ export class EditOps {
     } catch (err) {
       const status = statusOf(err)
       if (status === 401 || status === 403) d.problem(NO_KEY)
-      else d.warn(`The price could not be fetched from Venice: ${errorText(err)}`)
+      else d.warn(`The price could not be fetched: ${errorText(err)}`)
     }
     d.addPrice(usd)
     d.steps.push({ label, ...(seconds !== undefined ? { seconds: round(seconds) } : {}), priceUsd: usd })
@@ -1580,8 +1611,8 @@ export class EditOps {
     if (raw.op === 'upscale') {
       const factor: 2 | 4 = raw.factor === 4 ? 4 : 2
       const vm = models.find((m) => m.videoInput && isUpscaleModel(m.id))
-      const modelId = vm?.id ?? DEFAULT_UPSCALE
-      if (models.length && !vm) d.problem("Venice doesn't offer upscaling right now.")
+      const modelId = vm?.id ?? serviceDefaults().upscale
+      if (models.length && !vm) d.problem(`${activeServiceName()} doesn't offer upscaling right now.`)
       const longSide = Math.max(info.width, info.height)
       if (longSide * factor > MAX_UPSCALE_LONG_SIDE) {
         d.problem(
@@ -1593,7 +1624,7 @@ export class EditOps {
       const sendBase = info.bytes <= MAX_REQUEST_MEDIA_BYTES && /\.(mp4|mov|m4v)$/i.test(base.filePath)
       const minBytes = (MIN_BITS_PER_PIXEL_FRAME * info.width * info.height * Math.min(info.fps, 60) * D) / 8
       if (D > MAX_UPSCALE_SECONDS || (!sendBase && minBytes > MAX_REQUEST_MEDIA_BYTES)) d.problem(UPSCALE_TOO_BIG)
-      if (!getApiKey()) d.problem(NO_KEY)
+      if (!getActiveKey()) d.problem(NO_KEY)
       const op: EditOperation = { op: 'upscale', factor }
       const params: GenerationParams = { model: modelId, prompt: '', duration: 'Auto', upscaleFactor: factor }
       if (!d.problems.length) {
@@ -1618,9 +1649,9 @@ export class EditOps {
     }
 
     if (raw.op === 'extend') {
-      let modelId = str(raw.model, 200) || DEFAULT_I2V
+      let modelId = str(raw.model, 200) || serviceDefaults().i2v
       let vm = models.find((m) => m.id === modelId)
-      if (models.length && !vm) d.problem("Venice doesn't have the model.")
+      if (models.length && !vm) d.problem(`${providerName(providerOf(modelId))} doesn't have the model.`)
       if (vm && vm.kind !== 'image-to-video') {
         modelId = endImageVariant(modelId, ids)
         vm = models.find((m) => m.id === modelId)
@@ -1673,10 +1704,57 @@ export class EditOps {
     if (!r) d.problem('Select the section first.')
     const audio: 'keep' | 'model' = raw.audio === 'model' ? 'model' : 'keep'
 
+    if (raw.op === 'lip-sync') {
+      // fal.ai only (Venice has no lip sync model): the selection, with the sound it has now, goes as a proxy; the
+      // model's picture is put back over the range and the film's own sound stays.
+      const modelId = str(raw.model, 200) || serviceDefaults().lipSync || ''
+      const vm = models.find((m) => m.id === modelId)
+      if (!modelId || !isLipSyncModel(modelId)) {
+        d.problem(`${activeServiceName()} has no lip sync. Choose fal.ai in Settings → Service.`)
+      } else if (models.length && !vm) {
+        d.problem(`${providerName(providerOf(modelId))} doesn't have the model.`)
+      }
+      const range = r
+        ? this.snap(d, r, info, { min: LIP_SYNC_MIN_SECONDS, max: LIP_SYNC_MAX_SECONDS })
+        : { start: 0, end: Math.min(D, LIP_SYNC_MIN_SECONDS) }
+      const length = round(range.end - range.start)
+      if (!info.hasAudio) d.problem('The film has no sound for the mouths to follow.')
+      if (!getActiveKey()) d.problem(NO_KEY)
+      const params: GenerationParams = { model: modelId, prompt: '', duration: 'Auto', includeDescriptions: false }
+      try {
+        const first = await this.frame(base, 'after', range.start)
+        const last = await this.frame(base, 'before', range.end)
+        d.frames = { start: first, end: last }
+      } catch (err) {
+        console.warn('The frames of a lip sync could not be taken out:', err)
+      }
+      if (!d.problems.length) {
+        const standIn = await this.standIn(length, 64, 36, 24)
+        await this.quote(d, { ...params, sourceVideo: standIn }, `Lip sync ${fmtSeconds(length)}`, length)
+      }
+      d.note('The mouths follow the sound the selection has now: re-recorded lines, say. Speech alone works best.')
+      if (own) d.warn(REAL_PEOPLE)
+      d.resultSeconds = D
+      d.estimatedBytes = info.bytes * 1.3
+      const op: EditOperation = { op: 'lip-sync', range, model: modelId }
+      return {
+        op,
+        exec: {
+          kind: 'picture',
+          spec: {
+            params,
+            proxy: { start: range.start, end: range.end, maxHeight: MAX_PATCH_HEIGHT, audio: true },
+            frames: d.frames
+          },
+          finish: {}
+        }
+      }
+    }
+
     if (raw.op === 'regenerate') {
-      let modelId = str(raw.model, 200) || DEFAULT_I2V
+      let modelId = str(raw.model, 200) || serviceDefaults().i2v
       let vm = models.find((m) => m.id === modelId)
-      if (models.length && !vm) d.problem("Venice doesn't have the model.")
+      if (models.length && !vm) d.problem(`${providerName(providerOf(modelId))} doesn't have the model.`)
       if (vm && (vm.kind !== 'image-to-video' || !supportsEndImage(modelId))) {
         const swapped = endImageVariant(modelId, ids)
         if (swapped !== modelId) {
@@ -1735,11 +1813,11 @@ export class EditOps {
     }
 
     // prompt-edit
-    const modelId = str(raw.model, 200) || DEFAULT_EDIT_MODEL
+    const modelId = str(raw.model, 200) || serviceDefaults().promptEdit
     const spec = PICTURE_EDIT_MODELS[modelId]
     const vm = models.find((m) => m.id === modelId)
     if (!spec) d.problem('The model cannot edit video.')
-    else if (models.length && !vm) d.problem("Venice doesn't have the model.")
+    else if (models.length && !vm) d.problem(`${providerName(providerOf(modelId))} doesn't have the model.`)
     const range = r
       ? this.snap(d, r, info, { min: spec?.minSeconds ?? 1, max: spec?.maxSeconds ?? 10 })
       : { start: 0, end: Math.min(D, spec?.minSeconds ?? 4) }
@@ -1779,7 +1857,7 @@ export class EditOps {
     else if (imageBytes && minBytes + imageBytes + IMAGE_BYTES_MARGIN > MAX_REQUEST_MEDIA_BYTES) {
       d.problem(IMAGES_TOO_BIG)
     }
-    const sentPrompt = seedance ? seedanceEditPrompt(prompt) : prompt
+    const sentPrompt = seedance ? seedanceEditPrompt(prompt, providerOf(modelId)) : prompt
     const params: GenerationParams = seedance
       ? {
           model: modelId,
@@ -2559,9 +2637,10 @@ export class EditOps {
     try {
       await request()
     } catch (err) {
-      // An answer (a status) means Venice refused; no answer at all may mean it was charged.
+      // An answer (a status) means the service refused; no answer at all may mean it was charged.
       const status = statusOf(err)
-      const error = err instanceof AfterSendError ? err.message : status === undefined ? LOST : veniceFailure(err)
+      const error =
+        err instanceof AfterSendError ? err.message : status === undefined ? LOST : veniceFailure(err, step.model)
       store.updateStep(step.id, { status: 'failed', error })
       run.failed = true
       return
@@ -2579,7 +2658,7 @@ export class EditOps {
     switch (step.endpoint) {
       case 'voice-changer': {
         const changer = (await this.catalog()).voiceChangers.find((m) => m.id === step.model)
-        if (!changer) throw new Error(NO_VOICE_CHANGER)
+        if (!changer) throw new Error(noVoiceChanger())
         const src = await this.uploadSource(job, req.source)
         const sent = join(dir, `${step.position}.sent`)
         const res = await encodeUpload(src, sent, {
@@ -2733,7 +2812,8 @@ export class EditOps {
   /** Polls a queued (paid) step to its audio, with the job manager's backoff. */
   private async poll(run: JobRun, step: store.StoredStep): Promise<void> {
     if (!step.queueId) {
-      store.updateStep(step.id, { status: 'failed', error: 'The job has no queue ID at Venice.' })
+      const error = `The job has no queue ID at ${providerName(providerOf(step.model))}.`
+      store.updateStep(step.id, { status: 'failed', error })
       return
     }
     const job = store.getJob(step.jobId)
@@ -2770,7 +2850,7 @@ export class EditOps {
           await sleep(Math.min(POLL_INTERVAL_MS * retries, MAX_RETRY_DELAY_MS))
           continue
         }
-        store.updateStep(step.id, { status: 'failed', error: veniceFailure(err) })
+        store.updateStep(step.id, { status: 'failed', error: veniceFailure(err, step.model) })
         run.failed = true
         return
       }
@@ -3179,12 +3259,12 @@ export class EditOps {
   cancel(jobId: unknown): void {
     const job = store.requireJob(jobId)
     if (job.status !== 'running') return
-    if (isPictureOp(job.op)) throw new Error('The take has already been sent to Venice and cannot be cancelled.')
+    if (isPictureOp(job.op)) throw new Error('The take has already been sent and cannot be cancelled.')
     db.getDb().transaction(() => {
       store.cancelPendingSteps(job.id)
       store.updateJob(job.id, { status: 'cancelled', error: null })
     })()
-    // The runner sees the status and sends nothing more; parts already at Venice are fetched and kept.
+    // The runner sees the status and sends nothing more; parts already at the service are fetched and kept.
     this.reportDone(job, 'Cancelled.')
     this.notify(job.editId)
   }
@@ -3353,6 +3433,8 @@ export class EditOps {
       const audioId = s.endpoint === 'voice-clone' ? undefined : cloneVoiceOf(s)
       return (
         !!audioId &&
+        // fal's clone is a free upload: making it again changes no price.
+        providerOf(s.model) !== 'fal' &&
         !store.validClone(audioId, s.model) &&
         !resumable.some((x) => x.endpoint === 'voice-clone' && x.request.audioId === audioId)
       )
@@ -3366,8 +3448,8 @@ export class EditOps {
       currentStep = this.finishing.has(job.id)
         ? 'putting the take in'
         : take?.status === 'processing'
-          ? 'Venice is making the take'
-          : 'queued at Venice'
+          ? `${serviceOf(take?.model)} is making the take`
+          : `queued at ${serviceOf(take?.model)}`
     }
     return {
       id: job.id,
@@ -3388,7 +3470,7 @@ export class EditOps {
       canResume,
       ...(resumePriceUsd !== undefined ? { resumePriceUsd } : {}),
       ...(resumePartialPrice ? { resumePartialPrice: true } : {}),
-      ...(resumePartialPrice && clonesOnly ? { resumePriceNote: "Venice doesn't give a price for the voice cloning in advance." } : {}),
+      ...(resumePartialPrice && clonesOnly ? { resumePriceNote: 'The voice cloning has no price in advance.' } : {}),
       createdAt: job.createdAt,
       updatedAt: job.updatedAt
     }
@@ -3710,7 +3792,9 @@ export class EditOps {
       })
     }
 
-    if (op.op !== 'regenerate' && op.op !== 'prompt-edit') throw new FinishRefused('Unknown picture operation.')
+    if (op.op !== 'regenerate' && op.op !== 'prompt-edit' && op.op !== 'lip-sync') {
+      throw new FinishRefused('Unknown picture operation.')
+    }
     const { start: a, end: b } = op.range
     const target = b - a
     // A regenerated range drops the take's first frame (the start image, already shown) and its last (the end image).
@@ -3732,7 +3816,8 @@ export class EditOps {
       onProgress: (f) => progress(f * 0.7)
     })
     const { wav: baseWav, mix: baseMix } = await baseSound()
-    if (op.audio === 'keep') {
+    // Lip sync changes the mouths only: the film's sound is the sound they now follow.
+    if (op.op === 'lip-sync' || op.audio === 'keep') {
       await replaceAudioTrack(picture, baseWav, out, { signal })
       return this.writeVersion({ ...pictureVersion, video: out, mix: baseMix, timing: 'same' })
     }
@@ -3800,9 +3885,9 @@ export class EditOps {
     if (!description) d.problem('Describe the voice.')
     if (!sampleText) d.problem('Write a sample text.')
     const catalog = await this.catalogOrProblem(d)
-    const wanted = str(req.model, 200) || DESIGN_MODEL
+    const wanted = str(req.model, 200) || serviceDefaults().voiceDesign
     const model = catalog?.voiceDesign.find((m) => m.id === wanted)
-    if (catalog && !model) d.problem("Venice doesn't offer voice design right now.")
+    if (catalog && !model) d.problem(`${activeServiceName()} doesn't offer voice design right now.`)
     const prompt = designPrompt(description, sampleText)
     if (model && Array.from(prompt).length > model.maxCharacters) {
       d.problem(`The description and sample text may be at most ${model.maxCharacters} characters together.`)
@@ -3812,7 +3897,7 @@ export class EditOps {
     d.steps.push({ label: 'Design voice', priceUsd: usd })
     if (asset) d.note(`The voice is added as a new voice clip of ${asset.name}.`)
     d.warn(
-      "Venice doesn't say how the description and sample text should be written – listen to the result before you use it."
+      `${serviceOf(model?.id)} doesn't say how the description and sample text should be written – listen to the result before you use it.`
     )
     const plan: EditPlan = {
       // Voice design is no operation on a film: the plan's operation names it, for whoever reads plans generically.
@@ -3890,7 +3975,7 @@ function cloneVoiceOf(s: store.StoredStep): string | undefined {
 }
 
 export function isPictureOp(op: string): boolean {
-  return op === 'regenerate' || op === 'prompt-edit' || op === 'extend' || op === 'upscale'
+  return op === 'regenerate' || op === 'prompt-edit' || op === 'extend' || op === 'upscale' || op === 'lip-sync'
 }
 
 /** Overlapping or touching ranges merged, in order. */

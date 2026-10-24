@@ -1,6 +1,12 @@
 import { useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { englishPath } from '@shared/folder-names'
-import { DEFAULT_PARAMS, referenceVideosOf, sanitizeReferenceAudios, sanitizeReferenceVideos } from '@shared/models'
+import {
+  DEFAULT_PARAMS,
+  modelForService,
+  referenceVideosOf,
+  sanitizeReferenceAudios,
+  sanitizeReferenceVideos
+} from '@shared/models'
 import { sanitizeOutfitWearers } from '@shared/outfits'
 import { sanitizeDescriptionFlags } from '@shared/prompt-compose'
 import type { Asset, AssetAudio, GenerationParams } from '@shared/types'
@@ -20,6 +26,8 @@ function loadRemembered(): GenerationParams {
     const saved: unknown = JSON.parse(localStorage.getItem(LAST_PARAMS_KEY) ?? '{}')
     const valid = saved && typeof saved === 'object' && !Array.isArray(saved)
     const params: GenerationParams = { ...DEFAULT_PARAMS, ...(valid ? (saved as Partial<GenerationParams>) : {}) }
+    // Saved while the other service was chosen: the same mode's model of the active one (the form adapts the rest).
+    params.model = modelForService(params.model)
     // Written by an older or newer version, or edited by hand: keep only clips that can be read.
     const audios = sanitizeReferenceAudios(params.referenceAudios)
     if (audios) params.referenceAudios = audios

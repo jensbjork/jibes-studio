@@ -8,7 +8,7 @@ import { useWork } from '../../lib/work'
 import { BudgetMeter } from '../BudgetDialog'
 import { MoreAbout, SaveActions, SettingsItem } from './SettingsLayout'
 
-// Settings → Spending: what Studio has paid Venice for – today, this month and the last 30 days, then the optional
+// Settings → Spending: what Studio has paid the services for – today, this month and the last 30 days, then the optional
 // daily and monthly budget (the one setting here), and under "Spending details" the days as a chart and this month by
 // kind, place and who asked. Read from the library's own records (main's spending.ts); what is still rendering is on
 // its way, not spent. Nothing spent in 30 days is one line, not a page of zeros.
@@ -66,17 +66,18 @@ export default function SpendingSettings({ budget, onChanged }: { budget: Budget
       )}
       <MoreAbout summary="More about what counts">
         <p>
-          A video counts when it is finished, at the price Venice quoted – from Generate, a sequence, a storyboard or the
-          Editor’s picture fixes. A failed one costs nothing. Images count when they are made; the Editor’s sound jobs,
-          transcripts and designed voices count as their parts are sent.
+          A video counts when it is finished, at the price shown before it was sent (Venice’s quote, or on fal.ai
+          Studio’s calculation from fal’s rates) – from Generate, a sequence, a storyboard or the Editor’s picture
+          fixes. A failed one costs nothing. Images count when they are made; the Editor’s sound jobs, transcripts and
+          designed voices count as their parts are sent.
         </p>
         <p>
           Days follow your {COMPUTER}’s calendar. Work still rendering is on its way: not spent yet, but it counts against
           the budget.
         </p>
         <p>
-          The numbers come from your library, so something you delete drops out of them. Your Venice account is the
-          record of what was billed.
+          The numbers come from your library, so something you delete drops out of them. Your account at Venice or
+          fal.ai is the record of what was billed.
         </p>
         <p>
           Who asked: what an agent’s request paid for counts as that agent’s once you approved it. Everything else is

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { workKey, type EditRange, type VideoModel } from '@shared/types'
 import { isModalOpen } from '../../lib/dialogs'
 import { focusedWithKeyboard, trackFocusOrigin } from '../../lib/focusOrigin'
-import { ipcErrorMessage, useAudioCatalog, useSeparationStatus } from '../../lib/hooks'
+import { SERVICE_NAME, ipcErrorMessage, useAudioCatalog, useSeparationStatus } from '../../lib/hooks'
 import type { Navigate } from '../../lib/navigation'
 import { isMac, isModKey } from '../../lib/platform'
 import { markSeen } from '../../lib/work'
@@ -404,9 +404,9 @@ export default function EditWorkspace({
 function PriceConfirm({ pending, onAnswer }: { pending: PendingConfirm; onAnswer: (yes: boolean) => void }) {
   const price = pending.priceUsd !== undefined ? formatPrice(pending.priceUsd) : undefined
   const text = pending.check.unknown
-    ? 'Venice gives no price for this in advance. It’s charged to your Venice balance when it’s sent.'
+    ? `There’s no price for this in advance. It’s charged to your ${SERVICE_NAME} balance when it’s sent.`
     : pending.check.partial
-      ? `It costs at least ${price}. ${pending.priceNote ? `${pending.priceNote.replace(/\.$/, '')}.` : 'Venice gives no price in advance for part of it.'}`
+      ? `It costs at least ${price}. ${pending.priceNote ? `${pending.priceNote.replace(/\.$/, '')}.` : 'Part of it has no price in advance.'}`
       : `This costs ${price}.`
   return (
     <ConfirmDialog

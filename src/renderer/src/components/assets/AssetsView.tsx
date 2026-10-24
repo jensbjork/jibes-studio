@@ -92,7 +92,7 @@ function longClipsNotice(clips: AssetAudio[], section: string): string | undefin
       ? `“${clipFileName(clips[0].path)}” is ${formatDuration(clips[0].duration)} long`
       : `${clips.length} of the audio files are longer than ${formatDuration(LONG_AUDIO_SECONDS)}`
   return (
-    `${what}. Only an excerpt of ${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} s is sent to Venice – pick ` +
+    `${what}. Only an excerpt of ${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} s is sent with a generation – pick ` +
     `the best part under ${section}.`
   )
 }

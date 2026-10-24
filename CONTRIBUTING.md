@@ -32,7 +32,7 @@ the pull request's title.
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). In short: Node from `.nvmrc`, `brew install ffmpeg`, the Xcode Command
 Line Tools for the voice separation helper (optional), `npm install`, `npm run dev`. `npm run dev` runs the separate
 **Studio Dev** profile; please develop and test there (or in a throwaway `STUDIO_PROFILE_DIR` profile), never against
-a library you care about, and **don't trigger real Venice generations while testing** — the guide shows how to test
+a library you care about, and **don't trigger real generations (Venice or fal.ai) while testing** — the guide shows how to test
 without spending money.
 
 ## Branches
@@ -89,14 +89,14 @@ Optional, but please use one when a change clearly belongs to an area. Pick the 
 
 | Scope | Area | Mainly |
 | --- | --- | --- |
-| `generate` | The Generate view, its list of this session's clips and the job queue | `GenerateView.tsx`, `ParamsForm.tsx`, `jobs.ts`, `venice.ts`, `shared/session.ts` |
+| `generate` | The Generate view, its list of this session's clips, the job queue and the services | `GenerateView.tsx`, `ParamsForm.tsx`, `jobs.ts`, `venice.ts`, `fal*.ts`, `providers.ts`, `shared/fal-models.ts`, `shared/session.ts` |
 | `media` | Media: every video (the clip feed), picture and exported film | `components/media/`, `components/feed/` |
 | `prompt` | The prompt editor and `@ImageN` / `@AudioN` reference checks | `components/prompt/`, `shared/prompt-refs.ts` |
 | `library` | Characters, environments, products, outfits and poses, the prompt library, reviews and learnings | `components/assets/`, `components/prompts/`, `library.ts`, `reviews.ts` |
 | `assets` | Reference images, audio clips and asset folders on disk | `assets.ts`, `references.ts` |
 | `sequences` | Sequences and storyboards: clips, boards, transitions, takes, trims, preview, keyframes, own clips | `components/sequences/`, `components/storyboards/`, `components/takes/`, `sequences.ts`, `storyboards.ts`, `sequence-store.ts`, `imports.ts` |
 | `editor` | The Editor: edits, versions, the free and paid operations, voices, transcripts and voice separation | `components/editor/`, `edits.ts`, `edit-ops.ts`, `edit-store.ts`, `edit-mix.ts`, `venice-audio.ts`, `voice-separation.ts`, `shared/edit-plan.ts`, `native/` |
-| `images` | Stills and Venice's image models (*Create image…*, frames saved from takes) | `components/images/`, `images.ts`, `stills.ts` |
+| `images` | Stills and the services' image models (*Create image…*, frames saved from takes) | `components/images/`, `images.ts`, `stills.ts` |
 | `export` | ffmpeg export of sequences and storyboards | `sequence-export.ts`, `ffmpeg.ts` |
 | `agent` | Agent connection: approvals, activity, the agent guide | `agent/approvals.ts`, `agent/guide.ts`, `components/agent/` |
 | `mcp` | The MCP server, its tools, transport and agents' uploads | `agent/server.ts`, `agent/network.ts`, `agent/uploads.ts`, `agent/fetch-url.ts`, `agent/tools/` |
@@ -184,7 +184,7 @@ request focused. Before asking for review, check that:
 
 - [ ] `npm run check` (typecheck + build) passes.
 - [ ] You tested in the dev profile (`npm run dev`, "Studio Dev") or a throwaway profile — not against a real
-      library — and said in the description whether any paid Venice generations were used.
+      library — and said in the description whether any paid generations (Venice or fal.ai) were used.
 - [ ] **No secrets or personal data**: no API keys, tokens, real names, personal paths, e-mail addresses or
       private library content in code, comments, commits, screenshots or logs. Never commit media files (videos,
       photos) or a `studio.db`; the README's pictures and GIFs in `docs/images/` come only from `npm run screenshots`.

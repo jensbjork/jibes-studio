@@ -18,6 +18,9 @@ export const TRASH = IS_WINDOWS ? 'the Recycle Bin' : 'the Trash'
 export const THIS_COMPUTER = IS_MAC ? 'this Mac' : IS_WINDOWS ? 'this PC' : 'this computer'
 
 /** The same, from an agent's side: "Studio runs on the user's Mac". */
+/** The menu command that ends the app: Quit on a Mac, Exit on Windows. */
+export const QUIT = IS_WINDOWS ? 'Exit' : 'Quit'
+
 export const USERS_COMPUTER = IS_MAC ? "the user's Mac" : IS_WINDOWS ? "the user's PC" : "the user's computer"
 
 /**

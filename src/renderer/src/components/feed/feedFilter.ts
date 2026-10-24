@@ -1,6 +1,7 @@
 // The clip feed's filters as the toolbar shows them, and how they translate into the shared GenerationFilter
 // (src/shared/generation-filter.ts), which the agents' list_generations tool applies the same way.
 
+import { falVideoModel } from '@shared/fal-models'
 import type { GenerationQuery } from '@shared/generation-filter'
 import type { Asset, GenerationFilter, GenerationSource, VideoModel } from '@shared/types'
 import { ASSET_COPY } from '../../lib/assets'
@@ -15,7 +16,7 @@ export type PlacementChoice = NonNullable<GenerationFilter['placement']>
 
 export interface FeedFilters {
   query: string
-  /** "Source": Venice's clips, the user's own clips, or versions from the Editor. */
+  /** "Source": generated clips, the user's own clips, or versions from the Editor. */
   source?: GenerationSource
   status?: StatusChoice
   model?: string
@@ -59,7 +60,7 @@ export const PERIOD_OPTIONS: { id: PeriodChoice; label: string }[] = [
 ]
 
 export const SOURCE_OPTIONS: { id: GenerationSource; label: string; text: string }[] = [
-  { id: 'generated', label: 'Generated', text: 'Clips Venice has made' },
+  { id: 'generated', label: 'Generated', text: 'Clips made with Venice or fal.ai' },
   { id: 'import', label: 'Own clips', text: 'Your own films, imported into the library' },
   { id: 'edit', label: 'Edited', text: 'Versions made in the Editor' }
 ]
@@ -133,8 +134,9 @@ export interface FilterChip {
   label: string
 }
 
+/** A model's name: from the active service's list, else (a clip made with the other service) fal's own list, else its id. */
 export function modelName(id: string, models: readonly VideoModel[]): string {
-  return models.find((m) => m.id === id)?.name ?? id
+  return models.find((m) => m.id === id)?.name ?? falVideoModel(id)?.name ?? id
 }
 
 /** The active filters, in toolbar order, as removable chips. */

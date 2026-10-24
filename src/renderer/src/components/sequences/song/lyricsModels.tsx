@@ -1,14 +1,15 @@
+import { activeServiceModels } from '@shared/service-models'
 import { transcriptionPriceUsd } from '@shared/edit-plan'
 import type { AsrModel } from '@shared/types'
-import { useAudioCatalog } from '../../../lib/hooks'
+import { SERVICE_NAME, useAudioCatalog } from '../../../lib/hooks'
 import { LANGUAGES } from '../../editor/VoiceTab'
 
 // The transcription models a song's lyrics can be made with: only those that time every word (the words are what the
 // clips' places and the References legend are made from), the Editor's default first. Shared by the import dialog and
 // the song strip's "Transcribe the lyrics…".
 
-/** The Editor's default transcription model, also the lyrics' when Venice lists it. */
-const DEFAULT_LYRICS_MODEL = 'elevenlabs/scribe-v2'
+/** The Editor's default transcription model, also the lyrics' when the service lists it. */
+const DEFAULT_LYRICS_MODEL = activeServiceModels().transcription
 
 export interface LyricsModels {
   models: AsrModel[]
@@ -27,13 +28,13 @@ export function useLyricsModels(): LyricsModels {
     models.length || audio.loading
       ? undefined
       : audio.error
-        ? `Venice's transcription models couldn't be listed: ${audio.error}`
-        : 'Venice lists no transcription model that times every word right now.'
+        ? `${SERVICE_NAME}'s transcription models couldn't be listed: ${audio.error}`
+        : `${SERVICE_NAME} lists no transcription model that times every word right now.`
   return { models, defaultId, problem, loading: audio.loading && !audio.catalog }
 }
 
 /**
- * What transcribing `seconds` of song costs with the model (Venice prices it by the second), worked out as main does
+ * What transcribing `seconds` of song costs with the model (priced by the second), worked out as main does
  * (quoteSongLyrics) – the import dialog needs it before the sequence exists.
  */
 export function lyricsPrice(model: AsrModel | undefined, seconds: number | undefined): number | undefined {

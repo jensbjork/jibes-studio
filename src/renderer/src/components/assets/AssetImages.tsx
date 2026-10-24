@@ -204,9 +204,9 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
           flagged > 0 && (
             <span
               className="text-[11px] text-warning"
-              title="Venice rejects images under 300 px on the shortest side or with an aspect ratio outside 0.4–2.5."
+              title="The video models reject images under 300 px on the shortest side or with an aspect ratio outside 0.4–2.5."
             >
-              ⚠ {flagged === 1 ? '1 image' : `${flagged} images`} may be rejected by Venice
+              ⚠ {flagged === 1 ? '1 image' : `${flagged} images`} may be rejected by the models
             </span>
           )
         }
@@ -279,7 +279,7 @@ export default function AssetImages({ asset, adding, fileOver, onAdd, onUpdated,
         <p className="mt-3 text-[11px] text-muted">
           {copy.images?.many ?? (
             <>
-              Venice takes at most {MAX_REFERENCES} reference images per generation, in total. When you generate{' '}
+              A generation takes at most {MAX_REFERENCES} reference images in total. When you generate{' '}
               {copy.generatePhrase}, the first ones come along, as many as fit.
             </>
           )}

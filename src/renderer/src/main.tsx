@@ -1,3 +1,5 @@
+// First: the active service decides the default models the stores below start from.
+import './lib/initProvider'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'

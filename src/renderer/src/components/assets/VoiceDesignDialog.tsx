@@ -126,7 +126,7 @@ export default function VoiceDesignDialog({ asset, onClose, onStarted }: Props) 
             <>
               <span className="mr-auto text-[12px] leading-snug text-muted">
                 {plan.priceUsd === undefined
-                  ? "Venice doesn't give a price for this in advance. Continue?"
+                  ? 'There’s no price for this in advance. Continue?'
                   : `This costs ${formatPrice(plan.priceUsd)}. Continue?`}
               </span>
               <button

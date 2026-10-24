@@ -1,8 +1,8 @@
 // Activity: what Studio is doing right now and what finished that the user hasn't looked at yet, wherever it
 // was started. One summary (WorkSummary) is built here from two halves and pushed whole to the windows as
 // `work:change`:
-// - running: videos at Venice (pending generations rows) and what only lives in the services' memory, read through
-//   their small registries: takes and form generations on their way to Venice, "Generate missing" runs, pictures
+// - running: videos at Venice or fal.ai (pending generations rows) and what only lives in the services' memory, read
+//   through their small registries: takes and form generations on their way out, "Generate missing" runs, pictures
 //   being made, the Editor's paid jobs and free renders, exports, imports of own clips, approved agent requests being
 //   carried out and agents' uploads;
 // - finished but not seen: the library's `unseen` table. A row is added where work finishes (a video settling, a
@@ -20,6 +20,7 @@ import { basename, extname } from 'node:path'
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { agentDisplayName } from '@shared/agent-name'
 import { generationTitle } from '@shared/generation-label'
+import { activeProvider, providerName, providerOf } from '@shared/provider'
 import { inGenerateSession, type GenerateSession } from '@shared/session'
 import {
   workKey,
@@ -117,7 +118,7 @@ export interface UnseenJoinedRow {
   job?: { id: string; editId?: string; assetId?: string; status: string; error?: string; label: string }
 }
 
-/** A Venice generation still queued or processing. */
+/** A generation still queued or processing at its service. */
 export type PendingRow = Pick<Generation, 'id' | 'status' | 'model' | 'prompt' | 'createdAt'> &
   Partial<Pick<Generation, 'segmentId' | 'editId' | 'averageExecutionTime' | 'executionDuration' | 'title'>> & {
     /** A picture it starts from (or its first reference), shown as its thumbnail. */
@@ -310,7 +311,7 @@ function capitalized(text: string): string {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : text
 }
 
-/** A video at Venice: its phase, progress and what is left (as measured at `measuredAt`). */
+/** A video at its service: its phase, progress and what is left (as measured at `measuredAt`). */
 function videoProgress(
   g: PendingRow,
   reg: Registries,
@@ -318,7 +319,9 @@ function videoProgress(
 ): Pick<RunningWork, 'detail' | 'progress' | 'remainingMs' | 'typicalMs' | 'measuredAt'> {
   const typicalMs = reg.typicalVideo[g.model]
   const measuredAt = reg.measuredAt[g.id] ?? now
-  if (g.status === 'queued') return { detail: 'Queued at Venice', measuredAt, ...(typicalMs ? { typicalMs } : {}) }
+  if (g.status === 'queued') {
+    return { detail: `Queued at ${providerName(providerOf(g.model))}`, measuredAt, ...(typicalMs ? { typicalMs } : {}) }
+  }
   const avg = g.averageExecutionTime
   const exec = g.executionDuration
   if (avg && avg > 0 && typeof exec === 'number' && exec >= 0) {
@@ -334,7 +337,7 @@ function videoProgress(
   return { detail: 'Generating', measuredAt, ...(typicalMs ? { typicalMs } : {}) }
 }
 
-/** What a running video has left from `now`: Venice's own estimate, else the typical time less what has passed. */
+/** What a running video has left from `now`: the service's own estimate, else the typical time less what has passed. */
 function videoLeft(g: PendingRow, reg: Registries, now: number): number | undefined {
   const p = videoProgress(g, reg, now)
   if (p.remainingMs !== undefined) return Math.max(0, p.remainingMs - (now - p.measuredAt))
@@ -443,7 +446,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
       kind: 'sending',
       ...where,
       label,
-      detail: 'Sending to Venice',
+      detail: `Sending to ${providerName(activeProvider())}`,
       startedAt: s.startedAt,
       measuredAt: now
     })
@@ -455,7 +458,7 @@ function runningItems(pending: readonly PendingRow[], reg: Registries, now: numb
     const common = {
       key: `send:${s.token}`,
       kind: 'sending' as const,
-      detail: 'Sending to Venice',
+      detail: `Sending to ${providerName(providerOf(s.model))}`,
       startedAt: s.startedAt,
       measuredAt: now,
       ...(typicalMs ? { typicalMs } : {})

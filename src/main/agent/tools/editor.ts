@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { formatTimecode, frameCaptions, isPaidOperation, operationLabel, toSrt } from '@shared/edit-plan'
 import { generationTitle } from '@shared/generation-label'
+import { activeProvider, providerName } from '@shared/provider'
 import type {
   AudioCatalog,
   Edit,
@@ -89,7 +90,7 @@ export function baseVersion(edit: Edit, versionId: string | undefined): EditVers
 export const separation = (): Promise<SeparationStatus | undefined> =>
   within(callService<SeparationStatus>('audio:separation'), 5000)
 
-/** Venice's audio models (cached in main for ten minutes); undefined when they can't be had in time. */
+/** The active service's audio models (cached in main for ten minutes); undefined when they can't be had in time. */
 export const audioCatalog = (force = false): Promise<AudioCatalog | undefined> =>
   within(callService<AudioCatalog>('audio:models', force), 10_000)
 
@@ -332,8 +333,11 @@ async function editInfo(edit: Edit, detail: boolean): Promise<Record<string, unk
   data.voice_changer = catalog
     ? catalog.voiceChangers.length
       ? { available: true, models: catalog.voiceChangers.map((m) => m.id) }
-      : { available: false, note: 'Venice lists no voice changer now: use transcribe + speak_lines instead of change_voice.' }
-    : { available: false, note: "Venice's audio models couldn't be read just now." }
+      : {
+          available: false,
+          note: `${providerName(activeProvider())} lists no voice changer now: use transcribe + speak_lines instead of change_voice.`
+        }
+    : { available: false, note: `${providerName(activeProvider())}'s audio models couldn't be read just now.` }
   return data
 }
 
@@ -378,7 +382,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get edit',
       description:
-        `One edit in the Editor: its versions as a tree (v1 is the untouched original; each version has its parent_version_id, the operation that made it, its cost and which sequence clips use it), which one is current, the paid jobs (running or done, with errors), the AI takes made for picture operations, the edit's audio media (reusable with add_audio media_id), every version's added sound layers (layer_id for the layer op), and for the current version its cut markers, its layers and muted spans as the timeline draws them, and a summary of its transcript – plus whether ${THIS_COMPUTER} can separate voice and background and whether Venice offers a voice changer. With include_thumbnails (default true) the poster frames of the current version and the original come as images. Look at a version itself with review_generation(version_id) – frames and, with include_audio and audio_start, its sound.`,
+        `One edit in the Editor: its versions as a tree (v1 is the untouched original; each version has its parent_version_id, the operation that made it, its cost and which sequence clips use it), which one is current, the paid jobs (running or done, with errors), the AI takes made for picture operations, the edit's audio media (reusable with add_audio media_id), every version's added sound layers (layer_id for the layer op), and for the current version its cut markers, its layers and muted spans as the timeline draws them, and a summary of its transcript – plus whether ${THIS_COMPUTER} can separate voice and background and whether the active service offers a voice changer. With include_thumbnails (default true) the poster frames of the current version and the original come as images. Look at a version itself with review_generation(version_id) – frames and, with include_audio and audio_start, its sound.`,
       input: {
         edit_id: editIdInput,
         include_thumbnails: z.boolean().default(true)
@@ -415,7 +419,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Get transcript',
       description:
-        "The transcript of a version (or any generation) with its lines – segment_id, start, end (seconds) and text – as JSON, or as SubRip subtitles with format \"srt\". A version whose timing equals its parent's inherits the parent's transcript (inherited_from). Use the segment_ids with speak_lines (replace a line) and change_voice (only those lines), and fix wrong words with update_transcript first. Venice gives no speaker labels. None yet: request_edit_operation with {op: \"transcribe\"}.",
+        "The transcript of a version (or any generation) with its lines – segment_id, start, end (seconds) and text – as JSON, or as SubRip subtitles with format \"srt\". A version whose timing equals its parent's inherits the parent's transcript (inherited_from). Use the segment_ids with speak_lines (replace a line) and change_voice (only those lines), and fix wrong words with update_transcript first. The transcript has no speaker labels. None yet: request_edit_operation with {op: \"transcribe\"}.",
       input: {
         generation_id: z.string().describe('A version_id (get_edit) or any generation_id.'),
         format: z.enum(['json', 'srt']).default('json')
@@ -466,7 +470,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Plan an edit operation (free)',
       description:
-        "Checks an operation on a version exactly as the Editor's cards do and says what it would do and cost – without doing anything. Free; always call it first. Answers with the normalized operation (the range snapped to frames, cut markers and what the model allows, defaults filled in), paid, price_usd (the total of what Venice prices; undefined when it can't be priced), partial_price and price_note (e.g. billed per started minute, or a voice clone Venice doesn't price), the steps (parts) with their prices, notes, warnings (lip sync, real people, the old voice bleeding through, disk space) and problems (non-empty: it can't run as it is). For picture operations the frames come as images: regenerate's start and end frames (the frames before and after the range; the film's first frame when the range starts at 0), extend's start (the film's last frame), prompt_edit's first and last frame of the range; upscale has none. Free operations then go with apply_edit, paid ones with request_edit_operation (the user approves the price). Prompts are English.",
+        "Checks an operation on a version exactly as the Editor's cards do and says what it would do and cost – without doing anything. Free; always call it first. Answers with the normalized operation (the range snapped to frames, cut markers and what the model allows, defaults filled in), paid, price_usd (the total of what the service prices – on fal.ai Studio's calculation from fal's rates; undefined when it can't be priced), partial_price and price_note (e.g. billed per started minute, or a voice clone without a price), the steps (parts) with their prices, notes, warnings (lip sync, real people, the old voice bleeding through, disk space) and problems (non-empty: it can't run as it is). For picture operations the frames come as images: regenerate's start and end frames (the frames before and after the range; the film's first frame when the range starts at 0), extend's start (the film's last frame), prompt_edit's first and last frame of the range; upscale has none. Free operations then go with apply_edit, paid ones with request_edit_operation (the user approves the price). Prompts are English.",
       input: {
         edit_id: editIdInput,
         base_version_id: baseVersionInput,
@@ -512,7 +516,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List audio models',
       description:
-        `Venice's audio models for the Editor, with their voices, limits and prices: speech (text-to-speech for speak_lines: voices, max characters per line, price per 1000 characters, whether it clones a voice or takes a style prompt), music and effects (durations per model), transcription (price per minute; word or segment timestamps), voice_changers (speech-to-speech for change_voice; empty while Venice lists none) and voice_design (request_voice_design). Also whether ${THIS_COMPUTER} can separate voice and background (separation: needed for the voice/background targets and to keep music under a new voice) and the default models. Exact prices for a given film come from plan_edit_operation (free).`,
+        `The audio models of the active service (Settings → Service: Venice or fal.ai) for the Editor, with their voices, limits and prices (on fal.ai worked out by Studio from fal's rates): speech (text-to-speech for speak_lines: voices, max characters per line, price per 1000 characters, whether it clones a voice or takes a style prompt), music and effects (durations per model), transcription (price per minute; word or segment timestamps), voice_changers (speech-to-speech for change_voice; empty while the service lists none) and voice_design (request_voice_design). Also whether ${THIS_COMPUTER} can separate voice and background (separation: needed for the voice/background targets and to keep music under a new voice) and the default models. Exact prices for a given film come from plan_edit_operation (free).`,
       input: {
         refresh: z.boolean().default(false).describe('Fetch the list again instead of the ten-minute cache.')
       },
@@ -523,7 +527,9 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
       const [catalog, sep] = await Promise.all([callService<AudioCatalog>('audio:models', refresh), separation()])
       const notes: string[] = []
       if (!catalog.voiceChangers.length) {
-        notes.push('Venice lists no voice changer right now, so change_voice is not available: transcribe, then speak_lines.')
+        notes.push(
+          `${providerName(activeProvider())} lists no voice changer right now, so change_voice is not available: transcribe, then speak_lines.`
+        )
       }
       if (!catalog.keyed) notes.push('Fetched without the API key: models only listed to keyed accounts are missing.')
       return {
@@ -531,7 +537,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
           keyed: catalog.keyed,
           fetched: localTime(catalog.fetchedAt),
           defaults: {
-            transcribe: 'elevenlabs/scribe-v2',
+            transcribe: EDIT_DEFAULT_MODELS.transcription,
             speech: EDIT_DEFAULT_MODELS.speech,
             clone_speech: EDIT_DEFAULT_MODELS.cloneSpeech,
             music: EDIT_DEFAULT_MODELS.music,
@@ -651,7 +657,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
       const edit = await loadEdit(edit_id)
       const base = baseVersion(edit, base_version_id)
       const op = await editOperation(operation)
-      const paidRefusal = `${operation.op} costs money at Venice and is only done once the user has approved it: plan it with plan_edit_operation and ask for permission with request_edit_operation.`
+      const paidRefusal = `${operation.op} costs money at ${providerName(activeProvider())} and is only done once the user has approved it: plan it with plan_edit_operation and ask for permission with request_edit_operation.`
       if (isPaidOperation(op)) throw new Error(paidRefusal)
       const plan = await planOperation(edit.id, op, base.id)
       if (plan.paid) throw new Error(paidRefusal)
@@ -852,7 +858,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'Stop a paid edit job',
       description:
-        "Stops a running paid job in the Editor (get_edit's jobs) like the user's Cancel: no further parts are sent to Venice, so nothing more is paid. Parts already sent finish and are kept. A picture operation (regenerate, prompt_edit, extend, upscale) can't be stopped once its take is at Venice. Free.",
+        "Stops a running paid job in the Editor (get_edit's jobs) like the user's Cancel: no further parts are sent to the service, so nothing more is paid. Parts already sent finish and are kept. A picture operation (regenerate, prompt_edit, extend, upscale, lip_sync) can't be stopped once its take has been sent. Free.",
       input: { job_id: z.string().describe("A job_id from get_edit's jobs.") },
       annotations: { ...WRITE, idempotentHint: true },
       summary: () => 'stopped a job in the Editor'
@@ -875,7 +881,7 @@ export function registerEditorTools(server: McpServer, ctx: ToolContext): void {
       return {
         data: {
           ...(job ? jobInfo(job) : { job_id, status: 'cancelled' }),
-          note: 'No more parts are sent. Parts already at Venice finish and are kept.'
+          note: 'No more parts are sent. Parts already sent finish and are kept.'
         },
         summary: edit ? `stopped ${job ? q(job.label) : 'a job'} in ${q(edit.name)}` : 'stopped a job'
       }

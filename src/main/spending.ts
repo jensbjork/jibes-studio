@@ -8,8 +8,8 @@ import { getBudget, setBudget } from './settings'
 
 // Spending (Settings → Spending, get_spending, the budget check): what the library's database records as paid, summed
 // per local day, kind, place and who asked. What counts:
-//  - a Venice video (source 'generated': Generate, sequence clips, storyboard transitions, the Editor's picture
-//    operations) that completed, at its quote, on the day it completed. A failed one counts nothing: Venice doesn't
+//  - a generated video (source 'generated': Generate, sequence clips, storyboard transitions, the Editor's picture
+//    operations) that completed, at its quote, on the day it completed. A failed one counts nothing: the services don't
 //    charge for a generation that fails. One still rendering is on its way (pendingUsd), not spent;
 //  - a generated still at its cost, on the day it was made (a failed picture leaves no row);
 //  - an Editor sound job, a transcription (an edit's, or a song's: placed on its sequence) or a voice design at the
@@ -17,7 +17,7 @@ import { getBudget, setBudget } from './settings'
 //    included), on the day the job was started; the rest of a running job's quote is on its way. A picture
 //    operation's cost is its take's (a video above), never its job's.
 // Edit media and transcripts repeat their job's cost and are left out. Whatever is deleted (a take, an edit with its
-// jobs) drops out of the history; Venice's own account is the record of what was billed.
+// jobs) drops out of the history; the service's own account is the record of what was billed.
 
 type SpendKind = 'video' | 'image' | 'editor' | 'voice' | 'transcript'
 
@@ -30,7 +30,7 @@ const KIND_LABELS: Record<SpendKind, string> = {
 }
 
 /** The Editor's picture operations: paid through their take (a generation), never through the job's own cost. */
-const PICTURE_OPS = "('regenerate', 'prompt-edit', 'extend', 'upscale')"
+const PICTURE_OPS = "('regenerate', 'prompt-edit', 'extend', 'upscale', 'lip-sync')"
 
 /** Where something paid was made. */
 type Place =
@@ -150,7 +150,7 @@ function spendsSince(since: number): Spend[] {
   return out
 }
 
-/** On its way: videos at Venice with a quote, and what running Editor jobs and voice designs have still to send. */
+/** On its way: videos at their service with a quote, and what running Editor jobs and voice designs have to send. */
 function pendingUsd(): number {
   const conn = db.getDb()
   const videos = conn

@@ -346,7 +346,7 @@ function JobRow({
           </button>
           <span className="text-[11px] text-muted">
             {picture
-              ? 'Puts the paid take in again – nothing is sent to Venice.'
+              ? 'Puts the paid take in again – nothing is sent.'
               : free
                 ? 'Everything is already fetched – the version is finished.'
                 : 'Sends only the missing parts.'}

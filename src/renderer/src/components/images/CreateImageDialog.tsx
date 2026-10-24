@@ -14,7 +14,7 @@ import {
 import { ASSET_VIEW } from '../../lib/assets'
 import { withBudgetConfirm } from '../../lib/budget'
 import { resolveDirector } from '@shared/direction'
-import { ipcErrorMessage, useAssets } from '../../lib/hooks'
+import { ipcErrorMessage, safeModeEffect, useAssets } from '../../lib/hooks'
 import { ImageDirectionNote } from '../directors/DirectedByNote'
 import { samePath } from '../../lib/library'
 import { mediaUrl } from '../../lib/media'
@@ -987,7 +987,7 @@ function ResultPanel({
 }
 
 /**
- * Whether Venice blurs adult content in the image ("Safe mode for images" in Settings), in one line and switchable
+ * Whether adult content is held back in the image ("Safe mode for images" in Settings), in one line and switchable
  * here too, so the setting doesn't come as a surprise after paying for a blurred picture. What it does is the tooltip.
  */
 function SafeModeNote() {
@@ -1028,8 +1028,8 @@ function SafeModeNote() {
       className="mr-auto max-w-md text-[11px] leading-relaxed text-muted"
       title={
         on
-          ? 'Safe mode for images: Venice blurs adult content in the image'
-          : 'Safe mode for images is off: Venice doesn’t blur adult content in the image'
+          ? `Safe mode for images: ${safeModeEffect(true)}`
+          : `Safe mode for images is off: ${safeModeEffect(false)}`
       }
     >
       {error ? <span className="text-danger">{error}</span> : `Safe mode ${on ? 'on' : 'off'}`}

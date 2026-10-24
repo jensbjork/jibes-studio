@@ -243,7 +243,7 @@ export function addAudios(
   if (tooShort.length) {
     notes.push(
       `${capitalized(englishNames(tooShort))} ${tooShort.length === 1 ? 'is' : 'are'} shorter than ${MIN_AUDIO_CLIP_SECONDS} s and ` +
-        `${tooShort.length === 1 ? 'wasn’t' : 'weren’t'} included – Venice doesn’t take sound clips that short.`
+        `${tooShort.length === 1 ? 'wasn’t' : 'weren’t'} included – the models don’t take sound clips that short.`
     )
   }
   if (full.length) {

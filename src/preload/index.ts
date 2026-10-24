@@ -29,8 +29,11 @@ const api: StudioApi = {
 
   // Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),
-  setApiKey: (key) => ipcRenderer.invoke('settings:setApiKey', key),
-  testApiKey: () => ipcRenderer.invoke('settings:testApiKey'),
+  setApiKey: (key, provider) => ipcRenderer.invoke('settings:setApiKey', key, provider),
+  testApiKey: (provider) => ipcRenderer.invoke('settings:testApiKey', provider),
+  // Read once as the window loads (lib/initProvider.ts); a switch reloads the window.
+  initialProvider: ipcRenderer.sendSync('settings:providerSync'),
+  setProvider: (provider) => ipcRenderer.invoke('settings:setProvider', provider),
   ffmpegStatus: () => ipcRenderer.invoke('ffmpeg:status'),
   setPromptLanguage: (lang) => ipcRenderer.invoke('settings:setPromptLanguage', lang),
   setBudget: (budget) => ipcRenderer.invoke('settings:setBudget', budget),

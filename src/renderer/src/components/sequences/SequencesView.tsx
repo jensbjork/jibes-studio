@@ -857,9 +857,9 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
   }, [hasKey, sequence, ffmpegOk])
   const runQuote = useTotalQuote(runBlocked ? NO_RUN : runPlan.toGenerate)
 
-  /** Where a missing key is added: Settings, at Venice. */
-  const openVeniceSettings = () => {
-    showSettingsSection(SETTINGS_SECTION.venice)
+  /** Where a missing key is added: Settings → Service. */
+  const openServiceSettings = () => {
+    showSettingsSection(SETTINGS_SECTION.service)
     navigate('settings')
   }
 
@@ -1137,7 +1137,7 @@ export default function SequencesView({ intent, onIntentHandled, navigate }: Pro
               autoFocusName={focusNameFor === sequence.id}
               onAutoFocused={() => setFocusNameFor(undefined)}
               onRename={rename}
-              onGenerateAll={() => (hasKey ? void generateAll() : openVeniceSettings())}
+              onGenerateAll={() => (hasKey ? void generateAll() : openServiceSettings())}
               onStop={() => void stopAll()}
               // A song plays from its start, whatever clips have takes yet; otherwise from the first clip with one.
               onPreview={() => void openPreview(sequence.song ? undefined : sequence.segments.find((s) => readyTake(s))?.id)}

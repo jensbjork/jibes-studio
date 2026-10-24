@@ -25,7 +25,7 @@
 
 import { composeDirection, styleVideoNumbers, type ResolvedDirector } from './direction'
 import { pathKey } from './generation-filter'
-import { paramsForSubmit, videosAreReferences } from './models'
+import { paramsForSubmit, supportsNegativePrompt, videosAreReferences } from './models'
 import { resolveOutfitWearers } from './outfits'
 import { songAudioNumber } from './song-send'
 import type {
@@ -266,6 +266,37 @@ function shorten(text: string, max: number): string {
  * for every candidate with `include: true`. composeOptionsFor gives the options a submission uses.
  */
 export function composePrompt(
+  params: GenerationParams,
+  assets: readonly DescribedAsset[],
+  opts: ComposeOptions & ComposeExtras
+): ComposedPrompt {
+  return withAvoidLine(composeDirected(params, assets, opts), params)
+}
+
+/**
+ * For a model that takes no negative prompt (fal's Seedance, Kling 4.0 and O3: models.ts supportsNegativePrompt), the
+ * negative prompt – with a director's avoid, which withDirection merged into it – goes last in the prompt as one line,
+ * "Avoid: …", and in `legend` (`avoid`), so the box under the prompt shows it. Nothing for a blank prompt, as for the
+ * legend; the line is never shortened.
+ */
+function withAvoidLine(composed: ComposedPrompt, params: GenerationParams): ComposedPrompt {
+  const line = avoidLine(params)
+  if (!line) return composed
+  const userPrompt = typeof params.prompt === 'string' ? params.prompt : ''
+  if (!userPrompt.trim()) return { ...composed, avoid: { line } }
+  const text = `\n\n${line}`
+  return { ...composed, prompt: composed.prompt + text, legend: composed.legend + text, avoid: { line } }
+}
+
+/** "Avoid: blur, text" for a model without a negative prompt that has one; undefined otherwise. */
+export function avoidLine(params: Pick<GenerationParams, 'model' | 'negativePrompt'>): string | undefined {
+  if (supportsNegativePrompt(params.model)) return undefined
+  const negative = typeof params.negativePrompt === 'string' ? params.negativePrompt.replace(/\s+/g, ' ').trim() : ''
+  return negative ? `Avoid: ${negative.replace(/[.\s]+$/, '')}.` : undefined
+}
+
+/** composePrompt without the avoid line: the References legend and a director's Direction section. */
+function composeDirected(
   params: GenerationParams,
   assets: readonly DescribedAsset[],
   opts: ComposeOptions & ComposeExtras

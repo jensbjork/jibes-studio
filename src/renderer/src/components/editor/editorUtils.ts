@@ -198,7 +198,13 @@ export function deleteVersionBlocked(v: EditVersion): string | undefined {
  * Operations whose job is one AI take put into the film: their "Continue" puts the paid take in again (free), and the
  * take stays among the edit's takes whatever happens to the job.
  */
-export const PICTURE_JOB_OPS: ReadonlySet<string> = new Set<string>(['regenerate', 'prompt-edit', 'extend', 'upscale'])
+export const PICTURE_JOB_OPS: ReadonlySet<string> = new Set<string>([
+  'regenerate',
+  'prompt-edit',
+  'extend',
+  'upscale',
+  'lip-sync'
+])
 
 /**
  * The jobs worth showing at the top of Versions: running ones, failed audio jobs that can go on (their sent parts
@@ -359,6 +365,7 @@ export function operationRange(op: EditOperation | undefined): EditRange | undef
     case 'cut':
     case 'regenerate':
     case 'prompt-edit':
+    case 'lip-sync':
       return op.range
     case 'volume':
     case 'mute':

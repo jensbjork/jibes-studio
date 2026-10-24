@@ -558,9 +558,9 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
   )
   const runQuote = useTotalQuote(runParams)
 
-  /** Where a missing key is added: Settings, at Venice. */
-  const openVeniceSettings = () => {
-    showSettingsSection(SETTINGS_SECTION.venice)
+  /** Where a missing key is added: Settings → Service. */
+  const openServiceSettings = () => {
+    showSettingsSection(SETTINGS_SECTION.service)
     navigate('settings')
   }
 
@@ -837,7 +837,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
               onAutoFocused={() => setFocusNameFor(undefined)}
               onRename={rename}
               onAspectRatio={setAspectRatio}
-              onGenerateAll={() => (hasKey ? void startRun() : openVeniceSettings())}
+              onGenerateAll={() => (hasKey ? void startRun() : openServiceSettings())}
               onStop={() => void stopRun()}
               onPreview={() => void openPreview()}
               onExport={() => void exportFilm()}
@@ -918,7 +918,7 @@ export default function StoryboardsView({ intent, onIntentHandled, navigate }: P
                     onError={(text) => setNotice({ text, storyboardId: storyboard.id })}
                     onClose={() => setEditorId(undefined)}
                     onOpenDirector={(id) => navigate('directors', { type: 'open-asset', assetId: id })}
-                    onAddApiKey={openVeniceSettings}
+                    onAddApiKey={openServiceSettings}
                   />
                 </section>
               )}

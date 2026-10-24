@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEven
 import { DEFAULT_MODEL, MAX_AUDIO_CLIP_SECONDS, MIN_AUDIO_CLIP_SECONDS, maxReferenceAudios } from '@shared/models'
 import { workKey, type Asset, type AssetAudio, type EditJob, type FinishedWork } from '@shared/types'
 import { ASSET_COPY, assetAudio, originText, type AudioCopy } from '../../lib/assets'
-import { ipcErrorMessage } from '../../lib/hooks'
+import { SERVICE_NAME, ipcErrorMessage } from '../../lib/hooks'
 import { TRASH } from '../../lib/platform'
 import { markSeen, useIsUnseen, useSeenWhenVisible, useUnseen } from '../../lib/work'
 import SectionTitle from '../library/SectionTitle'
@@ -307,7 +307,7 @@ export default function AssetSounds({
                 type="button"
                 onClick={() => setDesigning(true)}
                 className={buttonClass('ghost', 'sm')}
-                title="Describe a voice – Venice creates it and it is saved as a new voice clip"
+                title={`Describe a voice – ${SERVICE_NAME} creates it and it is saved as a new voice clip`}
               >
                 Design a voice with AI…
               </button>
@@ -409,7 +409,7 @@ export default function AssetSounds({
       {/* Only what applies, one line each (Generate shows the seconds against its limit itself). */}
       {clips.length > MAX_AUDIOS && (
         <p className="mt-3 text-[11px] leading-relaxed text-muted">
-          Venice takes at most {MAX_AUDIOS} {MAX_AUDIOS === 1 ? 'sound clip' : 'sound clips'} per generation – the first
+          A generation takes at most {MAX_AUDIOS} {MAX_AUDIOS === 1 ? 'sound clip' : 'sound clips'} – the first
           ones come along.
         </p>
       )}
@@ -742,7 +742,7 @@ function ClipRow({
             <div className="mt-2 space-y-1 text-[11px] leading-relaxed">
               {tooShort && (
                 <p className="text-warning">
-                  ⚠ The recording is only {formatDuration(clip.duration)} – Venice needs at least{' '}
+                  ⚠ The recording is only {formatDuration(clip.duration)} – the models need at least{' '}
                   {MIN_AUDIO_CLIP_SECONDS} seconds. Choose a longer recording.
                 </p>
               )}

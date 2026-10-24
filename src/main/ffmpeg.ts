@@ -1548,7 +1548,7 @@ export async function normalizeVideo(input: string, out: string, o: NormalizeOpt
   }
 }
 
-// ── What is sent to Venice for picture edits ─────────────────────────────────
+// ── What is sent for picture edits ───────────────────────────────────────────
 
 /**
  * [start, end) of a film as an H.264 file small enough to send to Venice inside a JSON body: CRF 23, but capped to a
@@ -1566,7 +1566,7 @@ export async function makeProxy(
   const start = clamp(o.start, 0, info.duration)
   const end = clamp(o.end, start, info.duration)
   const length = end - start
-  if (length < MIN_CLIP_SECONDS) throw new Error('The section is too short to send to Venice.')
+  if (length < MIN_CLIP_SECONDS) throw new Error('The section is too short to send.')
   const short = Math.min(info.width, info.height)
   const scale = o.maxHeight > 0 && short > o.maxHeight ? o.maxHeight / short : 1
   const w = even(Math.round(info.width * scale))
@@ -1577,7 +1577,7 @@ export async function makeProxy(
   const budget = (o.maxBytes * 8 * 0.96) / length - audioBps
   const minimum = MIN_PROXY_BITS_PER_PIXEL * w * h * info.fps
   const tooBig = (): Error =>
-    new Error(`The section gets too large for Venice (at most ~${sizeLabel(o.maxBytes)}). Select a shorter part.`)
+    new Error(`The section gets too large to send (at most ~${sizeLabel(o.maxBytes)}). Select a shorter part.`)
   if (budget < minimum) throw tooBig()
 
   let rate = budget
@@ -1599,7 +1599,7 @@ export async function makeProxy(
         '-movflags', '+faststart',
         '-f', 'mp4', '-y', tmp
       ],
-      { failure: 'The input for Venice could not be made', signal: o.signal }
+      { failure: 'The input to send could not be made', signal: o.signal }
     )
     const bytes = (await stat(out)).size
     if (bytes <= o.maxBytes) {
@@ -1731,7 +1731,7 @@ export async function makeReferenceVideoProxy(
     rate *= 0.6
   }
   await rm(out, { force: true })
-  throw new Error(`${failure}: it stays too large for Venice. Select a shorter part.`)
+  throw new Error(`${failure}: it stays too large to send. Select a shorter part.`)
 }
 
 /**
@@ -1901,7 +1901,7 @@ export async function encodeUpload(
         '-map_metadata', '-1', '-map_chapters', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact',
         '-y', tmp
       ],
-      { failure: 'The audio could not be prepared for Venice', signal: o.signal }
+      { failure: 'The audio could not be prepared for sending', signal: o.signal }
     )
     return (await stat(out)).size
   }
@@ -1920,7 +1920,7 @@ export async function encodeUpload(
     if (bytes <= o.maxBytes) return { format, bytes }
   }
   await rm(out, { force: true })
-  throw new Error(`The audio is too large for Venice (at most ~${sizeLabel(o.maxBytes)} per part). Select a shorter part.`)
+  throw new Error(`The audio is too large to send (at most ~${sizeLabel(o.maxBytes)} per part). Select a shorter part.`)
 }
 
 // ── Analysing sound ──────────────────────────────────────────────────────────

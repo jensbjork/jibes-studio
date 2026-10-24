@@ -15,7 +15,7 @@ import {
   type SettingsSectionId
 } from './settings/SettingsLayout'
 import { useFfmpegStatus } from './settings/ToolsSettings'
-import VeniceSettings from './settings/VeniceSettings'
+import ServiceSettings from './settings/ServiceSettings'
 
 // Settings: one pane per subject, shown one at a time and chosen in the navigation – beside the pane when there is
 // room, as a sticky row of tabs above it on a narrow window. Each pane has a heading, one line on what it is for and
@@ -25,14 +25,14 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
   const scroller = useRef<HTMLDivElement>(null)
   const ffmpeg = useFfmpegStatus()
   const ffmpegMissing = ffmpeg.status !== undefined && !ffmpeg.status.ok
-  // A pane asked for before Settings opened (⌘K, the Agent panel) is the first one shown: no frame of Venice first.
-  const [active, setActive] = useState<SettingsSectionId>(() => takeRequestedSection() ?? SECTION.venice)
+  // A pane asked for before Settings opened (⌘K, the Agent panel) is the first one shown: no frame of Service first.
+  const [active, setActive] = useState<SettingsSectionId>(() => takeRequestedSection() ?? SECTION.service)
 
   const items = useMemo<SettingsNavItem[]>(
     () => [
       {
-        id: SECTION.venice,
-        label: 'Venice',
+        id: SECTION.service,
+        label: 'Service',
         attention: settings.hasApiKey ? undefined : 'No API key yet'
       },
       { id: SECTION.spending, label: 'Spending' },
@@ -77,17 +77,17 @@ export default function SettingsView({ settings, onChanged }: { settings: Settin
 
           <div className="min-w-0 flex-1 @4xl/main:max-w-[620px]">
             <SettingsSection
-              {...pane(SECTION.venice)}
-              title="Venice"
-              description="Studio generates video, images and sound through your Venice account."
+              {...pane(SECTION.service)}
+              title="Service"
+              description="Studio generates video, images and sound through your account at Venice or fal.ai."
             >
-              <VeniceSettings hasApiKey={settings.hasApiKey} onChanged={onChanged} />
+              <ServiceSettings settings={settings} onChanged={onChanged} />
             </SettingsSection>
 
             <SettingsSection
               {...pane(SECTION.spending)}
               title="Spending"
-              description="What you’ve spent on Venice, and an optional budget."
+              description="What you’ve spent on generations, and an optional budget."
             >
               <SpendingSettings budget={settings.budget ?? {}} onChanged={onChanged} />
             </SettingsSection>

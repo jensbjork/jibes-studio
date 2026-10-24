@@ -55,7 +55,7 @@ import { generationTitle } from '@shared/generation-label'
 import { composeSubmission } from '../jobs'
 import { isLibraryReady, toStoredPath } from '../paths'
 import { knownVideoDuration } from '../reference-videos'
-import { getPromptLanguage } from '../settings'
+import { activeServiceName, getPromptLanguage } from '../settings'
 import { callService } from './local-ipc'
 
 // What the agent tools share: the library check, looking up assets with their photos and audio clips, the token
@@ -679,7 +679,7 @@ export function resolveReferences(
     for (const clip of tooShort) {
       skippedAudio.push({
         ...describeAudio(referenceAudioOf(clip), index),
-        reason: `The voice clip is only ${seconds(clip.clipLength)} s – Venice only takes audio clips of at least ${MIN_AUDIO_CLIP_SECONDS} s, so it wasn't added. Add a longer recording with add_asset_audio (or choose a longer reference window with update_asset_audio).`
+        reason: `The voice clip is only ${seconds(clip.clipLength)} s – the models only take audio clips of at least ${MIN_AUDIO_CLIP_SECONDS} s, so it wasn't added. Add a longer recording with add_asset_audio (or choose a longer reference window with update_asset_audio).`
       })
     }
     for (const image of images) {
@@ -727,8 +727,8 @@ export function assetPhotoPath(assetId: string, imageId: string | undefined, ind
 // ── Models ───────────────────────────────────────────────────────────────────
 
 /**
- * Venice's video models (cached in main for ten minutes). Their prompt limits are remembered on the way, as a
- * submit does it, so the prompt an agent is shown (and an approval holds on to) is composed within the same limit
+ * The active service's video models (cached in main for ten minutes). Their prompt limits are remembered on the way,
+ * as a submit does it, so the prompt an agent is shown (and an approval holds on to) is composed within the same limit
  * as the one that is sent.
  */
 export async function loadModels(): Promise<VideoModel[]> {
@@ -736,7 +736,7 @@ export async function loadModels(): Promise<VideoModel[]> {
   try {
     models = await callService<VideoModel[]>('models:list')
   } catch (err) {
-    throw new Error(`Couldn't fetch the models from Venice: ${errorText(err)}`)
+    throw new Error(`Couldn't fetch the models from ${activeServiceName()}: ${errorText(err)}`)
   }
   rememberPromptLimits(models)
   return models
@@ -746,7 +746,7 @@ export async function loadModels(): Promise<VideoModel[]> {
 const MODELS_TIMEOUT_MS = 5000
 
 /**
- * The model list, or undefined when Venice can't be reached in time (the shared helpers decide on their own then,
+ * The model list, or undefined when the service can't be reached in time (the shared helpers decide on their own then,
  * and the prompt is composed within the limit main last remembered). Read tools like get_workspace wait for it,
  * so a stalled connection must not hold them up until the agent's client gives up, as paid requests and submits
  * also only wait so long for it.
@@ -770,7 +770,10 @@ export function usableModels(models: readonly VideoModel[]): VideoModel[] {
 
 export function requireModel(models: readonly VideoModel[], id: string): VideoModel {
   const model = usableModels(models).find((m) => m.id === id)
-  if (!model) throw new Error(`The model ${id} isn't available at Venice right now. Use list_models to see which there are.`)
+  if (!model) {
+    const service = activeServiceName()
+    throw new Error(`The model ${id} isn't available at ${service} right now. Use list_models to see which there are.`)
+  }
   return model
 }
 
@@ -813,7 +816,7 @@ export function modelForMode(models: readonly VideoModel[], currentModel: string
   const sibling = currentModel.replace(/(text|image|reference)-to-video/, mode)
   const preferred = [sibling, DEFAULT_MODEL[mode]].find((c) => list.some((m) => m.id === c))
   const id = preferred ?? [...list].sort((a, b) => a.name.localeCompare(b.name))[0]?.id
-  if (!id) throw new Error(`Venice has no model for the ${mode} mode right now.`)
+  if (!id) throw new Error(`${activeServiceName()} has no model for the ${mode} mode right now.`)
   return id
 }
 

@@ -23,7 +23,7 @@ export function isReferenceKind(kind: AssetKind): kind is ReferenceKind {
   return (ASSET_KINDS as readonly AssetKind[]).includes(kind)
 }
 
-/** "2–15 s": how long the part of a sound clip sent to Venice may be. */
+/** "2–15 s": how long the part of a sound clip that is sent may be. */
 const CLIP_SECONDS = `${MIN_AUDIO_CLIP_SECONDS}–${MAX_AUDIO_CLIP_SECONDS} s`
 
 /** What every kind's description is for, beside its label (a director's says where it shows instead). */
@@ -117,7 +117,7 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
       listLabel: 'voice',
       intro: `How the character sounds – a ${CLIP_SECONDS} excerpt is sent.`,
       introMore:
-        "Venice uses the excerpt as a model for the voice's timbre, tone and pace – the result is a similar voice, not " +
+        "The video model uses the excerpt as a guide for the voice's timbre, tone and pace – the result is a similar voice, not " +
         'an exact copy. Only with a model that takes audio. The clip sets how the character sounds – write what is ' +
         'said in the prompt.',
       tips: 'A recording where only the person speaks, without music or background noise, gives the best results.',
@@ -151,7 +151,7 @@ export const ASSET_COPY: Record<AssetKind, AssetCopy> = {
       listLabel: 'sound',
       intro: `How the place sounds – a ${CLIP_SECONDS} excerpt is sent.`,
       introMore:
-        'Waves, chatter, traffic, rain: Venice uses the excerpt as a model for the sound in the clip when you switch on ' +
+        'Waves, chatter, traffic, rain: the video model uses the excerpt as a guide for the sound in the clip when you switch on ' +
         '“Include the soundscape” on the environment in Generate, with a model that takes audio. The clip sets how ' +
         'the place sounds – write what happens in the prompt.',
       tips: 'A recording of the place itself, without speech or music, gives the best results.',

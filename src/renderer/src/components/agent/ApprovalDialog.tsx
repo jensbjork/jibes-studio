@@ -41,7 +41,7 @@ import {
   resolveApproval,
   useAgentState
 } from '../../lib/agent'
-import { ipcErrorMessage, useAssetsState, useModels } from '../../lib/hooks'
+import { SERVICE_NAME, ipcErrorMessage, safeModeEffect, useAssetsState, useModels } from '../../lib/hooks'
 import { fileName } from '../../lib/library'
 import { formatUsd, mediaUrl } from '../../lib/media'
 import { blockingPromptIssue, promptIssuesOf } from '../../lib/promptIssues'
@@ -231,7 +231,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
   const expired = pending && now > expiresAt
   // Past the user's budget: said here, since approving is their yes to it (main doesn't ask again).
   const overBudget = useOverBudget(a.priceUsd, pending && a.kind !== 'delete')
-  // A still for a storyboard (Venice's image models) rather than a video.
+  // A still for a storyboard (an image model) rather than a video.
   const image = a.kind === 'image' ? (a.image ?? null) : undefined
   const clips = useMemo(
     () => (storyboardId ? [] : withDescriptions(clipsOf(a, sequence), a, composer, sequence)),
@@ -446,9 +446,9 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
       <>
         <span className="mr-auto text-[13px]">
           {a.priceUsd === undefined
-            ? 'Venice gives no price for this in advance. Continue?'
+            ? 'There’s no price for this in advance. Continue?'
             : partialPrice
-              ? `It costs at least ${formatUsd(a.priceUsd)} – Venice gives no price for part of it. Continue?`
+              ? `It costs at least ${formatUsd(a.priceUsd)} – part of it has no price in advance. Continue?`
               : `This costs ${formatUsd(a.priceUsd)}. Continue?`}
         </span>
         <button onClick={() => setPhase('review')} className={secondary}>
@@ -693,7 +693,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
                   : variantCount(a) > 1
                     ? 'Total'
                     : 'Cost'}
-              <span className="ml-1.5 text-[11px]">(charged to your Venice account)</span>
+              <span className="ml-1.5 text-[11px]">(charged to your {SERVICE_NAME} account)</span>
             </span>
             {/* "3 variants · $3.09": each variant is its own generation at the full price. */}
             <span className="shrink-0 whitespace-nowrap text-lg font-semibold tabular-nums">
@@ -718,7 +718,7 @@ function ApprovalPanel({ approval: a, position, othersWaiting, hold }: PanelProp
           </div>
         )}
         {phase === 'submitting' && image !== undefined && (
-          <p className="text-[12px] text-muted">Venice is creating the image – it usually takes 10–30 seconds.</p>
+          <p className="text-[12px] text-muted">{SERVICE_NAME} is creating the image – it usually takes 10–30 seconds.</p>
         )}
         {/* A removal says what changed at the top of its list (DeleteSummary). */}
         {blocking && removal === undefined && (
@@ -1243,7 +1243,7 @@ function DescriptionLegend({
         {sentLength !== undefined && (
           <span
             className="ml-auto tabular-nums"
-            title="This many characters are sent to Venice: the prompt and the descriptions together"
+            title="This many characters are sent: the prompt and the descriptions together"
           >
             {limit ? `${count(sentLength)} of ${count(limit)} characters` : `${count(sentLength)} characters`}
           </span>
@@ -1455,8 +1455,8 @@ function ImageSummary({
           safeMode === undefined
             ? undefined
             : safeMode
-              ? 'Safe mode is on: Venice blurs adult content.'
-              : 'Safe mode is off: Venice doesn’t blur adult content.'
+              ? `Safe mode is on: ${safeModeEffect(true)}.`
+              : `Safe mode is off: ${safeModeEffect(false)}.`
         ]
           .filter(Boolean)
           .join(' ')}

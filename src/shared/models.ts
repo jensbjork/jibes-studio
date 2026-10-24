@@ -1,5 +1,7 @@
 // Model-related defaults and helpers shared by the main process and the renderer.
 
+import { FAL_DEFAULT_MODEL, falVideoModel } from './fal-models'
+import { activeProvider, providerOf, type Provider } from './provider'
 import type { GenerationParams, ReferenceAudio, ReferenceVideo, VideoModel } from './types'
 
 export type Kind = 'text-to-video' | 'image-to-video' | 'reference-to-video'
@@ -10,10 +12,42 @@ export const KINDS: { id: Kind; label: string }[] = [
   { id: 'reference-to-video', label: 'References' }
 ]
 
-export const DEFAULT_MODEL: Record<Kind, string> = {
+/** Venice's default model per mode. */
+export const VENICE_DEFAULT_MODEL: Record<Kind, string> = {
   'text-to-video': 'seedance-2-5-text-to-video-basic',
   'image-to-video': 'seedance-2-5-image-to-video-basic',
   'reference-to-video': 'seedance-2-5-reference-to-video-basic'
+}
+
+/** A service's default model for a mode (Seedance 2.5 on both). */
+export function defaultModelFor(kind: Kind, provider: Provider): string {
+  return provider === 'fal' ? FAL_DEFAULT_MODEL[kind] : VENICE_DEFAULT_MODEL[kind]
+}
+
+/**
+ * The model new work with `modelId` is made with on `provider` (the active service unless named): the id itself when
+ * it is that service's, else the same mode's default there (Seedance 2.5 on both). A clip or a form saved while the
+ * other service was chosen is thereby priced and sent where the user now works. Editor-only models (an edit model, an
+ * upscaler, lip sync) are left as they are: the Editor offers only the active service's.
+ */
+export function modelForService(modelId: string, provider: Provider = activeProvider()): string {
+  if (typeof modelId !== 'string' || !modelId || providerOf(modelId) === provider || isVideoInputModel(modelId)) {
+    return modelId
+  }
+  return defaultModelFor(kindOfModelId(modelId), provider)
+}
+
+/** The default model per mode of the active service (provider.ts): read when used, so it follows a switch. */
+export const DEFAULT_MODEL: Readonly<Record<Kind, string>> = {
+  get 'text-to-video'() {
+    return defaultModelFor('text-to-video', activeProvider())
+  },
+  get 'image-to-video'() {
+    return defaultModelFor('image-to-video', activeProvider())
+  },
+  get 'reference-to-video'() {
+    return defaultModelFor('reference-to-video', activeProvider())
+  }
 }
 
 /** Preferred values when a model is (re)selected and the current value isn't supported. */
@@ -24,7 +58,9 @@ export const PREFERRED = {
 }
 
 export const DEFAULT_PARAMS: GenerationParams = {
-  model: DEFAULT_MODEL['reference-to-video'],
+  get model() {
+    return DEFAULT_MODEL['reference-to-video']
+  },
   prompt: '',
   duration: '8s',
   resolution: '480p',
@@ -76,13 +112,22 @@ export function rememberModelKinds(
  */
 export function isVideoInputModel(id: string): boolean {
   if (typeof id !== 'string' || !id) return false
+  const fal = falVideoModel(id)
+  if (fal) return fal.kind === 'video-to-video'
   return knownVideoInput.get(id) ?? /video-to-video|upscale/.test(id)
 }
 
 /** Whether the model is an upscaler (Topaz): it takes `upscale_factor` and no prompt, resolution or aspect. */
 export function isUpscaleModel(id: string): boolean {
   if (typeof id !== 'string' || !id) return false
+  const fal = falVideoModel(id)
+  if (fal) return !!fal.upscale
   return id.includes('upscale') || knownUpscale.has(id)
+}
+
+/** Whether the model is a lip sync model (fal only): it takes a video and the sound its mouths follow. */
+export function isLipSyncModel(id: string): boolean {
+  return !!falVideoModel(id)?.lipSync
 }
 
 /**
@@ -90,7 +135,10 @@ export function isUpscaleModel(id: string): boolean {
  * task (`omni_reference_task_type`): Seedance 2.x reference-to-video.
  */
 export function supportsReferenceVideos(id: string): boolean {
-  return typeof id === 'string' && /^seedance-2-.*reference-to-video/.test(id)
+  if (typeof id !== 'string') return false
+  const fal = falVideoModel(id)
+  if (fal) return !!fal.videoLimits
+  return /^seedance-2-.*reference-to-video/.test(id)
 }
 
 /**
@@ -98,6 +146,8 @@ export function supportsReferenceVideos(id: string): boolean {
  * (Venice reports R2V models as "image-to-video", so the id comes before Venice's model_type there).
  */
 export function kindOfModelId(id: string): Kind {
+  const fal = falVideoModel(id)
+  if (fal) return fal.kind === 'video-to-video' ? 'text-to-video' : fal.kind
   const known = knownKinds.get(id)
   if (known) return known
   if (id.includes('reference-to-video')) return 'reference-to-video'
@@ -126,6 +176,8 @@ export function audioForModel(model: Pick<VideoModel, 'audio'>, audio: boolean |
 /** The image-to-video sibling of a model, e.g. seedance-2-5-reference-to-video-basic → seedance-2-5-image-to-video-basic. */
 export function imageToVideoVariant(modelId: string): string {
   if (kindOfModelId(modelId) === 'image-to-video') return modelId
+  const fal = falVideoModel(modelId)
+  if (fal) return fal.siblings['image-to-video'] ?? FAL_DEFAULT_MODEL['image-to-video']
   return modelId.replace(/(reference|text)-to-video/, 'image-to-video')
 }
 
@@ -139,6 +191,11 @@ export function imageToVideoVariant(modelId: string): string {
 export function referenceToVideoVariant(modelId: string, available?: readonly string[]): string | undefined {
   if (typeof modelId !== 'string' || !modelId) return undefined
   if (kindOfModelId(modelId) === 'reference-to-video') return modelId
+  const fal = falVideoModel(modelId)
+  if (fal) {
+    const r2v = fal.siblings['reference-to-video']
+    return r2v && (!available || available.includes(r2v)) ? r2v : undefined
+  }
   const sibling = modelId.replace(/(image|text)-to-video/, 'reference-to-video')
   if (sibling === modelId) return undefined
   if (available) return available.includes(sibling) ? sibling : undefined
@@ -155,6 +212,8 @@ export function referenceToVideoVariant(modelId: string, available?: readonly st
 /** Whether the model takes an end image (`end_image_url`) besides its start image. */
 export function supportsEndImage(modelId: string): boolean {
   if (typeof modelId !== 'string') return false
+  const fal = falVideoModel(modelId)
+  if (fal) return fal.endImage
   const id = modelId.toLowerCase()
   if (id.includes('first-last-frame') || id.includes('transition')) return true
   return /^seedance-.+-image-to-video(-.*)?$/.test(id) || /^kling-[vo]3-.*image-to-video/.test(id)
@@ -168,6 +227,11 @@ export function supportsEndImage(modelId: string): boolean {
  */
 export function endImageVariant(modelId: string, available?: readonly string[]): string {
   const offered = (id: string): boolean => supportsEndImage(id) && (!available || available.includes(id))
+  if (providerOf(modelId) === 'fal') {
+    // fal's families each have an image-to-video model that takes one (Veo's sends to its first-last-frame endpoint).
+    const found = [modelId, imageToVideoVariant(modelId)].find(offered)
+    return found ?? FAL_DEFAULT_MODEL['image-to-video']
+  }
   const i2v = imageToVideoVariant(modelId)
   // Ids made up from the family name are only tried against the list: without it they may not exist at all.
   const guessed = available
@@ -175,11 +239,13 @@ export function endImageVariant(modelId: string, available?: readonly string[]):
     : []
   const found = [modelId, i2v, ...guessed].find(offered)
   if (found) return found
-  const fallback = DEFAULT_MODEL['image-to-video']
+  const fallback = VENICE_DEFAULT_MODEL['image-to-video']
   return !available || available.includes(fallback) ? fallback : (available.find(supportsEndImage) ?? fallback)
 }
 
 export function maxReferenceImages(modelId: string): number {
+  const fal = falVideoModel(modelId)
+  if (fal) return fal.maxImages || 9
   if (modelId.includes('grok')) return 7
   if (modelId.includes('kling')) return 4
   return 9
@@ -209,8 +275,17 @@ export function isAudioClipTooShort(length: number): boolean {
 }
 
 /** How many reference audio clips a model takes. Seedance takes 3; later clips are not sent. */
-export function maxReferenceAudios(_modelId: string): number {
-  return 3
+export function maxReferenceAudios(modelId: string): number {
+  return falVideoModel(modelId)?.maxAudios ?? 3
+}
+
+/**
+ * Whether the model takes a negative prompt. Venice's all do; on fal Seedance, Kling 4.0 and O3 don't, and their
+ * negative prompt (with a director's avoid) is sent as an "Avoid:" line at the end of the prompt instead
+ * (prompt-compose.ts).
+ */
+export function supportsNegativePrompt(modelId: string): boolean {
+  return falVideoModel(modelId)?.negativePrompt ?? true
 }
 
 /**
@@ -221,6 +296,8 @@ export function maxReferenceAudios(_modelId: string): number {
  */
 export function supportsAudioInput(model: Pick<VideoModel, 'id' | 'kind' | 'audioInput'> | string): boolean {
   if (typeof model !== 'string') return model.kind === 'reference-to-video' && !!model.audioInput
+  const fal = falVideoModel(model)
+  if (fal) return fal.kind === 'reference-to-video' && fal.maxAudios > 0
   if (kindOfModelId(model) !== 'reference-to-video') return false
   return knownAudioInput.get(model) ?? (model.startsWith('seedance-') || model.startsWith('minimax-'))
 }
@@ -346,12 +423,16 @@ const SEEDANCE_25_VIDEOS: ReferenceVideoLimits = {
  * family Studio doesn't know yet gets 2.0's, the stricter.
  */
 export function referenceVideoLimits(modelId: string): ReferenceVideoLimits | undefined {
+  const fal = falVideoModel(modelId)
+  if (fal) return fal.videoLimits
   if (!supportsReferenceVideos(modelId)) return undefined
   return modelId.startsWith('seedance-2-5-') ? SEEDANCE_25_VIDEOS : SEEDANCE_20_VIDEOS
 }
 
 /** Whether the model is Seedance 2.5, which takes `omni_reference_task_type` (2.0 doesn't). */
 export function takesReferenceTask(modelId: string): boolean {
+  const fal = falVideoModel(modelId)
+  if (fal) return fal.referenceTask
   return supportsReferenceVideos(modelId) && modelId.startsWith('seedance-2-5-')
 }
 
@@ -417,10 +498,15 @@ export function referenceVideoModelFor(modelId: string, available?: readonly str
   const offered = (id: string): boolean => !!id && supportsReferenceVideos(id) && (!available || available.includes(id))
   if (typeof modelId !== 'string') return undefined
   if (offered(modelId)) return modelId
-  const sibling = modelId.replace(/(image|text)-to-video/, 'reference-to-video')
+  const provider = providerOf(modelId)
+  const sibling =
+    provider === 'fal'
+      ? (falVideoModel(modelId)?.siblings['reference-to-video'] ?? '')
+      : modelId.replace(/(image|text)-to-video/, 'reference-to-video')
   if (offered(sibling)) return sibling
-  if (offered(DEFAULT_MODEL['reference-to-video'])) return DEFAULT_MODEL['reference-to-video']
-  return available?.find((id) => supportsReferenceVideos(id))
+  const fallback = defaultModelFor('reference-to-video', provider)
+  if (offered(fallback)) return fallback
+  return available?.find((id) => supportsReferenceVideos(id) && providerOf(id) === provider)
 }
 
 /**

@@ -113,7 +113,7 @@ export function overBudgetText(o: OverBudget, subject?: string): string {
     : `${usdText(o.spentUsd)} spent`
   if (!o.amountUsd) {
     const Period = o.period === 'day' ? 'Today’s' : 'This month’s'
-    const unpriced = subject ? '' : ', and Venice gives no price for this in advance'
+    const unpriced = subject ? '' : ', and there’s no price for this in advance'
     return `${Period} spending is already at your budget of ${usdText(o.budgetUsd)} (${spent})${unpriced}.`
   }
   if (subject) return `${subject} ${period} spending past your budget of ${usdText(o.budgetUsd)} (${spent}).`

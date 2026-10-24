@@ -203,7 +203,7 @@ export default function FeedToolbar({
             onChange={(model) => set({ model })}
             allLabel="All models"
             width={300}
-            empty={<p className="px-3 py-2 text-[12px] text-muted">No clips made with a Venice model yet.</p>}
+            empty={<p className="px-3 py-2 text-[12px] text-muted">No generated clips yet.</p>}
           />
         )}
         {(filters.assetId !== undefined || usesAssets) && (

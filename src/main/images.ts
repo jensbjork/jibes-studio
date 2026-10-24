@@ -9,7 +9,10 @@ import { nativeImage } from 'electron'
 import type { ImageModel } from '@shared/types'
 import { decodeImageFile } from './input-image'
 import { fileErrorReason } from './references'
-import { getApiKey, getImageSafeMode } from './settings'
+import { FAL_DEFAULT_EDIT_MODEL, FAL_DEFAULT_IMAGE_MODEL } from '@shared/fal-models'
+import { providerOf } from '@shared/provider'
+import { falImageCatalog, falRequestImage } from './fal-images'
+import { getApiKey, getImageSafeMode, getProvider } from './settings'
 import { VeniceError } from './venice'
 
 const BASE_URL = 'https://api.venice.ai/api/v1'
@@ -17,6 +20,12 @@ const BASE_URL = 'https://api.venice.ai/api/v1'
 /** The default when the user (or an agent) names no model: the Seedream family, the same as Seedance's. */
 export const DEFAULT_IMAGE_MODEL = 'seedream-v5-pro'
 export const DEFAULT_EDIT_MODEL = 'seedream-v5-pro-edit'
+
+/** The active service's default model for making a picture (`edit`: combining reference pictures). */
+export function defaultImageModelId(edit: boolean): string {
+  if (getProvider() === 'fal') return edit ? FAL_DEFAULT_EDIT_MODEL : FAL_DEFAULT_IMAGE_MODEL
+  return edit ? DEFAULT_EDIT_MODEL : DEFAULT_IMAGE_MODEL
+}
 
 /** How many reference pictures an edit model takes when its entry in the list doesn't say (Venice's default). */
 export const DEFAULT_MAX_INPUT_IMAGES = 3
@@ -163,6 +172,8 @@ let modelCache: { at: number; models: ImageModelInfo[] } | undefined
 
 /** Text-to-image models first, then the edit models, each in Venice's order. Cached for 10 minutes. */
 export async function imageModelCatalog(force = false): Promise<ImageModelInfo[]> {
+  // fal's are Studio's own list (fal-images.ts); Venice's are fetched.
+  if (getProvider() === 'fal') return falImageCatalog()
   if (!force && modelCache && Date.now() - modelCache.at < MODEL_CACHE_MS) return modelCache.models
   try {
     const [generators, editors] = await Promise.all([fetchModels('image'), fetchModels('inpaint')])
@@ -620,6 +631,7 @@ export async function requestMultiEdit(body: MultiEditBody): Promise<ImageResult
 /** Sends the request to the right endpoint with the user's safe-mode setting (paid). */
 export async function requestImage(req: ImageRequest): Promise<ImageResult> {
   const safeMode = getImageSafeMode()
+  if (providerOf(req.model.id) === 'fal') return falRequestImage(req, safeMode, GENERATE_TIMEOUT_MS)
   if (req.model.edit) return requestMultiEdit(await multiEditBody(req, safeMode))
   return requestGenerate(generateBody(req, safeMode))
 }

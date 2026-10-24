@@ -528,7 +528,8 @@ const PAID_OPS = new Set<EditOperation['op']>([
   'regenerate',
   'prompt-edit',
   'extend',
-  'upscale'
+  'upscale',
+  'lip-sync'
 ])
 
 /** Operations that call Venice (and cost money); the rest are local and free. */
@@ -614,6 +615,8 @@ export function operationLabel(op: EditOperation, ctx: { voiceName?: string; med
       return `Extended ${secondsShort(op.seconds)}`
     case 'upscale':
       return `Upscaled ${op.factor}×`
+    case 'lip-sync':
+      return `Lip-synced ${rangeText(op.range)}`
   }
 }
 
@@ -683,6 +686,22 @@ export const PICTURE_EDIT_MODELS: Record<
     label: 'HappyHorse 1.0 Edit',
     minSeconds: 3,
     maxSeconds: 15,
+    referenceImages: false,
+    kind: 'v2v'
+  },
+  // fal.ai's (shared/fal-models.ts): Seedance 2.5's editing task, and Wan's and Gemini's edit endpoints.
+  'fal:bytedance/seedance-2.5/reference-to-video': {
+    label: 'Seedance 2.5',
+    minSeconds: 4,
+    maxSeconds: 30,
+    referenceImages: true,
+    kind: 'r2v-edit'
+  },
+  'fal:fal-ai/wan/v2.7/edit-video': { label: 'Wan 2.7 Edit', minSeconds: 2, maxSeconds: 10, referenceImages: false, kind: 'v2v' },
+  'fal:google/gemini-omni-flash/v1.1/edit': {
+    label: 'Gemini Omni Flash 1.1 Edit',
+    minSeconds: 1,
+    maxSeconds: 10,
     referenceImages: false,
     kind: 'v2v'
   }

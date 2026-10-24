@@ -10,6 +10,20 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Added
 
+- **fal.ai as a second service.** *Settings → Service* chooses whether Studio generates with Venice or with
+  [fal.ai](https://fal.ai); each service keeps its own encrypted API key, so switching back needs no new one. Every view
+  and tool works on both: Generate, sequences, storyboards, *Create image…*, the Editor's paid cards, voice design, a
+  song's lyrics, Spending and the agents. On fal Studio offers a chosen set – Seedance 2.5, 2.0 and 2.0 Fast, Kling
+  4.0, Kling 3 / O3, Veo 3.1 and Veo 3.1 Fast; Seedream 5.0 Pro and Nano Banana 2.1 for pictures; ElevenLabs, Chatterbox,
+  Qwen 3 TTS and ACE-Step for sound – and works prices out from fal's published rates. A model's id says its service
+  (`fal:…`), so work already sent always finishes where it went, also after a switch; a clip saved with the other
+  service's model is made with the same mode's model of the active one. Models without a negative prompt (Seedance,
+  Kling 4.0, Kling O3 on fal) get it, with a director's *Avoid*, as a last *Avoid: …* line in the prompt. Files a fal
+  request needs are uploaded to fal's storage; Studio asks fal to keep no request history and to delete uploads and
+  results after a day, and asks before quitting while fal.ai is still working (fal keeps a finished result for an hour).
+- **Lip sync** (fal.ai only): the Editor's *Lip sync* card makes the mouths in the selection follow the sound it has
+  now – after re-recorded lines, say – with Sync Lipsync 2; agents have it as the `lip_sync` operation.
+
 - **Updates from GitHub**: Studio looks for a newer release once a day when it starts (*Settings → About* to
   switch it off or check now; on a Mac also **Check for Updates…** in the app menu; never in a development build). A
   newer one is offered in a small notice – **Update now**, **Release notes**, **Later** (which skips that version):
@@ -111,6 +125,8 @@ breaking changes; they are called out under **Changed** or **Removed**.
 
 ### Changed
 
+- *Settings → Venice* is *Settings → Service*: the choice of service and its API key, with *Test* (on fal.ai it checks
+  the key; fal shows the balance on its own dashboard). Paid forms without a key say which service's key is missing.
 - **A new README**: what the app does with animated pictures of it at work (references and `@` in Generate, a sequence
   in Preview, a storyboard's transition), clearer install steps and *Your first film* in five steps. `npm run
   screenshots` now fills its throwaway library with made-up illustrations and clips (`scripts/demo-art.mjs`), records

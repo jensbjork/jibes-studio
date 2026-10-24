@@ -3,12 +3,13 @@
 Everything JIBES Studio (Studio for short) does, in detail. For a short introduction and how to install it, see the [README](../README.md).
 
 
-A desktop video studio for [Venice.ai](https://venice.ai)'s video models. Studio lets you generate short clips from
+A desktop video studio for the video models of [Venice.ai](https://venice.ai) or [fal.ai](https://fal.ai) – you choose
+the service in Settings (see [Services](#services-venice-and-fal-ai)). Studio lets you generate short clips from
 text, a start image or a set of reference photos (and voices), keep a library of **characters**, **environments**,
 **products**, **outfits** and **poses** with their reference photos — and what the characters and places sound
 like —, **directors** that give every clip they direct the same way of being made, and save the prompts that work. Clips are chained into longer films that continue seamlessly from one clip's last frame into
 the next, and a clip in the middle that didn't turn out can be redone so it fits exactly between its neighbours. A
-film can also start as a **storyboard**: one picture for every milestone — made with Venice's image models or taken
+film can also start as a **storyboard**: one picture for every milestone — made with the service's image models or taken
 from what you already have — with the clips between the pictures generated for you. Your **own footage** can be
 brought in and continued with AI clips, and any finished film — a clip, a take, an exported film or your own — can
 be changed in the **Editor**: cut, faded, its sound cleaned up or its voice taken out, new lines spoken in
@@ -24,14 +25,14 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
 
 ## Features
 
-- **Generate** with Venice's video models in three modes: text-to-video, image-to-video (start and optional end image)
+- **Generate** with the service's video models in three modes: text-to-video, image-to-video (start and optional end image)
   and reference-to-video (up to 9 reference photos for Seedance, plus up to 3 voice or sound clips with the models
   that take reference audio, and with Seedance 2.x up to 3 or 10 **reference videos** for motion, camera and style,
   `@Video1` …). The mode switch (*Text*, *Start image*, *References*) sits at the top, and what sets the price —
   *Duration*, *Resolution*, *Aspect ratio* and *Sound* — in one row right above the button, which shows the price
   before you generate; the line under it says what is still missing, or *⌘↵ to generate* (⌘↵ works from any field of
-  the form). Without an API key that line starts with *Add your Venice API key in Settings*, and when nothing else is
-  missing the button opens *Settings → Venice*. Empty optional sections (reference videos, voices and sound) are a
+  the form). Without an API key that line starts with *Add your Venice API key in Settings* (or fal.ai's, when that
+  is the service), and when nothing else is missing the button opens *Settings → Service*. Empty optional sections (reference videos, voices and sound) are a
   single row, and one *＋ From library* adds characters, places, products, outfits and poses. *Use again* reloads a
   generation's settings. **Variants:** *×1 ×2 ×3 ×4* beside *Generate* (and beside a sequence clip's or a storyboard
   transition's *Generate take*) sends that many takes of the same settings at once — each its own generation, with its
@@ -117,12 +118,13 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
     range, or only the voice or the background), mute, removing the voice or keeping only the voice (voice and
     background separated with macOS's own sound isolation), noise reduction, even loudness (−14 / −16 / −23 LUFS), and adding
     sound from the library, from earlier results or from a file.
-  - **Paid, through Venice, with the price on the button:** transcription (lines with times, editable, saved as
-    `.srt`), *Change voice* (speech to speech, when Venice lists a voice changer), lines read again and new
+  - **Paid, through the service, with the price on the button:** transcription (lines with times, editable, saved as
+    `.srt`), *Change voice* (speech to speech, when the service lists a voice changer), lines read again and new
     lines (spoken in a preset voice or a character's cloned voice, fitted to the old line's length),
     music and sound effects on their own layers, *Regenerate section* (a stretch regenerated between the frame before
     and the frame after it), *Edit with prompt* (video-to-video edits of a short stretch), *Extend* and
-    *Upscale* (2×/4×). Clicking the button is the approval; above $5, or when Venice can't price all of it, a
+    *Upscale* (2×/4×), and on fal.ai *Lip sync* (the mouths in a stretch follow its sound). Clicking the button is
+    the approval; above $5, or when the service can't price all of it, a
     second question asks first. A job interrupted by quitting Studio never sends its remaining parts by itself, and
     a paid AI take that couldn't be put into the film (a full disk) is put in again for free when you continue the job.
 - **New voices for characters:** *Design a voice with AI…* designs a voice from a description and adds it as a voice
@@ -139,7 +141,7 @@ Built with Electron, React, TypeScript, SQLite (`better-sqlite3`) and ffmpeg.
   lists everything that runs — with its progress and an estimate —, what is ready to watch and what failed, with
   *Mark all as seen* (and *Undo*). A video counts as seen once it has played for a second or you chose it; the
   Dock icon shows the number of new results.
-- **Spending and a budget:** *Settings → Spending* shows what Studio has paid Venice for today, this month and per
+- **Spending and a budget:** *Settings → Spending* shows what Studio has paid for today (to Venice and fal.ai), this month and per
   day over the last 30 days, and this month by kind (videos, images, Editor jobs, voices, transcripts), by place
   (Generate, each sequence, storyboard and edit) and by who asked (you, or the agent whose request you approved).
   An optional daily and monthly budget: anything paid that would take the spending past one asks first (*Send
@@ -216,8 +218,8 @@ places:
   neighbours (and their previews), saving a frame as a still, exports, voice and sound clips (measuring them and
   cutting out the part that is sent), own clips, everything in the Editor and the frames agents review; generating
   without voices works without it.
-- **A Venice.ai API key** — added under **Settings → Venice**. Generations cost money on your Venice
-  account.
+- **An API key for [Venice.ai](https://venice.ai/settings/api) or [fal.ai](https://fal.ai/dashboard/keys)** — added
+  under **Settings → Service**. Generations cost money on that account.
 - **Optional: the Xcode Command Line Tools** (`xcode-select --install`), to build the small Swift helper that
   separates voice and background (`npm run build:helpers`, run automatically by `dev`, `build` and `app`). Without
   it Studio works as before, and the Editor says that voice separation isn't available.
@@ -620,7 +622,7 @@ selected take, each after the clips whose frames it needs, waiting for each one;
 frames it says which switch to turn off before anything is paid for. The button shows only while something is
 missing, always with the count (*Generate missing (3)*); the price, and the accent colour, only when the run can
 start. When it can't — no API key, a clip without a prompt, a missing frame — its tooltip says why, and a click
-shows the clip in the way (or *Settings → Venice* for the key). **Export** renders the selected, trimmed
+shows the clip in the way (or *Settings → Service* for the key). **Export** renders the selected, trimmed
 takes into one H.264/AAC mp4 in the sequence's folder, showing a picture two clips share at a cut only once. The
 rest is under ⋯ in the header: *Export format*, *Edit latest export*, *Open folder*, *Mark all as seen*, *Add a
 song…* and *Delete sequence…*, which asks in the menu.
@@ -746,7 +748,7 @@ can be changed later under ⋯ → *Format*.
   transitions don't depend on each other, so they are sent one after another without waiting for each to render;
   nothing is paid for while any of them can't be made (no API key, a board without a picture, a missing prompt) —
   the button then shows no price, its tooltip says why, and a click shows the transition that stands in the way (or
-  *Settings → Venice* for the key).
+  *Settings → Service* for the key).
 - **Preview** plays the selected takes back to back; **Export** cuts them into one mp4 in the storyboard's
   folder. Two neighbouring transitions both show the board between them (one ends on it, the next starts on it), so
   where both takes were made from the same picture the export drops the later one's first frame and the board is
@@ -770,9 +772,11 @@ by default; *Safe mode on · Turn off* in the dialog) lets Venice blur adult con
 **Settings** (⌘, — or *Settings…* in the Studio menu, or the bottom of the sidebar) has six panes, shown one at a
 time: beside their list, or as tabs above them in a narrow window.
 
-- **Venice** — the API key. While there is none the field is ready to type in, with a link to Venice's key page,
-  Settings has a dot in the sidebar, and every paid form says *Add your Venice API key in Settings* under its button
-  (which then opens this pane).
+- **Service** — which service Studio generates with, *Venice* or *fal.ai* (see [Services](#services-venice-and-fal-ai)),
+  and its API key, with *Test*. While the active service has none the field is ready to type in, with a link to the
+  service's key page, Settings has a dot in the sidebar, and every paid form says *Add your Venice API key in Settings*
+  (or fal.ai's) under its button (which then opens this pane). Each service's key is kept, so switching back needs no
+  new one.
 - **Spending** — today and this month, then the optional daily and monthly **budget**, then *Spending details*: the
   last 30 days as a chart (*Show as a table*) and this month by kind, by place and by who asked.
 - **Generation** — *Prompt language* and *Safe mode for images*.
@@ -785,6 +789,49 @@ time: beside their list, or as tabs above them in a narrow window.
 
 A field saved with a button (the key, the budget, the agent port) shows *Save* and *Undo* while it has changes —
 Enter saves, Esc undoes — and then *Saved*.
+
+## Services: Venice and fal.ai
+
+Studio generates with one service at a time, chosen in **Settings → Service**: [Venice.ai](https://venice.ai) (the
+default) or [fal.ai](https://fal.ai). Each has its own API key, stored encrypted. Switching keeps the other key, starts
+the window over with the new service's models and prices, and opens Settings again. What you made with one service
+stays, and a clip, a take or an Editor job already sent finishes at the service it went to. A clip or a form saved
+with the other service's model is made with the same mode's model of the active service (Seedance 2.5 on both), and
+priced so.
+
+**The same on both.** Every view works on both services: Generate (text, a start image with an optional end image,
+references with photos, voices and reference videos), sequences and storyboards, *Create image…*, the Editor's paid
+cards (transcription, *Change voice*, lines read again and new lines, a character's cloned voice, music, sound
+effects, *Regenerate section*, *Edit with prompt*, *Extend*, *Upscale*), *Design a voice with AI…*, a song's lyrics,
+Spending and the budget, and the agents' tools.
+
+**Models on fal.ai.** Studio offers a chosen set rather than fal's whole catalogue: Seedance 2.5, Seedance 2.0 and 2.0
+Fast (text, start image, references), Kling 4.0, Kling 3 and O3, Veo 3.1 and Veo 3.1 Fast; in the Editor Seedance 2.5's
+edit task, Wan 2.7 Edit and Gemini Omni Flash Edit, Topaz to upscale and Sync Lipsync 2; Seedream 5.0 Pro and Nano
+Banana 2.1 for pictures; ElevenLabs v3 (lines in a voice), its voice changer, sound effects and Scribe v2
+(transcripts), Chatterbox (a character's cloned voice), Qwen 3 TTS (voice design), ACE-Step and ElevenLabs Music.
+
+**What differs on fal.ai.**
+
+- **Prices** — fal has no quote that looks at a request, so Studio works the price out from fal's published rates:
+  per second by resolution (and sound, for Veo and Kling 3), Seedance's reference videos at their reduced rate on the
+  input and output together, Kling 4.0's at least twice the output. Token-priced models (Seedance, Nano Banana) come
+  out within a few percent. Spending records the price as for Venice.
+- **No negative prompt on some models** — Seedance, Kling 4.0 and Kling O3 take none. The negative prompt, with a
+  director's *Avoid*, goes last in the prompt as one line, *Avoid: …*, and *Added to the prompt* shows it.
+- **Lip sync** (fal.ai only) — the Editor's *Lip sync* card (Picture) makes the mouths in the selection follow the
+  sound it has now, after re-recorded lines, say; the film's sound stays as it is. Speech alone works best.
+- **A character's cloned voice** — Chatterbox on fal takes the voice clip with every line instead of keeping a clone:
+  "cloning" costs nothing, and the clip is uploaded again after a day.
+- **Balance** — fal shows it only to keys made for billing, so *Test* checks the key; fal's dashboard has the balance.
+- **Safe mode for images** — fal's own checks can't be switched off on most models; the setting is used where fal
+  allows it.
+- **Files and privacy** — fal's models take files as links, so the pictures, sound and video a request needs are
+  uploaded to fal's storage first. Studio asks fal to keep no request history and to delete uploads and results after
+  a day. Without that history fal keeps a finished result for an hour only, so **quitting while fal.ai is still
+  working asks first**: a result that is done while Studio is closed is lost if Studio isn't opened again within the
+  hour.
+- **Queue** — a new fal account runs two jobs at a time; more wait in fal's queue (variants ×2–×4 too).
 
 ## Keyboard shortcuts
 

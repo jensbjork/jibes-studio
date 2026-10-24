@@ -19,7 +19,7 @@ interface Props {
   problems?: readonly string[]
   /**
    * The click while blocked, which keeps the button clickable: the missing API key, when it is the only problem,
-   * opens Settings → Venice.
+   * opens Settings → Service.
    */
   onBlockedClick?: () => void
   /** Sending: the button waits and says so. */

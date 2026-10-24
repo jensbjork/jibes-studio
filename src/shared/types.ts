@@ -1,6 +1,7 @@
 // Types shared between the main process, preload and renderer.
 
 import type { PromptIssue } from './prompt-refs'
+import type { Provider } from './provider'
 import type { GenerateSession, MediaTab } from './session'
 
 export type VideoModelType = 'text-to-video' | 'image-to-video' | 'reference-to-video' | 'video-to-video' | 'other'
@@ -387,7 +388,12 @@ export interface ClaudeDesktopStatus {
 }
 
 export interface Settings {
+  /** The service new work is made with (Settings → Service): Venice unless the user chose fal.ai. */
+  provider: Provider
+  /** The active service has a key. */
   hasApiKey: boolean
+  /** Which services have a key stored (each is kept, so switching back needs no new key). */
+  keys: Record<Provider, boolean>
   /** The current base folder (grundmapp), or '' while no library is open. */
   libraryDir: string
   /** Running as "Studio Dev" (npm run dev) with its own settings and library, separate from JIBES Studio.app. */
@@ -832,6 +838,11 @@ export interface ComposedPrompt {
    * nothing is appended (a blank prompt), like `entries`. Style videos are explained here, not in `videos`.
    */
   direction?: ComposedDirection
+  /**
+   * For a model that takes no negative prompt (fal's Seedance, Kling 4.0 and O3): the negative prompt, with a director's
+   * avoid, as the prompt's last line ("Avoid: …"), included in `legend`. Also when nothing is appended, like `entries`.
+   */
+  avoid?: { line: string }
 }
 
 /** One line of a Direction section: a part of the direction, the style frames' line or a style video's. */
@@ -1631,6 +1642,8 @@ export type EditOperation =
     }
   | { op: 'extend'; seconds: number; prompt: string; model: string; resolution?: string; audio: 'model' | 'silence' }
   | { op: 'upscale'; factor: 2 | 4 }
+  /** fal.ai only: the mouths in the range follow the film's sound there (its own sound is kept). */
+  | { op: 'lip-sync'; range: EditRange; model: string }
 
 /** What an operation would do and cost on a base version (planEditOperation; free). */
 export interface EditPlan {
@@ -2563,8 +2576,14 @@ export interface StudioApi {
 
   // Settings
   getSettings(): Promise<Settings>
-  setApiKey(key: string): Promise<void>
-  testApiKey(): Promise<{ ok: boolean; message: string }>
+  /** Stores a service's API key (Venice's when none is named); '' removes it. */
+  setApiKey(key: string, provider?: Provider): Promise<void>
+  /** Checks a service's key (the active one's when none is named), with Venice's balance. */
+  testApiKey(provider?: Provider): Promise<{ ok: boolean; message: string }>
+  /** Chooses the service new work is made with (the window reloads when it changes). */
+  setProvider(provider: Provider): Promise<void>
+  /** The service as the window loaded (lib/initProvider.ts). */
+  initialProvider: Provider
   ffmpegStatus(): Promise<FfmpegStatus>
   setPromptLanguage(lang: PromptLanguage): Promise<void>
   setBudget(budget: BudgetSettings): Promise<void>

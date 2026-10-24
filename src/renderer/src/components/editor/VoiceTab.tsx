@@ -7,7 +7,8 @@ import type {
   TranscriptSegment,
   VoiceChoice
 } from '@shared/types'
-import { ipcErrorMessage, useAssets } from '../../lib/hooks'
+import { activeServiceModels } from '@shared/service-models'
+import { SERVICE_NAME, ipcErrorMessage, useAssets } from '../../lib/hooks'
 import { openCard, useOpenCard, useReportRange } from './cards'
 import { useCardRun, useEditor } from './EditorContext'
 import { fileName, formatClock, segmentsInRange } from './editorUtils'
@@ -18,9 +19,10 @@ import { Check, Choice, Field, OpCard, PlanNotes, RunButton, TimeAt, fieldInput,
 // (speech-to-speech that keeps the performance, shown only when Venice lists a voice changer), Re-record lines (new
 // spoken lines in a preset or cloned voice, laid over the old ones) and New line (a line of its own).
 
-const DEFAULT_ASR = 'elevenlabs/scribe-v2'
-const DEFAULT_SPEECH = 'elevenlabs-tts-multilingual-v2'
-const CLONE_MODEL = 'tts-chatterbox-hd'
+// The active service's (the window starts over when it changes).
+const DEFAULT_ASR = activeServiceModels().transcription
+const DEFAULT_SPEECH = activeServiceModels().speech
+const CLONE_MODEL = activeServiceModels().cloneSpeech
 
 export const LANGUAGES: { code: string; label: string }[] = [
   { code: '', label: 'Automatic' },
@@ -123,7 +125,7 @@ function TranscribeCard({ open, onToggle }: CardProps) {
         )}
       </div>
       <p className="text-[11px] leading-relaxed text-muted">
-        The lines land on the timeline and under Text, where you can correct them for free. Venice doesn’t tell
+        The lines land on the timeline and under Text, where you can correct them for free. The transcript doesn’t tell
         speakers apart.
       </p>
       <PlanNotes plan={plan} error={card.error ?? planError ?? audio.error} />
@@ -408,7 +410,7 @@ function useSpeechVoice(value: SpeechVoice, consentOverride: Record<string, bool
   const speech = audio.catalog?.speech ?? []
   if (value.mode === 'clone') {
     const model = speech.find((m) => m.id === CLONE_MODEL) ?? speech.find((m) => m.cloning)
-    if (!model) return { missing: 'Venice doesn’t offer voice cloning right now.' }
+    if (!model) return { missing: `${SERVICE_NAME} doesn’t offer voice cloning right now.` }
     const entry = clips.find((c) => c.clip.id === value.audioId) ?? clips[0]
     if (!entry) return { model, missing: 'No character has a voice clip yet (Characters → Voice).' }
     const consent = consentOverride[entry.clip.id] ?? entry.clip.cloneConsent
@@ -421,7 +423,7 @@ function useSpeechVoice(value: SpeechVoice, consentOverride: Record<string, bool
   const presets = speech.filter((m) => m.voices.length || m.customVoiceId)
   const model =
     presets.find((m) => m.id === value.model) ?? presets.find((m) => m.id === DEFAULT_SPEECH) ?? presets[0]
-  if (!model) return { missing: audio.error ?? 'Loading Venice’s voice models…' }
+  if (!model) return { missing: audio.error ?? `Loading ${SERVICE_NAME}’s voice models…` }
   if (value.voice === '__custom') {
     const id = value.custom?.trim()
     return id ? { model, voice: { kind: 'custom', voiceId: id } } : { model, missing: 'Type the voice ID.' }
@@ -460,7 +462,7 @@ function SpeechVoiceField({
             label: 'The character’s voice',
             hint: 'Cloned from the voice sample. Swedish is untested – listen to the first line before doing the whole film.',
             disabled: !canClone,
-            title: canClone ? undefined : 'Venice doesn’t offer voice cloning right now.'
+            title: canClone ? undefined : `${SERVICE_NAME} doesn’t offer voice cloning right now.`
           },
           { value: 'preset', label: 'A ready-made voice' }
         ]}

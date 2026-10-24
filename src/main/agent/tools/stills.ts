@@ -13,9 +13,9 @@ import type {
   StoryboardSummary
 } from '@shared/types'
 import * as db from '../../db'
-import { DEFAULT_EDIT_MODEL, DEFAULT_IMAGE_MODEL } from '../../images'
+import { defaultImageModelId } from '../../images'
 import { frameStartAtOrAfter } from '../../ffmpeg'
-import { getImageSafeMode } from '../../settings'
+import { activeServiceName, getImageSafeMode, getProvider } from '../../settings'
 import { FILE_MANAGER } from '../../platform'
 import * as store from '../../sequence-store'
 import { imageBlock } from '../images'
@@ -205,12 +205,12 @@ export async function framePreview(
 
 // ── Image models ─────────────────────────────────────────────────────────────
 
-/** Venice's image models; the text-to-image ones first, then those that combine references. */
+/** The active service's image models; the text-to-image ones first, then those that combine references. */
 export async function loadImageModels(): Promise<ImageModel[]> {
   try {
     return await callService<ImageModel[]>('images:models')
   } catch (err) {
-    throw new Error(`Couldn't fetch the image models from Venice: ${errorText(err)}`)
+    throw new Error(`Couldn't fetch the image models from ${activeServiceName()}: ${errorText(err)}`)
   }
 }
 
@@ -220,7 +220,7 @@ export async function loadImageModels(): Promise<ImageModel[]> {
  */
 export function defaultImageModel(models: readonly ImageModel[], withReferences: boolean): ImageModel | undefined {
   const usable = models.filter((m) => !m.offline && m.edit === withReferences)
-  const preferred = withReferences ? DEFAULT_EDIT_MODEL : DEFAULT_IMAGE_MODEL
+  const preferred = defaultImageModelId(withReferences)
   return usable.find((m) => m.id === preferred) ?? usable[0]
 }
 
@@ -232,7 +232,7 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: 'List image models',
       description:
-        "Venice's image models that request_image_generation can use, with the price of one picture at the default settings, and whether the user's \"Safe mode for images\" (safe_mode: Venice blurs adult content) is on. takes_references: false are text-to-image models (prompt only; negative_prompt allowed); true are models that combine up to max_input_images reference pictures (characters, products, outfits, places, poses, stills) into a new picture. The defaults are marked: Seedream (seedream-v5-pro, and seedream-v5-pro-edit with references), the same family as the Seedance video models.",
+        "The image models of the active service (Settings → Service: Venice or fal.ai) that request_image_generation can use, with the price of one picture at the default settings (on fal.ai Studio's calculation from fal's rates), and whether the user's \"Safe mode for images\" (safe_mode: Venice blurs adult content; on fal.ai the models that have a safety setting use a stricter one) is on. takes_references: false are text-to-image models (prompt only; negative_prompt allowed); true are models that combine up to max_input_images reference pictures (characters, products, outfits, places, poses, stills) into a new picture. The defaults are marked: Seedream 5.0 Pro (and its edit model with references) on both services, the same family as the Seedance video models.",
       input: {
         takes_references: z
           .boolean()
@@ -266,8 +266,12 @@ export function registerStillTools(server: McpServer, ctx: ToolContext): void {
           // Read-only for agents: only the user switches it, in Settings → Generation → Safe mode for images.
           safe_mode: safeMode,
           safe_mode_note: safeMode
-            ? '"Safe mode for images" is on: Venice blurs adult content in the pictures it makes. Only the user can switch it off (Settings → Generation → Safe mode for images).'
-            : '"Safe mode for images" is off: Venice does not blur adult content.',
+            ? getProvider() === 'fal'
+              ? '"Safe mode for images" is on: fal.ai\'s models that have a safety setting use a stricter one. Only the user can switch it off (Settings → Generation → Safe mode for images).'
+              : '"Safe mode for images" is on: Venice blurs adult content in the pictures it makes. Only the user can switch it off (Settings → Generation → Safe mode for images).'
+            : getProvider() === 'fal'
+              ? '"Safe mode for images" is off: fal.ai\'s models use their most permissive safety setting.'
+              : '"Safe mode for images" is off: Venice does not blur adult content.',
           models: models.map((m, i) => ({
             id: m.id,
             name: m.name,

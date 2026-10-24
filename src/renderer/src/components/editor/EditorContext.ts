@@ -39,7 +39,7 @@ export interface EditorContextValue {
   player: PlayerController
   audio: { catalog?: AudioCatalog; error?: string; loading: boolean; refresh: () => void }
   separation?: SeparationStatus
-  /** Venice's video models (the picture operations' choices). */
+  /** The active service's video models (the picture operations' choices). */
   models: VideoModel[]
   modelsError?: string
   hasApiKey: boolean

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { access, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { paramsForSubmit, referenceVideosOf, videosAreReferences } from '@shared/models'
+import { modelForService, paramsForSubmit, referenceVideosOf, videosAreReferences } from '@shared/models'
 import {
   composeOptionsFor,
   composePrompt,
@@ -46,15 +46,29 @@ import { resolveReferenceVideos } from './reference-videos'
 import { importExternalReferences, placeFile } from './references'
 import { noteCarriedOver } from './session'
 import { getAcceptedConsents, getPromptLanguage } from './settings'
+import { providerOf } from '@shared/provider'
+import { retryKind } from './service-error'
 import {
   buildRequestBody,
   download,
   ensureImagesExist,
-  NetworkError,
   resolveReferenceAudios,
-  VeniceClient,
-  VeniceError
+  VeniceError,
+  type RetrieveResult
 } from './venice'
+
+/**
+ * What the job manager needs of the video service: providers.ts VideoService, which sends each job to its model's
+ * service. Tests may pass Venice's four calls alone; the request body and the download are then Venice's.
+ */
+export interface VideoJobs {
+  queue(body: Record<string, unknown>): Promise<{ queue_id: string; download_url?: string }>
+  retrieve(model: string, queueId: string): Promise<RetrieveResult>
+  complete(model: string, queueId: string): Promise<void>
+  listVideoModels(): Promise<VideoModel[]>
+  buildRequestBody?(params: GenerationParams): Promise<Record<string, unknown>>
+  download?(url: string, model?: string): Promise<Buffer>
+}
 
 const POLL_INTERVAL_MS = 5000
 /** Longest pause between polls while Venice can't be reached. */
@@ -386,7 +400,7 @@ export class JobManager extends EventEmitter<JobEvents> {
    * fetched from Venice (GET /models, free) when a submit needs a limit it doesn't know yet.
    */
   constructor(
-    private readonly venice: VeniceClient,
+    private readonly venice: VideoJobs,
     private readonly models?: () => Promise<VideoModel[]>
   ) {
     super()
@@ -427,6 +441,9 @@ export class JobManager extends EventEmitter<JobEvents> {
    * spend money on a video made from the wrong picture or voice, or none.
    */
   async submit(params: GenerationParams, opts: SubmitOptions = {}): Promise<Generation> {
+    // A clip or form saved while the other service was chosen goes to the active one (as its price was quoted).
+    const model = modelForService(params.model)
+    if (model !== params.model) params = { ...params, model }
     // The prompt is checked at once, before anything is copied or sent; measuring audio clips takes a moment.
     const problem = blockingPromptError(params)
     if (problem) throw new Error(problem)
@@ -558,8 +575,12 @@ export class JobManager extends EventEmitter<JobEvents> {
     // Outside images, audio and reference videos are copied into Reference images first, so the stored params point at
     // the copies.
     params = await importExternalReferences(params)
-    const body = await buildRequestBody({ ...params, prompt: composed.prompt })
-    if (params.model.includes('seedance') && getAcceptedConsents().seedance) {
+    const toSend = { ...params, prompt: composed.prompt }
+    const body = this.venice.buildRequestBody
+      ? await this.venice.buildRequestBody(toSend)
+      : await buildRequestBody(toSend)
+    // Venice's own consent for Seedance (fal asks nothing of the kind).
+    if (providerOf(params.model) === 'venice' && params.model.includes('seedance') && getAcceptedConsents().seedance) {
       body.consents = {
         seedance: {
           confirmed_terms_and_privacy: true,
@@ -568,7 +589,7 @@ export class JobManager extends EventEmitter<JobEvents> {
         }
       }
     }
-    let res: Awaited<ReturnType<VeniceClient['queue']>>
+    let res: Awaited<ReturnType<VideoJobs['queue']>>
     try {
       res = await this.venice.queue(body)
     } catch (err) {
@@ -695,7 +716,7 @@ export class JobManager extends EventEmitter<JobEvents> {
       if (isSettled(g)) return this.stop(id)
       if (!g.queueId) {
         this.stop(id)
-        return this.fail(id, 'The job has no queue ID at Venice.')
+        return this.fail(id, 'The job has no queue ID at the service.')
       }
       try {
         // An earlier attempt (or a run the app quit during) already saved the video; only the rest is left.
@@ -715,7 +736,13 @@ export class JobManager extends EventEmitter<JobEvents> {
             setTimeout(() => void tick(), POLL_INTERVAL_MS)
             return
           }
-          const data = res.state === 'video' ? res.data : await download(res.url ?? g.downloadUrl ?? '')
+          const url = res.state === 'download' ? (res.url ?? g.downloadUrl ?? '') : ''
+          const data =
+            res.state === 'video'
+              ? res.data
+              : this.venice.download
+                ? await this.venice.download(url, g.model)
+                : await download(url)
           filePath = await this.saveVideo(id, data)
         }
         // Undefined: deleted while downloading. Otherwise the take may have been moved meanwhile (its segment
@@ -736,9 +763,7 @@ export class JobManager extends EventEmitter<JobEvents> {
       } catch (err) {
         // Network hiccups, rate limiting (429) and 5xx are worth retrying — the job is already paid for.
         // Other 4xx (policy, balance, not found) are final.
-        const unreachable =
-          err instanceof NetworkError || (err instanceof VeniceError && (err.status >= 500 || err.status === 429))
-        const transient = unreachable || !(err instanceof VeniceError)
+        const { unreachable, transient } = retryKind(err)
         if (transient && ++retries <= (unreachable ? MAX_UNREACHABLE_RETRIES : MAX_RETRIES)) {
           setTimeout(() => void tick(), Math.min(POLL_INTERVAL_MS * retries, MAX_RETRY_DELAY_MS))
           return

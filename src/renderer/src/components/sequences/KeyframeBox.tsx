@@ -252,8 +252,7 @@ export default function KeyframeBox({
       {showPersonNotice && (
         <div className="flex items-start gap-2 border-t border-line p-3">
           <p className="min-w-0 flex-1 text-[11px] leading-snug text-muted">
-            Some Venice models may refuse images and video of real people. If the continuation is refused, try another
-            model.
+            Some models may refuse images and video of real people. If the continuation is refused, try another model.
           </p>
           <button
             type="button"

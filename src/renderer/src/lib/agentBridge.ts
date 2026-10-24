@@ -43,7 +43,7 @@ import { appendVideoWindows } from '../components/pickers/videoRefs'
 import { ASSET_VIEW } from './assets'
 import { directorById, isPresetId } from './directors'
 import { followGenerateAudio, generateParamsFrozen, getGenerateParams, setGenerateParams } from './generateStore'
-import { ipcErrorMessage, loadModels } from './hooks'
+import { SERVICE_NAME, ipcErrorMessage, loadModels } from './hooks'
 import { SELECTED_ASSET_KEYS, fileName, followAssetImages, isAbsolutePath, readRememberedImageIds } from './library'
 import { getMediaTab, setMediaTab } from './mediaTab'
 import type { Intent, Navigate, View } from './navigation'
@@ -233,7 +233,7 @@ export function applySetForm(
   ].some(given)
   if (needsModels && !models.length) {
     throw new BridgeError(
-      `Studio couldn't fetch the model list from Venice${modelsError ? ` (${modelsError})` : ''}. Try again in a moment.`
+      `Studio couldn't fetch the model list from ${SERVICE_NAME}${modelsError ? ` (${modelsError})` : ''}. Try again in a moment.`
     )
   }
 
@@ -295,7 +295,7 @@ export function applySetForm(
   }
 
   const unknownModel = () =>
-    errors.push(`The model ${modelLabel} is no longer in Venice's model list – pick another one with model.`)
+    errors.push(`The model ${modelLabel} isn't in ${SERVICE_NAME}'s model list – pick another one with model.`)
 
   if (given(durationValue)) {
     const duration = normalizeDuration(durationValue)
@@ -900,13 +900,13 @@ export interface BridgeContext {
 }
 
 /**
- * Venice's model list, waiting at most `ms` for it: a slow Venice must not hold up a command until main gives
- * up on the window (COMMAND_TIMEOUT_MS) and tells the agent Studio isn't answering.
+ * The active service's model list, waiting at most `ms` for it: a slow service must not hold up a command until main
+ * gives up on the window (COMMAND_TIMEOUT_MS) and tells the agent Studio isn't answering.
  */
 async function modelList(ms: number): Promise<{ models: VideoModel[]; error?: string }> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("Venice isn't answering with the model list right now.")), ms)
+    timer = setTimeout(() => reject(new Error(`${SERVICE_NAME} isn't answering with the model list right now.`)), ms)
   })
   try {
     return { models: await Promise.race([loadModels(), timeout]) }

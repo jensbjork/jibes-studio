@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Sequence } from '@shared/types'
 import { withBudgetConfirm } from '../../../lib/budget'
-import { ipcErrorMessage } from '../../../lib/hooks'
+import { SERVICE_NAME, ipcErrorMessage } from '../../../lib/hooks'
 import { formatUsd } from '../../../lib/media'
 import { isMac } from '../../../lib/platform'
 import Popover from '../../pickers/Popover'
@@ -152,7 +152,7 @@ export default function TranscribeLyrics({ disabled, disabledTitle, className, .
         disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={disabled ? disabledTitle : 'Venice writes down the words with their times (paid; the price is shown first)'}
+        title={disabled ? disabledTitle : `${SERVICE_NAME} writes down the words with their times (paid; the price is shown first)`}
         className={className}
       >
         {panel.sequence.song?.lyrics ? 'Transcribe again…' : 'Transcribe the lyrics…'}

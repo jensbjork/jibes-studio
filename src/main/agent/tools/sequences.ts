@@ -502,7 +502,7 @@ function songInfo(song: SequenceSong): Record<string, unknown> {
   }
 }
 
-/** A take that Venice didn't make from the clip: an import (own clip) or a version from the Editor. */
+/** A take that wasn't generated from the clip: an import (own clip) or a version from the Editor. */
 export function ownTake(take: Generation): boolean {
   return !!take.source && take.source !== 'generated'
 }
@@ -1320,7 +1320,7 @@ const clipFields = {
     .string()
     .max(4000)
     .optional()
-    .describe('"Notes": what happens in the shot, shown with the clip in Studio (any language). Not sent to Venice.'),
+    .describe('"Notes": what happens in the shot, shown with the clip in Studio (any language). Never sent with a generation.'),
   continue_from_previous: z
     .boolean()
     .optional()
@@ -2112,7 +2112,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
     {
       title: 'Stop "Generate missing"',
       description:
-        "Stops a running \"Generate missing\" (request_generate_all / request_generate_storyboard) for a sequence (sequence_id) or a storyboard (storyboard_id): no further clips are sent. Takes already at Venice keep going and land as usual (they are paid already). Free – it only saves money.",
+        "Stops a running \"Generate missing\" (request_generate_all / request_generate_storyboard) for a sequence (sequence_id) or a storyboard (storyboard_id): no further clips are sent. Takes already sent keep going and land as usual (they are paid already). Free – it only saves money.",
       input: {
         sequence_id: z.string().optional(),
         storyboard_id: z.string().optional()
@@ -2142,7 +2142,7 @@ export function registerSequenceTools(server: McpServer, ctx: ToolContext): void
       return {
         data: {
           stopped: true,
-          note: 'No more clips are sent. Takes already at Venice keep going and land as usual.'
+          note: 'No more clips are sent. Takes already sent keep going and land as usual.'
         },
         summary: `stopped Generate missing in ${q(current.name)}`
       }

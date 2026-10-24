@@ -4,8 +4,8 @@
 //
 // - The song is copied into the sequence's folder (Sequences/<name>/Audio/<file>), so it moves with it; the vocals are
 //   separated on this Mac (free, voice-separation.ts) into Audio/<name> (vocals).flac.
-// - The lyrics are transcribed (paid: Venice ASR with word times, priced first, the budget applies) from the vocals
-//   when there are any (cleaner), else the mix; each transcription is a media_jobs row (op 'transcribe', no edit, the
+// - The lyrics are transcribed (paid: the service's ASR with word times, priced first, the budget applies) from the
+//   vocals when there are any (cleaner), else the mix; each transcription is a media_jobs row (op 'transcribe', no edit, the
 //   sequence in its request) that Spending places on the sequence. A line corrected by hand keeps its timing.
 // - Long work runs in the background, one step at a time per sequence (separate → transcribe → analyse → split into
 //   clips), shown in Sequence.songWork and Activity; a step that fails says why in Sequence.songError and the next
@@ -33,7 +33,8 @@ import { AUDIO_FILE_TYPES } from './assets'
 import { assertWithinBudget } from './budget'
 import * as db from './db'
 import { libraryDirector } from './directors'
-import { DEFAULT_ASR } from './edit-ops'
+import { activeServiceModels } from '@shared/service-models'
+import { activeProvider, providerName } from '@shared/provider'
 import { extractAudio, probeAudio } from './ffmpeg'
 import { isInsideRoot, tmpDir, toStoredPath } from './paths'
 import { isConfirmedHere, noteRequestedBy } from './requested-by'
@@ -41,7 +42,7 @@ import * as store from './sequence-store'
 import type { SequenceService } from './sequences'
 import { analyseSong, cachedSongAnalysis, overviewOf } from './song-analysis'
 import { assertAgentFiles } from './upload-paths'
-import type { VeniceAudio } from './venice-audio'
+import type { AudioBackend } from './providers'
 import { separateStems, separationStatus } from './voice-separation'
 
 /** Venice takes at most ~24 MB in one transcription (the song is sent as 64 kb/s mono MP3: ~50 minutes). */
@@ -69,14 +70,17 @@ export interface SongActiveWork {
 }
 
 /**
- * The model a song's lyrics are transcribed with, among Venice's transcription models: `wanted`, which must time every
- * word (Scribe, xAI: the lyrics need each word's time), or by default Scribe, else the first that times words.
+ * The model a song's lyrics are transcribed with, among the active service's transcription models: `wanted`, which
+ * must time every word (Scribe, xAI: the lyrics need each word's time), or by default Scribe, else the first that
+ * times words.
  */
 export function lyricsModelOf(models: readonly AsrModel[], wanted?: string): AsrModel {
   const timed = models.filter((m) => m.timestamps === 'word')
-  const model = timed.find((m) => m.id === (wanted ?? DEFAULT_ASR)) ?? (wanted ? undefined : timed[0])
+  const model = timed.find((m) => m.id === (wanted ?? activeServiceModels().transcription)) ?? (wanted ? undefined : timed[0])
   if (model) return model
-  if (!wanted) throw new Error('Venice offers no transcription model that times every word right now.')
+  if (!wanted) {
+    throw new Error(`${providerName(activeProvider())} offers no transcription model that times every word right now.`)
+  }
   throw new Error(
     `${wanted} isn't a transcription model that times every word. Choose one of: ${timed.map((m) => m.id).join(', ') || 'none right now'}.`
   )
@@ -94,7 +98,7 @@ export interface LyricsPlan {
 
 interface SongDeps {
   sequences: SequenceService
-  audio: VeniceAudio
+  audio: AudioBackend
   /** The sequence changed (its song, its work, its clips): the window refetches it. */
   notify: (sequenceId: string) => void
   /** Work started, moved on or stopped: the status summary reads activeWork() again. */
@@ -185,7 +189,7 @@ function recordTranscription(sequenceId: string, plan: LyricsPlan): void {
       .run(id, JSON.stringify(request), plan.priceUsd, plan.priceUsd, now, now)
     noteRequestedBy(id)
   } catch (err) {
-    // Bookkeeping: the lyrics are there either way; Venice's own account has the charge.
+    // Bookkeeping: the lyrics are there either way; the service's own account has the charge.
     console.warn('Could not record the transcription of a song:', err)
   }
 }
@@ -326,7 +330,7 @@ export class SongService {
 
   // ── Lyrics: the price ──────────────────────────────────────────────────────
 
-  /** The transcription models Venice lists (free). */
+  /** The transcription models the active service lists (free). */
   private async wordModels(): Promise<AsrModel[]> {
     return (await this.deps.audio.catalog()).transcription
   }

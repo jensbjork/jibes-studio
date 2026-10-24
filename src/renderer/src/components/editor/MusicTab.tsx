@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import type { AudioGenModel, EditOperation } from '@shared/types'
-import { NO_API_KEY } from '../../lib/hooks'
+import { activeServiceModels } from '@shared/service-models'
+import { NO_API_KEY, SERVICE_NAME } from '../../lib/hooks'
 import { useReportRange } from './cards'
 import { useCardRun, useEditor } from './EditorContext'
 import PromptField from '../prompt/PromptField'
@@ -12,8 +13,9 @@ import { Check, Choice, Field, GainSlider, OpCard, PlanNotes, RunButton, TimeAt,
 // it) and sound effects at a point. Each result lands on the Layers lane as a layer, so its volume and place can be
 // changed for free afterwards.
 
-const DEFAULT_MUSIC = 'ace-step-15'
-const DEFAULT_EFFECT = 'elevenlabs-sound-effects-v2'
+// The active service's (the window starts over when it changes).
+const DEFAULT_MUSIC = activeServiceModels().music
+const DEFAULT_EFFECT = activeServiceModels().effect
 
 /** The Sound tab has no API key banner (most of it is free): its paid cards say it themselves. */
 const NO_KEY_WARNING = [`${NO_API_KEY}.`]
@@ -121,7 +123,7 @@ export function MusicCard({ open, onToggle }: CardProps) {
       </Field>
       <Field label="Model">
         {!audio.catalog ? (
-          <p className="text-[12px] text-muted">{audio.error ?? 'Loading Venice’s music models…'}</p>
+          <p className="text-[12px] text-muted">{audio.error ?? `Loading ${SERVICE_NAME}’s music models…`}</p>
         ) : (
           <Choice
             value={model?.id ?? ''}

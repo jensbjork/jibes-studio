@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Settings } from '@shared/types'
-import { ipcErrorMessage } from '../../lib/hooks'
+import { ipcErrorMessage, safeModeEffect } from '../../lib/hooks'
 import { refreshPromptLanguage } from '../prompt/usePromptLanguage'
 import { SettingsItem } from './SettingsLayout'
 import { SwitchRow } from './Switch'
@@ -104,7 +104,7 @@ function ImageSafeModeSetting({ on, onChanged }: { on: boolean; onChanged: () =>
         disabled={saving}
         onChange={(next) => void change(next)}
         label="Safe mode for images"
-        description="Venice blurs adult content in the images you create – start, end and storyboard images. Videos aren’t affected."
+        description={`For the images you create – start, end and storyboard images: ${safeModeEffect(true)}. Videos aren’t affected.`}
       />
       {error && (
         <p role="alert" className="mt-2 text-[12px] text-danger">

@@ -3,7 +3,7 @@
   "productName": "Studio",
   "version": "0.2.0",
   "private": true,
-  "description": "Desktop studio for macOS and Windows for generating videos with the Venice.ai API: reference-aware prompts, a library of characters, environments, products, outfits and poses, sequences and storyboards exported with ffmpeg, and an MCP server for your own AI agents.",
+  "description": "Desktop studio for macOS and Windows for generating videos with the Venice.ai or fal.ai API: reference-aware prompts, a library of characters, environments, products, outfits and poses, sequences and storyboards exported with ffmpeg, and an MCP server for your own AI agents.",
   "keywords": [
     "electron",
     "react",
@@ -12,6 +12,7 @@
     "video-generation",
     "ai-video",
     "venice-ai",
+    "fal-ai",
     "mcp",
     "model-context-protocol",
     "ffmpeg",

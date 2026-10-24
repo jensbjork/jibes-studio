@@ -31,7 +31,7 @@
   ],
   "tools_generated": true,
   "prompts_generated": true,
-  "keywords": ["video", "studio", "storyboard", "sequence", "venice"],
+  "keywords": ["video", "studio", "storyboard", "sequence", "venice", "fal"],
   "license": "MIT",
   "compatibility": {
     "claude_desktop": ">=0.10.0",

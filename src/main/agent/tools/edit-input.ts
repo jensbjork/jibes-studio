@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { formatTimecode, MAX_SPEAK_LINES } from '@shared/edit-plan'
+import { activeProvider, providerName } from '@shared/provider'
+import { activeServiceModels } from '@shared/service-models'
 import type { BackgroundChoice, EditOperation, EditRange, SpeakLine, VoiceChoice } from '@shared/types'
 
 // The Editor's operations as agents write them: one zod discriminated union on `op`, mirroring EditOperation in
@@ -8,19 +10,43 @@ import type { BackgroundChoice, EditOperation, EditRange, SpeakLine, VoiceChoice
 // (planEditOperation), the same one the window's operation cards use; this only fills the defaults the window's
 // cards start from, so a plan an agent asks for is the plan the user would get from the same choices.
 
-/** The models the Editor's cards start from (spec §8.5); a plan with another model is checked by the service. */
+/**
+ * The models the Editor's cards start from (spec §8.5), the active service's (shared/service-models.ts, read when
+ * used); a plan with another model is checked by the service.
+ */
 export const EDIT_DEFAULT_MODELS = {
   /** Regenerate section and Extend: image-to-video between (or from) frames of the film. */
-  regenerate: 'seedance-2-5-image-to-video-basic',
-  extend: 'seedance-2-5-image-to-video-basic',
+  get regenerate(): string {
+    return activeServiceModels().i2v
+  },
+  get extend(): string {
+    return activeServiceModels().i2v
+  },
   /** Edit with prompt: Seedance 2.5 reference-to-video in its edit task. */
-  promptEdit: 'seedance-2-5-reference-to-video-basic',
+  get promptEdit(): string {
+    return activeServiceModels().promptEdit
+  },
   /** New spoken lines in a preset voice, and in a cloned one. */
-  speech: 'elevenlabs-tts-multilingual-v2',
-  cloneSpeech: 'tts-chatterbox-hd',
-  music: 'ace-step-15',
-  effect: 'elevenlabs-sound-effects-v2'
-} as const
+  get speech(): string {
+    return activeServiceModels().speech
+  },
+  get cloneSpeech(): string {
+    return activeServiceModels().cloneSpeech
+  },
+  get music(): string {
+    return activeServiceModels().music
+  },
+  get effect(): string {
+    return activeServiceModels().effect
+  },
+  get transcription(): string {
+    return activeServiceModels().transcription
+  },
+  /** Lip sync: fal.ai only (undefined on Venice). */
+  get lipSync(): string | undefined {
+    return activeServiceModels().lipSync
+  }
+}
 
 const range = z
   .object({
@@ -141,7 +167,7 @@ export const operationInput = z
       })
       .strict()
       .describe('Free. Change or remove an added sound (music, effect, line).'),
-    // ── Paid (Venice) ──
+    // ── Paid ──
     z
       .object({
         op: z.literal('transcribe'),
@@ -227,7 +253,12 @@ export const operationInput = z
         op: z.literal('prompt_edit'),
         range: range.describe('The stretch to change (per-model limits, e.g. 4–30 s for Seedance).'),
         prompt: z.string().min(1).max(4000).describe('English: the one change to make.'),
-        model: z.string().optional().describe('Default Seedance 2.5 reference-to-video (edit); also Gemini Omni Flash, Wan 2.7, HappyHorse video-to-video.'),
+        model: z
+          .string()
+          .optional()
+          .describe(
+            "Default Seedance 2.5 reference-to-video (edit), of the active service; also Gemini Omni Flash and Wan 2.7 (and on Venice HappyHorse) video-to-video. list_models shows the active service's ids."
+          ),
         resolution,
         reference_image_ids: z
           .array(z.string())
@@ -252,10 +283,20 @@ export const operationInput = z
     z
       .object({ op: z.literal('upscale'), factor: z.union([z.literal(2), z.literal(4)]) })
       .strict()
-      .describe('Paid. Upscale the whole version 2× or 4× (Topaz; needs the API key for its price).')
+      .describe('Paid. Upscale the whole version 2× or 4× (Topaz; needs the API key for its price).'),
+    z
+      .object({
+        op: z.literal('lip_sync'),
+        range: range.describe('The stretch whose mouths should follow its sound (2–60 s).'),
+        model: z.string().optional().describe('Default Sync Lipsync 2 (fal.ai only).')
+      })
+      .strict()
+      .describe(
+        "Paid, fal.ai only. Lip sync: the mouths in the stretch follow the sound it has now (after speak_lines, say); the film's sound stays."
+      )
   ])
   .describe(
-    'The operation, by op. Free: trim, cut, fade, volume, mute, denoise, loudness, add_audio, layer. Paid: transcribe, change_voice, speak_lines, music, effect, regenerate, prompt_edit, extend, upscale.'
+    'The operation, by op. Free: trim, cut, fade, volume, mute, denoise, loudness, add_audio, layer. Paid: transcribe, change_voice, speak_lines, music, effect, regenerate, prompt_edit, extend, upscale, lip_sync (fal.ai only).'
   )
 
 export type OperationInput = z.infer<typeof operationInput>
@@ -263,7 +304,7 @@ export type OperationInput = z.infer<typeof operationInput>
 /** What the defaults depend on beyond the input: whether separation works, and the voice changer listed. */
 export interface OperationDefaults {
   separation: boolean
-  /** The first voice changer Venice lists; undefined while there is none. */
+  /** The first voice changer the active service lists; undefined while there is none. */
   voiceChanger?: string
 }
 
@@ -284,7 +325,7 @@ function clean<T extends object>(o: T): T {
 
 /**
  * The agent's operation as the EditOperation Studio's edit service takes, with the defaults the window's cards
- * start from. Throws for what the schema can't say: a voice changer while Venice lists none, a clone
+ * start from. Throws for what the schema can't say: a voice changer while the service lists none, a clone
  * voice where only speak_lines takes one, add_audio without exactly one source.
  */
 export function toEditOperation(input: OperationInput, defaults: OperationDefaults): EditOperation {
@@ -341,7 +382,7 @@ export function toEditOperation(input: OperationInput, defaults: OperationDefaul
       const model = input.model ?? defaults.voiceChanger
       if (!model) {
         throw new Error(
-          'Voice change isn\'t available at Venice right now (no voice changer model is listed). Use transcribe and then speak_lines to re-record the lines.'
+          `Voice change isn't available at ${providerName(activeProvider())} right now (no voice changer model is listed). Use transcribe and then speak_lines to re-record the lines.`
         )
       }
       return clean<EditOperation>({
@@ -423,6 +464,12 @@ export function toEditOperation(input: OperationInput, defaults: OperationDefaul
       })
     case 'upscale':
       return { op: 'upscale', factor: input.factor }
+    case 'lip_sync':
+      return clean<EditOperation>({
+        op: 'lip-sync',
+        range: rangeOf(input.range)!,
+        model: input.model ?? EDIT_DEFAULT_MODELS.lipSync ?? ''
+      })
   }
 }
 
@@ -517,6 +564,8 @@ export function operationOutput(op: EditOperation): Record<string, unknown> {
       return out({ seconds: op.seconds, prompt: op.prompt, model: op.model, resolution: op.resolution, audio: op.audio })
     case 'upscale':
       return out({ factor: op.factor })
+    case 'lip-sync':
+      return out({ range: rangeOut(op.range), model: op.model })
   }
 }
 
@@ -617,5 +666,7 @@ export function operationSummary(op: EditOperation, seconds: number | undefined,
       return `Extend past the end by ${op.seconds} s`
     case 'upscale':
       return `Upscale the whole film ${op.factor}×`
+    case 'lip-sync':
+      return `Lip sync ${rangeText(op.range)}`
   }
 }

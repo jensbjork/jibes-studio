@@ -225,7 +225,7 @@ function sinceDays(days: number | undefined): number | undefined {
 }
 
 /**
- * Where a generation came from, and how it is named: Venice's generations by their prompt, the user's own clips
+ * Where a generation came from, and how it is named: generated ones by their prompt, the user's own clips
  * (imports) by their file name and the Editor's versions by "<edit> v3" (generationTitle), so neither is listed as
  * an empty prompt.
  */
@@ -437,7 +437,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Get asset',
       description:
-        "One asset with its description and its photos as images (JPEG, at most 768 px), so you can see faces, garments, places, products and poses before choosing references. Each photo is labelled with its photo number and image_id (added_by names the agent – and the host a fetched file came from – when an agent added it); pass image_ids to set_references or add_segment to send only the best photos. Characters and environments list their audio clips (voice / soundscape) with the reference window that is sent to Venice (and, for a voice, clone_consent); with include_audio you also get that window as audio (MP3) to listen to, if your client takes audio. For a character it also names the default outfit; for an outfit, the characters wearing it by default.",
+        "One asset with its description and its photos as images (JPEG, at most 768 px), so you can see faces, garments, places, products and poses before choosing references. Each photo is labelled with its photo number and image_id (added_by names the agent – and the host a fetched file came from – when an agent added it); pass image_ids to set_references or add_segment to send only the best photos. Characters and environments list their audio clips (voice / soundscape) with the reference window that is sent with a generation (and, for a voice, clone_consent); with include_audio you also get that window as audio (MP3) to listen to, if your client takes audio. For a character it also names the default outfit; for an outfit, the characters wearing it by default.",
       input: {
         asset_id: z.string().describe('The id from list_assets.'),
         include_images: z.boolean().default(true).describe('Return the photos as images. Default true.'),
@@ -596,7 +596,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Update audio clip window',
       description:
-        "Moves or resizes the reference window of an asset's audio clip (a character's voice, an environment's soundscape): the part of the file that is sent to Venice when the clip is a reference. clip_start is seconds into the file, clip_length the window's length; Studio keeps it 2–15 s and inside the file (the answer shows the window it ended up with). All reference audio of one generation may be at most 15 s together, so shorten windows (e.g. to 5–7 s each) when several voices are used. Pick a part where the voice is clear and typical; listen with get_asset({include_audio: true, audio_id}). Add clips with add_asset_audio; removing one goes through request_delete (the user approves).",
+        "Moves or resizes the reference window of an asset's audio clip (a character's voice, an environment's soundscape): the part of the file that is sent when the clip is a reference. clip_start is seconds into the file, clip_length the window's length; Studio keeps it 2–15 s and inside the file (the answer shows the window it ended up with). All reference audio of one generation may be at most 15 s together, so shorten windows (e.g. to 5–7 s each) when several voices are used. Pick a part where the voice is clear and typical; listen with get_asset({include_audio: true, audio_id}). Add clips with add_asset_audio; removing one goes through request_delete (the user approves).",
       input: {
         audio_id: z.string().describe('The audio_id from list_assets or get_asset.'),
         clip_start: z.number().min(0).optional().describe('Seconds into the file.'),
@@ -834,7 +834,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'List video models',
       description:
-        "Venice's video models Studio can use, with their mode (kind), allowed durations, resolutions and aspect ratios, how many reference images they take, whether they take reference audio (audio_input: voices and sounds as @Audio1…, max_reference_audios), whether they make audio, and their prompt length limit. The default model (Seedance 2.5 reference-to-video) is marked default: true. Use these exact values with set_form, add_segment and update_segment.",
+        "The video models of the active service (Settings → Service: Venice or fal.ai; fal.ai's ids start with fal:) that Studio can use, with their mode (kind), allowed durations, resolutions and aspect ratios, how many reference images they take, whether they take reference audio (audio_input: voices and sounds as @Audio1…, max_reference_audios), whether they make audio, and their prompt length limit. The default model (Seedance 2.5 reference-to-video) is marked default: true. Use these exact values with set_form, add_segment and update_segment.",
       input: {
         kind: z.enum(MODES).optional().describe('Only models of this mode.')
       },
@@ -976,7 +976,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'List generations',
       description:
-        "Generations (clips) – every one in the library, as Media's Videos lists them, filtered and sorted the same way, with paging. session: true lists only what Generate's list shows: what was made in Generate this session (since Studio started; the answer says when), including clips that were still being made when it started; everything older is in Media. Each has its source (generated by Venice, an import – the user's own film – or an edit version made in the Editor, named by title), its status (queued, processing, completed, failed), prompt, settings, price, the user's rating (-1 = thumbs down; 1–3 = stars; null = not rated) and how many reviews it has, a one-line-per-token summary of its references (\"@Image1 Anna (character) photo 1\", \"@Audio1 Anna (voice)\") and which sequence clip or storyboard transition it is a take of. The answer also sums up the filtered set (count, cost, seconds). Use it to find clips to learn from: e.g. the best rated ones (sort \"rating\", min_rating 2), the ones the user disliked (thumbs_down true), the ones of one character (asset_id), or completed clips nobody has reviewed (status \"completed\", has_reviews false) – then review_generation. Finished and failed rows say seen_by_user (whether the user has played or opened it yet; unseen_only lists only the new ones) – read-only: only the user marks things seen. get_generation and review_generation look at one.",
+        "Generations (clips) – every one in the library, as Media's Videos lists them, filtered and sorted the same way, with paging. session: true lists only what Generate's list shows: what was made in Generate this session (since Studio started; the answer says when), including clips that were still being made when it started; everything older is in Media. Each has its source (generated by Venice or fal.ai, an import – the user's own film – or an edit version made in the Editor, named by title), its status (queued, processing, completed, failed), prompt, settings, price, the user's rating (-1 = thumbs down; 1–3 = stars; null = not rated) and how many reviews it has, a one-line-per-token summary of its references (\"@Image1 Anna (character) photo 1\", \"@Audio1 Anna (voice)\") and which sequence clip or storyboard transition it is a take of. The answer also sums up the filtered set (count, cost, seconds). Use it to find clips to learn from: e.g. the best rated ones (sort \"rating\", min_rating 2), the ones the user disliked (thumbs_down true), the ones of one character (asset_id), or completed clips nobody has reviewed (status \"completed\", has_reviews false) – then review_generation. Finished and failed rows say seen_by_user (whether the user has played or opened it yet; unseen_only lists only the new ones) – read-only: only the user marks things seen. get_generation and review_generation look at one.",
       input: {
         session: z
           .boolean()
@@ -988,7 +988,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
         source: z
           .enum(['generated', 'import', 'edit'])
           .optional()
-          .describe('"generated": made by Venice; "import": the user\'s own clips – and copies of exported films opened in the Editor, which get_generation marks with recipe.export (made in Studio, not the user\'s footage); "edit": versions made in the Editor.'),
+          .describe('"generated": made by Venice or fal.ai; "import": the user\'s own clips – and copies of exported films opened in the Editor, which get_generation marks with recipe.export (made in Studio, not the user\'s footage); "edit": versions made in the Editor.'),
         status: z.enum(['queued', 'processing', 'completed', 'failed', 'pending']).optional().describe('"pending" = queued or processing.'),
         model: z.string().optional().describe('Only this model id.'),
         asset_id: z.string().optional().describe("Only generations whose references use this asset's photos or audio."),
@@ -1092,7 +1092,7 @@ export function registerLibraryTools(server: McpServer, ctx: ToolContext): void 
     {
       title: 'Get generation',
       description:
-        "One generation: its source (generated, import – the user's own film, with original_path when the file is a working copy – or edit, a version made in the Editor, with its edit_id, parent_id and recipe: the operation that made it), status, error, timing, price, its settings with the reference token maps (@ImageN and @AudioN), sent_prompt (the prompt exactly as Venice got it, with the descriptions of its referenced assets appended as a References legend – when that differs from the prompt), which sequence clip or storyboard transition it is a take of, the user's rating (-1 = thumbs down, 1–3 = stars) and every review, seen_by_user (whether the user has looked at it yet), and – when completed – its poster frame as an image. Ask for `frames` to also get evenly spread frames from the video, captioned with their time (the last one is the clip's final frame, where a continuation clip would start). Poll this after an approval to follow progress. To judge a finished clip properly (frames next to the reference images, its sound), use review_generation.",
+        "One generation: its source (generated, import – the user's own film, with original_path when the file is a working copy – or edit, a version made in the Editor, with its edit_id, parent_id and recipe: the operation that made it), status, error, timing, price, its settings with the reference token maps (@ImageN and @AudioN), sent_prompt (the prompt exactly as the service got it, with the descriptions of its referenced assets appended as a References legend – when that differs from the prompt), which sequence clip or storyboard transition it is a take of, the user's rating (-1 = thumbs down, 1–3 = stars) and every review, seen_by_user (whether the user has looked at it yet), and – when completed – its poster frame as an image. Ask for `frames` to also get evenly spread frames from the video, captioned with their time (the last one is the clip's final frame, where a continuation clip would start). Poll this after an approval to follow progress. To judge a finished clip properly (frames next to the reference images, its sound), use review_generation.",
       input: {
         generation_id: z.string(),
         include_thumbnail: z.boolean().default(true).describe('Return the poster frame when completed. Default true.'),

@@ -3,7 +3,9 @@
 // window.studio; this file only shapes what the dialogs show.
 
 import { useEffect, useState } from 'react'
+import { FAL_DEFAULT_EDIT_MODEL, FAL_DEFAULT_IMAGE_MODEL } from '@shared/fal-models'
 import { pickOption } from '@shared/models'
+import { activeProvider } from '@shared/provider'
 import type { ImageModel, Still, StillParams } from '@shared/types'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { samePath } from '../../lib/library'
@@ -12,7 +14,11 @@ import { samePath } from '../../lib/library'
  * Seedream by default: the same family as the Seedance video models, and about $0.06 a picture at 1K. With
  * reference images the edit model combines them; without, the text-to-image model draws from the prompt alone.
  */
-export const DEFAULT_IMAGE_MODEL = { text: 'seedream-v5-pro', edit: 'seedream-v5-pro-edit' } as const
+/** The active service's default image models (the window starts over when it changes). */
+export const DEFAULT_IMAGE_MODEL =
+  activeProvider() === 'fal'
+    ? ({ text: FAL_DEFAULT_IMAGE_MODEL, edit: FAL_DEFAULT_EDIT_MODEL } as const)
+    : ({ text: 'seedream-v5-pro', edit: 'seedream-v5-pro-edit' } as const)
 
 /** text: a picture from the prompt alone (/image/generate). edit: reference images combined (/image/multi-edit). */
 export type ImageMode = keyof typeof DEFAULT_IMAGE_MODEL
@@ -310,7 +316,7 @@ export function useStills(sequenceId?: string): { stills: Still[]; loaded: boole
   return state.key === (sequenceId ?? '') ? state : { stills: [], loaded: false }
 }
 
-/** Live USD price of a still (Venice's model pricing via quoteStill); debounced while the options change. */
+/** Live USD price of a still (the service's pricing via quoteStill); debounced while the options change. */
 export function useStillQuote(params: StillParams | undefined): { price?: number; pending: boolean } {
   const [state, setState] = useState<{ key: string; price?: number }>({ key: '' })
   // The prompt doesn't change the price, so typing doesn't refetch it.

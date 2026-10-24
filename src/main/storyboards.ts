@@ -25,6 +25,7 @@ import {
 } from '@shared/models'
 import { isVeniceGeneration } from '@shared/generation-label'
 import { blockingPromptError } from '@shared/prompt-refs'
+import { activeProvider, providerName } from '@shared/provider'
 import {
   DEFAULT_STORYBOARD_ASPECT_RATIO,
   STORYBOARD_ASPECT_RATIOS,
@@ -920,7 +921,7 @@ export class StoryboardService {
       model !== undefined || patch.duration !== undefined || patch.resolution !== undefined || patch.audio !== undefined
     const models = touchesOptions ? await this.modelList() : undefined
     if (model && models && !models.some((m) => m.id === model)) {
-      throw new Error(`Venice has no video model called ${model}. Choose another model.`)
+      throw new Error(`${providerName(activeProvider())} has no video model called ${model}. Choose another model.`)
     }
 
     // Read again after the wait: the boards (and with them this transition) may have changed.
@@ -995,7 +996,9 @@ export class StoryboardService {
     const problem = this.problemsOf(storyboard.id, row.id)[0]
     if (problem) throw new Error(problem)
     if (this.deps.sequences.isSubmitting(row.id)) {
-      throw new Error('A take of the transition is already being sent to Venice. Wait until it shows among the takes.')
+      throw new Error(
+        `A take of the transition is already being sent to ${providerName(activeProvider())}. Wait until it shows among the takes.`
+      )
     }
     return this.deps.sequences.generateSegment(row.id, this.transitionGuard(storyboard.id, guard), undefined, variants)
   }

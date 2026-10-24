@@ -87,8 +87,8 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
   const problems = [hasKey ? undefined : NO_API_KEY, inputMissing, modelMissing].filter((p): p is string => !!p)
   // Only the key missing: the button stays clickable and opens Settings at it (⌘↵ still sends nothing).
   const keyOnly = !hasKey && !inputMissing && !modelMissing
-  const openVeniceSettings = () => {
-    showSettingsSection(SETTINGS_SECTION.venice)
+  const openServiceSettings = () => {
+    showSettingsSection(SETTINGS_SECTION.service)
     navigate('settings')
   }
   const set = <K extends keyof GenerationParams>(key: K, value: GenerationParams[K]) =>
@@ -183,7 +183,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
           return
         }
         if (!canUseAgain(g)) {
-          setNotice('This clip’s settings can’t be filled in here: it wasn’t made by Venice from a prompt.')
+          setNotice('This clip’s settings can’t be filled in here: it wasn’t generated from a prompt.')
           return
         }
         reuse(g)
@@ -305,7 +305,7 @@ export default function GenerateView({ intent, onIntentHandled, navigate }: Prop
             onCount={setCount}
             total={total}
             problems={problems}
-            onBlockedClick={keyOnly ? openVeniceSettings : undefined}
+            onBlockedClick={keyOnly ? openServiceSettings : undefined}
             submitting={submitting}
             error={error}
             onDismissError={() => setError(undefined)}

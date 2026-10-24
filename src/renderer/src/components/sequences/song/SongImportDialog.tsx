@@ -1,7 +1,7 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { DEFAULT_SONG_TARGET_SECONDS } from '@shared/song-window'
 import type { SongImportOptions } from '@shared/types'
-import { NO_SEPARATION, ipcErrorMessage, useSeparationStatus } from '../../../lib/hooks'
+import { NO_SEPARATION, SERVICE_NAME, ipcErrorMessage, useSeparationStatus } from '../../../lib/hooks'
 import { formatUsd, mediaUrl } from '../../../lib/media'
 import { THIS_COMPUTER, isMac } from '../../../lib/platform'
 import { pauseOthers } from '../../feed/playback'
@@ -165,7 +165,7 @@ export default function SongImportDialog({ path, mode, onCancel, onSubmit }: Pro
           note={canTranscribe ? priceText : undefined}
           hint={
             canTranscribe
-              ? 'Venice writes down the words with their times. Each clip then knows what is sung in it; you can correct the lines by hand for free.'
+              ? `${SERVICE_NAME} writes down the words with their times. Each clip then knows what is sung in it; you can correct the lines by hand for free.`
               : (lyrics.problem ?? 'Loading the transcription models…')
           }
         >

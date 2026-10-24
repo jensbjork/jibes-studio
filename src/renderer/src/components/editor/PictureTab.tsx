@@ -2,6 +2,8 @@ import { useId, useMemo, useState } from 'react'
 import { PICTURE_EDIT_MODELS } from '@shared/edit-plan'
 import { DEFAULT_MODEL, supportsEndImage } from '@shared/models'
 import type { EditOperation, EditPlan, VideoModel } from '@shared/types'
+import { activeProvider, providerOf } from '@shared/provider'
+import { activeServiceModels } from '@shared/service-models'
 import { useAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import { shortcut } from '../../lib/platform'
@@ -60,6 +62,7 @@ export default function PictureTab() {
       <PromptEditCard open={open === 'prompt-edit'} onToggle={() => toggle('prompt-edit')} />
       <ExtendCard open={open === 'extend'} onToggle={() => toggle('extend')} />
       <UpscaleCard open={open === 'upscale'} onToggle={() => toggle('upscale')} />
+      {LIP_SYNC_MODEL && <LipSyncCard open={open === 'lip-sync'} onToggle={() => toggle('lip-sync')} />}
       <CutCard open={open === 'cut'} onToggle={() => toggle('cut')} />
     </div>
   )
@@ -278,9 +281,9 @@ function RegenerateCard({ open, onToggle }: CardProps) {
 
 function PromptEditCard({ open, onToggle }: CardProps) {
   const { edit, current, selection, models } = useEditor()
-  // The edit models Venice lists (all of them while the list loads, so the card isn't empty).
+  // The edit models the active service lists (all of its own while the list loads, so the card isn't empty).
   const choices = useMemo(() => {
-    const ids = Object.keys(PICTURE_EDIT_MODELS)
+    const ids = Object.keys(PICTURE_EDIT_MODELS).filter((id) => providerOf(id) === activeProvider())
     return models.length ? ids.filter((id) => models.some((m) => m.id === id && !m.offline)) : ids
   }, [models])
   const [prompt, setPrompt] = useState('')
@@ -611,6 +614,47 @@ function UpscaleCard({ open, onToggle }: CardProps) {
         onClick={() => plan && void card.run({ op, plan, label: `Upscale ${chosen}×` })}
       />
       {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
+    </OpCard>
+  )
+}
+
+/** The active service's lip sync model: fal.ai only, so the card shows only there. */
+const LIP_SYNC_MODEL = activeServiceModels().lipSync
+
+/** fal.ai only: the mouths in the selection follow the sound it has now; the film's sound stays as it is. */
+function LipSyncCard({ open, onToggle }: CardProps) {
+  const { edit, current, selection } = useEditor()
+  const [nonce, setNonce] = useState(0)
+  const op: EditOperation | undefined =
+    selection && LIP_SYNC_MODEL ? { op: 'lip-sync', range: selection, model: LIP_SYNC_MODEL } : undefined
+  const { plan, planning, error: planError } = usePlan(edit.id, op, current.id, open && !!op, nonce)
+  const range = operationRange(plan?.operation) ?? selection
+  useReportRange(open, range)
+  const card = useCardRun(() => setNonce((n) => n + 1))
+
+  return (
+    <OpCard
+      title="Lip sync"
+      summary="The mouths in the selection follow its sound – after re-recorded lines, say."
+      open={open}
+      onToggle={onToggle}
+    >
+      {!selection ? (
+        <NeedsSelection />
+      ) : (
+        <>
+          <Target range={range} />
+          <PlanNotes plan={plan} error={card.error ?? planError} />
+          <RunButton
+            label="Lip sync"
+            plan={plan}
+            planning={planning}
+            running={card.running}
+            onClick={() => plan && op && void card.run({ op, plan, label: 'Lip sync' })}
+          />
+          {card.sent && <p className="text-[11px] text-success">{card.sent}</p>}
+        </>
+      )}
     </OpCard>
   )
 }

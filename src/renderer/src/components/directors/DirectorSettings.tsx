@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { falVideoModel } from '@shared/fal-models'
 import { KINDS, PREFERRED } from '@shared/models'
 import type { Direction, VideoModel } from '@shared/types'
 import { continuityText, defaultsText } from '../../lib/directors'
@@ -107,7 +108,7 @@ export function shotSettingsText(direction: Direction): string | undefined {
 
 /** A model's name for the defaults line (its id while the list hasn't loaded or no longer has it). */
 export function modelNamer(models: readonly VideoModel[]): (id: string) => string {
-  return (id) => models.find((m) => m.id === id)?.name ?? id
+  return (id) => models.find((m) => m.id === id)?.name ?? falVideoModel(id)?.name ?? id
 }
 
 // ── Defaults ─────────────────────────────────────────────────────────────────

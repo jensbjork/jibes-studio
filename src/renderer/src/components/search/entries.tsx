@@ -61,7 +61,7 @@ export interface Entry {
   context?: string
   /** Searched after the title and shown, cut around the match, when it matched: a description, a prompt, notes. */
   detail?: string
-  /** Searched like the title but never shown: other words for a place ("API key" for Venice). */
+  /** Searched like the title but never shown: other words for a place ("API key" for Service). */
   keywords?: string
   /** The second line when the detail didn't match. */
   meta?: string
@@ -161,7 +161,7 @@ const MEDIA_TABS = [
 
 // Every pane of Settings, in its order (a new pane must be named here, or the type check fails).
 const SETTINGS_SECTIONS: Record<keyof typeof SETTINGS_SECTION, { title: string; keywords: string }> = {
-  venice: { title: 'Venice', keywords: 'api key account' },
+  service: { title: 'Service', keywords: 'venice fal api key account provider' },
   spending: { title: 'Spending', keywords: 'budget cost money spent price' },
   generation: { title: 'Generation', keywords: 'prompt language safe mode images descriptions' },
   library: { title: 'Library', keywords: 'folder base tidy up change move' },

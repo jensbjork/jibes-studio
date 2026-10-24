@@ -30,7 +30,9 @@ import {
   videosAreReferences,
   type Kind
 } from '@shared/models'
+import { falVideoModel } from '@shared/fal-models'
 import { outfitWearersAmong, withOutfitWearer } from '@shared/outfits'
+import { activeProvider, providerOf } from '@shared/provider'
 import { blockingContinuationError, blockingPromptError, validationContext } from '@shared/prompt-refs'
 import { swapReferenceAsset, swapReferenceImage, type SwapResult } from '@shared/reference-swap'
 import {
@@ -290,7 +292,8 @@ function audioModelOf(models: readonly VideoModel[]): VideoModel | undefined {
 /** The model to use for a mode: the same family if it exists there, then the app default, then any online one. */
 export function modelForKind(models: VideoModel[], currentModel: string, kind: Kind): string | undefined {
   const list = models.filter((m) => m.kind === kind && !m.offline)
-  const sibling = currentModel.replace(/(text|image|reference)-to-video/, kind)
+  // fal's families name their siblings in the catalogue (Veo's text-to-video has no "-to-video" in its id).
+  const sibling = falVideoModel(currentModel)?.siblings[kind] ?? currentModel.replace(/(text|image|reference)-to-video/, kind)
   const preferred = [sibling, DEFAULT_MODEL[kind]].find((c) => list.some((m) => m.id === c))
   return preferred ?? [...list].sort((a, b) => a.name.localeCompare(b.name))[0]?.id
 }
@@ -497,6 +500,14 @@ export default function ParamsForm({
       audio: audioForModel(model, p.audio)
     }))
   }, [model?.id])
+
+  // A model of the other service (a clip or form saved before Settings → Service changed): the same mode's model
+  // here, as main also sends it (modelForService).
+  useEffect(() => {
+    if (!models.length || providerOf(params.model) === activeProvider()) return
+    const id = modelForKind(models, params.model, kind)
+    if (id) set('model', id)
+  }, [models.length, params.model])
 
   // If the current mode isn't allowed here (e.g. a continuation segment), switch to the first allowed one.
   useEffect(() => {
@@ -1380,7 +1391,7 @@ export default function ParamsForm({
                   }`}
                   title={
                     `${audios.length} of at most ${maxAudios} sound clips, ${formatClipSeconds(audioSeconds)} of at most ` +
-                    `${MAX_REFERENCE_AUDIO_SECONDS} s together. Venice takes 2–15 s per clip.`
+                    `${MAX_REFERENCE_AUDIO_SECONDS} s together. Each clip may be 2–15 s.`
                   }
                 >
                   {formatClipSeconds(audioSeconds).replace(/ s$/, '')}/{MAX_REFERENCE_AUDIO_SECONDS} s

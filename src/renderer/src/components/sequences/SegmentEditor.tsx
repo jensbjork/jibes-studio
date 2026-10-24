@@ -194,8 +194,8 @@ export default function SegmentEditor({
   const problems = [hasKey ? undefined : NO_API_KEY, clipProblem].filter((p): p is string => !!p)
   // Only the key missing: the button stays clickable and opens Settings at it (⌘↵ still sends nothing).
   const keyOnly = !hasKey && !clipProblem
-  const openVeniceSettings = () => {
-    showSettingsSection(SETTINGS_SECTION.venice)
+  const openServiceSettings = () => {
+    showSettingsSection(SETTINGS_SECTION.service)
     navigate('settings')
   }
 
@@ -506,7 +506,7 @@ export default function SegmentEditor({
             onCount={setCount}
             total={total}
             problems={problems}
-            onBlockedClick={keyOnly ? openVeniceSettings : undefined}
+            onBlockedClick={keyOnly ? openServiceSettings : undefined}
             submitting={submitting}
             error={error}
             onDismissError={() => setError(undefined)}

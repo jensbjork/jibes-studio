@@ -1,4 +1,4 @@
-// Stills: the pictures storyboards and keyframes are built from — images generated with Venice's image models
+// Stills: the pictures storyboards and keyframes are built from — images generated with the service's image models
 // ("Skapa bild…"), pictures the user dropped onto a board or a slot, and frames saved from takes. Each still is a row
 // in `stills` and a file of its own: in its sequence's folder (Sequences/<sequence>/Storyboard/), its storyboard's
 // (Storyboards/<storyboard>/Images/) or, without either, in Reference images/<day>/. Clips and boards use a still by
@@ -12,6 +12,7 @@ import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { app, ipcMain, shell } from 'electron'
 import { withImageDirection } from '@shared/direction'
 import { generationTitle } from '@shared/generation-label'
+import { activeProvider, providerName, providerOf } from '@shared/provider'
 import {
   NEEDS_CONSENT,
   type GenerationParams,
@@ -26,9 +27,8 @@ import * as db from './db'
 import { libraryDirector } from './directors'
 import { extractFrame } from './ffmpeg'
 import {
-  DEFAULT_EDIT_MODEL,
-  DEFAULT_IMAGE_MODEL,
   closestAspectRatio,
+  defaultImageModelId,
   effectiveQuality,
   effectiveResolution,
   imageModelCatalog,
@@ -631,7 +631,7 @@ export interface StillPlan {
 /** The model a request names, or the default for it (references: an edit model; none: a text-to-image model). */
 function pickModel(models: ImageModelInfo[], requested: string, edit: boolean): ImageModelInfo | undefined {
   if (requested) return models.find((m) => m.id === requested)
-  const preferred = edit ? DEFAULT_EDIT_MODEL : DEFAULT_IMAGE_MODEL
+  const preferred = defaultImageModelId(edit)
   return (
     models.find((m) => m.id === preferred && !m.offline) ??
     models.find((m) => m.edit === edit && !m.offline) ??
@@ -664,13 +664,17 @@ async function plan(input: unknown): Promise<{ plan: StillPlan; model: ImageMode
   const models = await imageModelCatalog()
   const model = pickModel(models, params.model, refs.length > 0)
   if (!model) {
+    const service = providerName(activeProvider())
     throw new Error(
       params.model
-        ? `Venice has no image model called ${params.model}. Choose another model.`
-        : 'Venice has no image model to create the image with right now.'
+        ? `${service} has no image model called ${params.model}. Choose another model.`
+        : `${service} has no image model to create the image with right now.`
     )
   }
-  if (model.offline) throw new Error(`${model.name} is not available at Venice right now. Choose another model.`)
+  if (model.offline) {
+    const service = providerName(providerOf(model.id))
+    throw new Error(`${model.name} is not available at ${service} right now. Choose another model.`)
+  }
   if (refs.length && !model.edit) {
     throw new Error(
       `${model.name} creates images from text and cannot use reference images. Choose a model that combines images, or remove the references.`

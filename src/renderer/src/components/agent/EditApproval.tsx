@@ -10,6 +10,7 @@ import type {
   EditOperation,
   EditPlan
 } from '@shared/types'
+import { activeServiceModels } from '@shared/service-models'
 import { ipcErrorMessage } from '../../lib/hooks'
 import { formatUsd, mediaUrl } from '../../lib/media'
 import AudioPlayButton from '../pickers/AudioPlayButton'
@@ -247,6 +248,8 @@ function settingsOf(op: EditOperation): string[] {
       )
     case 'extend':
       return [op.model, op.resolution, op.audio === 'model' ? 'sound from the model' : 'silence'].filter((s): s is string => !!s)
+    case 'lip-sync':
+      return [op.model, 'the film’s sound is kept']
     case 'music':
       return [op.model, op.instrumental ? 'instrumental' : undefined, op.duck === false ? undefined : 'lowered under speech'].filter(
         (s): s is string => !!s
@@ -474,7 +477,7 @@ export function EditSummary({
         state.plan.priceUsd !== undefined &&
         Math.abs(state.plan.priceUsd - a.priceUsd) > 0.01 && (
           <p className="text-[12px] text-warning">
-            Venice now quotes {formatUsd(state.plan.priceUsd)}. If that’s more than when the agent asked, the request
+            The price is now {formatUsd(state.plan.priceUsd)}. If that’s more than when the agent asked, the request
             won’t go through – then ask the agent to ask again.
           </p>
         )}
@@ -502,7 +505,7 @@ export function EditSummary({
   )
 }
 
-/** "≈ $0.45 +" for a price with a part Venice doesn't price, else "$0.45". */
+/** "≈ $0.45 +" for a price with a part that has no price, else "$0.45". */
 function priceText(usd: number | undefined, partial: boolean | undefined): string {
   if (usd === undefined) return 'unknown price'
   return partial ? `≈ ${formatUsd(usd)} +` : formatUsd(usd)
@@ -581,7 +584,7 @@ export function VoiceDesignSummary({ request }: { request: ApprovalEditRequest }
             </p>
           </div>
           <p className="text-[12px] text-muted">
-            {design.model ?? 'seed-audio-1-0'} · The voice is added as a new voice clip under Voice
+            {design.model ?? activeServiceModels().voiceDesign} · The voice is added as a new voice clip under Voice
             {request.assetName ? ` for ${request.assetName}` : ''}. Listen to it before it’s used.
           </p>
         </>

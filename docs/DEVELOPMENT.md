@@ -114,7 +114,7 @@ On Windows the settings are in `%APPDATA%\Studio\` (`Studio Dev\`) and the sugge
 
 ## Testing without spending money
 
-Every Venice generation costs real money, so development is set up to never need one. There is no automated test
+Every generation at Venice or fal.ai costs real money, so development is set up to never need one. There is no automated test
 suite yet; changes are verified with the techniques below (contributions of a proper test setup are welcome).
 
 ### Ground rules
@@ -411,6 +411,16 @@ yourself. The job manager needs the models' prompt limits for that: pass a model
 (`new JobManager(venice, async () => models)`, as `index.ts` passes its cached list), or serve `/models` — without
 either it composes without a limit.
 
+**fal.ai** is stubbed the same way: replace `fetch` and answer fal's hosts – `queue.fal.run/<endpoint>` (submit:
+`{ request_id }`), `queue.fal.run/<owner>/<app>/requests/<id>/status` (`IN_QUEUE`, `IN_PROGRESS`, `COMPLETED`) and
+`…/requests/<id>` (the model's output, e.g. `{ video: { url } }`), `rest.fal.ai/storage/upload/initiate` (`{ upload_url,
+file_url }`) and the `PUT` to the upload link, `api.fal.ai/v1/models/pricing` for *Test* – and serve the output links
+(`*.fal.media`) from a small test file. Studio's fal lists are its own (`shared/fal-models.ts`), so no list needs to be
+served. To check what is sent, build `FalVideo.buildRequestBody(params)` (main `fal-video.ts`) with a stubbed upload and
+compare its `input` with the endpoint's OpenAPI schema (`https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=…`,
+free, no key): required fields, known properties, enum values. Test the switch of service with a throwaway profile:
+`setApiKey('test', 'fal')` and `setProvider('fal')` over the DevTools protocol (the window reloads; reattach).
+
 For the Editor's paid operations stub `/audio/*` and `/video/*` the same way, keeping the real `VeniceAudio` and
 `VeniceClient`: serve `/models?type=tts|music|asr` from saved lists (add a fake model with `voice_changer: true` and
 a short `max_source_audio_duration_seconds` to force chunking), answer `/audio/quote` and
@@ -663,7 +673,7 @@ both directed by the ready-made *Noir*, and an edit. Then, over the DevTools pro
   *Preview*) and `storyboard.gif` (a transition's prompt from *Suggest*). Paid buttons are pointed at, never pressed.
   `DEMO_ONLY=generate,sequence` records only those (`DEMO_ONLY=none` none), to try a change quickly.
 
-It never reads your own settings or library, generates nothing at Venice and uses no API key; the temporary folder is
+It never reads your own settings or library, generates nothing at Venice or fal.ai and uses no API key; the temporary folder is
 removed afterwards. The app runs with Chromium's background throttling off, so a window behind others still paints the
 frames a recording needs. Run it again when the UI changes, and keep the GIFs small (a few MB each).
 

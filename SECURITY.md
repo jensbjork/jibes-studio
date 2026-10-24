@@ -27,18 +27,23 @@ Please give us a reasonable time to fix the issue before disclosing it.
 
 Studio is a local desktop app for macOS and Windows. What it protects:
 
-- **Money** — the Venice API key spends real money on every generation.
-- **Secrets** — the Venice API key and the agent connection's bearer token.
+- **Money** — the API keys (Venice's and fal.ai's) spend real money on every generation.
+- **Secrets** — the API keys and the agent connection's bearer token.
 - **The user's library** — private photos of people and places, prompts and videos.
 
 ### Secrets
 
-- The Venice API key and the agent token are stored in the profile's `settings.json`, encrypted with Electron
+- The API keys (Venice's and fal.ai's, each on its own) and the agent token are stored in the profile's `settings.json`, encrypted with Electron
   `safeStorage` (backed by the macOS Keychain; on Windows by DPAPI, tied to the user's Windows account). Nothing else
   in `settings.json` is secret.
-- The API key never reaches the renderer (it only learns *whether* a key is set). The agent token is sent to the
+- The API keys never reach the renderer (it only learns *whether* a key is set). The agent token is sent to the
   renderer only when the user shows or copies it in Settings.
-- Venice is called over HTTPS. The pre-signed download URLs Venice returns are kept in the main process.
+- Venice and fal.ai are called over HTTPS. The download links they return are kept in the main process.
+- fal.ai's models take files as links, so the pictures, sound and video a fal request needs are uploaded to fal's
+  storage first (only files Studio prepared from the library: the same encoded pictures, audio windows and proxies
+  Venice would get). Studio asks fal to keep no request history (`X-Fal-Store-IO: 0`) and to delete uploaded and
+  generated files after a day (`X-Fal-Object-Lifecycle-Preference`); until then a file's link is unguessable but not
+  private.
 
 ### The window
 
@@ -135,7 +140,7 @@ Mac it wasn't given, and so that nothing outside the user's devices can reach it
   version to be edited are still exactly what was shown (an edit also re-plans and refuses a higher price), and each
   take is re-checked right before it is sent. A paid edit job interrupted by quitting Studio never sends its
   remaining parts by itself.
-- **Only library files are uploaded.** The video the Editor sends to Venice (a short proxy or a stand-in for a free
+- **Only library files are uploaded.** The video the Editor sends to the service (a short proxy or a stand-in for a free
   quote) is read only from inside the library; params that name any other file are refused before anything is
   read. Requests expire after 30 minutes and immediately when the token is replaced, the library is switched or
   the connection is turned off; at most 10 can be pending.

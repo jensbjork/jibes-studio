@@ -88,7 +88,7 @@ interface Props {
   onClose: () => void
   /** Opens the storyboard's director in Directors. */
   onOpenDirector?: (directorId: string) => void
-  /** Generate while the Venice API key is the only thing missing: Settings, at Venice. */
+  /** Generate while the API key is the only thing missing: Settings → Service. */
   onAddApiKey?: () => void
 }
 

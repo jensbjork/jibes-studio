@@ -3,7 +3,7 @@ import { AUDIO_EXT, AUDIO_FORMATS } from './audioUtils'
 
 export const IMAGE_EXT = /\.(jpe?g|png|webp)$/i
 
-// Venice rejects reference images that are too small or too stretched.
+// The video models reject reference images that are too small or too stretched.
 const MIN_SHORT_SIDE = 300
 const MIN_RATIO = 0.4
 const MAX_RATIO = 2.5
@@ -22,7 +22,7 @@ export interface ImageIssue {
 
 const decimal = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 })
 
-/** Reasons Venice is likely to reject the image as a reference; empty when it looks fine. */
+/** Reasons a model is likely to reject the image as a reference; empty when it looks fine. */
 export function imageIssues({ width, height }: Size): ImageIssue[] {
   if (!width || !height) return []
   const issues: ImageIssue[] = []
@@ -30,14 +30,14 @@ export function imageIssues({ width, height }: Size): ImageIssue[] {
   if (shortSide < MIN_SHORT_SIDE) {
     issues.push({
       label: 'Low resolution',
-      detail: `The shortest side is ${shortSide} px – Venice needs at least ${MIN_SHORT_SIDE} px.`
+      detail: `The shortest side is ${shortSide} px – the models need at least ${MIN_SHORT_SIDE} px.`
     })
   }
   const ratio = width / height
   if (ratio < MIN_RATIO || ratio > MAX_RATIO) {
     issues.push({
       label: 'Odd aspect ratio',
-      detail: `The aspect ratio ${decimal.format(ratio)} is outside the ${decimal.format(MIN_RATIO)}–${decimal.format(MAX_RATIO)} that Venice accepts.`
+      detail: `The aspect ratio ${decimal.format(ratio)} is outside the ${decimal.format(MIN_RATIO)}–${decimal.format(MAX_RATIO)} that the models accept.`
     })
   }
   return issues

@@ -781,7 +781,7 @@ export function registerStoryboardTools(server: McpServer, ctx: ToolContext): vo
       let models: VideoModel[] | undefined
       if (model !== undefined || outputGiven || patch.prompt !== undefined) models = await modelsIfAvailable()
       if (model !== undefined) {
-        if (!models) throw new Error('The model list couldn\'t be fetched from Venice right now, so the model can\'t be changed. Try again in a while.')
+        if (!models) throw new Error('The model list couldn\'t be fetched right now, so the model can\'t be changed. Try again in a while.')
         const m = requireModel(models, model)
         if (kindOfModelId(m.id) !== 'image-to-video' || !supportsEndImage(m.id)) {
           const fitting = usableModels(models)

@@ -12,7 +12,7 @@ import { generationTitle, sourceBadge } from '@shared/generation-label'
 import type { FinishedWork, RunningWork, Segment, Sequence } from '@shared/types'
 import { directorName } from '../../lib/directors'
 import { focusedWithKeyboard } from '../../lib/focusOrigin'
-import { useDirectorAssets } from '../../lib/hooks'
+import { SERVICE_NAME, useDirectorAssets } from '../../lib/hooks'
 import { mediaUrl } from '../../lib/media'
 import { shortcut } from '../../lib/platform'
 import { useSeenWhenVisible } from '../../lib/work'
@@ -831,7 +831,7 @@ function CardPreview({ segment, sending }: { segment: Segment; sending: boolean 
     return (
       <div className="flex h-full items-center justify-center gap-1.5 text-[11px] text-muted">
         <Spinner size={11} />
-        Sending to Venice
+        Sending to {SERVICE_NAME}
       </div>
     )
   }

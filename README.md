@@ -5,8 +5,9 @@
 <h1 align="center">JIBES Studio</h1>
 
 <p align="center">
-  <strong>Make films with <a href="https://venice.ai">Venice.ai</a>'s video models</strong> – from a single clip to a
-  whole story,<br>with your own characters, places and style. On your Mac or Windows PC.
+  <strong>Make films with the video models of <a href="https://venice.ai">Venice.ai</a> or
+  <a href="https://fal.ai">fal.ai</a></strong> – from a single clip to a whole story,<br>with your own characters,
+  places and style. On your Mac or Windows PC.
 </p>
 
 <p align="center">
@@ -45,8 +46,8 @@ happens between two pictures, and **Generate missing** makes every clip that joi
 performance and sound – that every prompt it directs carries. Start from eight ready-made ones (Noir, Documentary,
 Music video …) or write your own.
 
-**Finish it in the Editor.** Cut, fade, clean up the sound, replace a voice, add music or redo a stretch with AI.
-Every change is a new version; the original is never touched.
+**Finish it in the Editor.** Cut, fade, clean up the sound, replace a voice, add music or redo a stretch with AI – and
+with fal.ai, make the mouths follow new lines (lip sync). Every change is a new version; the original is never touched.
 
 **Bring your own agent.** Connect Claude or any other agent that speaks [MCP](https://modelcontextprotocol.io). It can
 do nearly everything you can – build characters, write prompts, plan sequences – but anything that costs money or
@@ -86,16 +87,17 @@ JIBES Studio tells you when a new version is out and updates itself when you cho
 
 ## Your first film
 
-JIBES Studio is free. You need a [Venice](https://venice.ai) account with some credit: you pay Venice per generation,
-and the price is on the button before you press it.
+JIBES Studio is free. You need an account with some credit at [Venice](https://venice.ai) or [fal.ai](https://fal.ai):
+you pay the service per generation, and the price is on the button before you press it.
 
 1. **Choose a library folder.** The first time it opens, Studio asks where to keep your work (suggested: *JIBES
    Studio* in your Movies folder – Videos on Windows). Everything is stored there as plain files.
-2. **Add your Venice API key.** Create one at [venice.ai/settings/api](https://venice.ai/settings/api), then open
-   **Settings** (⌘, on a Mac, Ctrl+, on Windows) → **Venice** and paste it. Set a daily or monthly budget under
+2. **Add your API key.** Create one at [venice.ai/settings/api](https://venice.ai/settings/api) or
+   [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys), then open **Settings** (⌘, on a Mac, Ctrl+, on Windows) →
+   **Service**, choose the service and paste it. Set a daily or monthly budget under
    **Spending** if you like.
 3. **Make a clip.** **Generate** → **Text**: describe the scene, choose the length and resolution, press
-   **Generate**. The clip appears beside the form when Venice is done.
+   **Generate**. The clip appears beside the form when it's done.
 4. **Cast someone.** **Characters** → **New**: a name, a photo or two and a short description. Back in Generate,
    choose **References** → **＋ From library**, pick the character and type `@` in the prompt to point at it.
 5. **Make it a film.** **Sequences** → **New**. Write the first clip and generate a take, then add the next clip –
@@ -105,9 +107,11 @@ Stuck? ⌘K (Ctrl+K) finds anything in the app, and the [guide](docs/GUIDE.md) e
 
 ## Good to know
 
-- **Your files stay yours.** The library is a folder of ordinary files on your computer, and your API key is stored
-  encrypted by the system. Pictures, clips and prompts leave your computer only when you send them to Venice – or to
-  an agent you connect yourself.
+- **Your files stay yours.** The library is a folder of ordinary files on your computer, and your API keys are stored
+  encrypted by the system. Pictures, clips and prompts leave your computer only when you send them to Venice or
+  fal.ai – or to an agent you connect yourself.
+- **Two services.** Generate with Venice or fal.ai and switch whenever you like in Settings → Service; each keeps its
+  key, and what you made stays. The [guide](docs/GUIDE.md#services-venice-and-falai) says what differs.
 - **No surprise costs.** Every paid action shows its price first, the optional budget asks before going past it, and
   an agent can never spend or delete on its own.
 - **Keyboard first.** The same keys work in every view – see [Keyboard shortcuts](docs/GUIDE.md#keyboard-shortcuts).

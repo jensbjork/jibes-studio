@@ -24,18 +24,14 @@ import { encodeAudioClip, probeAudio } from './ffmpeg'
 import { decodeImageFile } from './input-image'
 import { isInsideRoot } from './paths'
 import { referenceVideoProxy, referenceVideoSeconds, resolveReferenceVideos } from './reference-videos'
+import { fetchOrExplain, networkError, NetworkError, ServiceError } from './service-error'
+
+export { NetworkError }
 
 const BASE_URL = 'https://api.venice.ai/api/v1'
 
-export class VeniceError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly body?: unknown
-  ) {
-    super(message)
-  }
-}
+/** Venice answered with an error (see ServiceError). */
+export class VeniceError extends ServiceError {}
 
 interface RawModel {
   id: string
@@ -90,22 +86,6 @@ function toVideoModel(raw: RawModel): VideoModel {
     promptCharacterLimit: c.prompt_character_limit,
     modelSets: raw.model_spec.model_sets ?? [],
     videoInput: c.video_input === true
-  }
-}
-
-/** Venice couldn't be reached at all (no network, DNS, connection dropped mid-transfer). */
-export class NetworkError extends Error {}
-
-/** fetch() rejects with a bare "TypeError: fetch failed" (or "terminated" mid-body) when the network drops. */
-function networkError(err: unknown, what: string): NetworkError {
-  return new NetworkError(`${what} Check your internet connection and try again.`, { cause: err })
-}
-
-async function fetchOrExplain(url: string, init: RequestInit | undefined, what: string): Promise<Response> {
-  try {
-    return await fetch(url, init)
-  } catch (err) {
-    throw networkError(err, what)
   }
 }
 
@@ -317,7 +297,7 @@ export function mp3FrameCount(bytes: Buffer): number | undefined {
  * mp3FramePlan gives it. Some sources decode with a few samples more than they are cut to (an AAC file's encoder
  * priming survives the seek), which adds a frame; such a clip is cut again that much shorter.
  */
-async function encodeReferenceAudios(clips: readonly ReferenceAudio[]): Promise<Buffer[]> {
+export async function encodeReferenceAudios(clips: readonly ReferenceAudio[]): Promise<Buffer[]> {
   const plan = mp3FramePlan(clips.map((clip) => referenceAudioWindow(clip).length))
   return Promise.all(
     clips.map(async (clip, i) => {
@@ -345,12 +325,17 @@ async function encodeReferenceAudios(clips: readonly ReferenceAudio[]): Promise<
  * shape of its video from the start image, and a WebP through ffmpeg.
  */
 async function imageToDataUrl(path: string): Promise<string> {
+  const { bytes, mime } = await encodeInputImage(path)
+  return `data:${mime};base64,${bytes.toString('base64')}`
+}
+
+/** A picture as a model gets it (see imageToDataUrl): upright, at most 2048 px on its long side, JPEG. */
+export async function encodeInputImage(path: string): Promise<{ bytes: Buffer; mime: string }> {
   const { image: img, bytes } = await decodeImageFile(path)
   if (!img) {
     // Nothing here could decode it (a WebP without ffmpeg, say); send the file as-is.
     const ext = extname(path).slice(1).toLowerCase()
-    const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`
-    return `data:${mime};base64,${bytes.toString('base64')}`
+    return { bytes, mime: ext === 'jpg' ? 'image/jpeg' : `image/${ext}` }
   }
   const { width, height } = img.getSize()
   const maxSide = 2048
@@ -358,7 +343,7 @@ async function imageToDataUrl(path: string): Promise<string> {
     Math.max(width, height) > maxSide
       ? img.resize(width >= height ? { width: maxSide, quality: 'best' } : { height: maxSide, quality: 'best' })
       : img
-  return `data:image/jpeg;base64,${scaled.toJPEG(92).toString('base64')}`
+  return { bytes: scaled.toJPEG(92), mime: 'image/jpeg' }
 }
 
 /** The raw bytes a picture adds to a request, encoded exactly as buildRequestBody encodes it (for size budgets). */

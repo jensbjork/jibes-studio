@@ -161,7 +161,7 @@ export async function readForm(ctx: ToolContext): Promise<AgentFormState> {
 
 const QUOTE_TIMEOUT_MS = 8000
 
-/** Venice's price in USD for the params (free to ask); undefined when it can't be had in time. */
+/** The price in USD for the params (free to ask; fal.ai's is Studio's own); undefined when it can't be had in time. */
 export async function quote(params: GenerationParams): Promise<number | undefined> {
   let timer: NodeJS.Timeout | undefined
   const timeout = new Promise<undefined>((resolve) => {

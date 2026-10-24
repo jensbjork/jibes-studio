@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { app, safeStorage } from 'electron'
 import { normalizeBudget } from '@shared/budget'
+import { asProvider, providerName, rememberProvider, type Provider } from '@shared/provider'
 import type { BudgetSettings, PromptLanguage, Settings } from '@shared/types'
 import { isLibraryReady, libraryRoot } from './paths'
 import { VARIANT } from './variant'
@@ -21,8 +22,12 @@ interface StoredAgentSettings {
 }
 
 interface StoredSettings {
-  /** API key encrypted with the macOS keychain via safeStorage, base64. */
+  /** Venice's API key, encrypted with the macOS keychain via safeStorage, base64. */
   apiKeyEncrypted?: string
+  /** fal.ai's API key, encrypted the same way. */
+  falKeyEncrypted?: string
+  /** The service new work is made with (Settings → Service); Venice unless the user picked fal.ai. */
+  provider?: Provider
   /** Absolute path of the base folder (grundmapp). Unset until the user has chosen one. */
   libraryRoot?: string
   /** Phase-2 library location (never set by the app itself); only read to find a legacy library. */
@@ -151,8 +156,7 @@ export function legacyLibraryDir(): string {
   return typeof old === 'string' && isAbsolute(old) ? resolve(old) : join(app.getPath('videos'), app.getName())
 }
 
-export function getApiKey(): string | null {
-  const enc = load().apiKeyEncrypted
+function decrypt(enc: string | undefined): string | null {
   if (!enc) return null
   try {
     return safeStorage.decryptString(Buffer.from(enc, 'base64'))
@@ -161,22 +165,76 @@ export function getApiKey(): string | null {
   }
 }
 
-export function setApiKey(key: string): void {
+/** Venice's API key. */
+export function getApiKey(): string | null {
+  return decrypt(load().apiKeyEncrypted)
+}
+
+/** fal.ai's API key. */
+export function getFalKey(): string | null {
+  return decrypt(load().falKeyEncrypted)
+}
+
+/** The key of a service. */
+export function getKeyOf(provider: Provider): string | null {
+  return provider === 'fal' ? getFalKey() : getApiKey()
+}
+
+/** The key of the active service (Settings → Service). */
+export function getActiveKey(): string | null {
+  return getKeyOf(getProvider())
+}
+
+/** Stores a service's key encrypted ('' removes it); Venice's when no service is named, as before fal existed. */
+export function setApiKey(key: string, provider: Provider = 'venice'): void {
   const s = load()
-  const trimmed = key.trim()
+  const trimmed = typeof key === 'string' ? key.trim() : ''
   // Electron's own message for this is about its internals; Settings shows this one.
   if (trimmed && !safeStorage.isEncryptionAvailable()) {
     throw new Error("The key can't be stored encrypted on this computer right now.")
   }
-  if (trimmed) s.apiKeyEncrypted = safeStorage.encryptString(trimmed).toString('base64')
-  else delete s.apiKeyEncrypted
+  const field = provider === 'fal' ? 'falKeyEncrypted' : 'apiKeyEncrypted'
+  if (trimmed) s[field] = safeStorage.encryptString(trimmed).toString('base64')
+  else delete s[field]
   save(s)
+}
+
+/** The service new work is made with. */
+export function getProvider(): Provider {
+  return asProvider(load().provider) ?? 'venice'
+}
+
+/** Switches the service new work is made with; shared code (default models) follows at once. */
+export function setProvider(value: unknown): Provider {
+  const provider = asProvider(value)
+  if (!provider) throw new Error('Unknown service.')
+  const s = load()
+  if (provider === 'venice') delete s.provider
+  else s.provider = provider
+  save(s)
+  rememberProvider(provider)
+  return provider
+}
+
+/** Reads the stored choice into shared code; main calls it once at start (setProvider keeps it current after). */
+export function loadProvider(): Provider {
+  const provider = getProvider()
+  rememberProvider(provider)
+  return provider
+}
+
+/** "Venice" / "fal.ai": the active service's name, for messages. */
+export function activeServiceName(): string {
+  return providerName(getProvider())
 }
 
 export function getSettings(): Settings {
   const s = load()
+  const provider = asProvider(s.provider) ?? 'venice'
   return {
-    hasApiKey: !!s.apiKeyEncrypted,
+    provider,
+    hasApiKey: provider === 'fal' ? !!s.falKeyEncrypted : !!s.apiKeyEncrypted,
+    keys: { venice: !!s.apiKeyEncrypted, fal: !!s.falKeyEncrypted },
     libraryDir: isLibraryReady() ? libraryRoot() : '',
     devProfile: isDevProfile(),
     variant: VARIANT || undefined,
