@@ -52,7 +52,8 @@ Keep a branch focused on one change; rebase on `main` rather than merging `main`
 ## Commit messages
 
 Studio follows [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/). CI checks every commit
-in a pull request, and the pull request title, with commitlint (`commitlint.config.mjs`).
+in a pull request, the pull request title and every commit pushed to `main` with commitlint (`commitlint.config.mjs`).
+commitlint can't tell the mood of a subject, so check that one yourself.
 
 ```
 <type>(<scope>): <subject>
@@ -85,7 +86,10 @@ git config commit.template .gitmessage
 
 ### Scope
 
-Optional, but please use one when a change clearly belongs to an area. Pick the closest:
+Optional, but please use one when a change clearly belongs to an area. Pick the closest. Leave it out when a change
+spans the whole app or several areas – the spec defines a scope as "a noun describing a section of the codebase" –
+and never invent a catch-all such as `app`, `all` or `misc`: `feat: add fal.ai as a second service`, not
+`feat(app): …`.
 
 | Scope | Area | Mainly |
 | --- | --- | --- |
@@ -111,7 +115,8 @@ An unknown scope only produces a warning, so a new area never blocks a pull requ
 
 ### Subject
 
-- Imperative mood, lower case, no full stop: `add trim handles to takes`, not `Added trim handles.`
+- Imperative mood, lower case, no full stop: it completes "If applied, this commit will …" – `add trim handles to
+  takes`, not `Added trim handles.`, `Adds …` or a noun phrase such as `trim handles for takes`.
 - At most **72 characters** for the whole header (commitlint's hard limit is 100).
 
 ### Body

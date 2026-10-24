@@ -30,15 +30,19 @@
 #   chore     maintenance that does not touch src/ or the shipped app
 #   revert    reverts an earlier commit
 #
-# Scopes (optional, pick the closest one):
-#   generate   the Generate view and the job queue
-#   media      the Mediabank: videos, pictures and exported films
+# Scopes (optional): the closest area below. Leave the scope out when a change
+# spans the whole app – a scope is "a noun describing a section of the
+# codebase" (the spec) – and never invent a catch-all such as app, all or misc:
+#   "feat: add fal.ai as a second service", not "feat(app): …".
+#
+#   generate   the Generate view, the job queue and the services
+#   media      Media: clips, pictures and exported films
 #   prompt     the prompt editor and @ImageN reference checks
 #   library    characters, environments, outfits and the prompt library
 #   assets     reference images and asset folders on disk
 #   sequences  sequences, clips, takes, trims, preview, storyboards and own clips
-#   editor     Redigera: edits, versions, operations, voices and transcripts
-#   images     stills and Venice's image models (Skapa bild)
+#   editor     the Editor: edits, versions, operations, voices and transcripts
+#   images     stills and the services' image models (Create image…)
 #   export     ffmpeg export of sequences
 #   agent      agent connection: approvals, activity, the agent guide
 #   mcp        the MCP server, its tools and transport

@@ -20,8 +20,9 @@ a brand and a public name only.
 - Every feature an agent could use also gets its MCP tools and guide text (`src/main/agent/**`), and its docs:
   `docs/GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/AGENTS.md` and `CHANGELOG.md` under *Unreleased*. The README stays short.
 - The version number (`package.json`, a CHANGELOG version section, a `v…` tag) changes only when the maintainer asks.
-- Commits follow Conventional Commits with the scopes in [CONTRIBUTING.md](CONTRIBUTING.md); AI help is credited with
-  an `Assisted-by:` trailer.
-- Paid generations (Venice) never run in tests: stub the API.
+- Commits follow Conventional Commits as [CONTRIBUTING.md](CONTRIBUTING.md) says: the subject in the imperative, lower
+  case, no full stop (`add …`, never a noun phrase such as `a new …`); a scope from its list, or none when the change
+  spans the whole app (never a catch-all like `app`); AI help is credited with an `Assisted-by:` trailer.
+- Paid generations (Venice, fal.ai) never run in tests: stub the API.
 - UI copy is English; macOS and Windows wording goes through the platform helpers (`src/main/platform.ts`,
   `src/renderer/src/lib/platform.ts`).
