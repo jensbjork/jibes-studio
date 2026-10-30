@@ -27,10 +27,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -69,7 +69,7 @@ jobs:
         run: test -f "dist/mac-arm64/JIBES Studio.app/Contents/Resources/mcpb/server/index.js"
 
       - name: Upload the build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: JIBES-Studio-mac-arm64
           path: |
@@ -87,10 +87,10 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -138,7 +138,7 @@ jobs:
 
       - name: Upload the smoke test's screenshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-test-windows
           path: dist/smoke-test-windows.png
@@ -146,7 +146,7 @@ jobs:
           retention-days: 14
 
       - name: Upload the build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: JIBES-Studio-win-x64
           path: |
@@ -165,7 +165,7 @@ jobs:
       contents: write
     steps:
       - name: Download the builds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: JIBES-Studio-*
           merge-multiple: true
